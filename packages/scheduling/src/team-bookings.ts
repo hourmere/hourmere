@@ -1,7 +1,8 @@
-import type { Db } from '@hourmere/db'
-import { sql } from 'kysely'
+import type { Database, Db } from '@hourmere/db'
+import { sql, type Transaction } from 'kysely'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
-import type { ServiceContext } from './context.ts'
+import { cancelTeamBookingInTransaction } from './bookings.ts'
+import type { BookingNotifier, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import {
@@ -11,6 +12,33 @@ import {
 } from './team-admin-booking.ts'
 
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
+
+/**
+ * Cancel inside teamManagementAccess.write, using its returned transaction and actor.
+ * The caller must bind that write to its expected organization; this service adds no
+ * authorization layer. Missing, out-of-team and unchangeable bookings share one refusal.
+ * The existing cancellation transaction owns attribution, notifications and cleanup.
+ */
+export async function cancelTeamAdminBooking(
+  trx: Transaction<Database>,
+  actor: { userId: string; organizationId: string },
+  id: string,
+  now: () => Temporal.Instant,
+  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+): Promise<void> {
+  try {
+    await cancelTeamBookingInTransaction(trx, actor, id, now, options)
+  } catch (error) {
+    if (
+      error instanceof DomainError &&
+      (error.code === 'booking_not_found' ||
+        error.code === 'booking_cancelled' ||
+        error.code === 'booking_in_past')
+    )
+      throw denied()
+    throw error
+  }
+}
 
 /** The web access middleware guards its boundary; direct service calls need current facts too. */
 async function teamManager(ctx: ServiceContext): Promise<string> {

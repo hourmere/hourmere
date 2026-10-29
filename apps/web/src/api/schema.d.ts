@@ -4255,7 +4255,7 @@ export interface paths {
         };
         /**
          * Read the session member's own booking readiness
-         * @description Checks the current verified session and membership. Returns only the caller's private member detail and, in their personal organization, their personal event types. Uses cached configuration and sync facts, without a live provider request or a slot availability promise. Pages default to 50 items, at most 100; pass eventTypes.nextCursor as eventTypeCursor.
+         * @description Rechecks the current verified session, effective organization and membership on every request. Returns only the caller's private member detail and, in their personal organization, their personal event types. Private schedules and calendars appear once in member.details; event-type details retain empty arrays for compatibility. Uses cached configuration and sync facts, without a live provider request or a slot availability promise. Authorization takes precedence over cookies, so an API key plus a session cookie is refused. Pages default to 50 items, at most 100; pass eventTypes.nextCursor as eventTypeCursor.
          */
         get: {
             parameters: {
@@ -4307,6 +4307,15 @@ export interface paths {
                 };
                 /** @description The API key's rate limit is used up */
                 429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description internal_error: subject reads or another unexpected server operation failed */
+                500: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4979,7 +4988,7 @@ export interface paths {
         };
         /**
          * Read a minimal booking readiness summary for the acting team
-         * @description Requires a current verified owner/admin web session in this team. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Returns coarse reason codes and repair kinds, with no private calendar, account or schedule details. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.
+         * @description Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.
          */
         get: {
             parameters: {
@@ -5016,6 +5025,15 @@ export interface paths {
                 };
                 /** @description team_management_access_denied: requires the current team owner/admin web session without Authorization */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description internal_error: subject reads or another unexpected server operation failed */
+                500: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5864,6 +5882,7 @@ export interface components {
             timeZone?: string;
             weeklyHours?: components["schemas"]["WeeklyHoursInput"];
         };
+        /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         SelfReadinessPage: {
             eventTypes: {
                 data: {
@@ -5875,6 +5894,7 @@ export interface components {
                     availability: "not_checked";
                     /** @enum {string} */
                     completeness: "complete" | "partial";
+                    /** @description Private details occur only in member.details. Event-type details are a deprecated compatibility field with empty schedules and calendars; reuse member.details. */
                     details: {
                         calendars: {
                             accountEmail: string | null;
@@ -5908,7 +5928,10 @@ export interface components {
                         checkedAt: string | null;
                         /** @enum {string|null} */
                         fixKind: "event_editor" | "self_availability" | "self_schedule" | "self_calendars" | "self_identity" | "self_profile" | "self_conferences" | "ask_member" | "retry_summary" | null;
-                        /** @enum {string} */
+                        /**
+                         * @description event_enablement is a legacy signal ID and is no longer emitted; use the independent enablement field. Hidden visibility does not disable an event.
+                         * @enum {string}
+                         */
                         id: "event_enablement" | "default_schedule" | "effective_event_schedule" | "host_eligibility" | "round_robin_activation" | "conflict_calendar_selection" | "selected_calendar_sync" | "optional_conference_dependency" | "slot_observation";
                         /** @enum {string} */
                         ownerKind: "member_self" | "event_owner" | "team_admin" | "calendar_worker" | "shared_evaluator" | "operator";
@@ -5939,6 +5962,7 @@ export interface components {
                 availability: "not_checked";
                 /** @enum {string} */
                 completeness: "complete" | "partial";
+                /** @description Private details occur only in member.details. Event-type details are a deprecated compatibility field with empty schedules and calendars; reuse member.details. */
                 details: {
                     calendars: {
                         accountEmail: string | null;
@@ -5972,7 +5996,10 @@ export interface components {
                     checkedAt: string | null;
                     /** @enum {string|null} */
                     fixKind: "event_editor" | "self_availability" | "self_schedule" | "self_calendars" | "self_identity" | "self_profile" | "self_conferences" | "ask_member" | "retry_summary" | null;
-                    /** @enum {string} */
+                    /**
+                     * @description event_enablement is a legacy signal ID and is no longer emitted; use the independent enablement field. Hidden visibility does not disable an event.
+                     * @enum {string}
+                     */
                     id: "event_enablement" | "default_schedule" | "effective_event_schedule" | "host_eligibility" | "round_robin_activation" | "conflict_calendar_selection" | "selected_calendar_sync" | "optional_conference_dependency" | "slot_observation";
                     /** @enum {string} */
                     ownerKind: "member_self" | "event_owner" | "team_admin" | "calendar_worker" | "shared_evaluator" | "operator";
@@ -6038,6 +6065,7 @@ export interface components {
             data: components["schemas"]["TeamAdminBooking"][];
             nextCursor: string | null;
         };
+        /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         TeamReadinessPage: {
             eventTypes: {
                 data: {
@@ -6063,6 +6091,7 @@ export interface components {
                 data: {
                     /** @enum {string} */
                     completeness: "complete" | "partial";
+                    /** @description Verified, display-safe member name, otherwise the neutral label Team member. */
                     displayName: string;
                     /** Format: date-time */
                     evaluatedAt: string;
