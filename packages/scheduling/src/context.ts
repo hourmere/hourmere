@@ -35,7 +35,7 @@ export interface ServiceContext {
   now: () => Temporal.Instant
   /** Told about booking changes in their transaction; nobody is told when absent. */
   notify?: BookingNotifier | undefined
-  /** Optional web draft binding, rechecked inside an event-type write's transaction. */
+  /** Optional web draft binding, rechecked inside the organization write's transaction. */
   authorizeOrganizationWrite?:
     | ((trx: Db, organizationId: string, targetId?: string) => Promise<void>)
     | undefined

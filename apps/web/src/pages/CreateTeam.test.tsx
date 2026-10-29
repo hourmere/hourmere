@@ -124,6 +124,11 @@ describe('creating a team', () => {
       expect(api.to('POST /api/auth/organization/set-active').map((call) => call.body)).toEqual([
         { organizationId: team.id },
       ])
+      expect(
+        api
+          .to('POST /api/auth/organization/set-active')[0]
+          ?.headers.get('X-Expected-Organization-Id'),
+      ).toBe(ME.organization.id)
       const account = await screen.findByRole('region', {
         name: locale === 'en' ? 'Account' : '账号',
       })
@@ -244,6 +249,78 @@ describe('creating a team', () => {
     await pending.answer(json(200, team))
     expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
     expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+  })
+
+  it.each([
+    ['en', 'organization'],
+    ['zh-CN', 'organization'],
+    ['en', 'user'],
+  ] as const)(
+    'keeps the created team recoverable in %s when another tab changed the %s',
+    async (locale, mismatch) => {
+      chooseLanguage(locale)
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const pending = later()
+      const otherMe =
+        mismatch === 'user'
+          ? {
+              ...ME,
+              user: { ...ME.user, id: '00000000-0000-7000-8000-000000000098' },
+            }
+          : {
+              ...ME,
+              organization: {
+                ...teamMe.organization,
+                id: '00000000-0000-7000-8000-000000000099',
+                name: 'Other team',
+              },
+            }
+      const { api, state } = server({
+        'POST /api/auth/organization/create': () => pending.response,
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      state.me = otherMe
+      await pending.answer(json(200, team))
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+      const reload = await screen.findByRole('button', {
+        name: locale === 'en' ? 'Reload' : '重新加载',
+      })
+      expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
+      expect(nameInput().value).toBe(team.name)
+      expect(slugInput().value).toBe(team.slug)
+      const open = screen.getByRole('button', { name: locale === 'en' ? 'Open team' : '打开团队' })
+      expect(open.matches(':disabled')).toBe(true)
+      fireEvent.click(open)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+      await user.click(reload)
+      expect(confirm).toHaveBeenCalled()
+      expect(nameInput().value).toBe(team.name)
+      confirm.mockReturnValue(true)
+      await user.click(reload)
+      await waitFor(() => expect(nameInput().value).toBe(''))
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+    },
+  )
+
+  it('discards a late creation after an accepted multi-tab switch', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = later()
+    const { api, state } = server({
+      'POST /api/auth/organization/create': () => pending.response,
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    state.me = teamMe
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(nameInput().value).toBe(''))
+    await pending.answer(json(200, team))
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+    expect(nameInput().value).toBe('')
+    expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
   })
 })
 
@@ -625,7 +702,9 @@ describe('reconciling an uncertain creation result', () => {
       await user.click(open)
       await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
       expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
-      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(2)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(
+        failure === 'confirmation' ? 1 : 2,
+      )
     },
   )
 
@@ -646,6 +725,58 @@ describe('reconciling an uncertain creation result', () => {
     expect(api.to('GET /api/v1/me')).toHaveLength(2)
   })
 
+  it('refuses a retry activation after another tab switched to a different team', async () => {
+    const { api, state } = server({
+      'POST /api/auth/organization/set-active': () => json(503, { code: 'INTERNAL_SERVER_ERROR' }),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    const open = await screen.findByRole('button', { name: 'Open team' })
+    await waitFor(() => expect(open.matches(':disabled')).toBe(false))
+    state.me = {
+      ...teamMe,
+      organization: { ...teamMe.organization, id: '00000000-0000-7000-8000-000000000099' },
+    }
+    await user.click(open)
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+    await screen.findByRole('button', { name: 'Reload' })
+    expect(open.matches(':disabled')).toBe(true)
+    expect(nameInput().value).toBe(team.name)
+    expect(slugInput().value).toBe(team.slug)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'announces an activation conflict once and keeps the created team in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const { api } = server({
+        'POST /api/auth/organization/set-active': () =>
+          json(409, { code: 'ORGANIZATION_CONTEXT_CHANGED' }),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      await screen.findByRole('button', { name: locale === 'en' ? 'Reload' : '重新加载' })
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]?.querySelector('p')?.textContent).toBe(
+        locale === 'en'
+          ? 'Your team context changed. Reload before making changes.'
+          : '你的团队上下文已改变。请重新加载后再进行修改。',
+      )
+      expect(nameInput().value).toBe(team.name)
+      expect(slugInput().value).toBe(team.slug)
+      expect(
+        screen
+          .getByRole('button', { name: locale === 'en' ? 'Open team' : '打开团队' })
+          .matches(':disabled'),
+      ).toBe(true)
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+    },
+  )
+
   it.each(['organization', 'user'] as const)(
     'keeps creation blocked when the activation confirmation identifies another %s',
     async (mismatch) => {
@@ -665,7 +796,8 @@ describe('reconciling an uncertain creation result', () => {
       const user = await fill()
       await user.click(submit())
       const open = await screen.findByRole('button', { name: 'Open team' })
-      await waitFor(() => expect(open.matches(':disabled')).toBe(false))
+      await screen.findByRole('button', { name: 'Reload' })
+      expect(open.matches(':disabled')).toBe(true)
       expect(createButton()).toBeNull()
       expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
       expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)

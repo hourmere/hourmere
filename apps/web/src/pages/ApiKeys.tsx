@@ -1,5 +1,4 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
-import { useLocation } from 'react-router'
 import {
   API_KEY_NAME_MAX_LENGTH,
   type ApiKey,
@@ -12,12 +11,14 @@ import {
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { EmptyState } from '../components/EmptyState.tsx'
+import { OrganizationContextConflict } from '../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
-import { type Me, useMe, useSession } from '../session.tsx'
+import { type Me, useMe } from '../session.tsx'
+import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
 const DAY = 24 * 60 * 60
 
@@ -172,7 +173,7 @@ export function ApiKeysPage() {
 }
 
 function CreateKeyForm({
-  organization,
+  organization: openedOrganization,
   onCreated,
 }: {
   /** The organization the person is working in (GET /api/v1/me); new keys act in it. */
@@ -180,56 +181,48 @@ function CreateKeyForm({
   onCreated: (key: CreatedApiKey) => void
 }) {
   const { t, text, uiText: ui } = useI18n()
-
+  const [organization] = useState(openedOrganization)
   const [name, setName] = useState('')
   const [expiresIn, setExpiresIn] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<UiText | null>(null)
+  const [contextError, setContextError] = useState<unknown>(null)
   const nameHint = useId()
-  const { refresh, setNotice } = useSession()
-  // This page's address, kept by the handlers below even if the person has left meanwhile.
-  const { pathname } = useLocation()
+  useUnsavedChanges(Boolean(name || expiresIn))
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setCreating(true)
     setError(null)
+    setContextError(null)
     try {
-      onCreated(
-        await createApiKey(name.trim(), expiresIn ? Number(expiresIn) : null, organization.id),
+      const key = await createApiKey(
+        name.trim(),
+        expiresIn ? Number(expiresIn) : null,
+        organization.id,
       )
+      onCreated(key)
     } catch (err) {
-      // Null when the page starts over in another organization (and says why).
-      const message = await createErrorMessage(err)
-      setError(message)
+      if (
+        err instanceof RequestError &&
+        err.status === 403 &&
+        (err.code === 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' ||
+          // The API-key membership guard predates machine-readable refusal codes.
+          (err.code === undefined &&
+            err.message === 'metadata.organizationId must be an organization you are a member of'))
+      ) {
+        setError(
+          msg("Could not create the key: you can't create keys in {0}.", {
+            '0': organization.name,
+          }),
+        )
+        setContextError(new RequestError(409, 'organization_context_changed', ''))
+      } else {
+        setError(msg('Could not create the key. {0}', { '0': errorMessage(err) }))
+        setContextError(err)
+      }
       setCreating(false)
     }
-  }
-
-  /**
-   * A 403 other than an unverified email means the organization was not one the person
-   * belongs to (any more): they may have left it, or switched organizations in another tab.
-   * Ask who they are now. If the organization changed, the page starts over in the new one
-   * (this form goes away), so the explanation goes to the session's notice instead.
-   */
-  async function createErrorMessage(err: unknown): Promise<UiText | null> {
-    if (!(err instanceof RequestError) || err.status !== 403 || err.code === 'EMAIL_NOT_VERIFIED') {
-      return msg('Could not create the key. {0}', { '0': errorMessage(err) })
-    }
-    const now = await refresh()
-    if (now && now.organization.id !== organization.id) {
-      setNotice({
-        message: msg(
-          "You're no longer a member of {0}, so no key was created. Keys you create now act in {1}.",
-          { '0': organization.name, '1': now.organization.name },
-        ),
-        path: pathname,
-      })
-      return null
-    }
-    return msg("Could not create the key: you can't create keys in {0}.", {
-      '0': organization.name,
-    })
   }
 
   return (
@@ -275,6 +268,7 @@ function CreateKeyForm({
           {ui(error)}
         </p>
       )}
+      <OrganizationContextConflict error={contextError} />
     </section>
   )
 }

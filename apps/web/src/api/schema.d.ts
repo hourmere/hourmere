@@ -296,7 +296,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -351,7 +354,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description calendar_copy_not_retryable */
+                /** @description calendar_copy_not_retryable or organization_context_changed */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -381,7 +384,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -438,7 +444,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`) or already started (`booking_in_past`) */
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or the browser organization context changed (`organization_context_changed`) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -480,7 +486,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -535,7 +544,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description conference_not_retryable */
+                /** @description conference_not_retryable or organization_context_changed */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -568,7 +577,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -625,7 +637,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`) */
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or the browser organization context changed (`organization_context_changed`) */
                 409: {
                     headers: {
                         [name: string]: unknown;

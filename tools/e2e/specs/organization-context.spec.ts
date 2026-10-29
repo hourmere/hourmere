@@ -43,13 +43,30 @@ test('a stale team draft refuses a cross-tab session switch and reloads only aft
   await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved team draft')
   expect(await app.eventTypeTitles()).toEqual(before)
 
-  page.once('dialog', (dialog) => dialog.dismiss())
+  let prompts = 0
+  let discard = false
+  page.on('dialog', (dialog) => {
+    prompts++
+    return discard ? dialog.accept() : dialog.dismiss()
+  })
   await page.getByRole('button', { name: 'Reload', exact: true }).click()
   await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved team draft')
+  for (const event of ['focus', 'visibilitychange']) {
+    await Promise.all([
+      page.waitForResponse(`${app.url}/api/v1/me`),
+      page.evaluate((name) => {
+        const target = name === 'focus' ? window : document
+        target.dispatchEvent(new Event(name))
+      }, event),
+    ])
+    await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved team draft')
+    expect(prompts).toBe(1)
+  }
 
-  page.once('dialog', (dialog) => dialog.accept())
+  discard = true
   await page.getByRole('button', { name: 'Reload', exact: true }).click()
   await expect(page.getByLabel('Title', { exact: true })).toHaveValue('')
+  expect(prompts).toBe(2)
   await expect(page.getByLabel('Scheduling', { exact: true })).toHaveCount(0)
   expect(await app.eventTypeTitles()).toEqual(before)
   await otherTab.close()
