@@ -994,6 +994,10 @@ input[readonly] {
     justify-items: start;
     min-width: max-content;
   }
+
+  .table-event-types .event-checks {
+    min-width: 9rem;
+  }
 }
 
 .event-checks {

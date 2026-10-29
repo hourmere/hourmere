@@ -72,6 +72,21 @@ for (const personal of [true, false]) {
               ),
             ),
         ).toBe(true)
+        expect(
+          await page.locator('.event-checks > .badge').evaluateAll((badges) =>
+            badges.every((badge) => {
+              const text = badge.firstChild
+              const firstWord = text?.textContent?.match(/^\S+/u)?.[0]
+              if (!text || text.nodeType !== Node.TEXT_NODE || !firstWord) return false
+              const range = document.createRange()
+              range.setStart(text, 0)
+              range.setEnd(text, firstWord.length)
+              return (
+                new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size === 1
+              )
+            }),
+          ),
+        ).toBe(true)
       }
     })
   }
