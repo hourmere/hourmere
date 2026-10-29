@@ -58,6 +58,7 @@ import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
+import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
@@ -146,6 +147,7 @@ export function productRoutes({
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     teamBookingRoutes({ db }),
     memberDepartureImpactRoutes({ db }),
+    memberRemovalRoutes({ db }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
   ]

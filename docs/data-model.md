@@ -382,8 +382,12 @@ attribution with the authenticated user who actually cancelled. A small shared t
 needed because membership removal/leave and role changes have no booking row. It stores
 only the operation, organization, actor/target UUIDs, source/credential UUIDs, role
 transition and occurrence time. It contains no generic payload, names, email addresses,
-answers, cancellation reasons, session identifiers or tokens, and has no public read API
-or audit-management interface.
+answers, cancellation reasons, session identifiers or tokens. There is no general operation
+log API or audit-management interface. The session-only member-removal handling route
+uses a scoped `member_removed` record to identify the removed host after membership is gone
+and projects that team's current unfinished bookings through the administration whitelist.
+Removal records, membership revocation and affected team event-type deactivation commit
+in the same transaction. Booking rows and original hosts remain intact.
 
 Cancellation records use the same source/key/OAuth origin as `bookings.cancelled_*`, in
 the booking transaction. Host operations take the actor from the authenticated principal;

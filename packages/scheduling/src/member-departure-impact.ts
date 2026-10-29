@@ -16,6 +16,7 @@ export const MemberDepartureEventTypeSchema = z.strictObject({
   schedulingType: z.enum(['individual', 'round_robin', 'collective']),
   isActive: z.boolean(),
   reason: z.enum(['sole_host', 'round_robin_pool_member', 'collective_required_host']),
+  remainingHostCount: z.number().int().nonnegative(),
 })
 
 export const MemberDepartureBookingSchema = TeamAdminBookingSchema.extend({
@@ -137,6 +138,21 @@ async function readImpact(
     .executeTakeFirstOrThrow()
   const eventRows = await eventQuery
     .select(['event.id', 'event.title', 'event.slug', 'event.scheduling_type', 'event.is_active'])
+    .select((eb) =>
+      eb
+        .selectFrom('event_type_hosts as remaining_host')
+        .innerJoin('auth.member as remaining_member', (join) =>
+          join
+            .onRef('remaining_member.userId', '=', 'remaining_host.user_id')
+            .onRef('remaining_member.organizationId', '=', 'event.organization_id'),
+        )
+        .innerJoin('auth.user as remaining_user', 'remaining_user.id', 'remaining_host.user_id')
+        .select((host) => host.fn.countAll<string>().as('count'))
+        .whereRef('remaining_host.event_type_id', '=', 'event.id')
+        .where('remaining_host.user_id', '!=', input.memberUserId)
+        .where('remaining_user.emailVerified', '=', true)
+        .as('remaining_host_count'),
+    )
     .$if(after !== undefined, (q) => q.where('event.id', '>', after as string))
     .orderBy('event.id')
     .limit(limit + 1)
@@ -176,6 +192,7 @@ async function readImpact(
         slug: row.slug,
         schedulingType: row.scheduling_type as 'individual' | 'round_robin' | 'collective',
         isActive: row.is_active,
+        remainingHostCount: Number(row.remaining_host_count),
         reason:
           row.scheduling_type === 'round_robin'
             ? 'round_robin_pool_member'

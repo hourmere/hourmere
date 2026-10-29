@@ -116,9 +116,10 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
     if (target.activeOrganizationId?.toLowerCase() !== expectedId) throw changed()
   }
 
-  // Invitation/member ids are independent targets: a matching request organization does
+  // Invitation ids are independent targets: a matching request organization does
   // not prove that the object belongs to it. Scope lookups so missing and other-team ids
   // produce the same recoverable refusal without revealing object existence.
+  // Role changes and removals instead use the shared policy's uniform target denial.
   if (ctx.path === '/organization/cancel-invitation' && typeof body.invitationId === 'string') {
     const invitation = await db
       .selectFrom('auth.invitation')
@@ -127,22 +128,5 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
       .where('organizationId', '=', expectedId)
       .executeTakeFirst()
     if (!invitation) throw changed()
-  }
-  // Role changes use the shared management policy's uniform target denial. Keep context
-  // drift distinct from role authority without disclosing missing/other-team members.
-  const memberId =
-    ctx.path === '/organization/remove-member' &&
-    typeof body.memberIdOrEmail === 'string' &&
-    !body.memberIdOrEmail.includes('@')
-      ? body.memberIdOrEmail
-      : undefined
-  if (typeof memberId === 'string') {
-    const member = await db
-      .selectFrom('auth.member')
-      .select('id')
-      .where('id', '=', memberId)
-      .where('organizationId', '=', expectedId)
-      .executeTakeFirst()
-    if (!member) throw changed()
   }
 }

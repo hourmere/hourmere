@@ -40,7 +40,6 @@ export {
   type CreateBookingResult,
   cancelHostBooking,
   cancelManagedBooking,
-  cancelTeamBookingInTransaction,
   createPublicBooking,
   createPublicTeamBooking,
   DEFAULT_PAGE_SIZE,
@@ -104,6 +103,14 @@ export {
   type MemberDepartureImpactInput,
   MemberDepartureImpactSchema,
 } from './member-departure-impact.ts'
+export {
+  getLatestTeamMemberRemovalHandling,
+  getTeamMemberRemovalHandling,
+  type LatestMemberRemovalHandlingInput,
+  type MemberRemovalHandling,
+  type MemberRemovalHandlingInput,
+  MemberRemovalHandlingSchema,
+} from './member-removal.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,
