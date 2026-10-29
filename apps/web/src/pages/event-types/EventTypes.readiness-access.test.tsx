@@ -102,6 +102,73 @@ function expectChecksHidden(language: 'en' | 'zh-CN') {
   expect(document.querySelector('table caption')).toBeNull()
 }
 
+describe.each([
+  { context: 'personal', me: ME },
+  { context: 'team', me: TEAM },
+])('$context event readiness without a browser session', ({ me: base }) => {
+  // OAuth defensively covers the shared Me union; only sessions and API keys authenticate REST.
+  it.each(['api_key', 'oauth'] as const)(
+    'keeps the list, copying and editing usable for an %s principal',
+    async (kind) => {
+      const user = userEvent.setup()
+      const me: Schemas['Me'] = {
+        ...base,
+        principal: {
+          kind,
+          apiKeyId: kind === 'api_key' ? '00000000-0000-7000-8000-000000000004' : null,
+          ...(kind === 'oauth' && {
+            oauthConsentId: '00000000-0000-7000-8000-000000000005',
+          }),
+        },
+      }
+      const record = eventType({
+        organizationId: me.organization.id,
+        ownerUserId: me.organization.personal ? me.user.id : null,
+      })
+      const membership = later()
+      const teamReadiness = `GET /api/v1/teams/${me.organization.id}/readiness`
+      const api = fakeApi({
+        ...signedInAs(me),
+        ...profile(),
+        'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
+        'GET /api/v1/event-types': () => json(200, { data: [record] }),
+        [`GET /api/v1/event-types/${record.id}`]: () => json(200, record),
+        [`PATCH /api/v1/event-types/${record.id}`]: ({ body }) =>
+          json(200, { ...record, ...(body as { title: string }) }),
+        'GET /api/v1/event-type-hosts': () =>
+          json(200, { data: [{ id: me.user.id, name: me.user.name }], nextAfter: null }),
+        [MEMBER_ROUTE]: () => membership.response,
+        'GET /api/v1/readiness/self': () => json(403, { error: 'readiness_access_denied' }),
+        [teamReadiness]: () => json(403, { error: 'team_management_access_denied' }),
+      })
+      await open()
+      // A session-only role read can answer after the list initially appears. Its 401
+      // must never be requested for a non-session principal.
+      await membership.answer(json(401, { code: 'UNAUTHORIZED' }))
+      await waitFor(() => expectChecksHidden('en'))
+      expect(screen.getByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
+      expect(screen.getByTestId('location').textContent).toBe('/app/event-types')
+      expect(screen.queryByRole('heading', { name: 'Sign in to Hourmere' })).toBeNull()
+      await user.click(screen.getByRole('button', { name: labels.en.copy }))
+      expect(await navigator.clipboard.readText()).toBe(
+        `${window.location.origin}${me.organization.personal ? '/ada' : '/team/design-team'}/intro-call`,
+      )
+      await user.click(screen.getByRole('link', { name: 'Edit Intro call' }))
+      await screen.findByRole('heading', { name: 'Edit “Intro call”', level: 1 })
+      await user.clear(screen.getByLabelText('Title', { exact: true }))
+      await user.type(screen.getByLabelText('Title', { exact: true }), 'Updated call')
+      await user.click(screen.getByRole('button', { name: 'Save changes' }))
+      await screen.findByText('Saved.')
+      expect(api.to(`PATCH /api/v1/event-types/${record.id}`)[0]?.body).toMatchObject({
+        title: 'Updated call',
+      })
+      expect(api.to(MEMBER_ROUTE)).toHaveLength(0)
+      expect(api.to('GET /api/v1/readiness/self')).toHaveLength(0)
+      expect(api.to(teamReadiness)).toHaveLength(0)
+    },
+  )
+})
+
 describe('team event readiness access', () => {
   it.each(['en', 'zh-CN'] as const)(
     'skips readiness for a member and leaves the list usable without retry in %s',

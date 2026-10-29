@@ -48,6 +48,9 @@ export function useEventReadiness(me: Me) {
 
 /** Read event pages only; each event summary already covers its required hosts. */
 export async function loadEventReadiness(me: Me, signal: AbortSignal) {
+  // Readiness and membership reads require a browser session, even when the list itself
+  // is available to an API-key caller. A membership 401 would invalidate that valid caller.
+  if (me.principal.kind !== 'session') return null
   if (!me.organization.personal) {
     const member = await getActiveOrganizationMember(signal)
     if (member.organizationId !== me.organization.id || member.userId !== me.user.id)
