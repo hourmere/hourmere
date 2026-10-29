@@ -34,7 +34,7 @@ import { DepartureImpact, memberDepartureImpactRoutes } from './routes/member-de
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { openApiDocument, responseAndRequestStrictness } from './routes/test-app.ts'
 import { productRoutes } from './server.ts'
-import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
+import { EXPECTED_ORGANIZATION_HEADER, organizationContextWriteLock } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4391'
@@ -94,6 +94,7 @@ function routeCopy(depart: Departure = leaveTeamMember, replacement?: Replacemen
     json,
     serviceContext,
     EXPECTED_ORGANIZATION_HEADER,
+    organizationContextWriteLock,
     DepartureImpact,
   }
   return new Function(...Object.keys(bindings), `${source}; return memberLeaveRoutes`)(
@@ -144,6 +145,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     authentication: Auth,
     production = false,
     departureRoutes = memberLeaveRoutes,
+    routeDb = db,
   ) {
     return createApp({
       publicUrl: origin,
@@ -152,7 +154,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       resolveCaller: createCallerResolver({ auth: authentication, db }),
       routes: production
         ? productRoutes({ db, socialProviders: {} })
-        : [memberDepartureImpactRoutes({ db }), departureRoutes({ db })],
+        : [memberDepartureImpactRoutes({ db }), departureRoutes({ db: routeDb })],
     })
   }
 
@@ -588,6 +590,141 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       { timeout: 3000, interval: 10 },
     )
   }
+
+  async function verifyBoundSwitchOrdering(factory = memberLeaveRoutes) {
+    const f = await fixture()
+    const other = await createTestTeam(db, [
+      { user: f.actor, role: 'member' },
+      { user: f.survivor, role: 'owner' },
+    ])
+    const inserted = new WeakSet<object>()
+    const resume = Promise.withResolvers<void>()
+    let paused = false
+    const observed = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        if (
+          node.kind === 'InsertQueryNode' &&
+          node.into?.table.identifier.name === 'organization_operations'
+        )
+          inserted.add(queryId)
+        return node
+      },
+      async transformResult({ result, queryId }) {
+        if (inserted.has(queryId)) {
+          // Membership removal and its real operation INSERT have run, but this
+          // transaction still holds the session lock and has not committed its fallback.
+          paused = true
+          await resume.promise
+        }
+        return result
+      },
+    })
+    const target = application(auth, false, factory, observed)
+    let leaving: Promise<Response> | undefined
+    let switching: Promise<Response> | undefined
+    try {
+      leaving = Promise.resolve(leave(f, target))
+      await vi.waitFor(() => expect(paused).toBe(true), { timeout: 3000, interval: 10 })
+      switching = Promise.resolve(
+        target.request('/api/auth/organization/set-active', {
+          method: 'POST',
+          headers: headers(f),
+          body: JSON.stringify({ organizationId: other.id }),
+        }),
+      )
+      await vi.waitFor(
+        async () => {
+          const result = await owned.pool.query<{ blocked: boolean }>(`SELECT EXISTS (
+            SELECT FROM pg_stat_activity WHERE datname=current_database()
+            AND wait_event_type='Lock' AND (query LIKE '%pg_advisory_xact_lock%'
+              OR query ILIKE '%update%session%')
+          ) AS blocked`)
+          expect(result.rows[0]?.blocked).toBe(true)
+        },
+        { timeout: 3000, interval: 10 },
+      )
+      resume.resolve()
+      const [left, switched] = await Promise.all([leaving, switching])
+      expect(left.status).toBe(200)
+      expect(switched.status, 'a bound switch must reject the departed source organization').toBe(
+        409,
+      )
+      expect(await switched.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+      await departed(f)
+    } finally {
+      resume.resolve()
+      await Promise.allSettled([leaving, switching].filter(Boolean))
+    }
+  }
+
+  it('orders a bound native switch after REST departure and preserves the personal fallback', async () => {
+    await verifyBoundSwitchOrdering()
+  })
+
+  it('detects omitting the departure transaction context lock with a real HTTP race assertion', async () => {
+    const copy = serviceCopy([['await ctx.authorizeOrganizationWrite?.(trx, input.teamId)', '']])
+    await expect(verifyBoundSwitchOrdering(routeCopy(copy))).rejects.toThrow(
+      'a bound switch must reject the departed source organization',
+    )
+  })
+
+  it('detects omitting the route context lock wiring with a real HTTP race assertion', async () => {
+    const copy = routeCopy(leaveTeamMember, [
+      'authorizeOrganizationWrite: organizationContextWriteLock(c.var.principal),',
+      '',
+    ])
+    await expect(verifyBoundSwitchOrdering(copy)).rejects.toThrow(
+      'a bound switch must reject the departed source organization',
+    )
+  })
+
+  it('promptly refuses REST departure while a native switch holds the context lock', async () => {
+    const f = await fixture()
+    const other = await createTestTeam(db, [
+      { user: f.actor, role: 'member' },
+      { user: f.survivor, role: 'owner' },
+    ])
+    const adapter = (await auth.$context).adapter
+    const original = adapter.update.bind(adapter)
+    const resume = Promise.withResolvers<void>()
+    let paused = false
+    const spy = vi.spyOn(adapter, 'update')
+    spy.mockImplementation((async (request: Parameters<typeof original>[0]) => {
+      if (request.model === 'session' && request.update.activeOrganizationId === other.id) {
+        paused = true
+        await resume.promise
+      }
+      return original(request)
+    }) as typeof original)
+    let switching: Promise<Response> | undefined
+    let leaving: Promise<Response> | undefined
+    try {
+      switching = Promise.resolve(
+        app.request('/api/auth/organization/set-active', {
+          method: 'POST',
+          headers: headers(f),
+          body: JSON.stringify({ organizationId: other.id }),
+        }),
+      )
+      await vi.waitFor(() => expect(paused).toBe(true), { timeout: 3000, interval: 10 })
+      let finished = false
+      leaving = Promise.resolve(leave(f)).then((response) => {
+        finished = true
+        return response
+      })
+      await vi.waitFor(() => expect(finished).toBe(true), { timeout: 1500, interval: 10 })
+      const response = await leaving
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+      await unchanged(f)
+      resume.resolve()
+      expect((await switching).status).toBe(200)
+    } finally {
+      resume.resolve()
+      await Promise.allSettled([leaving, switching].filter(Boolean))
+      spy.mockRestore()
+    }
+  })
 
   async function verifyRace(
     entry: 'session route' | 'native leave',

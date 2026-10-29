@@ -27,6 +27,9 @@ export async function leaveTeamMember(
     .transaction()
     .setIsolationLevel('read committed')
     .execute(async (trx) => {
+      // Web callers join the native switch ordering before taking any row locks.
+      // Native HTTP departure already owns that context lock on its dedicated pool.
+      await ctx.authorizeOrganizationWrite?.(trx, input.teamId)
       const actor = await checkTeamManagementAccess(
         trx,
         principal,

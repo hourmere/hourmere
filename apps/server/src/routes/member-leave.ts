@@ -9,7 +9,7 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
-import { EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
+import { EXPECTED_ORGANIZATION_HEADER, organizationContextWriteLock } from '../team-management.ts'
 import { DepartureImpact } from './member-departure-impact.ts'
 
 const Handling = z.object({
@@ -55,10 +55,16 @@ export function memberLeaveRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) => {
         try {
-          const result = await leaveTeamMember(serviceContext(deps, c.var.principal), {
-            teamId: c.req.valid('param').teamId,
-            expectedOrganizationId: c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? '',
-          })
+          const result = await leaveTeamMember(
+            {
+              ...serviceContext(deps, c.var.principal),
+              authorizeOrganizationWrite: organizationContextWriteLock(c.var.principal),
+            },
+            {
+              teamId: c.req.valid('param').teamId,
+              expectedOrganizationId: c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? '',
+            },
+          )
           return c.json(result, 200)
         } catch (error) {
           if (!(error instanceof MemberDepartureBlockedError)) throw error

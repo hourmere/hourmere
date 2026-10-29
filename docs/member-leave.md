@@ -13,6 +13,11 @@ The organization write lock conflicts with the organization share locks used by 
 and booking writers. Dependencies committed while departure waits are therefore included
 in the recheck, and no new dependency can commit between that check and membership deletion.
 The preview endpoint remains a read, never authorization to leave.
+The REST route also shares the native organization-context advisory lock before taking
+row locks. A source-bound automatic switch waiting behind leave rechecks the personal
+fallback and returns 409; a leave contending with a switch returns 409 promptly. Native
+HTTP departure retains its existing outer context lock without reacquiring it on another
+connection.
 
 An affected event type (including a disabled one) or a confirmed booking whose end is still
 in the future blocks departure. HTTP 409 has `error: member_departure_blocked`, `message`,
