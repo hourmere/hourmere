@@ -418,7 +418,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       secret: config.BETTER_AUTH_SECRET,
       mailer: countingMailer,
       reserveInvitationEmail: (trx, input) =>
-        reserveInvitationEmailBudget(trx, input, notificationDeps),
+        reserveInvitationEmailBudget(trx, input, {
+          ...notificationDeps,
+          invitationInviterMaxPerHour: config.INVITATION_INVITER_MAX_PER_HOUR,
+          invitationInviterMaxPerDay: config.INVITATION_INVITER_MAX_PER_DAY,
+          invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
+          invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
+        }),
       queueSignInEmail: queuedSignInEmail(jobs, {
         db,
         secret: config.BETTER_AUTH_SECRET,

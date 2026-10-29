@@ -341,18 +341,22 @@ reconciliation and management integration are separate work. Explicit resend wil
 expiry under the approved protocol; it is not implemented by these storage queries.
 
 Invitation admission now writes the invitation and its queued delivery intent in one
-transaction. `generation_started_at` tracks the explicit resend cooldown independently
-of worker updates; `expiry_duration_ms` retains the original validity length across
+transaction. The explicit resend cooldown uses the later of `generation_started_at`
+and `updated_at`, so both explicit resends and worker attempts restart the wait;
+`expiry_duration_ms` retains the original validity length across
 successive renewals. The migration retains delivery creation time as the cooldown anchor
 and seeds the known legacy 48-hour validity policy. Historic native resends changed expiry
 without changing invitation creation time, so their difference cannot recover original
 validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.
 
-`invitation_email_requests` retains only actor/team UUIDs and request time for rolling
-inviter/team limits. It has no foreign keys, so deleting an invitation, account or team
-cannot reset the budget. Admission reserves a separate invitation-domain recipient HMAC
-in `notification_email_sends` while holding the existing global mail-budget lock.
-Reservations are conservative accounting, not SMTP receipts. Both ledgers retain two days.
+`invitation_email_requests` retains actor/team UUIDs, an invitation-domain recipient HMAC
+and request time for rolling inviter/team/recipient limits. It has no foreign keys, so
+deleting an invitation, account or team cannot reset the budget. Admission holds the
+existing global mail-budget lock without debiting the shared sending allowance in
+`notification_email_sends`. A future sender must check and debit ordinary, non-reserved
+shared capacity at send time. Both ledgers retain two days. Migration 0044 preserves
+earlier inviter/team counts, but cannot recover recipient identity from the old request
+rows; their new nullable hash remains empty and recipient windows fill within 24 hours.
 The invitation sender, job queue and reconciler remain separate work; queued intent alone
 does not send mail or claim SMTP acceptance.
 

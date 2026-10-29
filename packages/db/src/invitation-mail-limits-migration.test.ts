@@ -210,8 +210,9 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
         owned.pool.query(`UPDATE invitation_deliveries SET generation_started_at=NULL`),
       ).rejects.toMatchObject({ code: '23502', column: 'generation_started_at' })
       await owned.pool.query(
-        `INSERT INTO invitation_email_requests(user_id,organization_id,requested_at)
-        VALUES($1,$2,'2026-11-01T12:00:00.123456Z')`,
+        `INSERT INTO invitation_email_requests(user_id,organization_id,recipient_hash,requested_at)
+        VALUES($1,$2,sha256(convert_to('synthetic-retained-recipient','UTF8')),
+          '2026-11-01T12:00:00.123456Z')`,
         [userId, organizationId],
       )
       const retained = (
@@ -233,6 +234,7 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
         schema.indexes.filter((i) => i.relation === 'invitation_email_requests').map((i) => i.name),
       ).toEqual([
         'invitation_email_requests_organization_time',
+        'invitation_email_requests_recipient_time',
         'invitation_email_requests_time',
         'invitation_email_requests_user_time',
       ])

@@ -1,5 +1,5 @@
 -- Admission accounting survives deleting an invitation, team or inviter. No address
--- is stored here; the existing mail ledger holds purpose-separated recipient HMACs.
+-- is stored here; recipient admission hashes are added by the next migration.
 CREATE TABLE public.invitation_email_requests (
   user_id uuid NOT NULL,
   organization_id uuid NOT NULL,
@@ -12,8 +12,8 @@ CREATE INDEX invitation_email_requests_organization_time
 CREATE INDEX invitation_email_requests_time
   ON public.invitation_email_requests (requested_at);
 
--- Worker activity must not restart the resend cooldown. Pin the original validity
--- interval so each explicit resend can extend expiry without growing that interval.
+-- Record generation start alongside delivery updates for the resend cooldown. Pin the
+-- original validity so explicit resend extends expiry without growing that interval.
 -- Earlier production invitations always used Better Auth's default 48-hour validity.
 -- Native resend changed expiresAt without changing createdAt, so their difference
 -- cannot recover that interval. Preserve both fields and pin the known default.

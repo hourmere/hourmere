@@ -39,7 +39,7 @@ const generous: InvitationMailLimits = {
   mailRecipientMaxPerDay: 200,
   mailMaxPerHour: 1_000,
 }
-const denied = { code: 'TEAM_INVITATION_ACCESS_DENIED' }
+const denied = { code: 'TEAM_MANAGEMENT_ACCESS_DENIED' }
 
 interface Actor {
   userId: string
@@ -75,18 +75,45 @@ function moduleUrl(source: string, location: URL, replacements: Record<string, s
   return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
 }
 
-async function authSourceCopy(before: string, after: string): Promise<typeof createAuth> {
+async function authSourceCopy(
+  before: string,
+  after: string,
+  sourceFile = 'invitations.ts',
+): Promise<typeof createAuth> {
+  const mutationLocation = new URL(`../../../packages/auth/src/${sourceFile}`, import.meta.url)
+  const mutationSource = readFileSync(mutationLocation, 'utf8')
+  expect(mutationSource.includes(before), 'mutation matches real auth source').toBe(true)
+  const mutationUrl = moduleUrl(mutationSource.replace(before, after), mutationLocation)
+  const managerLocation = new URL('../../../packages/auth/src/team-management.ts', import.meta.url)
+  const managerUrl =
+    sourceFile === 'team-management.ts'
+      ? mutationUrl
+      : moduleUrl(readFileSync(managerLocation, 'utf8'), managerLocation)
+  const roleLocation = new URL('../../../packages/auth/src/team-role-policy.ts', import.meta.url)
+  const roleSource = readFileSync(roleLocation, 'utf8')
+  const roleUrl = moduleUrl(
+    sourceFile === 'team-role-policy.ts' ? roleSource.replace(before, after) : roleSource,
+    roleLocation,
+    { './team-management.ts': managerUrl },
+  )
   const serviceLocation = new URL('../../../packages/auth/src/invitations.ts', import.meta.url)
   const serviceSource = readFileSync(serviceLocation, 'utf8')
-  expect(serviceSource.includes(before), 'mutation matches real invitation source').toBe(true)
-  const serviceUrl = moduleUrl(serviceSource.replace(before, after), serviceLocation)
+  const serviceUrl = moduleUrl(
+    sourceFile === 'invitations.ts' ? serviceSource.replace(before, after) : serviceSource,
+    serviceLocation,
+    { './team-management.ts': managerUrl, './team-role-policy.ts': roleUrl },
+  )
   const hookLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
   const hookUrl = moduleUrl(readFileSync(hookLocation, 'utf8'), hookLocation, {
     './invitations.ts': serviceUrl,
+    './team-role-policy.ts': roleUrl,
   })
   const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
   const copy = await import(
-    moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, { './hooks.ts': hookUrl })
+    moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, {
+      './hooks.ts': hookUrl,
+      './team-role-policy.ts': roleUrl,
+    })
   )
   return copy.createAuth
 }
@@ -272,19 +299,170 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     return result
   }
 
-  it.each(['owner', 'admin'])('allows %s to create only member invitations', async (role) => {
-    const i = instance()
+  async function verifyInvitationRoles(factory = createAuth, role = 'owner') {
+    const i = instance(factory)
     const a = await actor(role)
     const invitation = await created(i, a)
     expect(invitation).toMatchObject({
       role: 'member',
       delivery: { generation: 1, state: 'queued', attempts: 0 },
     })
+    for (const requestedRole of [undefined, ['member']]) {
+      const response = await invite(i, a, { role: requestedRole })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ role: 'member' })
+    }
     const before = await snapshot()
-    for (const requestedRole of ['admin', 'owner', 'member,admin', ['member']]) {
+    for (const requestedRole of [null, 'admin', 'owner', 'member,admin', ['member', 'admin']]) {
       await error(await invite(i, a, { role: requestedRole }), 403, denied.code)
     }
     expect(await snapshot()).toEqual(before)
+  }
+
+  it.each(['owner', 'admin'])('allows %s to create only member invitations', async (role) => {
+    await verifyInvitationRoles(createAuth, role)
+  })
+
+  async function verifyAlreadyMember(factory = createAuth) {
+    const i = instance(factory)
+    const a = await actor('admin')
+    const member = await actor('member', a.organizationId)
+    const joinedEmail = `${randomUUID()}@outside.example`
+    const invitation = await created(i, a, joinedEmail)
+    await ageGeneration(invitation)
+    const joined = await user(joinedEmail)
+    await actor('member', a.organizationId, joined.id)
+    const existing = await db
+      .selectFrom('auth.user')
+      .select('email')
+      .where('id', 'in', [a.userId, member.userId])
+      .execute()
+    const before = await snapshot()
+    for (const { email } of existing) {
+      await error(
+        await invite(i, a, { email: ` ${email.toUpperCase()} ` }),
+        409,
+        'INVITATION_RECIPIENT_ALREADY_MEMBER',
+      )
+      await error(await invite(i, member, { email }), 403, denied.code)
+    }
+    await error(await resend(i, a, invitation), 409, 'INVITATION_RECIPIENT_ALREADY_MEMBER')
+    expect(await snapshot()).toEqual(before)
+  }
+
+  it('refuses current team members on create and resend, including an admin self-invite', async () => {
+    await verifyAlreadyMember()
+  })
+
+  async function verifyAcceptAlreadyMember(factory = createAuth) {
+    const i = instance(factory)
+    const owner = await actor('owner')
+    const admin = await actor('admin', owner.organizationId)
+    const recipient = await db
+      .selectFrom('auth.user')
+      .select('email')
+      .where('id', '=', admin.userId)
+      .executeTakeFirstOrThrow()
+    await error(
+      await invite(i, admin, { email: recipient.email }),
+      409,
+      'INVITATION_RECIPIENT_ALREADY_MEMBER',
+    )
+    // Historical invitations may predate the admission guard or a later team join.
+    const legacy = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: owner.organizationId,
+        inviterId: admin.userId,
+        email: recipient.email,
+        role: 'member',
+        status: 'pending',
+        expiresAt: new Date(Date.now() + 3_600_000),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const post = (action: string, actor: Actor, body: Record<string, unknown>) =>
+      i.app.request(`/api/auth/organization/${action}`, {
+        method: 'POST',
+        headers: {
+          origin,
+          cookie: actor.cookie,
+          'content-type': 'application/json',
+          'x-expected-organization-id': owner.organizationId,
+        },
+        body: JSON.stringify(body),
+      })
+    await error(
+      await post('accept-invitation', admin, { invitationId: legacy.id }),
+      409,
+      'INVITATION_RECIPIENT_ALREADY_MEMBER',
+    )
+    const memberships = () =>
+      db
+        .selectFrom('auth.member')
+        .select(['id', 'role'])
+        .where('organizationId', '=', owner.organizationId)
+        .where('userId', '=', admin.userId)
+        .execute()
+    const rows = await memberships()
+    expect(rows).toEqual([{ id: expect.any(String), role: 'admin' }])
+    expect(
+      (
+        await post('remove-member', owner, {
+          organizationId: owner.organizationId,
+          memberIdOrEmail: rows[0]?.id,
+        })
+      ).status,
+    ).toBe(200)
+    expect(await memberships()).toEqual([])
+    const me = await i.app.request('/api/v1/me', { headers: { cookie: admin.cookie } })
+    expect(me.status).toBe(200)
+    const context = (await me.json()) as { organization: { id: string; personal: boolean } }
+    expect(context.organization.personal).toBe(true)
+    expect(context.organization.id).not.toBe(owner.organizationId)
+    await error(await invite(i, admin), 403, denied.code)
+  }
+
+  it('refuses legacy self-invitation acceptance so owner removal revokes every team membership and access', async () => {
+    await verifyAcceptAlreadyMember()
+  })
+
+  async function verifyPendingCap(factory = createAuth) {
+    const i = instance(factory)
+    const a = await actor()
+    await db
+      .insertInto('auth.invitation')
+      .values(
+        Array.from({ length: 99 }, () => ({
+          organizationId: a.organizationId,
+          inviterId: a.userId,
+          email: `${randomUUID()}@outside.example`,
+          role: 'member',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 3_600_000),
+        })),
+      )
+      .execute()
+    const invitation = await created(i, a)
+    const before = await snapshot()
+    await error(await invite(i, a), 409, 'INVITATION_PENDING_LIMIT')
+    expect(await snapshot()).toEqual(before)
+    const retry = await invite(i, a, { email: invitation.email })
+    expect(retry.status).toBe(200)
+    expect(await retry.json()).toMatchObject({ id: invitation.id })
+    expect(await snapshot()).toEqual(before)
+    expect(
+      await db
+        .selectFrom('auth.invitation')
+        .select((eb) => eb.fn.countAll<string>().as('count'))
+        .where('organizationId', '=', a.organizationId)
+        .where('status', '=', 'pending')
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: '100' })
+  }
+
+  it('keeps the native cap of 100 pending invitations per team without spending a refused request', async () => {
+    await verifyPendingCap()
   })
 
   async function verifyDenied(factory = createAuth) {
@@ -294,7 +472,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await ageGeneration(invitation)
     const member = await actor('member', manager.organizationId)
     const outsider = await actor('owner')
-    const unknownRole = await actor('admin,custom', manager.organizationId)
+    const unknownRole = await actor('administrator', manager.organizationId)
     const before = await snapshot()
     const answers: unknown[] = []
     for (const a of [
@@ -321,7 +499,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     expect(await snapshot()).toEqual(before)
   }
 
-  it('uniformly denies members, other-team owners and roles containing unknown tokens on create and resend', async () => {
+  it('uniformly denies members, other-team owners and unknown roles on create and resend', async () => {
     await verifyDenied()
   })
 
@@ -478,7 +656,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     },
   )
 
-  it('uses invitation HMAC identity without spending the sign-in/host reserve', async () => {
+  it('uses invitation HMAC identity without spending shared booking or sign-in mail capacity', async () => {
     limits.mailMaxPerHour = 5
     const i = instance()
     const a = await actor()
@@ -487,9 +665,20 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       .insertInto('notification_email_sends')
       .values(Array.from({ length: 5 }, () => ({ recipient_hash: hash, sent_at: new Date() })))
       .execute()
-    const before = await snapshot()
-    await error(await invite(i, a), 429, 'INVITATION_RATE_LIMITED')
-    expect(await snapshot()).toEqual(before)
+    const before = (await snapshot()).sends
+    const invitation = await created(i, a, 'Reserved@outside.example')
+    const after = await snapshot()
+    expect(after.sends).toEqual(before)
+    expect(after.requests).toHaveLength(1)
+    expect(
+      after.requests[0].recipient_hash.equals(invitationRecipientHash(invitation.email, secret)),
+    ).toBe(true)
+    expect(
+      after.requests[0].recipient_hash.equals(signInRecipientHash(invitation.email, secret)),
+    ).toBe(false)
+    expect(
+      after.requests[0].recipient_hash.equals(notificationRecipientHash(invitation.email, secret)),
+    ).toBe(false)
     await expect(
       signInEmailBudget(
         db,
@@ -498,19 +687,6 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
         new Date(),
       ),
     ).resolves.toBeUndefined()
-    await db.deleteFrom('notification_email_sends').execute()
-    const invitation = await created(i, a, 'Reserved@outside.example')
-    const sends = (await snapshot()).sends
-    expect(sends).toHaveLength(1)
-    expect(sends[0].recipient_hash.equals(invitationRecipientHash(invitation.email, secret))).toBe(
-      true,
-    )
-    expect(sends[0].recipient_hash.equals(signInRecipientHash(invitation.email, secret))).toBe(
-      false,
-    )
-    expect(
-      sends[0].recipient_hash.equals(notificationRecipientHash(invitation.email, secret)),
-    ).toBe(false)
   })
 
   async function verifyCooldown(factory = createAuth) {
@@ -523,10 +699,61 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     expect(result).toMatchObject({ retryAfterSeconds: 60 })
     expect(response.headers.get('retry-after')).toBe('60')
     expect(await snapshot()).toEqual(before)
+    await verifyExplicitCooldown(factory)
   }
 
   it('returns a fixed non-leaking cooldown response without spending a budget', async () => {
     await verifyCooldown()
+  })
+
+  async function verifyExplicitCooldown(factory = createAuth) {
+    const i = instance(factory)
+    const a = await actor()
+    const invitation = await created(i, a)
+    await ageGeneration(invitation)
+    const first = await resend(i, a, invitation)
+    expect(first.status).toBe(200)
+    const current = (await first.json()) as Invitation
+    expect(current.delivery.generation).toBe(2)
+    const before = await snapshot()
+    await error(await resend(i, a, current), 429, 'INVITATION_RESEND_COOLDOWN')
+    expect(await snapshot()).toEqual(before)
+    // A stale worker timestamp must not move a newer generation's anchor backwards.
+    await owned.pool.query(
+      `UPDATE invitation_deliveries SET updated_at = clock_timestamp() - interval '61 seconds'
+       WHERE invitation_id = $1`,
+      [invitation.id],
+    )
+    const staleTimestamp = await snapshot()
+    await error(await resend(i, a, current), 429, 'INVITATION_RESEND_COOLDOWN')
+    expect(await snapshot()).toEqual(staleTimestamp)
+  }
+
+  it('delays the next explicit resend after an explicit generation change', async () => {
+    await verifyExplicitCooldown()
+  })
+
+  async function verifyWorkerCooldown(factory = createAuth) {
+    const i = instance(factory)
+    const a = await actor()
+    const invitation = await created(i, a)
+    await ageGeneration(invitation)
+    // No sender exists yet. Persist the completed worker-attempt state without SMTP.
+    await owned.pool.query(
+      `UPDATE invitation_deliveries SET state = 'failed', attempts = 1,
+       last_error_code = 'transport_error', updated_at = clock_timestamp()
+       WHERE invitation_id = $1`,
+      [invitation.id],
+    )
+    const before = await snapshot()
+    await error(await resend(i, a, invitation), 429, 'INVITATION_RESEND_COOLDOWN')
+    expect(await snapshot()).toEqual(before)
+    await ageGeneration(invitation)
+    expect((await resend(i, a, invitation)).status).toBe(200)
+  }
+
+  it('delays an explicit resend after a worker delivery attempt even when its generation is old', async () => {
+    await verifyWorkerCooldown()
   })
 
   it.each([
@@ -648,6 +875,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
           state: 'failed',
           last_error_code: 'legacy_delivery_unknown',
           generation_started_at: new Date(Date.now() - 3_600_000),
+          updated_at: new Date(Date.now() - 3_600_000),
           expiry_duration_ms: lifetime,
         })
         .execute()
@@ -860,11 +1088,9 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     }
     const before = await snapshot()
     const response = await invite(i, a, { email: 'sensitive-recipient@outside.example' })
-    expect(response.status).toBe(500)
-    expect(await response.text()).not.toContain('sensitive-recipient')
+    await error(response, 500, 'INVITATION_REQUEST_FAILED')
     expect(await snapshot()).toEqual(before)
-    expect(diagnostics.join('\n')).not.toContain('sensitive-recipient')
-    expect(diagnostics.join('\n')).not.toContain('outside.example')
+    expect(diagnostics.join('\n')).not.toContain('@')
   }
 
   async function verifyFenceExpiry(factory = createAuth) {
@@ -914,46 +1140,41 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await verifyRollback()
   })
 
-  it('treats existing accounts, team members and disallowed new accounts identically without changing signup policy', async () => {
+  it('treats existing non-members and disallowed new accounts identically without changing signup policy', async () => {
     await user('bootstrap@outside.example')
     const i = instance()
     const a = await actor()
     const existing = 'existing@outside.example'
-    const memberEmail = 'member@outside.example'
     const absent = 'new@outside.example'
     await user(existing)
-    const member = await user(memberEmail)
-    await db
-      .insertInto('auth.member')
-      .values({
-        userId: member.id,
-        organizationId: a.organizationId,
-        role: 'member',
-        createdAt: new Date(),
-      })
-      .execute()
     await expect(maySignUp(db, policy, absent)).resolves.toBe(false)
-    for (const email of [existing, memberEmail, absent]) {
+    const invitations: Invitation[] = []
+    for (const email of [existing, absent]) {
       const invitation = await created(i, a, email)
       expect(invitation.delivery).toEqual({ generation: 1, state: 'queued', attempts: 0 })
+      invitations.push(invitation)
     }
+    const cooldowns: unknown[] = []
+    for (const invitation of invitations)
+      cooldowns.push(await error(await resend(i, a, invitation), 429, 'INVITATION_RESEND_COOLDOWN'))
+    expect(cooldowns[0]).toEqual(cooldowns[1])
     await expect(maySignUp(db, policy, absent)).resolves.toBe(false)
     await expect(maySignUp(db, policy, `${randomUUID()}@allowed.example`)).resolves.toBe(true)
     await user('account@outside.example')
-    limits.invitationInviterMaxPerHour = 3
-    const failures = []
+    limits.invitationInviterMaxPerHour = 2
+    const failures: unknown[] = []
+    for (const invitation of invitations) {
+      await ageGeneration(invitation)
+      failures.push(await error(await resend(i, a, invitation), 429, 'INVITATION_RATE_LIMITED'))
+    }
     for (const email of ['account@outside.example', 'absent@outside.example']) {
       failures.push(await error(await invite(i, a, { email }), 429, 'INVITATION_RATE_LIMITED'))
     }
-    expect(failures[0]).toEqual(failures[1])
+    expect(
+      failures.every((failure) => JSON.stringify(failure) === JSON.stringify(failures[0])),
+    ).toBe(true)
     const log = diagnostics.join('\n')
-    for (const email of [
-      existing,
-      memberEmail,
-      absent,
-      'account@outside.example',
-      'absent@outside.example',
-    ])
+    for (const email of [existing, absent, 'account@outside.example', 'absent@outside.example'])
       expect(log).not.toContain(email)
     expect(log).not.toContain('@')
   })
@@ -1006,8 +1227,13 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     const token = 'INVITATION_GENERATION_LIMIT'
     const copy = await authSourceCopy(token, token)
     await verifyDenied(copy)
+    await verifyInvitationRoles(copy)
     await verifyVerified(copy)
+    await verifyAlreadyMember(copy)
+    await verifyAcceptAlreadyMember(copy)
+    await verifyPendingCap(copy)
     await verifyCooldown(copy)
+    await verifyWorkerCooldown(copy)
     await verifyResendProtocol(copy)
     await verifyLegacyDuration(copy)
     await verifyPinnedDuration(copy)
@@ -1017,18 +1243,52 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await verifyFenceExpiry(copy)
     await verifyRollback(copy)
   })
-  it.each([
+  it.each<[string, string, string, (factory: typeof createAuth) => Promise<void>, string?]>([
     [
       'verified actor check',
       'if (!user?.emailVerified) throw denied()',
       'if (!user) throw denied()',
       verifyVerified,
+      'team-management.ts',
     ],
     [
       'role authorization',
-      "!roles.some((role) => role === 'owner' || role === 'admin')",
-      'false',
+      'if (!role) throw denied()',
+      'if (false) throw denied()',
       verifyDenied,
+      'team-management.ts',
+    ],
+    [
+      'current member admission guard',
+      'if (recipient) throw recipientAlreadyMember()',
+      'if (false) throw recipientAlreadyMember()',
+      verifyAlreadyMember,
+    ],
+    [
+      'fixed invitation member role',
+      "if (fixedTeamRole(input.role === undefined ? 'member' : input.role) !== 'member') throw denied()",
+      'if (false) throw denied()',
+      verifyInvitationRoles,
+    ],
+    [
+      'current member acceptance guard',
+      'if (member) throw recipientAlreadyMember()',
+      'if (false) throw recipientAlreadyMember()',
+      verifyAcceptAlreadyMember,
+      'team-role-policy.ts',
+    ],
+    ['pending invitation cap', 'if (Number(pending.count) >= 100)', 'if (false)', verifyPendingCap],
+    [
+      'worker attempt cooldown anchor',
+      '(delivery?.updated_at ?? invitation.createdAt).getTime(),',
+      '0,',
+      verifyWorkerCooldown,
+    ],
+    [
+      'explicit generation cooldown anchor',
+      '(delivery?.generation_started_at ?? invitation.createdAt).getTime(),',
+      '0,',
+      verifyExplicitCooldown,
     ],
     [
       'resend cooldown',
@@ -1099,8 +1359,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     ],
   ])(
     'detects removed %s in a source copy through a real assertion failure',
-    async (_label, before, after, verify) => {
-      const copy = await authSourceCopy(before, after)
+    async (_label, before, after, verify, sourceFile) => {
+      const copy = await authSourceCopy(before, after, sourceFile)
       await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
     },
   )

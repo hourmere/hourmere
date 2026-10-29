@@ -510,18 +510,25 @@ successfully committed booking preserve the original result.
 
 ## Email abuse controls
 
-Team invitation creation and explicit resends are limited at admission: 20 requests per
-inviter per rolling hour and 100 per day, shared across teams; 50 per team per hour and
-200 per day, shared across inviters. Invitations use `MAIL_RECIPIENT_MAX_PER_HOUR` and
+Team invitation creation and explicit resends are limited at admission:
+`INVITATION_INVITER_MAX_PER_HOUR` (default 20) and `INVITATION_INVITER_MAX_PER_DAY`
+(default 100), shared across an inviter's teams; `INVITATION_TEAM_MAX_PER_HOUR` (default
+50) and `INVITATION_TEAM_MAX_PER_DAY` (default 200), shared across a team's inviters.
+Invitations use `MAIL_RECIPIENT_MAX_PER_HOUR` and
 `MAIL_RECIPIENT_MAX_PER_DAY` with an independent invitation HMAC domain. They share the
-global mail-budget lock and reserve only non-reserved capacity under `MAIL_MAX_PER_HOUR`,
-leaving the existing host/sign-in reserve available. Ordinary request retries and exact
+global mail-budget lock, but admission does not debit `MAIL_MAX_PER_HOUR` or consume
+guest booking mail capacity. Ordinary request retries and exact
 resend replays do not spend another slot; explicit resends never reset rolling counts.
-Deleting invitations or teams cannot reset those counts. Reservations expire from the
-two-day accounting ledger and do not indicate SMTP delivery.
+Deleting invitations or teams cannot reset those counts. Request counts expire from the
+two-day accounting ledger and do not indicate SMTP delivery. Admission stores only a
+purpose-separated recipient HMAC, the inviter/team identifiers and the request time.
+On upgrades from the earlier admission ledger, existing inviter/team counts are retained;
+recipient counts start with the new code and fill their rolling window within 24 hours,
+because the old request ledger has no recipient identity to backfill.
 
 Explicit resends require the invitation ID, expected generation and UUID request ID;
-they wait 60 seconds, stop at 32 generations and extend expiry by the original validity
+they wait 60 seconds from the later of the generation start and latest delivery update,
+including worker attempts, stop at 32 generations and extend expiry by the original validity
 length. Each delivery generation retains its existing maximum of four SMTP attempts.
 Expired or business-terminal invitations need a new invitation. Invitation admission
 never invokes the sign-in worker's account/sign-up eligibility decision and does not
@@ -530,8 +537,9 @@ omit recipients and underlying database/provider text.
 
 This release records queued invitation intent atomically with admission. The invitation
 sender, pg-boss dispatch and reconciler are not installed yet, so no invitation mail is
-sent by these requests. A future sender must integrate the reservation accounting with
-its attempt budget and recheck lifecycle, authorization and mail capacity before SMTP.
+sent by these requests. A future sender must check and debit the shared non-reserved
+mail capacity at send time, integrate its attempt budget and recheck lifecycle and
+authorization before SMTP. Admission accounting is separate from that send-time debit.
 
 Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
 5) across its entire reschedule chain. New response tokens and older email links use the

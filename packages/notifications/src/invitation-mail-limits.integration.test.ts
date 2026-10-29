@@ -30,8 +30,11 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     db = createDb(owned.pool)
   })
   afterAll(async () => {
-    expect(owned.pool.totalCount).toBeLessThanOrEqual(3)
-    await owned?.drop()
+    try {
+      expect(owned?.pool.totalCount ?? 0).toBeLessThanOrEqual(3)
+    } finally {
+      await owned?.drop()
+    }
   })
   beforeEach(async () => {
     await db.deleteFrom('invitation_email_requests').execute()
@@ -59,6 +62,19 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
       )
       .execute()
   }
+  async function recipientHistory(count: number, at = NOW) {
+    await db
+      .insertInto('invitation_email_requests')
+      .values(
+        Array.from({ length: count }, () => ({
+          user_id: randomUUID(),
+          organization_id: randomUUID(),
+          recipient_hash: invitationRecipientHash(actor.email, SECRET),
+          requested_at: at,
+        })),
+      )
+      .execute()
+  }
   async function mailHistory(count: number, hash: Buffer | null, at = NOW) {
     await db
       .insertInto('notification_email_sends')
@@ -66,7 +82,7 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
       .execute()
   }
 
-  it('requires a transaction and atomically reserves one durable request plus one mail slot', async () => {
+  it('requires a transaction and atomically counts one request without reserving a mail slot', async () => {
     await expect(reserveInvitationEmailBudget(db, actor, { secret: SECRET }, NOW)).rejects.toThrow(
       'needs a transaction',
     )
@@ -80,11 +96,14 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     expect(await counts()).toEqual({ requests: 0, mail: 0 })
     expect(await reserve()).toBe(true)
     expect(await db.selectFrom('invitation_email_requests').selectAll().execute()).toEqual([
-      { user_id: actor.userId, organization_id: actor.organizationId, requested_at: NOW },
+      {
+        user_id: actor.userId,
+        organization_id: actor.organizationId,
+        recipient_hash: invitationRecipientHash(actor.email, SECRET),
+        requested_at: NOW,
+      },
     ])
-    expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([
-      { recipient_hash: invitationRecipientHash(actor.email, SECRET), sent_at: NOW },
-    ])
+    expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([])
   })
 
   it.each([
@@ -121,35 +140,41 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     async (_, limits) => {
       expect(await reserve(limits)).toBe(true)
       expect(await reserve(limits)).toBe(false)
-      expect(await counts()).toEqual({ requests: 1, mail: 1 })
+      expect(await counts()).toEqual({ requests: 1, mail: 0 })
     },
   )
 
   it('enforces normalized invitation recipient hourly capacity across unrelated inviters and teams', async () => {
-    await mailHistory(4, invitationRecipientHash('  ADA@Example.TEST ', SECRET))
+    await recipientHistory(4)
     expect(await reserve()).toBe(true)
     expect(
-      await reserve({}, { ...actor, userId: randomUUID(), organizationId: randomUUID() }),
+      await reserve(
+        {},
+        {
+          ...actor,
+          userId: randomUUID(),
+          organizationId: randomUUID(),
+          email: '  ADA@Example.TEST ',
+        },
+      ),
     ).toBe(false)
-    expect(await counts()).toEqual({ requests: 1, mail: 5 })
+    expect(await counts()).toEqual({ requests: 5, mail: 0 })
   })
 
   it('enforces invitation daily capacity independently of the hourly window', async () => {
-    await mailHistory(
-      19,
-      invitationRecipientHash(actor.email, SECRET),
-      new Date(NOW.getTime() - 7_200_000),
-    )
+    await recipientHistory(19, new Date(NOW.getTime() - 7_200_000))
     expect(await reserve()).toBe(true)
     expect(await reserve()).toBe(false)
-    expect(await counts()).toEqual({ requests: 1, mail: 20 })
+    expect(await counts()).toEqual({ requests: 20, mail: 0 })
   })
 
-  it('shares the global mail fence and preserves reserved capacity for hosts and sign-in', async () => {
+  it('leaves shared guest-mail capacity untouched even when the instance is at its cap', async () => {
     await mailHistory(99, null)
-    expect(await reserve()).toBe(true)
-    expect(await reserve({}, { ...actor, email: 'other@example.test' })).toBe(false)
-    expect(await counts()).toEqual({ requests: 1, mail: 100 })
+    expect(await reserve({ mailMaxPerHour: 100 })).toBe(true)
+    expect(await reserve({ mailMaxPerHour: 100 }, { ...actor, email: 'other@example.test' })).toBe(
+      true,
+    )
+    expect(await counts()).toEqual({ requests: 2, mail: 99 })
     await db.transaction().execute(async (trx) => {
       await lockNotificationEmailBudget(trx)
       expect(
@@ -157,15 +182,16 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
           trx,
           {},
           notificationRecipientHash(actor.email, SECRET),
-          false,
+          true,
           NOW,
         ),
       ).toBeUndefined()
-      expect(
-        await signInEmailBudget(trx, {}, signInRecipientHash(actor.email, SECRET), NOW),
-      ).toBeUndefined()
     })
-    await mailHistory(20, null)
+    await mailHistory(21, null)
+    expect(await reserve({ mailMaxPerHour: 1 }, { ...actor, email: 'full@example.test' })).toBe(
+      true,
+    )
+    expect(await counts()).toEqual({ requests: 3, mail: 120 })
     await db.transaction().execute(async (trx) => {
       await lockNotificationEmailBudget(trx)
       expect(
@@ -187,7 +213,7 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     await mailHistory(5, notificationRecipientHash(actor.email, SECRET))
     await mailHistory(5, signInRecipientHash(actor.email, SECRET))
     expect(await reserve()).toBe(true)
-    await mailHistory(4, invitationRecipientHash(actor.email, SECRET))
+    await recipientHistory(4)
     expect(await reserve()).toBe(false)
     expect(invitationRecipientHash(' ADA@EXAMPLE.TEST ', SECRET)).toEqual(
       invitationRecipientHash(actor.email, SECRET),
@@ -195,36 +221,33 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     expect(invitationRecipientHash(actor.email, 'other-synthetic-secret')).not.toEqual(
       invitationRecipientHash(actor.email, SECRET),
     )
+    expect(invitationRecipientHash(actor.email, SECRET)).not.toEqual(
+      notificationRecipientHash(actor.email, SECRET),
+    )
+    expect(invitationRecipientHash(actor.email, SECRET)).not.toEqual(
+      signInRecipientHash(actor.email, SECRET),
+    )
   })
 
   it('excludes exact hourly and daily boundaries from all rolling counts', async () => {
     await history(200, actor, new Date(NOW.getTime() - 86_400_000))
     await history(20, actor, new Date(NOW.getTime() - 3_600_000))
-    await mailHistory(
-      20,
-      invitationRecipientHash(actor.email, SECRET),
-      new Date(NOW.getTime() - 86_400_000),
-    )
-    await mailHistory(
-      5,
-      invitationRecipientHash(actor.email, SECRET),
-      new Date(NOW.getTime() - 3_600_000),
-    )
+    await recipientHistory(20, new Date(NOW.getTime() - 86_400_000))
+    await recipientHistory(5, new Date(NOW.getTime() - 3_600_000))
     expect(await reserve()).toBe(true)
   })
 
-  it('serializes concurrent admission at the final inviter, team, recipient and global slots', async () => {
+  it('serializes concurrent admission at the final inviter, team and recipient slots', async () => {
     for (const limits of [
       { invitationInviterMaxPerHour: 1 },
       { invitationTeamMaxPerHour: 1 },
       { mailRecipientMaxPerHour: 1 },
-      { mailMaxPerHour: 1 },
     ]) {
       await db.deleteFrom('invitation_email_requests').execute()
       await db.deleteFrom('notification_email_sends').execute()
       const results = await Promise.all([reserve(limits), reserve(limits)])
       expect(results.sort()).toEqual([false, true])
-      expect(await counts()).toEqual({ requests: 1, mail: 1 })
+      expect(await counts()).toEqual({ requests: 1, mail: 0 })
     }
   })
 

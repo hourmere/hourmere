@@ -536,6 +536,7 @@ export interface InvitationDeliveries {
 
 export interface InvitationEmailRequests {
   organization_id: string;
+  recipient_hash: Buffer | null;
   requested_at: Timestamp;
   user_id: string;
 }

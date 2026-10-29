@@ -135,7 +135,7 @@ export interface AuthConfig {
   queueSignInEmail?:
     | ((request: { email: string; url: string; language?: InterfaceLanguage }) => Promise<void>)
     | undefined
-  /** Invitation admission uses its own recipient domain and the shared non-reserved budget. */
+  /** Invitation admission uses its own recipient domain under the shared mail-budget lock. */
   reserveInvitationEmail?: ReserveInvitationEmail | undefined
   /** Who may create an account (SIGNUP); the same policy the pool was created with. */
   signup: SignupPolicy

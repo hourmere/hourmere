@@ -4,6 +4,8 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import { isUuid } from './organizations.ts'
+import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
+import { fixedTeamRole, recipientAlreadyMember, teamRoleDenied } from './team-role-policy.ts'
 
 export type ReserveInvitationEmail = (
   trx: Db,
@@ -11,11 +13,7 @@ export type ReserveInvitationEmail = (
   now: Date,
 ) => Promise<boolean>
 
-const denied = () =>
-  new APIError('FORBIDDEN', {
-    code: 'TEAM_INVITATION_ACCESS_DENIED',
-    message: 'You cannot manage invitations for this team.',
-  })
+const denied = teamRoleDenied
 const invalid = () =>
   new APIError('BAD_REQUEST', {
     code: 'INVALID_INVITATION_REQUEST',
@@ -42,7 +40,7 @@ const wallClock = async (db: Db) =>
   (await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow()).now
 
 /**
- * The native HTTP and internal API entrance share this transaction. No recipient account
+ * The native HTTP and internal API entrance share this transaction. No global recipient account
  * lookup or sign-up-policy decision participates in invitation admission. A queued row is
  * durable request intent only; a separate sender must enforce the four-attempt budget.
  */
@@ -62,7 +60,7 @@ export async function manageInvitation(
   if (typeof organizationId !== 'string' || !isUuid(organizationId)) throw denied()
   if (!isUuid(actor.userId) || !isUuid(actor.sessionId)) throw denied()
   // Refuse alternate role forms and unsupported native team/subgroup parameters.
-  if (input.role !== 'member') throw denied()
+  if (fixedTeamRole(input.role === undefined ? 'member' : input.role) !== 'member') throw denied()
   if (
     Object.keys(input).some(
       (key) =>
@@ -109,55 +107,48 @@ export async function manageInvitation(
     .transaction()
     .setIsolationLevel('read committed')
     .execute(async (trx) => {
-      // Match team-management writes: user -> organization -> membership -> session.
-      const user = await trx
-        .selectFrom('auth.user')
-        .select('emailVerified')
-        .where('id', '=', actor.userId)
-        .forShare()
-        .executeTakeFirst()
-      if (!user?.emailVerified) throw denied()
-      const organization = await trx
-        .selectFrom('auth.organization')
-        .select('id')
-        .where('id', '=', organizationId)
-        .forUpdate()
-        .executeTakeFirst()
-      if (!organization) throw denied()
-      const personal = await trx
-        .selectFrom('personal_organizations')
-        .select('organization_id')
-        .where('organization_id', '=', organizationId)
-        .executeTakeFirst()
-      const member = await trx
-        .selectFrom('auth.member')
-        .select('role')
-        .where('organizationId', '=', organizationId)
-        .where('userId', '=', actor.userId)
-        .forShare()
-        .executeTakeFirst()
-      const roles = member?.role.split(',').map((role) => role.trim()) ?? []
-      if (
-        personal ||
-        roles.some((role) => !['owner', 'admin', 'member'].includes(role)) ||
-        !roles.some((role) => role === 'owner' || role === 'admin')
-      )
-        throw denied()
+      // One authorization path and lock order: user -> team -> membership -> session.
+      try {
+        await checkTeamManagementAccess(
+          trx,
+          {
+            kind: 'session',
+            user: { id: actor.userId, name: '', email: '' },
+            sessionId: actor.sessionId,
+            organization: { id: organizationId, name: '', slug: '', personal: false },
+          },
+          organizationId,
+          true,
+        )
+      } catch (error) {
+        if (error instanceof TeamManagementError) throw denied()
+        throw error
+      }
       const session = await trx
         .selectFrom('auth.session')
         .select(['expiresAt', 'activeOrganizationId'])
         .where('id', '=', actor.sessionId)
         .where('userId', '=', actor.userId)
-        .forShare()
         .executeTakeFirst()
       let now = await wallClock(trx)
       if (!session || session.expiresAt <= now) throw denied()
       if (
         options.requireContext &&
-        (options.expectedOrganizationId?.toLowerCase() !== organization.id.toLowerCase() ||
-          session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase())
+        (options.expectedOrganizationId?.toLowerCase() !== organizationId.toLowerCase() ||
+          session.activeOrganizationId?.toLowerCase() !== organizationId.toLowerCase())
       )
         throw contextChanged()
+
+      // Team admins may already list their own members. This fixed refusal reveals
+      // no account existence outside that team and prevents duplicate memberships.
+      const recipient = await trx
+        .selectFrom('auth.member as m')
+        .innerJoin('auth.user as u', 'u.id', 'm.userId')
+        .select('m.id')
+        .where('m.organizationId', '=', organizationId)
+        .where(sql<string>`lower(btrim(u.email))`, '=', email)
+        .executeTakeFirst()
+      if (recipient) throw recipientAlreadyMember()
 
       let query = trx
         .selectFrom('auth.invitation')
@@ -169,7 +160,7 @@ export async function manageInvitation(
       const candidates = await query.orderBy('id').limit(2).forUpdate().execute()
       if (candidates.length > 1) throw conflict()
       let invitation = candidates[0]
-      if (invitation && invitation.role !== 'member') throw conflict()
+      if (invitation && invitation.role !== 'member') throw denied()
       if (!invitation && (resend || input.invitationId !== undefined)) throw ineligible()
       let delivery = invitation
         ? await trx
@@ -206,7 +197,12 @@ export async function manageInvitation(
             code: 'INVITATION_DELIVERY_BUSY',
             message: 'Invitation delivery is in progress. Try again shortly.',
           })
-        const started = delivery?.generation_started_at ?? invitation.createdAt
+        const started = new Date(
+          Math.max(
+            (delivery?.generation_started_at ?? invitation.createdAt).getTime(),
+            (delivery?.updated_at ?? invitation.createdAt).getTime(),
+          ),
+        )
         if (now.getTime() - started.getTime() < 60_000)
           throw new APIError(
             'TOO_MANY_REQUESTS',
@@ -219,7 +215,26 @@ export async function manageInvitation(
           )
       }
       // Ordinary retries retain the current generation, including terminal tombstones.
+      if (invitation && !resend && invitation.inviterId !== actor.userId)
+        throw new APIError('CONFLICT', {
+          code: 'INVITATION_ALREADY_PENDING',
+          message: 'An invitation is already pending. Reload before trying again.',
+        })
       if (invitation && delivery && !resend) return result(invitation, delivery)
+      if (!invitation) {
+        const pending = await trx
+          .selectFrom('auth.invitation')
+          .select(({ fn }) => fn.countAll<string>().as('count'))
+          .where('organizationId', '=', organizationId)
+          .where('status', '=', 'pending')
+          .where('expiresAt', '>', now)
+          .executeTakeFirstOrThrow()
+        if (Number(pending.count) >= 100)
+          throw new APIError('CONFLICT', {
+            code: 'INVITATION_PENDING_LIMIT',
+            message: 'This team has reached its pending invitation limit.',
+          })
+      }
       if (
         options.reserve &&
         !(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))

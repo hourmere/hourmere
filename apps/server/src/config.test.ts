@@ -14,6 +14,10 @@ describe('loadConfig', () => {
     ['MAIL_RECIPIENT_MAX_PER_DAY', 20, 1],
     ['SIGN_IN_MAIL_MAX_PER_HOUR', 5, 1],
     ['SIGN_IN_MAIL_MAX_PER_DAY', 20, 1],
+    ['INVITATION_INVITER_MAX_PER_HOUR', 20, 1],
+    ['INVITATION_INVITER_MAX_PER_DAY', 100, 1],
+    ['INVITATION_TEAM_MAX_PER_HOUR', 50, 1],
+    ['INVITATION_TEAM_MAX_PER_DAY', 200, 1],
     ['MAIL_MAX_PER_HOUR', 100, 0],
   ] as const)('%s', (name, fallback, minimum) => {
     it('enables the default even when Compose passes an empty variable', () => {
