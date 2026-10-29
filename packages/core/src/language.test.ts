@@ -6,6 +6,7 @@ import {
   explicitLanguage,
   formattingLocale,
   interfaceLanguage,
+  interfaceLanguages,
   localeCodes,
   localeFallbacks,
   localeRegistry,
@@ -13,6 +14,44 @@ import {
 } from './language.ts'
 
 describe('shared locale registry', () => {
+  it('offers public translations independently of admin and notification languages', () => {
+    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de'])
+    expect(interfaceLanguages('admin')).toEqual(['en', 'zh-CN'])
+    expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
+    expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('de')
+    expect(localeFallbacks('de')).toEqual(['de', 'en'])
+    const fixture = createLocaleResolver({
+      ...localeRegistry,
+      qaa: {
+        code: 'qaa',
+        nativeName: 'Fixture',
+        fallbacks: ['en'],
+        formatLocale: 'fr-FR',
+        direction: 'ltr',
+        interfaces: ['admin'],
+      },
+    })
+    expect(fixture.interfaceLanguages('public')).not.toContain('qaa')
+    expect(fixture.interfaceLanguages('admin')).toContain('qaa')
+    expect(fixture.acceptLanguage('qaa')).toBe('qaa')
+  })
+
+  it.each(['de', 'de-DE', 'de-AT', 'de-CH'])(
+    'negotiates %s and formats German dates through registry metadata',
+    (value) => {
+      expect(interfaceLanguage(value)).toBe('de')
+      expect(acceptLanguage(`fr,${value};q=0.8,en;q=0.5`)).toBe('de')
+      expect(
+        new Intl.DateTimeFormat(formattingLocale('de'), {
+          calendar: 'gregory',
+          timeZone: 'UTC',
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }).format(new Date('2026-10-27T15:30:00Z')),
+      ).toBe('27. Oktober 2026 um 15:30')
+    },
+  )
+
   it('provides language metadata and explicit choices from the same entries', () => {
     expect(localeCodes).toEqual(Object.keys(localeRegistry))
     expect(registeredLocales).toEqual(Object.values(localeRegistry))

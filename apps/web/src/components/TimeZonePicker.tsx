@@ -37,9 +37,21 @@ const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
  * Break opportunities after each slash; the stylesheet's `overflow-wrap: anywhere` still
  * splits a segment that is wider than a 320px option on its own, instead of overflowing.
  */
-export function TimeZoneName({ name, className }: { name: string; className?: string }) {
+export function TimeZoneName({
+  name,
+  className,
+  label,
+}: {
+  name: string
+  className?: string
+  label?: string
+}) {
+  // Only IANA name segments stay together; translated surrounding prose can wrap normally.
+  const at = label?.indexOf(name) ?? -1
+  if (label !== undefined && at < 0) return <span className={className}>{label}</span>
   return (
     <span className={className}>
+      {at >= 0 && label?.slice(0, at)}
       {name.split('/').map((part, index, parts) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: fixed components of a display name
         <Fragment key={index}>
@@ -52,6 +64,7 @@ export function TimeZoneName({ name, className }: { name: string; className?: st
           )}
         </Fragment>
       ))}
+      {at >= 0 && label?.slice(at + name.length)}
     </span>
   )
 }

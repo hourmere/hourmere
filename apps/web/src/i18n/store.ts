@@ -2,7 +2,9 @@ import {
   cookieLanguage,
   explicitLanguage,
   type InterfaceLanguage,
+  type InterfaceSurface,
   interfaceLanguage,
+  interfaceLanguages,
   LANGUAGE_COOKIE,
 } from '@hourmere/core/language'
 
@@ -10,11 +12,11 @@ const STORAGE_KEY = LANGUAGE_COOKIE
 let choice: InterfaceLanguage | undefined
 let initialized = false
 const listeners = new Set<() => void>()
-export function browserLanguage(): InterfaceLanguage {
+export function browserLanguage(surface: InterfaceSurface = 'public'): InterfaceLanguage {
   try {
     for (const locale of navigator.languages?.length ? navigator.languages : [navigator.language]) {
       const known = interfaceLanguage(locale)
-      if (known) return known
+      if (known && interfaceLanguages(surface).includes(known)) return known
     }
   } catch {
     /* Browser APIs can be absent or denied. */

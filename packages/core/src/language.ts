@@ -1,6 +1,11 @@
-import { type LocaleDefinition, localeRegistry } from './locales.ts'
+import { type InterfaceSurface, type LocaleDefinition, localeRegistry } from './locales.ts'
 
-export { type InterfaceLanguage, type LocaleDefinition, localeRegistry } from './locales.ts'
+export {
+  type InterfaceLanguage,
+  type InterfaceSurface,
+  type LocaleDefinition,
+  localeRegistry,
+} from './locales.ts'
 
 export const LANGUAGE_COOKIE = 'hourmere-language'
 
@@ -11,6 +16,13 @@ export function createLocaleResolver<
   type Language = 'en' | Extract<keyof Registry, string>
   const localeCodes = Object.keys(registry) as [Language, ...Language[]]
   const registeredLocales = localeCodes.map((code) => ({ ...registry[code], code }))
+
+  function interfaceLanguages(surface: InterfaceSurface): Language[] {
+    return localeCodes.filter((code) => {
+      const definition: LocaleDefinition = registry[code]
+      return !definition.interfaces || definition.interfaces.includes(surface)
+    })
+  }
 
   function explicitLanguage(value: unknown): Language | undefined {
     return typeof value === 'string' && Object.hasOwn(registry, value)
@@ -71,7 +83,7 @@ export function createLocaleResolver<
     return undefined
   }
 
-  function acceptLanguage(header: string | undefined): Language {
+  function acceptLanguage(header: string | undefined, surface?: InterfaceSurface): Language {
     if (!header || header.length > 4096) return 'en'
     const candidates = header
       .split(',')
@@ -90,13 +102,19 @@ export function createLocaleResolver<
               : 0
         return { language: interfaceLanguage(tag), q, index }
       })
-      .filter((entry) => entry.language && entry.q > 0)
+      .filter(
+        (entry) =>
+          entry.language &&
+          entry.q > 0 &&
+          (!surface || interfaceLanguages(surface).includes(entry.language)),
+      )
       .sort((a, b) => b.q - a.q || a.index - b.index)
     return candidates[0]?.language ?? 'en'
   }
 
   return {
     registeredLocales,
+    interfaceLanguages,
     localeCodes,
     explicitLanguage,
     interfaceLanguage,
@@ -109,6 +127,7 @@ export function createLocaleResolver<
 
 export const {
   registeredLocales,
+  interfaceLanguages,
   localeCodes,
   explicitLanguage,
   interfaceLanguage,

@@ -284,10 +284,15 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
   const rows = c.fields
-    .map(
-      (f) =>
-        `<tr><td style="${cell} color: #555; white-space: nowrap; width: 1%;">${htmlText(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${htmlLines(f.text, c.language)}</td></tr>`,
-    )
+    .map((f) => {
+      // Long labels must share narrow email widths with their values. Keep compact labels
+      // on one line, while longer copy can wrap at words or within a long word.
+      const labelStyle =
+        [...f.label].length > 20
+          ? `white-space: normal; width: 35%; ${emailWrapStyle}`
+          : 'white-space: nowrap; width: 1%;'
+      return `<tr><td style="${cell} color: #555; ${labelStyle}">${htmlText(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${htmlLines(f.text, c.language)}</td></tr>`
+    })
     .join('\n')
   const answers = c.answers.length
     ? `<p style="margin: 24px 0 4px; font-weight: 600;">${htmlText(t('Answers'))}</p>\n${c.answers

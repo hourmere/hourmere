@@ -1,5 +1,11 @@
 import { apiKey } from '@better-auth/api-key'
-import { acceptLanguage, cookieLanguage, type InterfaceLanguage } from '@hourmere/core/language'
+import {
+  acceptLanguage,
+  cookieLanguage,
+  type InterfaceLanguage,
+  interfaceLanguages,
+  localeFallbacks,
+} from '@hourmere/core/language'
 import { createDb, type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
@@ -388,9 +394,13 @@ export function createAuth({
         storeToken: 'hashed',
         sendMagicLink: async ({ email, url }, ctx) => {
           const headers = ctx?.headers ?? ctx?.request?.headers
-          const language =
+          const preference =
             cookieLanguage(headers?.get('cookie') ?? undefined) ??
-            acceptLanguage(headers?.get('accept-language') ?? undefined)
+            acceptLanguage(headers?.get('accept-language') ?? undefined, 'admin')
+          const language =
+            localeFallbacks(preference).find((code) =>
+              interfaceLanguages('admin').includes(code),
+            ) ?? 'en'
           // No address-dependent reads or SMTP work on the production request path.
           if (queueSignInEmail) {
             await queueSignInEmail({ email, url: confirmLink(url), language })

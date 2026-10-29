@@ -170,6 +170,8 @@ export const common = {
     'Enter your name on one line, at most 200 characters.',
   'Enter your name, at most 200 characters.': 'Enter your name, at most 200 characters.',
   From: 'From',
+  'reschedule.previousTime': 'From',
+  'reschedule.newTime': 'To',
   'Google Calendar': 'Google Calendar',
   'Guest {0} email': 'Guest {0} email',
   'Guest {0} name': 'Guest {0} name',

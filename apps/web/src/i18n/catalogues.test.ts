@@ -1,8 +1,8 @@
 import { registeredLocales } from '@hourmere/core/language'
 import { describe, expect, it } from 'vitest'
-import { type Catalog, catalogueCoverage } from './catalogues.ts'
+import { type Catalog, catalogueCoverage, registerCatalogues } from './catalogues.ts'
 import { commonCatalogues } from './common.ts'
-import { translate, translateMessage } from './translate.ts'
+import { type MessageKey, translate, translateMessage } from './translate.ts'
 
 const teamMessages = {
   'Team name': '团队名称',
@@ -46,6 +46,34 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  for (const group of ['common', 'widget'] as const) {
+    it(`requires complete German public ${group} messages`, () => {
+      const english = groups[group][`./catalogues/en/${group}.ts`] ?? {}
+      const german = groups[group][`./catalogues/de/${group}.ts`] ?? {}
+      expect(Object.keys(english).length).toBeGreaterThan(0)
+      expect(catalogueCoverage(english, german).missing).toEqual([])
+      expect(Object.keys(german).sort()).toEqual(Object.keys(english).sort())
+    })
+
+    it(`preserves every German public ${group} placeholder exactly`, () => {
+      const english = groups[group][`./catalogues/en/${group}.ts`] ?? {}
+      const german = groups[group][`./catalogues/de/${group}.ts`] ?? {}
+      expect(catalogueCoverage(english, german).malformed).toEqual([])
+    })
+  }
+
+  it('falls back per missing German message while preserving interpolation', () => {
+    registerCatalogues({
+      './catalogues/en/common.ts': { 'german.fixture': 'English fallback for {name}' },
+    })
+    const key = 'german.fixture' as MessageKey
+    expect(translate('de', key, { name: 'Ada' })).toBe('English fallback for Ada')
+    expect(translateMessage('de', { key, values: { name: 'Ada' } })).toBe(
+      'English fallback for Ada',
+    )
+    expect(translate('de', 'Your details')).toBe('Ihre Angaben')
+  })
+
   it('discovers the reviewed team-context guidance in both common catalogues', () => {
     const key = 'Your team context changed. Reload before making changes.'
     const chinese = '你的团队上下文已改变。请重新加载后再进行修改。'

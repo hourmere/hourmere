@@ -170,6 +170,8 @@ export const common = {
   'Enter your name on one line, at most 200 characters.': '请输入单行姓名，最多 200 个字符。',
   'Enter your name, at most 200 characters.': '请输入你的姓名，最多 200 个字符。',
   From: '从',
+  'reschedule.previousTime': '从',
+  'reschedule.newTime': '至',
   'Google Calendar': 'Google 日历',
   'Guest {0} email': '来宾{0}的邮箱',
   'Guest {0} name': '来宾{0}的姓名',

@@ -12,6 +12,16 @@ const content = async (headers: Record<string, string> = {}) => {
   return { response, html: await response.text() }
 }
 
+it.each<Record<string, string>>([
+  { 'accept-language': 'de-AT,en;q=0.5' },
+  { cookie: 'hourmere-language=de' },
+])('keeps public-only languages out of the sign-in interface: %j', async (headers) => {
+  const { html } = await content(headers)
+  expect(html).toContain('<html lang="en">')
+  expect(html).not.toContain('<option value="de"')
+  expect(inlineAsset(html, 'script')).not.toContain('"de":')
+})
+
 interface Element {
   hidden: boolean
   value: string
@@ -230,4 +240,10 @@ describe('server-rendered sign-in confirmation languages', () => {
       errorCallbackURL: '/sign-in',
     })
   })
+})
+
+it('negotiates the next supported sign-in language after a public-only preference', async () => {
+  const { html } = await content({ 'accept-language': 'de-CH,zh-CN;q=0.8,en;q=0.5' })
+  expect(html).toContain('<html lang="zh-CN">')
+  expect(html).not.toContain('<option value="de"')
 })
