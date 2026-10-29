@@ -78,6 +78,20 @@ test('French public booking, rescheduling, cancellation and embeds fit at 320px 
   await expect(page.locator('dt').filter({ hasText: /^Horaire précédent$/ })).toBeVisible()
   await expect(page.locator('dt').filter({ hasText: /^Nouvel horaire$/ })).toBeVisible()
   await fits(page, 'French move confirmation')
+  if (testInfo.project.name === 'mobile') {
+    // Larger font metrics reproduce narrow action-label overflow across host operating systems.
+    const actions = page.locator('.manage-actions .button')
+    await actions.evaluateAll((buttons) => {
+      for (const button of buttons) (button as HTMLElement).style.fontSize = '22px'
+    })
+    try {
+      await fits(page, 'French move confirmation with larger fonts')
+    } finally {
+      await actions.evaluateAll((buttons) => {
+        for (const button of buttons) (button as HTMLElement).style.removeProperty('font-size')
+      })
+    }
+  }
   await page.getByRole('button', { name: 'Confirmer le nouvel horaire', exact: true }).click()
   await expect(
     page.getByText('Votre réservation a été replanifiée au nouvel horaire.', { exact: true }),

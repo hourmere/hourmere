@@ -36,6 +36,12 @@ function declarations(rules: CSSRule[], selector: string) {
 }
 
 describe('public overflow protections', () => {
+  it('allows public action labels to wrap inside narrow cards', () => {
+    inspectStyles(publicStyles, (rules) => {
+      expect(declarations(rules, '.public .button').getPropertyValue('white-space')).toBe('normal')
+    })
+  })
+
   it('uses zero-minimum tracks for the public frame, cards and stacked booking layout', () => {
     inspectStyles(publicStyles, (rules) => {
       for (const selector of [
