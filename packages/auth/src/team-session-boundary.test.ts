@@ -398,7 +398,7 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
 
   async function verifyBoundary(hook: typeof beforeHook) {
     const selected = createFixtureAuth()
-    selected.options.hooks = { before: hook(db) }
+    selected.options.hooks = { before: hook(db, async () => {}) }
     const f = fixtures.get('owner') as Fixture
     const operation = {
       path: `get-full-organization?organizationId=${f.organizationId}`,
