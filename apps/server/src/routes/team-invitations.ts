@@ -47,11 +47,17 @@ export function teamInvitationRoutes(
         path: '/api/v1/team/invitations',
         summary: "Invitation delivery summaries of the session's current team",
         description:
-          'Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. All access denials are 403 team_management_access_denied without WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Delivery state is independent: queued is waiting, smtp_accepted means SMTP acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team for the next page. No email, links, tokens, credentials, job or lease identities or raw provider errors are returned.',
+          'Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; a different current team is denied. Omitting it retains current-team reads for existing clients. All access denials are 403 team_management_access_denied without WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Delivery state is independent: queued is waiting, smtp_accepted means SMTP acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team for the next page. No email, links, tokens, credentials, job or lease identities or raw provider errors are returned.',
         tags: ['Team invitations'],
         security: [{ session: [] }],
         middleware: access.middleware,
         request: {
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional team where the page opened; mismatched or inaccessible targets receive the same access denial',
+            }),
+          }),
           query: z.object({
             limit: z.coerce.number().int().min(1).max(100).optional(),
             cursor: z.string().max(2000).optional(),
@@ -69,15 +75,16 @@ export function teamInvitationRoutes(
           },
           403: {
             description:
-              'team_management_access_denied: requires a current verified team owner/admin session without Authorization',
+              'team_management_access_denied: requires a current verified team owner/admin session without Authorization; a supplied expected organization must match the current team',
             content: json(ErrorBody),
           },
         },
       }),
       async (c) => {
+        const expectedOrganizationId = c.req.valid('header')['x-expected-organization-id']
         const page = await access.read(
           c.var.principal,
-          c.var.principal.organization.id,
+          expectedOrganizationId ?? c.var.principal.organization.id,
           (db, actor) =>
             listTeamInvitationSummaries(db, actor, c.req.valid('query'), invitationMailLimits),
         )

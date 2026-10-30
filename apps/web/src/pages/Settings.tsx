@@ -11,13 +11,14 @@ import { PageHeader } from '../components/PageHeader.tsx'
 import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { browserTimeZone, isKnownTimeZone } from '../format.ts'
-import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
+import { type Loaded, useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { ACCOUNT, PROFILE } from '../limits.ts'
 import { PATHS } from '../paths.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
+import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
   const { t, ui } = useI18n()
@@ -53,6 +54,21 @@ export function SettingsPage() {
     }
   }, [location, navigate])
   const [profile, reload] = useLoad(loadProfile)
+  const organizationId = me.organization.id
+  const userId = me.user.id
+  const personal = me.organization.personal
+  const loadRole = useCallback(
+    async (signal: AbortSignal) => {
+      if (personal) return null
+      const member = await getActiveOrganizationMember(signal)
+      if (member.organizationId !== organizationId || member.userId !== userId || !member.role) {
+        throw new Error('Membership does not match the displayed account and organization')
+      }
+      return member.role
+    },
+    [organizationId, userId, personal],
+  )
+  const [role, reloadRole] = useLoad(loadRole)
 
   return (
     <>
@@ -86,7 +102,7 @@ export function SettingsPage() {
             <BreakableText>{me.organization.name}</BreakableText>
             {me.organization.personal && <span className="muted">{t(' (personal)')}</span>}
           </dd>
-          {!me.organization.personal && <TeamRole me={me} createdMember={createdMember} />}
+          {!personal && <TeamRole role={role} reload={reloadRole} createdMember={createdMember} />}
         </dl>
         <p>
           <Link className="button" to={PATHS.newTeam}>
@@ -95,25 +111,27 @@ export function SettingsPage() {
         </p>
         <p className="hint">{t('Your email comes from how you sign in.')}</p>
       </section>
+      {!personal && (
+        <TeamMembers
+          key={organizationId}
+          organizationId={organizationId}
+          role={role.status === 'ready' ? role.data : null}
+        />
+      )}
     </>
   )
 }
 
-function TeamRole({ me, createdMember }: { me: Me; createdMember: OrganizationMember | null }) {
+function TeamRole({
+  role,
+  reload,
+  createdMember,
+}: {
+  role: Loaded<string | null>
+  reload: () => void
+  createdMember: OrganizationMember | null
+}) {
   const { t } = useI18n()
-  const organizationId = me.organization.id
-  const userId = me.user.id
-  const load = useCallback(
-    async (signal: AbortSignal) => {
-      const member = await getActiveOrganizationMember(signal)
-      if (member.organizationId !== organizationId || member.userId !== userId || !member.role) {
-        throw new Error('Membership does not match the displayed account and organization')
-      }
-      return member.role
-    },
-    [organizationId, userId],
-  )
-  const [role, reload] = useLoad(load)
   const displayedRole = role.status === 'ready' ? role.data : createdMember?.role
   const labels: Record<string, string> = {
     owner: t('Owner'),

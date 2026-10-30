@@ -1,14 +1,32 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
-  'Saved version readiness': '已保存版本的就绪检查',
-  'These unsaved changes have not been checked yet. Save to check the saved version.':
-    '尚未检查这些未保存的更改。保存后可检查已保存版本。',
-  'These checks describe the saved version. Availability is confirmed when someone books.':
-    '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
-  'Readiness checks are unavailable for this account.': '此账号无法使用就绪检查。',
-  'Review enablement': '查看启用设置',
-  'Review meeting settings': '查看会议设置',
-  'Review round-robin activation': '查看轮询激活设置',
+  Pending: '待接受',
+  'Team members': '团队成员',
+  'Pending invitations are not members or hosts.': '待接受的邀请不计入成员或主持人。',
+  'Manage team events': '管理团队活动',
+  'Could not load team members.': '无法加载团队成员。',
+  'You do not have permission to view team members.': '你没有查看团队成员的权限。',
+  '{0} joined members': '{0}位已加入的成员',
+  'No team members found.': '未找到团队成员。',
+  'Previous members page': '上一页成员',
+  'Next members page': '下一页成员',
+  'Pending invitations': '待接受的邀请',
+  'Mail server acceptance does not confirm receipt in the inbox.':
+    '邮件服务器接受邮件并不代表邮件已到达收件箱。',
+  'Loading pending invitations…': '正在加载待接受的邀请…',
+  'Could not load pending invitations.': '无法加载待接受的邀请。',
+  'You do not have permission to view pending invitations.': '你没有查看待接受邀请的权限。',
+  'No pending invitations on this page.': '本页没有待接受的邀请。',
+  'Invitation {0}': '邀请{0}',
+  'Mail submission': '邮件提交状态',
+  Submitted: '已提交',
+  'Submitting to the mail server': '正在提交至邮件服务器',
+  'Accepted by the mail server': '邮件服务器已接受',
+  'Submission failed': '提交失败',
+  'Submission skipped': '已跳过提交',
+  'Submission status unknown': '提交状态未知',
+  'Previous invitations page': '上一页邀请',
+  'Next invitations page': '下一页邀请',
   'Loading team bookings…': '正在加载团队预约…',
   'Team bookings': '团队预约',
   'Owners and admins can view this team’s bookings and cancel bookings before they start.':
@@ -1030,4 +1048,13 @@ export const admin = {
     '无法确认切换结果。正在检查你当前所在的空间…',
   'You are now in your personal space. Your team access or active space changed.':
     '你现在位于个人空间。你的团队访问权限或当前空间已更改。',
+  'Saved version readiness': '已保存版本的就绪检查',
+  'These unsaved changes have not been checked yet. Save to check the saved version.':
+    '尚未检查这些未保存的更改。保存后可检查已保存版本。',
+  'These checks describe the saved version. Availability is confirmed when someone books.':
+    '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+  'Readiness checks are unavailable for this account.': '此账号无法使用就绪检查。',
+  'Review enablement': '查看启用设置',
+  'Review meeting settings': '查看会议设置',
+  'Review round-robin activation': '查看轮询激活设置',
 } as const
