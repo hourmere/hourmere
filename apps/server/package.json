@@ -22,7 +22,7 @@
     "@hourmere/webhooks": "*",
     "@modelcontextprotocol/server": "2.3.1",
     "hono": "4.13.13",
-    "kysely": "0.29.6",
+    "kysely": "0.29.7",
     "zod": "4.6.7"
   },
   "devDependencies": {
