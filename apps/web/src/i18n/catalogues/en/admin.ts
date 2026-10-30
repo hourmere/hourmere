@@ -33,8 +33,8 @@ export const admin = {
   'Unavailable on this instance.': 'Unavailable on this instance.',
   'Synchronization needs attention. Review the failed calendars below.':
     'Synchronization needs attention. Review the failed calendars below.',
-  'Waiting for the first synchronization on selected calendars.':
-    'Waiting for the first synchronization on selected calendars.',
+  'Synchronization is not ready for selected calendars yet.':
+    'Synchronization is not ready for selected calendars yet.',
   'No calendars selected for conflict checks.': 'No calendars selected for conflict checks.',
   'Latest synchronization of selected conflict calendars succeeded.':
     'Latest synchronization of selected conflict calendars succeeded.',
@@ -635,6 +635,7 @@ export const admin = {
   Questions: 'Questions',
   'Reason:': 'Reason:',
   'Refresh calendar list': 'Refresh calendar list',
+  'Synchronizing busy times…': 'Synchronizing busy times…',
   Remove: 'Remove',
   'Remove {0}': 'Remove {0}',
   'Remove option {0}{1}, of question {2}': 'Remove option {0}{1}, of question {2}',
@@ -814,8 +815,8 @@ export const admin = {
   'Use one line of up to 200 characters without control characters.':
     'Use one line of up to 200 characters without control characters.',
   'Using a key': 'Using a key',
-  'Waiting for the first synchronization. Booking times stay unavailable until it completes.':
-    'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+  'Synchronization is not ready yet. Booking times stay unavailable until it completes.':
+    'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
   'wants to connect to Hourmere.': 'wants to connect to Hourmere.',
   'We received your sign-in link request for': 'We received your sign-in link request for',
   Wed: 'Wed',
