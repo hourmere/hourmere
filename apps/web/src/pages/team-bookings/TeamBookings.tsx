@@ -9,7 +9,7 @@ import { Field } from '../../components/forms.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
-import { browserTimeZone, zoned } from '../../format.ts'
+import { browserTimeZone, isKnownTimeZone, zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
@@ -1011,13 +1011,36 @@ function CancellationSummary({ booking }: { booking: Booking }) {
           {booking.hosts.length ? (
             <ul className="plain-list">
               {booking.hosts.map((host) => (
-                <li key={host.userId}>{host.name}</li>
+                <li key={host.userId}>
+                  {host.name}
+                  {host.timeZone && isKnownTimeZone(host.timeZone) ? (
+                    host.timeZone !== format.timeZone && (
+                      <>
+                        <br />
+                        <time dateTime={booking.start}>
+                          {zoned(host.timeZone, formatLocale).dateTimeRange(
+                            booking.start,
+                            booking.end,
+                          )}
+                        </time>
+                        <br />
+                        {t('Host time zone: {zone}', {
+                          zone: host.timeZone.replaceAll('_', ' '),
+                        })}
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <br />
+                      <span className="hint">{t('This host’s time zone is unavailable.')}</span>
+                    </>
+                  )}
+                </li>
               ))}
             </ul>
           ) : (
             t('None')
           )}
-          <p className="hint">{t('Host time zones are not available in this view.')}</p>
         </dd>
         <dt>{t('Cancellation notifications')}</dt>
         <dd>

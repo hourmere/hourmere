@@ -1,11 +1,10 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
-  'Check public booking page again': 'Check public booking page again',
-  'Host time zones are not available in this view.':
-    'Host time zones are not available in this view.',
+  'This host’s time zone is unavailable.': 'This host’s time zone is unavailable.',
+  'Host time zone: {zone}': 'Host time zone: {zone}',
   'Book again with another host': 'Book again with another host',
-  'If a host has left the team, this booking cannot be rescheduled. Hourmere does not automatically assign another host.':
-    'If a host has left the team, this booking cannot be rescheduled. Hourmere does not automatically assign another host.',
+  'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.':
+    'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.',
   'An admin cancels this booking here before it starts.':
     'An admin cancels this booking here before it starts.',
   'This booking is already cancelled. Continue with the next step.':
@@ -14,13 +13,10 @@ export const admin = {
     'This booking has already started. Wait until it ends or coordinate with the hosts offline.',
   'Then ask the guest to book again from the event’s public booking page.':
     'Then ask the guest to book again from the event’s public booking page.',
-  'Find public booking page': 'Find public booking page',
-  'Checking public booking page…': 'Checking public booking page…',
   'Open public booking page': 'Open public booking page',
-  'The public booking page is unavailable. Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.':
-    'The public booking page is unavailable. Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.',
-  'Could not confirm whether the public booking page is available. Try again.':
-    'Could not confirm whether the public booking page is available. Try again.',
+  'The event is no longer bookable.': 'The event is no longer bookable.',
+  'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.':
+    'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.',
   'Cancellation notifications are queued. Email delivery is not confirmed.':
     'Cancellation notifications are queued. Email delivery is not confirmed.',
   'Your time zone: {zone}': 'Your time zone: {zone}',

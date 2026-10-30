@@ -41,8 +41,15 @@ function booking(id = FIRST_ID, title = 'Team discovery call'): Schemas['TeamAdm
     start: '2030-03-04T09:00:00.000Z',
     end: '2030-03-04T09:30:00.000Z',
     cancelledAt: null,
-    eventType: { id: 'e0000000-0000-7000-8000-000000000001', title },
-    hosts: [{ userId: ME.user.id, name: 'Historical host' }],
+    eventType: { id: 'e0000000-0000-7000-8000-000000000001', title, publicBookingPath: null },
+    hosts: [
+      {
+        userId: ME.user.id,
+        name: 'Historical host',
+        timeZone: 'Europe/London',
+        isCurrentMember: true,
+      },
+    ],
     attendees: [
       {
         name: 'Grace Hopper',
@@ -291,7 +298,8 @@ describe('team booking cancellation outcome', () => {
       summary: 'Cancel this booking',
       when: 'When',
       hosts: 'Hosts',
-      unavailableHostZones: 'Host time zones are not available in this view.',
+      unavailableHostZone: 'This host’s time zone is unavailable.',
+      hostZone: 'Host time zone: ',
       zone: 'Your time zone: Asia/Shanghai',
       notificationHeading: 'Cancellation notifications',
       notifications:
@@ -305,7 +313,8 @@ describe('team booking cancellation outcome', () => {
       summary: '取消此预约',
       when: '时间',
       hosts: '主持人',
-      unavailableHostZones: '此页面无法获取主持人的时区。',
+      unavailableHostZone: '无法获取此主持人的时区。',
+      hostZone: '主持人时区：',
       zone: '你的时区：Asia/Shanghai',
       notificationHeading: '取消通知',
       notifications:
@@ -318,10 +327,28 @@ describe('team booking cancellation outcome', () => {
       chooseLanguage(copy.locale)
       vi.spyOn(formatting, 'browserTimeZone').mockReturnValue('Asia/Shanghai')
       const current = booking()
-      current.hosts.push({
-        userId: 'a0000000-0000-7000-8000-000000000002',
-        name: 'Second saved host',
-      })
+      current.start = '2030-03-04T23:45:00.000Z'
+      current.end = '2030-03-05T00:15:00.000Z'
+      current.hosts.push(
+        {
+          userId: 'a0000000-0000-7000-8000-000000000002',
+          name: 'Second saved host',
+          timeZone: 'America/New_York',
+          isCurrentMember: false,
+        },
+        {
+          userId: 'a0000000-0000-7000-8000-000000000003',
+          name: 'Host in your zone',
+          timeZone: 'Asia/Shanghai',
+          isCurrentMember: true,
+        },
+        {
+          userId: 'a0000000-0000-7000-8000-000000000004',
+          name: 'Host without a known zone',
+          timeZone: null,
+          isCurrentMember: null,
+        },
+      )
       current.attendees.push({
         name: 'Alan Turing',
         email: 'alan@example.com',
@@ -344,8 +371,23 @@ describe('team booking cancellation outcome', () => {
       )
       expect(summary.getByText(copy.zone)).toBeDefined()
       const hosts = summary.getByText(copy.hosts, { selector: 'dt' }).nextElementSibling
-      for (const host of current.hosts) expect(hosts?.textContent).toContain(host.name)
-      expect(hosts?.textContent).toContain(copy.unavailableHostZones)
+      for (const host of current.hosts) {
+        const row = summary.getByText(host.name, { exact: false, selector: 'li' })
+        if (host.timeZone && host.timeZone !== 'Asia/Shanghai') {
+          expect(row.textContent).toContain(
+            formatting.zoned(host.timeZone, copy.locale).dateTimeRange(current.start, current.end),
+          )
+          expect(row.textContent).toContain(`${copy.hostZone}${host.timeZone.replaceAll('_', ' ')}`)
+          expect(row.querySelector('time')?.dateTime).toBe(current.start)
+        } else if (host.timeZone === 'Asia/Shanghai') {
+          expect(row.textContent).toBe(host.name)
+          expect(row.querySelector('time')).toBeNull()
+        } else {
+          expect(row.textContent).toContain(copy.unavailableHostZone)
+          expect(row.querySelector('time')).toBeNull()
+        }
+      }
+      expect(hosts?.querySelectorAll('time')).toHaveLength(2)
       const recipients = summary.getByText(copy.notificationHeading, {
         selector: 'dt',
       }).nextElementSibling
@@ -403,7 +445,11 @@ describe('team booking cancellation outcome', () => {
                   ...current,
                   status: 'cancelled',
                   cancelledAt: '2029-12-04T09:00:00.000Z',
-                  eventType: { ...current.eventType, title: 'Refreshed team meeting' },
+                  eventType: {
+                    ...current.eventType,
+                    title: 'Refreshed team meeting',
+                    publicBookingPath: null,
+                  },
                 }
               : current,
           ],
