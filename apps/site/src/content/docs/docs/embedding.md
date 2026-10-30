@@ -86,7 +86,8 @@ Scrolling stays contained within the popup and booking frame.
 
 Set `data-hourmere-language="zh-CN"` on an inline placeholder or popup button, or pass
 `language: 'zh-CN'` to `initInline` or `openPopup`, to initialize its Simplified Chinese
-interface. Use `en` for English, `de` for German, `fr` for French or `es` for Spanish. These
+interface. Use `en` for English, `de` for German, `fr` for French, `es` for Spanish or `pt-BR`
+for Brazilian Portuguese. These
 are the accepted explicit values; an invalid value fails before replacing a working widget. Without an explicit language, the widget
 uses a supported language from your page's `<html lang>`, then a supported browser language,
 then English.

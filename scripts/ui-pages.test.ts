@@ -12,6 +12,8 @@ import { formatTime } from '../apps/web/src/public/time.ts'
 import {
   AUDIT_DESCRIPTION,
   AUDIT_EMAIL,
+  AUDIT_GUEST_NAME,
+  AUDIT_TEAM_NAME,
   AUDIT_TITLE,
   visualMaskSelector,
   visualMaskText,
@@ -44,6 +46,8 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'availability-editor',
     'bookings',
     'booking-detail',
+    'team-bookings',
+    'team-booking-detail',
     'analytics',
     'calendars',
     'conferences',
@@ -66,6 +70,8 @@ it('uses a long Chinese title, unbroken synthetic URL, and long synthetic attend
   )
   expect(AUDIT_EMAIL.length).toBeGreaterThan(120)
   expect(AUDIT_EMAIL).toMatch(/@hourmere\.invalid$/)
+  expect(AUDIT_TEAM_NAME.length).toBeGreaterThan(150)
+  expect(AUDIT_GUEST_NAME.length).toBeGreaterThan(150)
 })
 
 it('preserves en-GB Monday-first and 24-hour formatting after a previous English choice', () => {
@@ -337,10 +343,12 @@ const expected={
   'team-booking':{path:'/team/FixtureTeam/layout-audit',public:true,wait:'heading'},
   'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
   'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
+  'team-bookings':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-bookings-list'},
+  'team-booking-detail':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-booking-detail'},
 }
 for(const [id,state] of Object.entries(expected)) {
   assert.ok(auditPages.some(page=>page.id===id),'Missing coverage state: '+id)
-  let path='',signedIn,query=''
+  let path='',signedIn,query='',space
   const calls=[]
   const locator=(selector)=>({
     waitFor:async()=>calls.push(['wait',selector]),
@@ -360,13 +368,14 @@ for(const [id,state] of Object.entries(expected)) {
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
     waitForFunction:async()=>{},evaluate:async(callback)=>calls.push(['evaluate',callback.name]),url:()=> 'http://127.0.0.1:42421'+path,
   }
-  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value)=>{signedIn=value},auditOAuthQuery:async()=>'?signed=fixture'}
+  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
   assert.deepEqual(calls[0],['clock',data.AUDIT_NOW],'Audit browser clock must be fixed before navigation: '+id)
   assert.deepEqual(calls.at(-1),['evaluate','settleAuditLayout'],'Audit layout must settle after content verification: '+id)
   assert.equal(path,state.path,'Wrong coverage route: '+id)
   if(id==='manage-reschedule')assert.ok(calls.some(call=>call[0]==='wait'&&call[1]==='.reschedule-summary'),'Missing current booking summary readiness')
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
+  assert.equal(space,state.space,'Wrong organization space: '+id)
   assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
   if(id==='booking-form'||id==='booking-confirmation') {
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='button.day-available'&&call[2]==='Enter'),'Booking state must choose a day')
@@ -378,6 +387,8 @@ for(const [id,state] of Object.entries(expected)) {
   }
   if(id==='booking-time-zone')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.tz-toggle'&&call[2]==='Enter'),'Time-zone panel must open')
+  if(id==='team-booking-detail')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.team-bookings-list button'&&call[2]==='Enter'),'Team booking detail must open with the keyboard')
   if(id==='embedded-booking') {
     assert.equal(new URLSearchParams(query).get('parentOrigin'),app.parentUrl,'Embed must use the owned allowed parent')
     assert.match(new URLSearchParams(query).get('embedId') ?? '',/^[a-zA-Z0-9_-]{16,64}$/,'Embed must provide a valid correlation ID')
@@ -407,6 +418,8 @@ describe('source-copy coverage mutations', () => {
     'team-booking',
     'oauth-consent',
     'manage-reschedule',
+    'team-bookings',
+    'team-booking-detail',
   ])
     it(`detects removal of ${id} from the shared scan list`, () => {
       const mutant = pagesSource.replace(new RegExp(`^  \\{ id: '${id}'.*\\n`, 'm'), '')
@@ -503,6 +516,16 @@ describe('source-copy coverage mutations', () => {
       "'team-booking': fixture.teamBookingPath",
       "'team-booking': fixture.bookingPath",
       'Wrong coverage route: team-booking',
+    ],
+    [
+      "id === 'team-bookings' || id === 'team-booking-detail' ? 'team' : undefined",
+      'undefined',
+      'Wrong organization space: team-bookings',
+    ],
+    [
+      "await page.locator('.team-bookings-list').getByRole('button').first().press('Enter')",
+      '',
+      'Team booking detail must open with the keyboard',
     ],
     [
       'parentOrigin: app.parentUrl',

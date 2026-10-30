@@ -46,11 +46,11 @@ const kinds: BookingEmailKind[] = [
   'conference_failed',
 ]
 
-const existingLanguages = ['en', 'zh-CN', 'de', 'fr'] as const
+const existingLanguages = ['en', 'zh-CN', 'de', 'fr', 'es'] as const
 
-describe('existing language output before Spanish registration', () => {
+describe('existing language output before Brazilian Portuguese registration', () => {
   // The digest covers complete subject/text/HTML messages, including inline styles.
-  // English/Chinese/German goldens predate French; French was captured from main before Spanish.
+  // Earlier goldens are retained; Spanish was captured from immutable main sources before pt-BR.
   it.each(existingLanguages)('preserves every rendered %s message byte', (locale) => {
     const messages = kinds.flatMap((kind) =>
       recipients.map((recipient) =>
