@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { createTestDatabase } from '@hourmere/db/testing'
 import { createJobs, type Jobs } from '@hourmere/jobs'
+import { createSmtpMailer } from '@hourmere/mail'
 import {
   createInvitationEmailRepairer,
   INVITATION_EMAIL_JOB,
@@ -16,6 +17,11 @@ vi.mock('@hourmere/notifications', async (importOriginal) => {
     ...actual,
     createInvitationEmailRepairer: vi.fn(actual.createInvitationEmailRepairer),
   }
+})
+
+vi.mock('@hourmere/mail', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@hourmere/mail')>()
+  return { ...actual, createSmtpMailer: vi.fn(() => ({ send: vi.fn(async () => {}) })) }
 })
 
 const serverUrl = process.env.DATABASE_URL
@@ -63,6 +69,8 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
         SIGNUP: 'closed',
         PORT: '0',
         PUBLIC_URL: publicUrl,
+        SMTP_URL: 'smtp://synthetic.invalid',
+        MAIL_FROM: 'sender@example.test',
       }
       running = await startServer({ ...config, HOURMERE_ROLE: 'web' })
       const response = await fetch(
@@ -107,11 +115,24 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
         [INVITATION_EMAIL_REPAIR_JOB],
       )
       expect(schedule.rows).toEqual([{ cron: '* * * * *', data: {} }])
+      await expect
+        .poll(
+          async () =>
+            (
+              await owned.pool.query(
+                'SELECT state FROM invitation_deliveries WHERE invitation_id = $1',
+                [invitation.id],
+              )
+            ).rows[0]?.state,
+          { timeout: 10_000 },
+        )
+        .toBe('smtp_accepted')
       const delivery = await owned.pool.query<{ state: string; attempts: number }>(
         'SELECT state, attempts FROM invitation_deliveries WHERE invitation_id = $1',
         [invitation.id],
       )
-      expect(delivery.rows).toEqual([{ state: 'queued', attempts: 0 }])
+      expect(delivery.rows).toEqual([{ state: 'smtp_accepted', attempts: 1 }])
+      expect(vi.mocked(createSmtpMailer).mock.results.at(-1)?.value.send).toHaveBeenCalledOnce()
     } finally {
       try {
         await running?.close()
@@ -176,7 +197,9 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
       expect((await fetch(`http://127.0.0.1:${running.port}/api/health`)).status).toBe(200)
       expect(retry).toHaveBeenCalledOnce()
       expect(spies[3]).toHaveBeenCalledWith(
-        'invitation email startup repair failed; scheduled repair will retry',
+        expect.stringMatching(
+          /^\S+ ERROR invitation-email-repair-v1: startup_repair_unavailable; scheduled repair will retry$/,
+        ),
       )
       expect(spies[3]?.mock.calls.flat().join(' ')).not.toContain('private database details')
       expect(
@@ -208,13 +231,24 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
         )
         .toBe('completed')
       expect(retry.mock.calls.length).toBeGreaterThanOrEqual(2)
+      await expect
+        .poll(
+          async () =>
+            (
+              await owned.pool.query('SELECT state FROM pgboss.job WHERE name = $1', [
+                INVITATION_EMAIL_JOB,
+              ])
+            ).rows[0]?.state,
+          { timeout: 10_000 },
+        )
+        .toBe('completed')
       expect(
         (
           await owned.pool.query('SELECT data, state FROM pgboss.job WHERE name = $1', [
             INVITATION_EMAIL_JOB,
           ])
         ).rows,
-      ).toEqual([{ data: { invitationId, generation: 1 }, state: 'created' }])
+      ).toEqual([{ data: { invitationId, generation: 1 }, state: 'completed' }])
     } finally {
       try {
         await producer?.stop()

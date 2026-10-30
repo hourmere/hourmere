@@ -94,31 +94,15 @@ export async function checkTeamManagementAccess(
   if (lock) organizationQuery = organizationQuery.forUpdate()
   const organization = await organizationQuery.executeTakeFirst()
   if (!organization) throw denied()
-  const personal = await db
-    .selectFrom('personal_organizations')
-    .select('organization_id')
-    .where('organization_id', '=', teamId)
-    .executeTakeFirst()
-  if (personal && !context?.allowPersonal) throw denied()
-
-  // Re-read AFTER acquiring the parent locks: a revocation committed while waiting wins.
-  let memberQuery = db
-    .selectFrom('auth.member')
-    .select('role')
-    .where('userId', '=', principal.user.id)
-    .where('organizationId', '=', teamId)
-  if (lock) memberQuery = memberQuery.forShare()
-  const member = await memberQuery.executeTakeFirst()
-  // Better Auth can store multiple roles. Only these exact known tokens grant management.
-  const roles = teamRoles(member?.role)
-  const role = roles.includes('owner')
-    ? 'owner'
-    : roles.includes('admin')
-      ? 'admin'
-      : allowMemberRead && roles.includes('member')
-        ? 'member'
-        : undefined
-  if (!role) throw denied()
+  const membership = await checkTeamManagementMembership(
+    db,
+    principal.user.id,
+    teamId,
+    lock,
+    context?.allowPersonal,
+    allowMemberRead,
+  )
+  const { personal, role } = membership
 
   // Refuse a session invalidated since caller resolution, including email-proof rotation.
   const session = await teamSession(db, principal, lock)
@@ -139,4 +123,42 @@ export async function checkTeamManagementAccess(
   }
 
   return { userId: principal.user.id, organizationId: organization.id, role }
+}
+
+/** Shared current-team policy for session management and durable invitation senders. */
+export async function checkTeamManagementMembership(
+  db: Db,
+  userId: string,
+  teamId: string,
+  lock = false,
+  allowPersonal = false,
+  allowMemberRead = false,
+): Promise<TeamReader & { personal: boolean }> {
+  const personal = await db
+    .selectFrom('personal_organizations')
+    .select('organization_id')
+    .where('organization_id', '=', teamId)
+    .executeTakeFirst()
+  if (personal && !allowPersonal) throw denied()
+
+  // Locking management callers already hold the parent locks, so committed revocation wins.
+  let memberQuery = db
+    .selectFrom('auth.member')
+    .select('role')
+    .where('userId', '=', userId)
+    .where('organizationId', '=', teamId)
+  if (lock) memberQuery = memberQuery.forShare()
+  const member = await memberQuery.executeTakeFirst()
+  // Better Auth can store multiple roles. Only these exact known tokens grant management.
+  const roles = teamRoles(member?.role)
+  const role = roles.includes('owner')
+    ? 'owner'
+    : roles.includes('admin')
+      ? 'admin'
+      : allowMemberRead && roles.includes('member')
+        ? 'member'
+        : undefined
+  if (!role) throw denied()
+
+  return { userId, organizationId: teamId, role, personal: Boolean(personal) }
 }

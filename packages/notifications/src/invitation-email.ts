@@ -7,6 +7,7 @@ import {
 } from '@hourmere/jobs'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import { deliverInvitationEmail, type InvitationEmailSenderDeps } from './invitation-sender.ts'
 
 export const INVITATION_EMAIL_JOB = 'invitation-email-v1'
 export const INVITATION_EMAIL_REPAIR_JOB = 'invitation-email-repair-v1'
@@ -24,6 +25,10 @@ export interface InvitationEmailQueue {
     payload: InvitationEmailRequest,
     options?: EnqueueOptions,
   ): Promise<string | null>
+  retireExpiredInvitationEmailJobs(
+    identity: Pick<InvitationEmailJobIdentity, 'invitationId' | 'generation'>,
+    transaction: KyselyTransactionLike,
+  ): Promise<void>
   hasLiveInvitationEmailJob(
     identity: InvitationEmailJobIdentity,
     transaction?: KyselyTransactionLike,
@@ -54,7 +59,7 @@ async function currentDelivery(db: Db, invitationId: string) {
   if (!invitation) return undefined
   const delivery = await db
     .selectFrom('invitation_deliveries')
-    .select(['generation', 'state', 'last_job_id', 'due_at'])
+    .select(['generation', 'state', 'last_job_id', 'due_at', 'attempts', 'lease_until'])
     .where('invitation_id', '=', invitationId)
     .forUpdate()
     .executeTakeFirst()
@@ -66,12 +71,13 @@ async function currentDelivery(db: Db, invitationId: string) {
     .select([
       sql<boolean>`"expiresAt" > clock_timestamp()`.as('unexpired'),
       sql<boolean>`due_at <= clock_timestamp()`.as('due'),
+      sql<boolean>`lease_until IS NULL OR lease_until <= clock_timestamp()`.as('leaseExpired'),
     ])
     .where('id', '=', invitationId)
     .executeTakeFirstOrThrow()
   return {
     invitation: { ...invitation, unexpired: expiry.unexpired },
-    delivery: { ...delivery, due: expiry.due },
+    delivery: { ...delivery, due: expiry.due, leaseExpired: expiry.leaseExpired },
   }
 }
 
@@ -80,12 +86,14 @@ async function skipIneligible(db: Db, invitationId: string, generation: number) 
     .updateTable('invitation_deliveries')
     .set({
       state: 'skipped',
+      lease_id: null,
+      lease_until: null,
       last_error_code: 'invitation_ineligible',
       updated_at: sql`clock_timestamp()`,
     })
     .where('invitation_id', '=', invitationId)
     .where('generation', '=', generation)
-    .where('state', '=', 'queued')
+    .where('state', 'in', ['queued', 'sending'])
     .execute()
 }
 
@@ -107,7 +115,34 @@ function invitationEmailDispatcher({ db, queue }: InvitationEmailDeps, dueOnly: 
         // current-generation row; an obsolete candidate must not retire its successor.
         if (!current || current.delivery.generation !== payload.generation) return false
         const { invitation, delivery } = current
-        if (delivery.state !== 'queued') return false
+        if (delivery.state === 'sending') {
+          // Never steal a live claim or a job pg-boss still considers active. A crash
+          // consumes its registered attempt; recovery cannot reset that budget.
+          if (!dueOnly || !delivery.leaseExpired) return false
+          if (
+            delivery.last_job_id &&
+            (await queue.hasLiveInvitationEmailJob({ id: delivery.last_job_id, ...payload }, trx))
+          )
+            return false
+          if (!(invitation.status === 'pending' && invitation.unexpired)) {
+            await skipIneligible(trx, payload.invitationId, payload.generation)
+            return false
+          }
+          const exhausted = delivery.attempts >= 4
+          await trx
+            .updateTable('invitation_deliveries')
+            .set({
+              state: exhausted ? 'failed' : 'queued',
+              lease_id: null,
+              lease_until: null,
+              last_error_code: exhausted ? 'attempts_exhausted' : 'interrupted',
+              updated_at: sql`clock_timestamp()`,
+            })
+            .where('invitation_id', '=', payload.invitationId)
+            .where('generation', '=', payload.generation)
+            .execute()
+          if (exhausted) return false
+        } else if (delivery.state !== 'queued') return false
         if (dueOnly && !delivery.due) return false
         // Repair runs this eligibility check before trusting or replacing a queued job.
         if (invitation.status !== 'pending' || !invitation.unexpired) {
@@ -119,6 +154,9 @@ function invitationEmailDispatcher({ db, queue }: InvitationEmailDeps, dueOnly: 
           (await queue.hasLiveInvitationEmailJob({ id: delivery.last_job_id, ...payload }, trx))
         )
           return true
+        // Retained expired jobs can still occupy pg-boss's exclusive index until
+        // maintenance runs. Retire only expired matching identities in this transaction.
+        await queue.retireExpiredInvitationEmailJobs(payload, trx)
         const jobId = await queue.enqueue(INVITATION_EMAIL_JOB, payload, {
           singletonKey: `invitation-email:v1:${payload.invitationId}:${payload.generation}`,
           // pg-boss starts retention at startAfter. An overdue row needs a fresh
@@ -144,28 +182,30 @@ function invitationEmailDispatcher({ db, queue }: InvitationEmailDeps, dueOnly: 
   }
 }
 
-/**
- * There is deliberately no consumer until the sender exists: pending jobs stay created.
- * The future sender must re-read the delivery row's state and generation before sending;
- * a retained created job may belong to a generation the repairer has since skipped.
- */
-export function invitationEmailJob() {
-  return defineJob({
-    name: INVITATION_EMAIL_JOB,
+/** Queue-only callers omit dependencies; workers recheck durable state before SMTP. */
+export function invitationEmailJob(deps?: InvitationEmailSenderDeps) {
+  const definition = {
+    name: INVITATION_EMAIL_JOB as typeof INVITATION_EMAIL_JOB,
     payload: InvitationEmailPayload,
-    policy: 'exclusive',
+    policy: 'exclusive' as const,
     retry: { limit: 0, delaySeconds: 0, backoff: false },
     expireInSeconds: 180,
     retentionSeconds: 86400,
     deleteAfterSeconds: 604800,
+  }
+  if (!deps)
+    return defineJob<typeof INVITATION_EMAIL_JOB, typeof InvitationEmailPayload>(definition)
+  return defineJob<typeof INVITATION_EMAIL_JOB, typeof InvitationEmailPayload>({
+    ...definition,
+    handler: (payload, { signal, id }) => deliverInvitationEmail(deps, payload, signal, id),
   })
 }
 
 /**
  * One bounded batch per run. Advancing past every candidate, including failures, keeps
  * an unhealthy low ID from starving later invitations; the next run wraps at the end.
- * pg-boss expires an unconsumed created job at its retention deadline. After it stops
- * being live, a still-eligible generation gets one replacement with fresh retention.
+ * Expired matching jobs are retired in the replacement transaction, independently
+ * of maintenance timing. The delivery lock and exclusive index serialize repairs.
  */
 export function createInvitationEmailRepairer(deps: InvitationEmailDeps) {
   const dispatch = invitationEmailDispatcher(deps, true)
@@ -198,8 +238,15 @@ async function dueInvitations(db: Db, afterId: string | null) {
   return db
     .selectFrom('invitation_deliveries')
     .select(['invitation_id', 'generation'])
-    .where('state', '=', 'queued')
-    .where('due_at', '<=', sql<Date>`clock_timestamp()`)
+    .where((eb) =>
+      eb.or([
+        eb.and([eb('state', '=', 'queued'), eb('due_at', '<=', sql<Date>`clock_timestamp()`)]),
+        eb.and([
+          eb('state', '=', 'sending'),
+          eb('lease_until', '<=', sql<Date>`clock_timestamp()`),
+        ]),
+      ]),
+    )
     .$if(afterId !== null, (query) => query.where('invitation_id', '>', afterId as string))
     .orderBy('invitation_id')
     .limit(100)
