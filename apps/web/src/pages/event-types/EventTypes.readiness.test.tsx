@@ -820,7 +820,7 @@ describe('team event type configuration checks', () => {
       TEAM,
     )
     await open()
-    await within(configuration()).findByRole('button', { name: 'Retry checks' })
+    await within(configuration()).findByText('Configuration not checked')
     expect(configuration().querySelector('.badge-success')).toBeNull()
     recovered = true
     await user.click(within(configuration()).getByRole('button', { name: 'Retry checks' }))

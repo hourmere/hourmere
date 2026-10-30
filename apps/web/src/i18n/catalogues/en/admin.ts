@@ -1112,4 +1112,14 @@ export const admin = {
     'Could not confirm the switch. Checking your current space…',
   'You are now in your personal space. Your team access or active space changed.':
     'You are now in your personal space. Your team access or active space changed.',
+  'Saved version readiness': 'Saved version readiness',
+  'These unsaved changes have not been checked yet. Save to check the saved version.':
+    'These unsaved changes have not been checked yet. Save to check the saved version.',
+  'These checks describe the saved version. Availability is confirmed when someone books.':
+    'These checks describe the saved version. Availability is confirmed when someone books.',
+  'Readiness checks are unavailable for this account.':
+    'Readiness checks are unavailable for this account.',
+  'Review enablement': 'Review enablement',
+  'Review meeting settings': 'Review meeting settings',
+  'Review round-robin activation': 'Review round-robin activation',
 } as const

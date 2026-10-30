@@ -8,6 +8,15 @@ export type SelfEventReadiness = Schemas['SelfReadinessPage']['eventTypes']['dat
 export type TeamEventReadiness = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
 export type EventReadiness = SelfEventReadiness | TeamEventReadiness
 
+export function readinessErrorStatus(me: Me, err: unknown): 'unavailable' | 'error' {
+  return !me.organization.personal &&
+    err instanceof RequestError &&
+    err.status === 403 &&
+    err.code === 'team_management_access_denied'
+    ? 'unavailable'
+    : 'error'
+}
+
 export function useEventReadiness(me: Me) {
   const [state, setState] = useState<
     | { status: 'loading' | 'error' | 'unavailable' }
@@ -25,16 +34,7 @@ export function useEventReadiness(me: Me) {
           setState(data ? { status: 'ready', data } : { status: 'unavailable' })
       },
       (err: unknown) => {
-        if (!controller.signal.aborted)
-          setState({
-            status:
-              !me.organization.personal &&
-              err instanceof RequestError &&
-              err.status === 403 &&
-              err.code === 'team_management_access_denied'
-                ? 'unavailable'
-                : 'error',
-          })
+        if (!controller.signal.aborted) setState({ status: readinessErrorStatus(me, err) })
       },
     )
     return () => controller.abort()
@@ -91,7 +91,21 @@ export async function loadEventReadiness(me: Me, signal: AbortSignal) {
       )
       if (result.organizationId !== me.organization.id) throw new Error('Readiness context changed')
       page = result.eventTypes
-      for (const item of result.eventTypes.data) items.set(item.eventTypeId, item)
+      for (const item of result.eventTypes.data) {
+        // Team hints use only the coarse projection, even if a response gains fields.
+        items.set(item.eventTypeId, {
+          eventTypeId: item.eventTypeId,
+          enablement: item.enablement,
+          activation: item.activation,
+          summary: item.summary,
+          completeness: item.completeness,
+          evaluatedAt: item.evaluatedAt,
+          reasonCodes: item.reasonCodes,
+          fixKinds: item.fixKinds.filter((fix) =>
+            ['edit_event', 'ask_member', 'retry_summary'].includes(fix),
+          ),
+        })
+      }
     }
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
     eventTypeCursor = page.nextCursor ?? undefined

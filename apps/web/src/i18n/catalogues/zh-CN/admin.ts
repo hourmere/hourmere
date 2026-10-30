@@ -1054,4 +1054,13 @@ export const admin = {
     '无法确认切换结果。正在检查你当前所在的空间…',
   'You are now in your personal space. Your team access or active space changed.':
     '你现在位于个人空间。你的团队访问权限或当前空间已更改。',
+  'Saved version readiness': '已保存版本的就绪检查',
+  'These unsaved changes have not been checked yet. Save to check the saved version.':
+    '尚未检查这些未保存的更改。保存后可检查已保存版本。',
+  'These checks describe the saved version. Availability is confirmed when someone books.':
+    '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+  'Readiness checks are unavailable for this account.': '此账号无法使用就绪检查。',
+  'Review enablement': '查看启用设置',
+  'Review meeting settings': '查看会议设置',
+  'Review round-robin activation': '查看轮询激活设置',
 } as const
