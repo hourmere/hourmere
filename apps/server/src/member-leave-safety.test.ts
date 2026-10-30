@@ -33,8 +33,10 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { ErrorBody, errorResponses, json, serviceContext } from './openapi.ts'
+import { eventTypeRoutes } from './routes/event-types.ts'
 import { DepartureImpact, memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
+import { publicRoutes } from './routes/public.ts'
 import { openApiDocument, responseAndRequestStrictness } from './routes/test-app.ts'
 import { productRoutes } from './server.ts'
 import {
@@ -165,7 +167,12 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       resolveCaller: createCallerResolver({ auth: authentication, db }),
       routes: production
         ? productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } })
-        : [memberDepartureImpactRoutes({ db }), departureRoutes({ db: routeDb })],
+        : [
+            memberDepartureImpactRoutes({ db }),
+            departureRoutes({ db: routeDb }),
+            eventTypeRoutes({ db }),
+            publicRoutes({ db }),
+          ],
     })
   }
 
@@ -296,6 +303,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
         source: 'web',
         status: state === 'cancelled' ? 'cancelled' : 'confirmed',
         cancelled_at: state === 'cancelled' ? new Date() : null,
+        required_host_user_ids: [f.actor.id],
       })
       .execute()
     await db.insertInto('booking_hosts').values({ booking_id: id, user_id: f.actor.id }).execute()
@@ -432,12 +440,28 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     },
   )
 
-  it('ignores ended and cancelled bookings while preserving their history', async () => {
+  async function verifyRetainedHistory(depart: Departure = leaveTeamMember) {
     const f = await fixture()
     const ended = await booking(f, 'ended')
     const cancelled = await booking(f, 'cancelled')
-    expect((await leave(f)).status).toBe(200)
+    const history = () =>
+      db
+        .selectFrom('bookings')
+        .select(['id', 'required_host_user_ids', 'status', 'start_at', 'end_at'])
+        .where('id', 'in', [ended, cancelled])
+        .orderBy('id')
+        .execute()
+    const before = await history()
+    expect(before.every((row) => row.required_host_user_ids.includes(f.actor.id))).toBe(true)
+    expect(
+      (await leave(f, application(auth, false, routeCopy(depart)))).status,
+      'departure must commit while retaining immutable required hosts',
+    ).toBe(200)
     await departed(f)
+    expect(
+      await history(),
+      'departure must commit while retaining immutable required hosts',
+    ).toEqual(before)
     expect(
       await db
         .selectFrom('booking_hosts')
@@ -446,6 +470,27 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
         .where('user_id', '=', f.actor.id)
         .execute(),
     ).toHaveLength(2)
+  }
+
+  it('ignores ended and cancelled bookings while preserving their history', () =>
+    verifyRetainedHistory())
+
+  it('detects leave rewriting saved required hosts with a real HTTP assertion', async () => {
+    const copy = serviceCopy([
+      [
+        'const removed = await trx',
+        `await trx.updateTable('bookings').set({ required_host_user_ids: [] }).where('organization_id', '=', actor.organizationId).execute()
+      const removed = await trx`,
+      ],
+    ])
+    const logging = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(verifyRetainedHistory(copy)).rejects.toThrow(
+        'departure must commit while retaining immutable required hosts',
+      )
+    } finally {
+      logging.mockRestore()
+    }
   })
 
   it('rejects an old team tab after departure without writing in personal or team space', async () => {
@@ -556,6 +601,11 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     const f = await fixture('admin')
     const eventId = await event(f)
     const bookingId = await booking(f, 'future', eventId)
+    const saved = await db
+      .selectFrom('bookings')
+      .select(['required_host_user_ids', 'status'])
+      .where('id', '=', bookingId)
+      .executeTakeFirstOrThrow()
     const managerLogin = await session(f.survivor, f.team.id)
     const production = application(auth, true)
     const key = await auth.api.createApiKey({
@@ -594,6 +644,13 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     ).toEqual([
       { operation: 'member_removed', actor_user_id: f.survivor.id, target_user_id: f.actor.id },
     ])
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select(['required_host_user_ids', 'status'])
+        .where('id', '=', bookingId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(saved)
     const revoked = await production.request('/api/v1/me', { headers: bearer })
     expect(revoked.status).toBe(401)
     expect(await revoked.json()).toMatchObject({ error: 'unauthorized' })
@@ -1121,46 +1178,138 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     const preview = await impact(f)
     expect(preview.eventTypes.totalCount).toBe(0)
     expect(preview.bookings.totalCount).toBe(0)
+    const manager = { ...f, login: await session(f.survivor, f.team.id) }
+    const editHosts = () =>
+      target.request(`/api/v1/event-types/${eventId}`, {
+        method: 'PATCH',
+        headers: headers(manager),
+        body: JSON.stringify({
+          schedulingType: 'collective',
+          hosts: [{ userId: f.actor.id }, { userId: f.survivor.id }],
+        }),
+      })
+    if (change === 'booking') {
+      // The preview predates both the new host requirement and the new booking.
+      expect((await editHosts()).status).toBe(200)
+      for (const user of [f.actor, f.survivor]) {
+        await db
+          .insertInto('profiles')
+          .values({
+            user_id: user.id,
+            handle: `race-${user.id.slice(0, 8)}`,
+            time_zone: 'UTC',
+          })
+          .execute()
+        await createFixtures(db).schedule(user.id, {
+          timeZone: 'UTC',
+          weeklyHours: Object.fromEntries(
+            ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(
+              (day) => [day, [{ start: '09:00', end: '17:00' }]],
+            ),
+          ),
+        })
+      }
+    }
     const holder = await owned.pool.connect()
     let pending: Promise<Response> | undefined
+    let writing: Promise<Response> | undefined
     try {
       await holder.query('BEGIN')
-      await holder.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [f.team.id])
+      if (change === 'booking') {
+        await holder.query('SELECT id FROM auth.member WHERE id=$1 FOR UPDATE', [f.memberId])
+        const eventRow = await db
+          .selectFrom('event_types')
+          .select('slug')
+          .where('id', '=', eventId)
+          .executeTakeFirstOrThrow()
+        const slug = f.team.as(f.survivor).organization.slug
+        const start = `${Temporal.Now.plainDateISO('UTC').add({ days: 2 })}T12:00:00Z`
+        writing = Promise.resolve(
+          target.request(`/api/v1/public/teams/${slug}/${eventRow.slug}/bookings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              start,
+              invitee: {
+                name: 'Synthetic race invitee',
+                email: 'race@example.com',
+                timeZone: 'UTC',
+              },
+            }),
+          }),
+        )
+      } else {
+        await holder.query('SELECT id FROM event_types WHERE id=$1 FOR UPDATE', [eventId])
+        writing = Promise.resolve(editHosts())
+      }
+      // The real writer owns its organization lock and is blocked on a later lock.
+      await waitForBlocker(holder)
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+        .rows[0]?.pid
+      const writerPid = (
+        await owned.pool.query<{ pid: number }>(
+          `SELECT pid FROM pg_stat_activity
+         WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))`,
+          [holderPid],
+        )
+      ).rows[0]?.pid
+      expect(writerPid).toBeTypeOf('number')
       pending = Promise.resolve(
         entry === 'session route' ? leave(f, target) : native(f, 'leave', f.memberId, target),
       )
-      await waitForBlocker(holder)
-      let bookingId: string | undefined
-      if (change === 'booking') {
-        bookingId = randomUUID()
-        await holder.query(
-          `INSERT INTO bookings (id, organization_id, event_type_id, start_at, end_at, title,
-             manage_token_hash, source) VALUES ($1,$2,$3,clock_timestamp()+interval '1 hour',
-             clock_timestamp()+interval '2 hours','Concurrent booking',$4,'web')`,
-          [bookingId, f.team.id, eventId, randomBytes(32)],
-        )
-        await holder.query('INSERT INTO booking_hosts (booking_id,user_id) VALUES ($1,$2)', [
-          bookingId,
-          f.actor.id,
-        ])
-      } else {
-        await holder.query('DELETE FROM event_type_hosts WHERE event_type_id=$1', [eventId])
-        await holder.query('INSERT INTO event_type_hosts (event_type_id,user_id) VALUES ($1,$2)', [
-          eventId,
-          f.actor.id,
-        ])
-      }
+      await vi.waitFor(
+        async () => {
+          const result = await owned.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS (SELECT FROM pg_stat_activity
+           WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))
+             AND query ILIKE '%"auth"."organization"%' AND query ILIKE '%for update%') AS blocked`,
+            [writerPid],
+          )
+          expect(
+            result.rows[0]?.blocked,
+            'leave must wait behind the real writer organization lock',
+          ).toBe(true)
+        },
+        { timeout: 3000, interval: 10 },
+      )
       await holder.query('COMMIT')
-      const result = await blocked(await pending, f, entry === 'native leave')
-      if (change === 'booking') {
-        expect(result.bookings.data.map((item) => item.id)).toEqual([bookingId])
+      const written = await writing
+      expect(written.status, 'the real writer must commit without a deadlock').toBe(
+        change === 'booking' ? 201 : 200,
+      )
+      // Read only the public identifier, never materialize the manage token in diagnostics.
+      const bookingId =
+        change === 'booking'
+          ? z.object({ booking: z.object({ id: z.uuid() }) }).parse(await written.json()).booking.id
+          : undefined
+      const result = await blocked(await pending, f, entry !== 'session route')
+      expect(result.eventTypes.data).toEqual([
+        expect.objectContaining({ id: eventId, reason: 'collective_required_host' }),
+      ])
+      if (bookingId) {
+        expect(result.bookings.data).toEqual([
+          expect.objectContaining({
+            id: bookingId,
+            handling: 'coordinate_cancellation',
+            inProgress: false,
+          }),
+        ])
+        expect(
+          await db
+            .selectFrom('bookings')
+            .select('required_host_user_ids')
+            .where('id', '=', bookingId)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({
+          required_host_user_ids: [f.actor.id, f.survivor.id].sort(),
+        })
       } else {
-        expect(result.eventTypes.data.map((item) => item.id)).toEqual([eventId])
+        expect(result.bookings.totalCount).toBe(0)
       }
     } finally {
       await holder.query('ROLLBACK')
       holder.release()
-      await pending
+      await Promise.allSettled([pending, writing].filter(Boolean))
     }
   }
 
@@ -1170,7 +1319,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     ['native leave', 'booking'],
     ['native leave', 'host assignment'],
   ] as const)(
-    'the %s catches a %s committed after preview while its transaction waits',
+    'the %s catches a %s committed through HTTP after preview while its transaction waits',
     (entry, change) => verifyRace(entry, change),
   )
 
@@ -1251,6 +1400,13 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     await expect(verifyService(serviceCopy([replacement]), scenario)).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+
+  it('passes HTTP writer races with an unchanged product source copy', async () => {
+    const copy = serviceCopy()
+    await verifyRace('session route', 'booking', copy)
+    await verifyRace('native leave', 'host assignment', copy)
+    await verifyRetainedHistory(copy)
   })
 
   it.each(['booking', 'host assignment'] as const)(

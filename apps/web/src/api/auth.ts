@@ -71,6 +71,13 @@ export function signOut(): Promise<unknown> {
   return authRequest('/sign-out', { body: {} })
 }
 
+/** Current Better Auth identity; /me intentionally omits email verification state. */
+export function getInvitationSession(signal?: AbortSignal): Promise<{
+  user: { id: string; email: string; emailVerified: boolean }
+} | null> {
+  return authRequest('/get-session', signal ? { signal } : {})
+}
+
 /** An API key as Better Auth lists it; the secret itself is never stored or listed. */
 export interface ApiKey {
   id: string

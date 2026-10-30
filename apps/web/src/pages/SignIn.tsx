@@ -164,6 +164,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
 
   // Better Auth comes back here (keeping `next`) when the link or the provider fails.
   const redirects = { callbackURL: next, errorCallbackURL: signInPath(next) }
+  const joiningTeam = new URL(next, 'https://app.invalid').pathname === PATHS.join
   const providers =
     instance.status === 'ready' ? PROVIDERS.filter((p) => instance.data.signIn[p] === true) : []
 
@@ -247,6 +248,13 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             )}
           </p>
           <EmailDeliveryHint />
+          {joiningTeam && (
+            <p>
+              {t(
+                'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+              )}
+            </p>
+          )}
           <div role="status" aria-atomic="true">
             {resend === 'sending' && <p>{t('Resending…')}</p>}
             {resend === 'success' && (
@@ -290,7 +298,6 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   }
 
   const busy = phase.kind === 'sending' || redirecting !== null
-  const joiningTeam = new URL(next, 'https://app.invalid').pathname === PATHS.join
   return (
     <main className="centered">
       <div className="card">
@@ -300,11 +307,18 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
         </header>
         <h1>{t('Sign in to Hourmere')}</h1>
         {joiningTeam && (
-          <p>
-            {t(
-              'Sign in with the email address that received this invitation. Signing in does not join the team.',
-            )}
-          </p>
+          <>
+            <p>
+              {t(
+                'Sign in with the email address that received this invitation. Signing in does not join the team.',
+              )}
+            </p>
+            <p>
+              {t(
+                'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+              )}
+            </p>
+          </>
         )}
         {expired && (
           <p className="alert alert-info" role="status">

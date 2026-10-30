@@ -28,6 +28,12 @@ export const admin = {
   'Try again in {0} seconds.': 'Try again in {0} seconds.',
   'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.':
     'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.',
+  'Join team': 'Join team',
+  'Go to team': 'Go to team',
+  'Invited email': 'Invited email',
+  'You are already a member of {team}.': 'You are already a member of {team}.',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
+    'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
   Pending: 'Pending',
   'Team members': 'Team members',
   'Pending invitations are not members or hosts.': 'Pending invitations are not members or hosts.',

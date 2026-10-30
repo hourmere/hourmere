@@ -24,7 +24,12 @@ interface InvitationApp {
   mailLink: () => string | undefined
   signIn: (account?: 'recipient' | 'other' | 'unverified') => Promise<void>
   state: () => Promise<{ status: string; joined: boolean; activeTeam: boolean }>
+  membershipCount: () => Promise<number>
   expire: () => Promise<void>
+  cancel: () => Promise<void>
+  addMember: () => Promise<void>
+  unverify: () => Promise<void>
+  restrictSignup: () => Promise<void>
 }
 
 export const test = base.extend<{ invitationApp: InvitationApp }>({
@@ -219,11 +224,56 @@ export const test = base.extend<{ invitationApp: InvitationApp }>({
             .executeTakeFirst()
           return { status: row.status, joined: Boolean(membership), activeTeam: Boolean(active) }
         },
+        membershipCount: async () => {
+          const result = await db
+            .selectFrom('auth.member as member')
+            .innerJoin('auth.user as user', 'user.id', 'member.userId')
+            .select(({ fn }) => fn.countAll<string>().as('count'))
+            .where('member.organizationId', '=', team)
+            .where('user.email', '=', email)
+            .executeTakeFirstOrThrow()
+          return Number(result.count)
+        },
         expire: async () => {
           await db
             .updateTable('auth.invitation')
             .set({ expiresAt: new Date(Date.now() - 60_000) })
             .where('id', '=', invitation.id)
+            .execute()
+        },
+        cancel: async () => {
+          await db
+            .updateTable('auth.invitation')
+            .set({ status: 'canceled' })
+            .where('id', '=', invitation.id)
+            .execute()
+        },
+        addMember: async () => {
+          const recipient = await db
+            .selectFrom('auth.user')
+            .select('id')
+            .where('email', '=', email)
+            .executeTakeFirstOrThrow()
+          await fixtures.member(recipient.id, team, 'member')
+        },
+        unverify: async () => {
+          await db
+            .updateTable('auth.user')
+            .set({ emailVerified: false })
+            .where('email', '=', email)
+            .execute()
+        },
+        restrictSignup: async () => {
+          // A different earliest user makes this outside-domain inviter ineligible
+          // to admit new accounts under the fixture's actual closed signup policy.
+          await db
+            .insertInto('auth.user')
+            .values({
+              name: 'Synthetic instance founder',
+              email: 'founder@hourmere.invalid',
+              emailVerified: true,
+              createdAt: new Date('2020-01-01T00:00:00Z'),
+            })
             .execute()
         },
       })

@@ -26,6 +26,12 @@ export const admin = {
   'Try again in {0} seconds.': '请在{0}秒后重试。',
   'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.':
     '在限制注册的实例上，仅当邀请者为实例首位用户，或其当前邮箱域名在允许名单中时，邀请才允许注册。受邀者须验证该确切邮箱地址，并另行接受邀请才能加入团队。',
+  'Join team': '加入团队',
+  'Go to team': '前往团队',
+  'Invited email': '受邀邮箱',
+  'You are already a member of {team}.': '你已经是{team}的成员。',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
+    '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请和此实例的注册规则。',
   Pending: '待接受',
   'Team members': '团队成员',
   'Pending invitations are not members or hosts.': '待接受的邀请不计入成员或主持人。',
