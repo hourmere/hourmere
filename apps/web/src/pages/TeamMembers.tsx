@@ -7,6 +7,10 @@ import {
   RemoveMemberButton,
   TeamMemberActions,
 } from '../components/team-members/TeamMemberActions.tsx'
+import {
+  RoleManagementNotice,
+  TeamMemberRoleButton,
+} from '../components/team-members/TeamMemberRole.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
@@ -48,7 +52,14 @@ function useTeamPage<T>(load: (signal: AbortSignal) => Promise<T>) {
     setResult(undefined)
     setVersion((value) => value + 1)
   }
-  return [state, retry] as const
+  const update = (transform: (data: T) => T) => {
+    setResult((previous) =>
+      previous?.load === load && previous.state.status === 'ready'
+        ? { load, state: { status: 'ready', data: transform(previous.state.data) } }
+        : previous,
+    )
+  }
+  return [state, retry, update] as const
 }
 
 function PageFeedback<T>({
@@ -95,12 +106,13 @@ export function TeamMembers({
   const [offset, setOffset] = useState(0)
   const [selectedMember, setSelectedMember] = useState<ListedOrganizationMember | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [roleReviewOpen, setRoleReviewOpen] = useState(false)
   const removalOpener = useRef<HTMLButtonElement | null>(null)
   const load = useCallback(
     (signal: AbortSignal) => listOrganizationMembers(organizationId, offset, PAGE_SIZE, signal),
     [organizationId, offset],
   )
-  const [state, retry] = useTeamPage(load)
+  const [state, retry, update] = useTeamPage(load)
   const roles = role?.split(',').map((value) => value.trim()) ?? []
   const canManage =
     roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
@@ -116,6 +128,7 @@ export function TeamMembers({
       <section className="panel" aria-labelledby="team-members-heading">
         <h2 id="team-members-heading">{t('Team members')}</h2>
         <p className="hint">{t('Pending invitations are not members or hosts.')}</p>
+        <RoleManagementNotice />
         {canManage && (
           <p>
             <Link className="button" to={PATHS.eventTypes}>
@@ -154,11 +167,29 @@ export function TeamMembers({
                         .join(', ')}
                     </BreakableText>
                   </span>
+                  <TeamMemberRoleButton
+                    key={`${organizationId}:${member.id}:${role}:${currentUserId}`}
+                    organizationId={organizationId}
+                    member={member}
+                    role={role}
+                    currentUserId={currentUserId}
+                    disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
+                    onReviewChange={setRoleReviewOpen}
+                    onChanged={(updated) =>
+                      update((data) => ({
+                        ...data,
+                        members: data.members.map((item) =>
+                          item.id === updated.id ? { ...item, role: updated.role } : item,
+                        ),
+                      }))
+                    }
+                    onReload={onReload}
+                  />
                   <RemoveMemberButton
                     member={member}
                     role={role}
                     currentUserId={currentUserId}
-                    disabled={reviewOpen || selectedMember !== null}
+                    disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
                     onSelect={(target, opener) => {
                       removalOpener.current = opener
                       setSelectedMember(target)
@@ -174,7 +205,7 @@ export function TeamMembers({
             <button
               type="button"
               className="button button-small"
-              disabled={state.status === 'loading'}
+              disabled={state.status === 'loading' || roleReviewOpen}
               onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
             >
               {t('Previous members page')}
@@ -184,6 +215,7 @@ export function TeamMembers({
             <button
               type="button"
               className="button button-small"
+              disabled={roleReviewOpen}
               onClick={() => setOffset((value) => value + PAGE_SIZE)}
             >
               {t('Next members page')}
@@ -195,6 +227,7 @@ export function TeamMembers({
           organizationId={organizationId}
           currentUserId={currentUserId}
           role={role}
+          disabled={roleReviewOpen}
           selectedMember={selectedMember?.organizationId === organizationId ? selectedMember : null}
           onClose={() => {
             setSelectedMember(null)

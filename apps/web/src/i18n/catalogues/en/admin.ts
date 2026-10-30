@@ -31,6 +31,34 @@ export const admin = {
   'Confirm cancellation': 'Confirm cancellation',
   'Keep invitation': 'Keep invitation',
 
+  'Only owners can manage admins. Ownership transfer is not available yet.':
+    'Only owners can manage admins. Ownership transfer is not available yet.',
+  'Owner roles cannot be changed here. The team must retain at least one owner.':
+    'Owner roles cannot be changed here. The team must retain at least one owner.',
+  'Make admin': 'Make admin',
+  'Make member': 'Make member',
+  'Make admin: {0}': 'Make admin: {0}',
+  'Make member: {0}': 'Make member: {0}',
+  'Change team role': 'Change team role',
+  'Change {name} from {oldRole} to {newRole}?': 'Change {name} from {oldRole} to {newRole}?',
+  'They will gain admin permissions.': 'They will gain admin permissions.',
+  'They will lose admin permissions and keep member access.':
+    'They will lose admin permissions and keep member access.',
+  'Admins can invite and remove ordinary members, manage team events, and view team bookings and cancel them before they start.':
+    'Admins can invite and remove ordinary members, manage team events, and view team bookings and cancel them before they start.',
+  'Members can view team members and manage their own availability, calendars and hosted bookings.':
+    'Members can view team members and manage their own availability, calendars and hosted bookings.',
+  'Confirm role change': 'Confirm role change',
+  'Changing role…': 'Changing role…',
+  '{name} is now {role}.': '{name} is now {role}.',
+  'This role change was denied. Your permission or this member’s team membership may have changed. Reload to check.':
+    'This role change was denied. Your permission or this member’s team membership may have changed. Reload to check.',
+  'This person is no longer a member of this team. Reload the member list.':
+    'This person is no longer a member of this team. Reload the member list.',
+  'This role change conflicts with the current team state. Reload before trying again.':
+    'This role change conflicts with the current team state. Reload before trying again.',
+  'Could not confirm the role change. Reload to check this person’s current role before trying again.':
+    'Could not confirm the role change. Reload to check this person’s current role before trying again.',
   'The invitation request could not be queued. Try again later.':
     'The invitation request could not be queued. Try again later.',
   'Invite member': 'Invite member',
