@@ -153,31 +153,17 @@ export async function listTeamAdminBookings(
 }
 
 /** Internal projection shared by authorized team reads; callers supply their checked team. */
-export async function readTeamBookingPage(
+function teamBookingQuery(
   ctx: ServiceContext,
   teamId: string,
   input: ListBookingsInput,
   hostUserId?: string,
   teamEventTypesOnly = false,
-): Promise<TeamAdminBookingPage & { startInstants: Map<string, Temporal.Instant> }> {
-  // Page booking rows before loading their hosts: collective meetings occupy one row.
+) {
   const { query, limit } = bookingPageQuery(ctx.db, input)
-  const rows = await query
+  const scoped = query
     // The composite event/organization foreign key keeps metadata in this booking's team.
     .leftJoin('event_types as event', 'event.id', 'b.event_type_id')
-    .select([
-      'b.id',
-      'b.status',
-      'b.start_at',
-      'b.end_at',
-      'b.cancelled_at',
-      'event.id as event_type_id',
-    ])
-    .select(
-      sql<string | null>`CASE WHEN event.deleted_at IS NULL THEN event.title ELSE NULL END`.as(
-        'event_type_title',
-      ),
-    )
     .where('b.organization_id', '=', teamId)
     .$if(teamEventTypesOnly, (q) => q.where('event.owner_user_id', 'is', null))
     .$if(hostUserId !== undefined, (q) =>
@@ -189,6 +175,51 @@ export async function readTeamBookingPage(
             .whereRef('assigned_host.booking_id', '=', 'b.id')
             .where('assigned_host.user_id', '=', hostUserId as string),
         ),
+      ),
+    )
+  return { query: scoped, limit }
+}
+
+/** Count the same authorized booking set as its pages, independently of pagination. */
+export async function countTeamBookings(
+  ctx: ServiceContext,
+  teamId: string,
+  input: Omit<ListBookingsInput, 'limit' | 'cursor' | 'order'>,
+  hostUserId?: string,
+  teamEventTypesOnly = false,
+): Promise<number> {
+  const { query } = teamBookingQuery(ctx, teamId, input, hostUserId, teamEventTypesOnly)
+  const count = await query
+    .clearSelect()
+    .clearOrderBy()
+    .clearLimit()
+    .select((eb) => eb.fn.countAll<string>().as('count'))
+    .executeTakeFirstOrThrow()
+  return Number(count.count)
+}
+
+/** Internal projection shared by authorized team reads; callers supply their checked team. */
+export async function readTeamBookingPage(
+  ctx: ServiceContext,
+  teamId: string,
+  input: ListBookingsInput,
+  hostUserId?: string,
+  teamEventTypesOnly = false,
+): Promise<TeamAdminBookingPage & { startInstants: Map<string, Temporal.Instant> }> {
+  // Page booking rows before loading their hosts: collective meetings occupy one row.
+  const { query, limit } = teamBookingQuery(ctx, teamId, input, hostUserId, teamEventTypesOnly)
+  const rows = await query
+    .select([
+      'b.id',
+      'b.status',
+      'b.start_at',
+      'b.end_at',
+      'b.cancelled_at',
+      'event.id as event_type_id',
+    ])
+    .select(
+      sql<string | null>`CASE WHEN event.deleted_at IS NULL THEN event.title ELSE NULL END`.as(
+        'event_type_title',
       ),
     )
     .execute()
