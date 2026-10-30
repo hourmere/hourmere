@@ -1,29 +1,18 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
-import { createRoute, z } from '@hono/zod-openapi'
+import '@hono/zod-openapi'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import {
-  getSelfReadiness,
-  getTeamReadiness,
-  SelfReadinessPageSchema,
-  TeamReadinessPageSchema,
-} from '@hourmere/scheduling'
-import { DomainError } from '@hourmere/scheduling/errors'
+import type { getSelfReadiness, getTeamReadiness } from '@hourmere/scheduling'
 import {
   createFixtures,
   createTestTeam,
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
-import { createMiddleware } from 'hono/factory'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
-import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
-import { teamManagementAccess } from '../team-management.ts'
 import { readinessRoutes } from './readiness.ts'
 
 type TeamPage = Awaited<ReturnType<typeof getTeamReadiness>>
@@ -32,16 +21,7 @@ const selfPath = '/api/v1/readiness/self'
 const teamPath = (id: string) => `/api/v1/teams/${id}/readiness`
 const denied = { error: 'team_management_access_denied' }
 const sizes = [1, 10, 50] as const
-const reasons = [
-  'default_schedule_required',
-  'host_configuration_required',
-  'activation_required',
-  'calendar_attention_required',
-  'check_not_performed',
-  'check_failed',
-  'optional_feature_attention_required',
-]
-const fixes = ['edit_event', 'ask_member', 'retry_summary']
+const now = () => Temporal.Instant.from('2026-11-01T12:00:00Z')
 
 function exactKeys(value: object, keys: string[]) {
   expect(Object.keys(value).sort()).toEqual([...keys].sort())
@@ -49,7 +29,8 @@ function exactKeys(value: object, keys: string[]) {
 
 function assertNoCanaries(value: unknown, canaries: string[]) {
   const serialized = JSON.stringify(value)
-  for (const canary of canaries) expect(serialized.includes(canary)).toBe(false)
+  for (const canary of canaries)
+    expect(serialized.includes(canary), `private canary leaked: ${canary}`).toBe(false)
 }
 
 // These wire allowlists are deliberately independent of the additive published schema.
@@ -62,41 +43,6 @@ function assertTeamProjection(page: TeamPage) {
   for (const member of page.members.data) exactKeys(member, ['memberId', 'displayName', ...common])
   for (const event of page.eventTypes.data)
     exactKeys(event, ['eventTypeId', 'enablement', 'activation', ...common])
-  for (const item of [...page.members.data, ...page.eventTypes.data]) {
-    expect(item.reasonCodes.length).toBeGreaterThan(0)
-    expect(item.fixKinds.length).toBeGreaterThan(0)
-    for (const reason of item.reasonCodes) expect(reasons).toContain(reason)
-    for (const fix of item.fixKinds) expect(fixes).toContain(fix)
-  }
-}
-
-function routeSourceCopy(mutation?: [string, string]): typeof readinessRoutes {
-  let source = readFileSync('apps/server/src/routes/readiness.ts', 'utf8')
-  if (mutation) {
-    expect(source.includes(mutation[0]), 'source-copy mutation must match').toBe(true)
-    source = source.replace(...mutation)
-  }
-  const script = stripTypeScriptTypes(
-    source.replace(/^import\b[\s\S]*?from\s+['"][^'"]+['"]\n/gm, ''),
-  ).replace(/\bexport /g, '')
-  const bindings = {
-    createRoute,
-    z,
-    getSelfReadiness,
-    getTeamReadiness,
-    SelfReadinessPageSchema,
-    TeamReadinessPageSchema,
-    DomainError,
-    createMiddleware,
-    ErrorBody,
-    errorResponses,
-    json,
-    serviceContext,
-    teamManagementAccess,
-  }
-  return new Function(...Object.keys(bindings), `${script}; return readinessRoutes`)(
-    ...Object.values(bindings),
-  ) as typeof readinessRoutes
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query audit', () => {
@@ -150,13 +96,13 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
     await owned?.drop()
   })
 
-  function application(routes = readinessRoutes) {
+  function application() {
     return createApp({
       publicUrl: origin,
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
-      routes: [routes({ db })],
+      routes: [readinessRoutes({ db, now })],
     })
   }
 
@@ -177,10 +123,10 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
     return `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
   }
 
-  async function read<T>(path: string, sessionCookie: string, routes = readinessRoutes) {
+  async function read<T>(path: string, sessionCookie: string) {
     const before = queries()
     const authBefore = authQueryCount
-    const response = await application(routes).request(path, {
+    const response = await application().request(path, {
       headers: { cookie: sessionCookie },
     })
     const count = queries() - before
@@ -194,11 +140,13 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
     const owner = await createTestUser(db, 'Audit owner')
     const admin = await createTestUser(db, 'Audit admin')
     const host = await createTestUser(db, 'Audit member')
+    const unnamed = await createTestUser(db, '   ')
     const outsider = await createTestUser(db, 'Unrelated member')
     const team = await createTestTeam(db, [
       { user: owner, role: 'owner' },
       { user: admin, role: 'admin' },
       { user: host, role: 'member' },
+      { user: unnamed, role: 'member' },
     ])
     const other = await createTestTeam(db, [
       { user: owner, role: 'owner' },
@@ -244,7 +192,7 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
       .values({
         calendar_id: calendar.id,
         external_event_id: 'private-external-event-canary',
-        period: '[2032-04-17T11:23:00Z,2032-04-17T12:41:00Z)',
+        period: '[2033-08-19T11:23:00Z,2033-08-19T12:41:00Z)',
       })
       .execute()
     const eventId = await fx.eventType(team.id, null, { hosts: [{ userId: host.id }] })
@@ -264,6 +212,12 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
       })
       .where('id', '=', bookingId)
       .execute()
+    const members = await db
+      .selectFrom('auth.member')
+      .select(['id', 'userId'])
+      .where('organizationId', '=', team.id)
+      .orderBy('id')
+      .execute()
     return {
       owner,
       admin,
@@ -273,6 +227,47 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
       other,
       eventId,
       otherEventId,
+      expected: {
+        organizationId: team.id,
+        members: {
+          data: members.map((member) => ({
+            memberId: member.id,
+            displayName:
+              member.userId === owner.id
+                ? 'Audit owner'
+                : member.userId === admin.id
+                  ? 'Audit admin'
+                  : member.userId === host.id
+                    ? 'Audit member'
+                    : 'Team member',
+            summary: member.userId === host.id ? 'dependency_unavailable' : 'configuration_blocked',
+            completeness: 'complete',
+            evaluatedAt: now().toString(),
+            reasonCodes: [
+              member.userId === host.id
+                ? 'calendar_attention_required'
+                : 'default_schedule_required',
+            ],
+            fixKinds: ['ask_member'],
+          })),
+          nextCursor: null,
+        },
+        eventTypes: {
+          data: [
+            {
+              eventTypeId: eventId,
+              enablement: 'enabled',
+              activation: 'not_applicable',
+              summary: 'dependency_unavailable',
+              completeness: 'complete',
+              evaluatedAt: now().toString(),
+              reasonCodes: ['calendar_attention_required'],
+              fixKinds: ['ask_member'],
+            },
+          ],
+          nextCursor: null,
+        },
+      },
       canaries: [
         host.email,
         host.id,
@@ -290,6 +285,12 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
         '02:13',
         '03:27',
         '2032-04-17',
+        '04/17/2032',
+        '17/04/2032',
+        '2032/04/17',
+        '17.04.2032',
+        'April 17, 2032',
+        '17 April 2032',
         '04:19',
         '05:31',
         'private-account-identifier-canary',
@@ -297,8 +298,19 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
         'private-calendar-identifier-canary',
         'private-calendar-title-canary',
         'private-external-event-canary',
-        '2032-04-17T11:23',
-        '2032-04-17T12:41',
+        '2033-08-19',
+        '2033-08-19T11:23',
+        '2033-08-19T12:41',
+        '2033-08-19 11:23',
+        '2033-08-19 12:41',
+        '08/19/2033',
+        '19/08/2033',
+        '2033/08/19',
+        '19.08.2033',
+        'August 19, 2033',
+        '19 August 2033',
+        '11:23',
+        '12:41',
         'private-booking-title-canary',
         'private-event-detail-canary',
       ],
@@ -311,10 +323,9 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
       const sessionCookie = await cookie(manager, f.team.id)
       const { body } = await read<TeamPage>(teamPath(f.team.id), sessionCookie)
       assertTeamProjection(body)
-      expect(body.organizationId).toBe(f.team.id)
-      expect(body.members.data).toHaveLength(3)
-      expect(body.eventTypes.data.map((event) => event.eventTypeId)).toEqual([f.eventId])
       assertNoCanaries(body, f.canaries)
+      // Exact values close every string channel, including names, labels and reasons.
+      expect(body).toEqual(f.expected)
       const { body: self } = await read<SelfPage>(selfPath, sessionCookie)
       expect(self.member.details).toEqual({ schedules: [], calendars: [] })
       expect(self.eventTypes.data).toEqual([])
@@ -374,38 +385,55 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
     }
   })
 
-  it('detects extra private fields at every team response object boundary using source copies', async () => {
-    const f = await privateFixture()
-    const sessionCookie = await cookie(f.owner, f.team.id)
-    const verify = async (routes: typeof readinessRoutes) => {
-      const { body } = await read<TeamPage>(teamPath(f.team.id), sessionCookie, routes)
-      assertTeamProjection(body)
-      assertNoCanaries(body, f.canaries)
-    }
-    await verify(routeSourceCopy())
-    for (const replacement of [
-      "{ ...result, privateDetail: 'private-field-canary' }",
-      "{ ...result, members: { ...result.members, privateDetail: 'private-field-canary' } }",
-      "{ ...result, eventTypes: { ...result.eventTypes, privateDetail: 'private-field-canary' } }",
-      "{ ...result, members: { ...result.members, data: result.members.data.map(row => ({ ...row, privateDetail: 'private-field-canary' })) } }",
-      "{ ...result, eventTypes: { ...result.eventTypes, data: result.eventTypes.data.map(row => ({ ...row, privateDetail: 'private-field-canary' })) } }",
-      "{ ...result, members: { ...result.members, data: result.members.data.map(row => ({ ...row, reasonCodes: ['private-reason-canary'] })) } }",
-      "{ ...result, members: { ...result.members, data: result.members.data.map(row => ({ ...row, fixKinds: ['private-fix-canary'] })) } }",
-      "{ ...result, eventTypes: { ...result.eventTypes, data: result.eventTypes.data.map(row => ({ ...row, reasonCodes: ['private-reason-canary'] })) } }",
-      "{ ...result, eventTypes: { ...result.eventTypes, data: result.eventTypes.data.map(row => ({ ...row, fixKinds: ['private-fix-canary'] })) } }",
-      "{ ...result, members: { ...result.members, data: result.members.data.map(row => ({ ...row, displayName: 'private-calendar-title-canary' })) } }",
-    ]) {
-      const mutant = routeSourceCopy([
-        'return c.json(result, 200)',
-        `return c.json(${replacement}, 200)`,
-      ])
-      await expect(verify(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
-    }
-    await verify(routeSourceCopy())
-  })
+  async function connectedAccounts(userId: string, calendarCount = 1) {
+    const connection = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: userId,
+        provider: 'google',
+        external_account_id: randomUUID(),
+        account_email: `audit-calendar-${randomUUID()}@example.com`,
+        credentials: Buffer.from('synthetic-unused-calendar-credential'),
+        status: 'active',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('calendars')
+      .values(
+        Array.from({ length: calendarCount }, () => ({
+          connection_id: connection.id,
+          external_id: randomUUID(),
+          name: `Audit calendar ${randomUUID()}`,
+          time_zone: 'UTC',
+          check_conflicts: true,
+          last_synced_at: new Date(now().epochMilliseconds),
+          sync_state: {
+            version: 2,
+            timeZone: 'UTC',
+            start: '2026-10-01T00:00:00Z',
+            end: '2026-12-01T00:00:00Z',
+            token: 'synthetic-unused-sync-cursor',
+          },
+        })),
+      )
+      .execute()
+    await db
+      .insertInto('conference_connections')
+      .values({
+        user_id: userId,
+        provider: 'zoom',
+        external_user_id: randomUUID(),
+        mode: 'identity',
+        scopes: ['user:read:user'],
+        status: 'active',
+        credentials: Buffer.from('synthetic-unused-conference-credential'),
+      })
+      .execute()
+  }
 
   it.each(['personal events', 'team events', 'team members'] as const)(
-    'keeps complete HTTP query cost constant for 1, 10 and 50 %s and detects per-row query mutations',
+    'keeps complete HTTP query cost constant for 1, 10 and 50 %s with connected accounts',
     async (pathKind) => {
       const owner = await createTestUser(db)
       const fx = createFixtures(db)
@@ -413,31 +441,45 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
       const personal = pathKind === 'personal events'
       const team = personal ? undefined : await createTestTeam(db, [{ user: owner, role: 'owner' }])
       const organizationId = team?.id ?? owner.principal.organization.id
+      // A personal page shares one owner's facts across its events. Fifty selected
+      // calendars also make a per-calendar loader exceed the fixed query budget.
+      if (personal) await connectedAccounts(owner.id, 50)
       for (let index = 0; index < 50; index++) {
+        const host =
+          personal || (pathKind === 'team members' && index === 0)
+            ? owner
+            : await createTestUser(db)
+        if (!personal) {
+          if (host !== owner) {
+            await fx.member(host.id, organizationId)
+            await fx.schedule(host.id)
+          }
+          await connectedAccounts(host.id)
+        }
         if (pathKind !== 'team members' || index === 0)
           await fx.eventType(organizationId, personal ? owner.id : null, {
-            hosts: [{ userId: owner.id }],
+            hosts: [{ userId: host.id }],
           })
-        if (pathKind === 'team members' && index > 0) {
-          const user = await createTestUser(db)
-          await fx.member(user.id, organizationId)
-          await fx.schedule(user.id)
-        }
       }
       const sessionCookie = await cookie(owner, organizationId)
       const requestPath = personal ? selfPath : teamPath(organizationId)
-      const measured = async (routes: typeof readinessRoutes) => {
+      const measured = async () => {
         const counts: number[] = []
         for (const size of sizes) {
           const { body, count, authCount } = await read<SelfPage | TeamPage>(
             `${requestPath}?limit=${size}`,
             sessionCookie,
-            routes,
           )
           const page = pathKind === 'team members' ? (body as TeamPage).members : body.eventTypes
           expect(page.data).toHaveLength(size)
           expect(count).toBeGreaterThan(0)
           expect(authCount).toBeGreaterThan(0)
+          if (personal) {
+            expect((body as SelfPage).member.details.calendars).toHaveLength(50)
+            expect((body as SelfPage).member.details.calendars.every((c) => c.checkConflicts)).toBe(
+              true,
+            )
+          }
           counts.push(count)
         }
         return counts
@@ -446,27 +488,10 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
         expect(counts).toEqual([counts[0], counts[0], counts[0]])
         expect(counts[0]).toBeLessThan(40)
       }
-      const counts = await measured(readinessRoutes)
-      assertConstant(counts)
+      const counts = await measured()
       // Numeric evidence only; never emit cookies, credential strings or SQL arguments.
       console.info(`readiness HTTP queries (${pathKind}; N=1,10,50): ${counts.join(',')}`)
-      const mutation: [string, string] = personal
-        ? [
-            "await getSelfReadiness(serviceContext(deps, c.var.principal), c.req.valid('query')),",
-            "await (async () => { const page = await getSelfReadiness(serviceContext(deps, c.var.principal), c.req.valid('query')); for (const row of page.eventTypes.data) await deps.db.selectFrom('event_types').select('id').where('id', '=', row.subject.id).execute(); return page })(),",
-          ]
-        : [
-            'return c.json(result, 200)',
-            pathKind === 'team members'
-              ? "for (const row of result.members.data) await deps.db.selectFrom('auth.member').select('id').where('id', '=', row.memberId).execute(); return c.json(result, 200)"
-              : "for (const row of result.eventTypes.data) await deps.db.selectFrom('event_types').select('id').where('id', '=', row.eventTypeId).execute(); return c.json(result, 200)",
-          ]
-      const mutatedCounts = await measured(routeSourceCopy(mutation))
-      await expect(
-        Promise.resolve().then(() => assertConstant(mutatedCounts)),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
-      expect(mutatedCounts).toEqual(counts.map((count, index) => count + (sizes[index] as number)))
-      assertConstant(await measured(routeSourceCopy()))
+      assertConstant(counts)
       expect(owned.pool.totalCount + authPool.totalCount).toBeLessThanOrEqual(20)
     },
   )

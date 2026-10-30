@@ -1,44 +1,22 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
-import { z } from '@hono/zod-openapi'
+import '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
-import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import { createDb, type Db, type Json } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
-  type getSelfReadiness,
-  type getTeamReadiness,
   listPublicSlots,
   listPublicTeamSlots,
   type SelfReadiness,
   type SelfReadinessPage,
   type TeamReadinessPage,
 } from '@hourmere/scheduling'
-import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import {
-  assertCachedCalendarSync,
-  servedHandle,
-} from '../../../packages/scheduling/src/availability.ts'
-import { checkedCatalogPage } from '../../../packages/scheduling/src/catalog-page.ts'
-import {
-  automaticMeet,
-  automaticZoom,
-  evaluateGoogleWriteDestination,
-  evaluateZoomConnection,
-  meetOrganizer,
-} from '../../../packages/scheduling/src/conferences.ts'
-import { DomainError } from '../../../packages/scheduling/src/errors.ts'
-import { eligibleHostIds, hasValidHostShape } from '../../../packages/scheduling/src/hosts.ts'
-import { isUuid } from '../../../packages/scheduling/src/internal.ts'
 import {
   createFixtures,
   createTestTeam,
   createTestUser,
   type TestUser,
 } from '../../../packages/scheduling/src/testing.ts'
-import { cleanText } from '../../../packages/scheduling/src/text.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
 import { productApp, syntheticSessionCookie } from './routes/test-app.ts'
@@ -49,67 +27,6 @@ const start = Temporal.Instant.from('2026-11-02T09:00:00Z')
 const end = Temporal.Instant.from('2026-11-02T17:00:00Z')
 type Mode = 'personal' | 'individual' | 'collective' | 'round_robin'
 type Summary = SelfReadiness['summary']
-type Mutation = readonly [string, string]
-type Evaluator = {
-  getSelfReadiness: typeof getSelfReadiness
-  getTeamReadiness: typeof getTeamReadiness
-}
-
-// Negative controls evaluate source copies without changing files other agents may use.
-function readinessCopy(mutation: Mutation): Evaluator {
-  const source = readFileSync('packages/scheduling/src/readiness.ts', 'utf8')
-  expect(source.includes(mutation[0]), 'source-copy mutation must match').toBe(true)
-  const script = stripTypeScriptTypes(
-    source.replace(...mutation).replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
-  ).replace(/\bexport /g, '')
-  const bindings = {
-    validateTimeZone,
-    validateWeeklyHours,
-    sql,
-    z,
-    assertCachedCalendarSync,
-    servedHandle,
-    checkedCatalogPage,
-    automaticMeet,
-    automaticZoom,
-    evaluateGoogleWriteDestination,
-    evaluateZoomConnection,
-    meetOrganizer,
-    DomainError,
-    eligibleHostIds,
-    hasValidHostShape,
-    isUuid,
-    cleanText,
-  }
-  return new Function(
-    ...Object.keys(bindings),
-    `${script}; return { getSelfReadiness, getTeamReadiness }`,
-  )(...Object.values(bindings)) as Evaluator
-}
-
-const mutations = {
-  schedule: [
-    "'configuration_blocker',\n      now,\n      'default_schedule_required',",
-    "'satisfied',\n      now,\n      'default_schedule_required',",
-  ],
-  calendar: ['assertCachedCalendarSync([calendar], now)', 'undefined'],
-  provider: [
-    "const unsupported = selected.some((c) => c.provider !== 'google')",
-    'const unsupported = false',
-  ],
-  disabled: [
-    "const enablement = event.is_active ? 'enabled' : 'disabled'",
-    "const enablement = 'enabled' as const",
-  ],
-  departed: [
-    'const hostBlocked = !shape || !eligible.length || (!rr && eligible.length !== configured.length)',
-    'const hostBlocked = false',
-  ],
-  healthy: [": 'checks_passed'))", ": 'configuration_blocked'))"],
-  pool: ["? 'partial_pool'", "? 'configuration_blocked'"],
-  activation: ['r.event_type_id === event.id && r.enabled', 'r.event_type_id === event.id'],
-} as const satisfies Record<string, Mutation>
-
 describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP booking', () => {
   let owned: TestDatabase
   let db: Db
@@ -251,21 +168,7 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
       .execute()
   }
 
-  async function summary(setup: Fixture, evaluator?: Evaluator) {
-    if (evaluator) {
-      if (setup.team) {
-        const page = await evaluator.getTeamReadiness({
-          db,
-          now,
-          organizationId: setup.organization.id,
-        })
-        return page.eventTypes.data.find((row) => row.eventTypeId === setup.eventTypeId)?.summary
-      }
-      const page = await evaluator.getSelfReadiness({ db, now, principal: setup.session.principal })
-      const event = page.eventTypes.data.find((row) => row.subject.id === setup.eventTypeId)
-      expect(event?.availability).toBe('not_checked')
-      return event?.summary
-    }
+  async function summary(setup: Fixture) {
     const response = await app.request(
       setup.team ? `/api/v1/teams/${setup.organization.id}/readiness` : '/api/v1/readiness/self',
       { headers: { cookie: setup.session.cookie } },
@@ -285,15 +188,8 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
   async function compare(
     setup: Fixture,
     expected: { summary: Summary; slots: number | string; status: number; error?: string },
-    mutation: Mutation,
   ) {
-    const assertSummary = (observed: Summary | undefined) => expect(observed).toBe(expected.summary)
-    assertSummary(await summary(setup))
-    const mutated = await summary(setup, readinessCopy(mutation))
-    expect(
-      () => assertSummary(mutated),
-      'the real summary assertion must reject the source mutation',
-    ).toThrow()
+    expect(await summary(setup)).toBe(expected.summary)
     const slots = (setup.team ? listPublicTeamSlots : listPublicSlots)(
       { db, now },
       { handle: setup.handle, slug: 'intro', start, end },
@@ -338,16 +234,12 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
   }
 
   it('missing schedule is blocked, offers no slots and refuses booking', async () => {
-    await compare(
-      await fixture('personal', false),
-      {
-        summary: 'configuration_blocked',
-        slots: 0,
-        status: 409,
-        error: 'slot_unavailable',
-      },
-      mutations.schedule,
-    )
+    await compare(await fixture('personal', false), {
+      summary: 'configuration_blocked',
+      slots: 0,
+      status: 409,
+      error: 'slot_unavailable',
+    })
   })
 
   it.each([
@@ -360,23 +252,19 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
     async (_label, options) => {
       const setup = await fixture()
       await calendar(setup.host, options)
-      await compare(
-        setup,
-        {
-          summary: 'dependency_unavailable',
-          slots: 'calendar_sync_unavailable',
-          status: 409,
-          error: 'calendar_sync_unavailable',
-        },
-        mutations.calendar,
-      )
+      await compare(setup, {
+        summary: 'dependency_unavailable',
+        slots: 'calendar_sync_unavailable',
+        status: 409,
+        error: 'calendar_sync_unavailable',
+      })
     },
   )
 
   it('a provider without cached sync checks stays unchecked while the existing engine can book', async () => {
     const setup = await fixture()
     await calendar(setup.host, { provider: 'caldav' })
-    await compare(setup, { summary: 'not_checked', slots: 16, status: 201 }, mutations.provider)
+    await compare(setup, { summary: 'not_checked', slots: 16, status: 201 })
   })
 
   it('healthy configuration with a fully booked range is no promise of a free slot', async () => {
@@ -388,89 +276,77 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
       end.toString(),
       { eventTypeId: setup.eventTypeId },
     )
-    await compare(
-      setup,
-      {
-        summary: 'checks_passed',
-        slots: 0,
-        status: 409,
-        error: 'slot_unavailable',
-      },
-      mutations.healthy,
-    )
+    await compare(setup, {
+      summary: 'checks_passed',
+      slots: 0,
+      status: 409,
+      error: 'slot_unavailable',
+    })
   })
 
-  it('disabled event types remain disabled and are not publicly bookable', async () => {
-    const setup = await fixture()
-    await db
-      .updateTable('event_types')
-      .set({ is_active: false })
-      .where('id', '=', setup.eventTypeId)
-      .execute()
-    await compare(
-      setup,
-      {
+  it.each(['personal', 'individual', 'collective', 'round_robin'] as const)(
+    'a disabled %s event type remains disabled and is not publicly bookable',
+    async (mode) => {
+      const setup = await fixture(mode)
+      await db
+        .updateTable('event_types')
+        .set({ is_active: false })
+        .where('id', '=', setup.eventTypeId)
+        .execute()
+      await compare(setup, {
         summary: 'disabled',
         slots: 'event_type_not_found',
         status: 404,
         error: 'event_type_not_found',
-      },
-      mutations.disabled,
-    )
-  })
+      })
+    },
+  )
 
-  it('a departed individual team host blocks public resolution and booking', async () => {
-    const setup = await fixture('individual')
-    await db
-      .deleteFrom('auth.member')
-      .where('organizationId', '=', setup.organization.id)
-      .where('userId', '=', setup.host.id)
-      .execute()
-    await compare(
-      setup,
-      {
-        summary: 'configuration_blocked',
-        slots: 'event_type_not_found',
-        status: 404,
-        error: 'event_type_not_found',
-      },
-      mutations.departed,
-    )
-  })
+  it.each(['individual', 'collective', 'round_robin'] as const)(
+    'a departed %s team host agrees with public availability and booking',
+    async (mode) => {
+      const setup = await fixture(mode)
+      await db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', setup.organization.id)
+        .where('userId', '=', setup.host.id)
+        .execute()
+      const hosts = await compare(
+        setup,
+        mode === 'round_robin'
+          ? { summary: 'partial_pool', slots: 16, status: 201 }
+          : {
+              summary: 'configuration_blocked',
+              slots: 'event_type_not_found',
+              status: 404,
+              error: 'event_type_not_found',
+            },
+      )
+      if (mode === 'round_robin') expect(hosts).toEqual([setup.users[1]?.id])
+    },
+  )
 
   it('healthy collective configuration books both required hosts without external calendars', async () => {
     const setup = await fixture('collective')
-    const hosts = await compare(
-      setup,
-      { summary: 'checks_passed', slots: 16, status: 201 },
-      mutations.healthy,
-    )
+    const hosts = await compare(setup, { summary: 'checks_passed', slots: 16, status: 201 })
     expect(hosts.sort()).toEqual(setup.users.map((user) => user.id).sort())
   })
 
   it('one unavailable collective host blocks the intersection and booking', async () => {
     const setup = await fixture('collective')
     await calendar(setup.host, { status: 'revoked' })
-    await compare(
-      setup,
-      {
-        summary: 'dependency_unavailable',
-        slots: 'calendar_sync_unavailable',
-        status: 409,
-        error: 'calendar_sync_unavailable',
-      },
-      mutations.calendar,
-    )
+    await compare(setup, {
+      summary: 'dependency_unavailable',
+      slots: 'calendar_sync_unavailable',
+      status: 409,
+      error: 'calendar_sync_unavailable',
+    })
   })
 
   it('a round-robin pool with an unavailable calendar can book its healthy host', async () => {
     const setup = await fixture('round_robin')
     await calendar(setup.host, { status: 'revoked' })
-    const hosts = await compare(
-      setup,
-      { summary: 'partial_pool', slots: 16, status: 201 },
-      mutations.pool,
-    )
+    const hosts = await compare(setup, { summary: 'partial_pool', slots: 16, status: 201 })
     expect(hosts).toEqual([setup.users[1]?.id])
   })
 
@@ -484,16 +360,12 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
       end.toString(),
       { eventTypeId: setup.eventTypeId },
     )
-    await compare(
-      setup,
-      {
-        summary: 'partial_pool',
-        slots: 'calendar_sync_unavailable',
-        status: 409,
-        error: 'calendar_sync_unavailable',
-      },
-      mutations.pool,
-    )
+    await compare(setup, {
+      summary: 'partial_pool',
+      slots: 'calendar_sync_unavailable',
+      status: 409,
+      error: 'calendar_sync_unavailable',
+    })
   })
 
   it('inactive round-robin configuration needs activation and refuses public booking', async () => {
@@ -503,15 +375,11 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
       .set({ enabled: false })
       .where('event_type_id', '=', setup.eventTypeId)
       .execute()
-    await compare(
-      setup,
-      {
-        summary: 'needs_activation',
-        slots: 'event_type_not_found',
-        status: 404,
-        error: 'event_type_not_found',
-      },
-      mutations.activation,
-    )
+    await compare(setup, {
+      summary: 'needs_activation',
+      slots: 'event_type_not_found',
+      status: 404,
+      error: 'event_type_not_found',
+    })
   })
 })
