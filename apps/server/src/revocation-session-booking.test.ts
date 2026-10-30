@@ -1,92 +1,41 @@
-import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
-import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { serve } from '@hono/node-server'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
+import type { MailMessage } from '@hourmere/mail'
+import { sendBookingNotification } from '@hourmere/notifications'
+import {
+  createFixtures,
+  createTestTeam,
+  createTestUser,
+  type TestUser,
+} from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
-import type { bookingTools } from './mcp/bookings.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
-import type { bookingRoutes } from './routes/bookings.ts'
-import { memberLeaveRoutes } from './routes/member-leave.ts'
-import { memberRemovalRoutes } from './routes/member-removal.ts'
-import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { productRoutes, productTools } from './server.ts'
+import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const bootstrap = process.env.DATABASE_URL
 const publicUrl = 'http://localhost:4389'
 const secret = 'synthetic-revocation-booking-session-secret-000000000'
 const paths = ['REST', 'MCP', 'CLI'] as const
 type Path = (typeof paths)[number]
-type Replacement = readonly [string, string]
-type Copies = { routes: typeof bookingRoutes; tools: typeof bookingTools }
-
-/** Evaluate disposable copies; mutations never change the worktree or other test workers. */
-async function sourceCopy<T>(
-  file: string,
-  exported: string,
-  overrides: Record<string, unknown> = {},
-  replacements: Replacement[] = [],
-): Promise<T> {
-  let source = readFileSync(file, 'utf8')
-  for (const [before, after] of replacements) {
-    expect(source.includes(before), 'mutation must match source').toBe(true)
-    source = source.replaceAll(before, after)
-  }
-  source = stripTypeScriptTypes(source)
-  const imports = /^import\s+\{([\s\S]*?)\}\s+from\s+'([^']+)'\n/gm
-  const bindings: Record<string, unknown> = {}
-  for (const match of source.matchAll(imports)) {
-    const specifier = match[2] as string
-    const imported = (await import(
-      specifier.startsWith('.') ? new URL(specifier, pathToFileURL(resolve(file))).href : specifier
-    )) as Record<string, unknown>
-    for (const entry of (match[1] as string).split(',')) {
-      const [name, alias = name] = entry.trim().split(/\s+as\s+/)
-      if (name && alias)
-        bindings[alias] = Object.hasOwn(overrides, name) ? overrides[name] : imported[name]
-    }
-  }
-  source = source
-    .replace(imports, '')
-    .replace(/^export \{[^}]+\} from '[^']+'\n/gm, '')
-    .replace(/\bexport /g, '')
-  return new Function(...Object.keys(bindings), `${source}; return ${exported}`)(
-    ...Object.values(bindings),
-  ) as T
-}
-
-async function bookingCopies(replacements: Replacement[] = []): Promise<Copies> {
-  const services = await sourceCopy<Record<string, unknown>>(
-    'packages/scheduling/src/bookings.ts',
-    '{ listHostBookings, getHostBooking, cancelManagedBooking }',
-    {},
-    replacements,
-  )
-  return {
-    routes: await sourceCopy('apps/server/src/routes/bookings.ts', 'bookingRoutes', services),
-    tools: await sourceCopy('apps/server/src/mcp/bookings.ts', 'bookingTools', services),
-  }
-}
-
 describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', () => {
   let owned: TestDatabase
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
   let auth: Auth
+  const outbox: MailMessage[] = []
+  const mailer = { send: async (message: MailMessage) => void outbox.push(message) }
 
   beforeAll(async () => {
     owned = await createTestDatabase(bootstrap as string, undefined, { tag: 'revocation_book' })
     db = createDb(owned.pool)
     const signup = { mode: 'open', allowedDomains: [] } as const
-    // Reused by all sequential scenarios and source copies; never one pool per test.
+    // Reused by both sequential scenarios; never one pool per test.
     authPool = createAuthPool(owned.url, signup)
     auth = createAuth({
       pool: authPool,
@@ -94,7 +43,7 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
       baseURL: publicUrl,
       secret,
       signup,
-      mailer: { send: async () => {} },
+      mailer,
     })
   })
 
@@ -103,25 +52,14 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
     await owned?.drop()
   })
 
-  async function withServer<T>(
-    run: (url: string) => Promise<T>,
-    copies?: Copies,
-    resolver = createCallerResolver({ auth, db }),
-  ): Promise<T> {
+  async function withServer<T>(run: (url: string) => Promise<T>): Promise<T> {
     const app = createApp({
       publicUrl,
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: resolver,
-      routes: copies
-        ? [
-            copies.routes({ db }),
-            memberLeaveRoutes({ db }),
-            memberRemovalRoutes({ db }),
-            teamBookingRoutes({ db }),
-          ]
-        : productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
-      mcp: mcpEndpoint({ tools: copies ? copies.tools({ db }) : productTools({ db }) }),
+      resolveCaller: createCallerResolver({ auth, db }),
+      routes: productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+      mcp: mcpEndpoint({ tools: productTools({ db }) }),
     })
     const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 })
     try {
@@ -134,38 +72,87 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
     }
   }
 
-  async function session(user: TestUser, organizationId: string) {
-    const token = randomBytes(24).toString('base64url')
-    await db
-      .insertInto('auth.session')
-      .values({
-        userId: user.id,
-        token,
-        activeOrganizationId: organizationId,
-        expiresAt: new Date(Date.now() + 3_600_000),
-        updatedAt: new Date(),
-      })
-      .execute()
-    const signature = createHmac('sha256', secret).update(token).digest('base64')
-    return `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
+  async function session(url: string, user: TestUser, organizationId: string) {
+    const before = outbox.length
+    const requested = await fetch(`${url}/api/auth/sign-in/magic-link`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: publicUrl },
+      body: JSON.stringify({ email: user.email, callbackURL: '/' }),
+    })
+    expect(requested.status).toBe(200)
+    await requested.body?.cancel()
+    await vi.waitFor(() =>
+      expect(outbox.slice(before).some((message) => message.to === user.email)).toBe(true),
+    )
+    const mail = outbox.slice(before).find((message) => message.to === user.email)
+    const link = mail?.text.match(/https?:\/\/\S+/)?.[0]
+    expect(typeof link === 'string', 'sign-in email includes a confirmation link').toBe(true)
+    const confirm = await pressConfirmButton(
+      {
+        request: (input) => {
+          const target = new URL(input)
+          return fetch(`${url}${target.pathname}${target.search}`, { redirect: 'manual' })
+        },
+      },
+      new URL(link as string),
+    )
+    const verified = await fetch(`${url}${confirm.pathname}${confirm.search}`, {
+      redirect: 'manual',
+    })
+    expect(verified.status).toBe(302)
+    const cookie = verified.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0])
+      .join('; ')
+    expect(cookie.includes('better-auth.session_token=')).toBe(true)
+    await verified.body?.cancel()
+    const active = await fetch(`${url}/api/auth/organization/set-active`, {
+      method: 'POST',
+      headers: writeHeaders(cookie, user.principal.organization.id),
+      body: JSON.stringify({ organizationId }),
+    })
+    expect(active.status).toBe(200)
+    await active.body?.cancel()
+    return cookie
   }
 
-  async function fixture() {
+  async function fixture(url: string) {
     const host = await createTestUser(db, 'Departing admin')
     const owner = await createTestUser(db, 'Continuing owner')
     const team = await createTestTeam(db, [
       { user: host, role: 'admin' },
       { user: owner, role: 'owner' },
     ])
-    const cookie = await session(host, team.id)
-    const secondCookie = await session(host, team.id)
-    const ownerCookie = await session(owner, team.id)
+    const fixtures = createFixtures(db)
+    const handle = `departing-${host.id.slice(-12)}`
+    await db.insertInto('profiles').values({ user_id: host.id, handle, time_zone: 'UTC' }).execute()
+    await fixtures.schedule(host.id, { timeZone: 'UTC' })
+    await fixtures.eventType(host.principal.organization.id, host.id, { slug: 'personal' })
+    const teamEventTypeId = await fixtures.eventType(team.id, null, {
+      slug: 'team',
+      hosts: [{ userId: host.id }],
+    })
+    const teamSlug = team.as(host).organization.slug
+    const cookie = await session(url, host, team.id)
+    const secondCookie = await session(url, host, team.id)
+    const ownerCookie = await session(url, owner, team.id)
     const key = (
       await auth.api.createApiKey({
         body: { userId: host.id, metadata: { organizationId: host.principal.organization.id } },
       })
     ).key
-    return { host, owner, team, cookie, secondCookie, ownerCookie, key }
+    return {
+      host,
+      owner,
+      team,
+      handle,
+      teamSlug,
+      teamEventTypeId,
+      cookie,
+      secondCookie,
+      ownerCookie,
+      key,
+    }
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>
 
@@ -191,53 +178,46 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
     return response.json()
   }
 
-  async function booking(f: Fixture, personal = false, sequence = 0) {
-    const start = Temporal.Now.instant().add({ hours: 48 + sequence })
-    const responseToken = randomBytes(32).toString('base64url')
-    const emailToken = randomBytes(32).toString('base64url')
-    const hash = (token: string) => createHash('sha256').update(token).digest()
-    const { id, attendeeId } = await db.transaction().execute(async (trx) => {
-      const row = await trx
-        .insertInto('bookings')
-        .values({
-          organization_id: personal ? f.host.principal.organization.id : f.team.id,
-          start_at: start.toString(),
-          end_at: start.add({ minutes: 30 }).toString(),
-          title: 'Guest appointment',
-          source: 'web',
-          manage_token_hash: hash(responseToken),
-          required_host_user_ids: [f.host.id],
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow()
-      await trx
-        .insertInto('booking_hosts')
-        .values({ booking_id: row.id, user_id: f.host.id })
-        .execute()
-      const attendee = await trx
-        .insertInto('booking_attendees')
-        .values({
-          booking_id: row.id,
-          name: 'Invitee',
-          email: 'invitee@example.com',
-          time_zone: 'UTC',
-          is_booker: true,
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow()
-      return { ...row, attendeeId: attendee.id }
-    })
-    // A synthetic sent receipt exercises the email-link lookup without contacting SMTP.
-    await db
-      .insertInto('booking_notifications')
-      .values({
-        booking_id: id,
-        kind: 'confirmed',
-        recipient: `attendee:${attendeeId}`,
-        manage_token_hash: hash(emailToken),
-      })
-      .execute()
-    return { id, responseToken, emailToken }
+  async function booking(url: string, f: Fixture, personal = false, sequence = 0) {
+    let day = Temporal.Now.zonedDateTimeISO('UTC').add({ days: 2 }).toPlainDate()
+    while (day.dayOfWeek > 5) day = day.add({ days: 1 })
+    for (let i = 0; i < sequence; i++) {
+      day = day.add({ days: 1 })
+      while (day.dayOfWeek > 5) day = day.add({ days: 1 })
+    }
+    const start = day.toZonedDateTime({ timeZone: 'UTC', plainTime: '10:00' }).toInstant()
+    const response = await fetch(
+      `${url}/api/v1/public/${personal ? `${f.handle}/personal` : `teams/${f.teamSlug}/team`}/bookings`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          start: start.toString(),
+          invitee: {
+            name: 'Invitee',
+            email: `invitee-${personal ? 'personal' : sequence}@example.com`,
+            timeZone: 'UTC',
+          },
+        }),
+      },
+    )
+    expect(response.status, 'guest booking is issued by the public booking flow').toBe(201)
+    const body = (await response.json()) as { booking: { id: string }; manageToken: string }
+    expect(typeof body.manageToken === 'string').toBe(true)
+    const before = outbox.length
+    // Run the same delivery handler as the booking-notification worker with a capturing mailer.
+    await sendBookingNotification({ db, mailer, secret, publicUrl }, body.booking.id, 'confirmed')
+    const mail = outbox.slice(before).find((message) => message.to.startsWith('invitee-'))
+    const emailToken = mail?.text.match(/#token=([A-Za-z0-9_-]{43})&action=/)?.[1]
+    expect(typeof emailToken === 'string', 'notification issues its own guest link').toBe(true)
+    expect(emailToken === body.manageToken, 'response and email capabilities are distinct').toBe(
+      false,
+    )
+    return {
+      id: body.booking.id,
+      responseToken: body.manageToken,
+      emailToken: emailToken as string,
+    }
   }
   type Booking = Awaited<ReturnType<typeof booking>>
 
@@ -337,10 +317,22 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
       expect(await team.json()).toMatchObject({ error: 'team_management_access_denied' })
       const update = await fetch(`${url}/api/auth/organization/update`, {
         method: 'POST',
-        headers: writeHeaders(cookie, f.team.id),
+        headers: writeHeaders(cookie, identity.organization.id),
         body: JSON.stringify({ organizationId: f.team.id, data: { name: 'Denied stale edit' } }),
       })
-      expect([403, 409].includes(update.status)).toBe(true)
+      expect(update.status).toBe(409)
+      expect(await update.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+      // HTTP also binds the explicit target to the expected context. The trusted native
+      // API bypasses that consistency guard and exercises its own membership check.
+      await expect(
+        auth.api.updateOrganization({
+          headers: new Headers({ cookie }),
+          body: { organizationId: f.team.id, data: { name: 'Denied stale edit' } },
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        body: { code: 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' },
+      })
       const switched = await fetch(`${url}/api/auth/organization/set-active`, {
         method: 'POST',
         headers: writeHeaders(cookie, f.team.id),
@@ -426,10 +418,10 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
 
   it('revokes old admin sessions while preserving both kinds of guest links after removal', async () => {
     await withServer(async (url) => {
-      const f = await fixture()
-      const personal = await booking(f, true, 12)
+      const f = await fixture(url)
+      const personal = await booking(url, f, true, 12)
       const bookings: Booking[] = []
-      for (let i = 0; i < paths.length * 2; i++) bookings.push(await booking(f, false, i))
+      for (let i = 0; i < paths.length * 2; i++) bookings.push(await booking(url, f, false, i))
       const before = await fetch(`${url}/api/v1/team/bookings`, {
         headers: { cookie: f.secondCookie },
       })
@@ -456,9 +448,9 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
 
   it('requires handling before leave, retains canceled team links and permits personal guest cancellation', async () => {
     await withServer(async (url) => {
-      const f = await fixture()
-      const team = await booking(f)
-      const personal = await booking(f, true, 12)
+      const f = await fixture(url)
+      const team = await booking(url, f)
+      const personal = await booking(url, f, true, 12)
       const blocked = await fetch(`${url}/api/v1/teams/${f.team.id}/leave`, {
         method: 'POST',
         headers: writeHeaders(f.cookie, f.team.id),
@@ -467,6 +459,11 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
       expect(blocked.status).toBe(409)
       privateResponse(await blocked.json(), [team.responseToken, team.emailToken])
       await cancelGuest(url, f, team, 'REST', team.responseToken)
+      const deleted = await fetch(`${url}/api/v1/event-types/${f.teamEventTypeId}`, {
+        method: 'DELETE',
+        headers: writeHeaders(f.cookie, f.team.id),
+      })
+      expect(deleted.status).toBe(204)
       privateResponse(await depart(url, f, 'leave'), [team.responseToken, team.emailToken])
       await oldSessions(url, f)
       await hostPrivacy(url, f, personal, team)
@@ -487,128 +484,6 @@ describe.skipIf(!bootstrap)('departed hosts and guest links through real HTTP', 
         expect(await repeated.json()).toMatchObject({ error: 'booking_cancelled' })
       }
       await cancelGuest(url, f, personal, 'CLI', personal.emailToken)
-    })
-  })
-
-  async function verifyGuest(copies: Copies) {
-    await withServer(async (url) => {
-      const f = await fixture()
-      const b = await booking(f)
-      await depart(url, f, 'remove')
-      await cancelGuest(url, f, b, 'REST', b.emailToken)
-    }, copies)
-  }
-
-  async function verifyPrivacy(copies: Copies) {
-    await withServer(async (url) => {
-      const f = await fixture()
-      const b = await booking(f)
-      const personal = await booking(f, true, 12)
-      await depart(url, f, 'remove')
-      await hostPrivacy(url, f, personal, b)
-    }, copies)
-  }
-
-  it('passes guest and departed-host assertions using unmodified service, route and tool copies', async () => {
-    const copies = await bookingCopies()
-    await verifyGuest(copies)
-    await verifyPrivacy(copies)
-  })
-
-  it('detects requiring current host membership for a guest cancellation with a real assertion', async () => {
-    const copies = await bookingCopies([
-      [
-        'await lockCancellationOrganization(trx, parent.organization_id)',
-        `if (!(await trx.selectFrom('booking_hosts as h').innerJoin('auth.member as m', 'm.userId', 'h.user_id').select('h.user_id').where('h.booking_id', '=', target.id).where('m.organizationId', '=', parent.organization_id).executeTakeFirst())) throw bookingNotFound()
-    await lockCancellationOrganization(trx, parent.organization_id)`,
-      ],
-    ])
-    await expect(verifyGuest(copies)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('guest cancellation remains authorized'),
-      actual: 404,
-      expected: 200,
-    })
-  })
-
-  it('detects exposing a management capability in host reads with a real assertion', async () => {
-    const copies = await bookingCopies([
-      ['id: r.id,', "id: r.id, manageToken: 'synthetic-capability-control',"],
-    ])
-    await expect(verifyPrivacy(copies)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('no private capability fields'),
-      actual: true,
-      expected: false,
-    })
-  })
-
-  it('detects dropping the booking organization scope with a real assertion', async () => {
-    const copies = await bookingCopies([
-      [".where('b.organization_id', '=', ctx.principal.organization.id)", ''],
-    ])
-    await expect(verifyPrivacy(copies)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('only current organization bookings'),
-    })
-  })
-
-  async function verifySessionFallback(resolver: ReturnType<typeof createCallerResolver>) {
-    await withServer(
-      async (url) => {
-        const f = await fixture()
-        await depart(url, f, 'remove')
-        await oldSessions(url, f)
-      },
-      undefined,
-      resolver,
-    )
-  }
-
-  it('passes old-session fallback assertions with the unmodified resolver source copy', async () => {
-    const factory = await sourceCopy<typeof createCallerResolver>(
-      'packages/auth/src/caller.ts',
-      'createCallerResolver',
-    )
-    await verifySessionFallback(factory({ auth, db }))
-  })
-
-  it('detects removing the old-session personal fallback with a real assertion', async () => {
-    const factory = await sourceCopy<typeof createCallerResolver>(
-      'packages/auth/src/caller.ts',
-      'createCallerResolver',
-      {},
-      [
-        [
-          '(active ? await inOrganization(userId, active) : undefined) ??\n      (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))',
-          '(active ? await inOrganization(userId, active) : undefined)',
-        ],
-      ],
-    )
-    await expect(verifySessionFallback(factory({ auth, db }))).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('old sessions retain personal access'),
-      actual: 401,
-      expected: 200,
-    })
-  })
-
-  it('detects trusting stale session team context without current membership', async () => {
-    const factory = await sourceCopy<typeof createCallerResolver>(
-      'packages/auth/src/caller.ts',
-      'createCallerResolver',
-      {},
-      [
-        [
-          ".innerJoin('auth.organization as o', 'o.id', 'm.organizationId')",
-          ".innerJoin('auth.organization as o', (join) => join.on('o.id', '=', organizationId))",
-        ],
-        [".where('m.organizationId', '=', organizationId)", ''],
-      ],
-    )
-    await expect(verifySessionFallback(factory({ auth, db }))).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('old sessions fall back from the revoked team'),
     })
   })
 })

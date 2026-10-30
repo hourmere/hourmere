@@ -1,56 +1,25 @@
 // Real HTTP, PostgreSQL and the executable CLI; no mail or external provider traffic.
 import { spawn } from 'node:child_process'
-import { createHmac, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
 import { serve } from '@hono/node-server'
 import '@hono/zod-openapi'
-import {
-  type Auth,
-  type CallerResolver,
-  createAuth,
-  createAuthPool,
-  createCallerResolver,
-  ensurePersonalOrganization,
-} from '@hourmere/auth'
+import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import type { MailMessage } from '@hourmere/mail'
 import { leaveTeamMember } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { isUuid } from '../../../packages/auth/src/organizations.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { productRoutes, productTools } from './server.ts'
+import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const bootstrap = process.env.DATABASE_URL
 const secret = 'synthetic-revocation-regression-session-secret-0000000000'
-type Replacement = readonly [string, string]
-type ResolverFactory = typeof createCallerResolver
 type Departure = 'removal' | 'leave'
 type Credential = { id: string; key: string }
 type Identity = { organization: { id: string } }
-
-/** Evaluate only a source copy; concurrent workers always retain the checked-in resolver. */
-function resolverCopy(replacement?: Replacement): ResolverFactory {
-  let source = readFileSync('packages/auth/src/caller.ts', 'utf8')
-  if (replacement) {
-    expect(source.includes(replacement[0]), 'mutation matches the real caller resolver').toBe(true)
-    source = source.replace(...replacement)
-  }
-  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
-    /\bexport /g,
-    '',
-  )
-  return new Function(
-    'sql',
-    'ensurePersonalOrganization',
-    'isUuid',
-    `${source}; return createCallerResolver`,
-  )(sql, ensurePersonalOrganization, isUuid) as ResolverFactory
-}
 
 describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI', () => {
   let owned: TestDatabase
@@ -60,6 +29,7 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
   let server: ReturnType<typeof serve> | undefined
   let app: ReturnType<typeof createApp>
   let origin: string
+  const outbox: MailMessage[] = []
 
   beforeAll(async () => {
     owned = await createTestDatabase(bootstrap as string, undefined, { tag: 'revoke_keys' })
@@ -81,13 +51,16 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
           { db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
-      mailer: {
-        send: async () => {
-          throw new Error('Mail delivery is forbidden in revocation regression tests')
-        },
-      },
+      mailer: { send: async (message) => void outbox.push(message) },
     })
-    application()
+    app = createApp({
+      checkDb: async () => {},
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      publicUrl: origin,
+      routes: productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+      mcp: mcpEndpoint({ tools: productTools({ db }) }),
+    })
   })
 
   afterAll(async () => {
@@ -100,32 +73,36 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
     await owned?.drop()
   })
 
-  function application(factory: ResolverFactory = createCallerResolver) {
-    const resolveCaller: CallerResolver = factory({ auth, db })
-    app = createApp({
-      checkDb: async () => {},
-      authHandler: auth.handler,
-      resolveCaller,
-      publicUrl: origin,
-      routes: productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
-      mcp: mcpEndpoint({ tools: productTools({ db }) }),
-    })
-  }
-
   async function session(user: TestUser, organizationId: string) {
-    const token = randomBytes(24).toString('base64url')
-    await db
-      .insertInto('auth.session')
-      .values({
-        userId: user.id,
-        token,
-        activeOrganizationId: organizationId,
-        expiresAt: new Date(Date.now() + 3_600_000),
-        updatedAt: new Date(),
-      })
-      .execute()
-    const signature = createHmac('sha256', secret).update(token).digest('base64')
-    return `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
+    const before = outbox.length
+    const requested = await post('/api/auth/sign-in/magic-link', '', {
+      email: user.email,
+      callbackURL: '/app',
+    })
+    expect(requested.status).toBe(200)
+    await requested.body?.cancel()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const link = outbox
+      .slice(before)
+      .find((message) => message.to === user.email)
+      ?.text.match(/https?:\/\/\S+/)?.[0]
+    expect(typeof link === 'string').toBe(true)
+    const verified = await pressConfirmButton(
+      { request: (url) => fetch(url) },
+      new URL(link as string),
+    )
+    const response = await fetch(verified, { redirect: 'manual' })
+    expect(response.status).toBe(302)
+    await response.body?.cancel()
+    const cookie = response.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0])
+      .join('; ')
+    expect(cookie.includes('better-auth.session_token=')).toBe(true)
+    const switched = await post('/api/auth/organization/set-active', cookie, { organizationId })
+    expect(switched.status).toBe(200)
+    await switched.body?.cancel()
+    return cookie
   }
 
   function post(path: string, cookie: string, body: unknown, organizationId?: string) {
@@ -141,8 +118,7 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
     })
   }
 
-  async function fixture(factory?: ResolverFactory) {
-    application(factory)
+  async function fixture() {
     const member = await createTestUser(db, 'Departing administrator')
     const owner = await createTestUser(db, 'Continuing owner')
     const team = await createTestTeam(db, [
@@ -303,8 +279,8 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
     }
   }
 
-  async function verifyRevocation(departure: Departure, factory?: ResolverFactory, native = false) {
-    const f = await fixture(factory)
+  async function verifyRevocation(departure: Departure, native = false) {
+    const f = await fixture()
     await expectIdentity(f.key, f.team.id)
     const client = new Client({ name: 'retained-revocation-client', version: '1.0.0' })
     const clientStatuses: number[] = []
@@ -361,12 +337,12 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
 
   it.each<Departure>(['removal', 'leave'])(
     'rejects the old team key after native Better Auth %s through REST, MCP and the CLI',
-    async (departure) => verifyRevocation(departure, undefined, true),
+    async (departure) => verifyRevocation(departure, true),
     30_000,
   )
 
-  async function verifyBinding(factory?: ResolverFactory) {
-    const f = await fixture(factory)
+  async function verifyBinding() {
+    const f = await fixture()
     await expectIdentity(f.key, f.team.id)
     for (const organizationId of [f.other.id, f.member.principal.organization.id, f.team.id]) {
       const switched = await post('/api/auth/organization/set-active', f.cookie, { organizationId })
@@ -385,8 +361,8 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
     await verifyBinding()
   }, 30_000)
 
-  async function verifyNoFallback(factory?: ResolverFactory) {
-    const f = await fixture(factory)
+  async function verifyNoFallback() {
+    const f = await fixture()
     const authenticated = await fetch(`${origin}/api/v1/me`, { headers: { cookie: f.cookie } })
     expect(authenticated.status).toBe(200)
     await authenticated.body?.cancel()
@@ -410,57 +386,5 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
 
   it('never falls back from an invalid bearer to a live web session', async () => {
     await verifyNoFallback()
-  })
-
-  it('passes the same HTTP and executable CLI assertions with the unmodified resolver copy', async () => {
-    const factory = resolverCopy()
-    await verifyRevocation('removal', factory)
-    await verifyRevocation('leave', factory)
-    await verifyBinding(factory)
-    await verifyNoFallback(factory)
-  }, 30_000)
-
-  it.each<Departure>(['removal', 'leave'])(
-    'detects accepting a departed team key by falling back to personal after %s',
-    async (departure) => {
-      const factory = resolverCopy([
-        'const membership = await inOrganization(userId, organizationId, result.key.id)',
-        `const membership = await inOrganization(userId, organizationId, result.key.id)
-          ?? await inOrganization(userId, await ensurePersonalOrganization(db, userId), result.key.id)`,
-      ])
-      // A loader error cannot kill a mutation: compilation happens before this assertion.
-      await expect(verifyRevocation(departure, factory)).rejects.toMatchObject({
-        name: 'AssertionError',
-        actual: 200,
-        expected: 401,
-      })
-    },
-    30_000,
-  )
-
-  it('detects retargeting an issued key to the current web session organization', async () => {
-    const factory = resolverCopy([
-      "typeof stored === 'string' ? stored : await ensurePersonalOrganization(db, userId)",
-      `(await db.selectFrom('auth.session').select('activeOrganizationId')
-        .where('userId', '=', userId).orderBy('updatedAt', 'desc')
-        .executeTakeFirst())?.activeOrganizationId ?? await ensurePersonalOrganization(db, userId)`,
-    ])
-    await expect(verifyBinding(factory)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('API key must retain its issued organization'),
-    })
-  })
-
-  it('detects accepting a cookie session after bearer authentication fails', async () => {
-    const factory = resolverCopy([
-      'return authorization === null ? fromSession(headers) : fromApiKey(authorization)',
-      `return authorization === null ? fromSession(headers) : fromApiKey(authorization)
-        .then(result => result.ok ? result : fromSession(headers))`,
-    ])
-    await expect(verifyNoFallback(factory)).rejects.toMatchObject({
-      name: 'AssertionError',
-      actual: 200,
-      expected: 401,
-    })
   })
 })

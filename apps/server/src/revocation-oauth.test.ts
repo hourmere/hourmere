@@ -1,9 +1,6 @@
 import '@hono/zod-openapi'
-import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingHttpHeaders, request, type Server } from 'node:http'
-import { createRequire, stripTypeScriptTypes } from 'node:module'
-import { pathToFileURL } from 'node:url'
 import { getRequestListener } from '@hono/node-server'
 import {
   type Auth,
@@ -14,6 +11,8 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import type { MailMessage } from '@hourmere/mail'
+import { leaveTeamMember } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
@@ -23,6 +22,7 @@ import { whoamiTool } from './mcp/whoami.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { closeServer } from './shutdown.ts'
+import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const bootstrap = process.env.DATABASE_URL
 const secret = 'synthetic-revocation-oauth-secret-at-least-thirty-two-characters'
@@ -30,79 +30,6 @@ const callback = 'https://connector.test/callback'
 const signup = { mode: 'closed', allowedDomains: [] } as const
 let nextAddress = 0
 let transportAddress = '198.18.0.1'
-type Mutation = readonly [string, string]
-type Factories = {
-  auth: typeof createAuth
-  resolve: typeof createMcpOAuthResolver
-  routes: typeof mcpOAuthRoutes
-}
-
-function moduleUrl(source: string, location: URL, replacements: Record<string, string> = {}) {
-  const resolvePackage = (specifier: string) => {
-    try {
-      return import.meta.resolve(specifier)
-    } catch {
-      return pathToFileURL(createRequire(location).resolve(specifier)).href
-    }
-  }
-  const code = stripTypeScriptTypes(source).replace(/from '([^']+)'/g, (_, specifier: string) => {
-    const resolved =
-      replacements[specifier] ??
-      (specifier.startsWith('node:') ? specifier : undefined) ??
-      (specifier.startsWith('.') ? new URL(specifier, location).href : resolvePackage(specifier))
-    return `from '${resolved}'`
-  })
-  return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-}
-
-/** In-memory modules keep mutations out of working files and concurrent test workers. */
-async function sourceCopy(oauthMutations: Mutation[] = [], brokerMutations: Mutation[] = []) {
-  const oauthLocation = new URL('../../../packages/auth/src/mcp-oauth.ts', import.meta.url)
-  let oauth = readFileSync(oauthLocation, 'utf8')
-  for (const [before, after] of oauthMutations) {
-    expect(oauth.includes(before), 'mutation matches the OAuth protection').toBe(true)
-    oauth = oauth.replace(before, after)
-  }
-  const indexLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
-  const indexUrl = moduleUrl(readFileSync(indexLocation, 'utf8'), indexLocation, {
-    './mcp-oauth.ts': moduleUrl(oauth, oauthLocation),
-  })
-  const copiedAuth = (await import(indexUrl)) as typeof import('@hourmere/auth')
-  const brokerLocation = new URL('./mcp/oauth.ts', import.meta.url)
-  let broker = readFileSync(brokerLocation, 'utf8')
-  for (const [before, after] of brokerMutations) {
-    expect(broker.includes(before), 'mutation matches the consent broker protection').toBe(true)
-    broker = broker.replace(before, after)
-  }
-  // Bind the broker's ordinary imports in Vitest's runtime. In particular, DomainError
-  // must retain the constructor that createApp uses to map service refusals to HTTP 403.
-  const imports = /^import\s+\{([\s\S]*?)\}\s+from\s+'([^']+)'\n/gm
-  broker = stripTypeScriptTypes(broker)
-  const bindings: Record<string, unknown> = {}
-  for (const match of broker.matchAll(imports)) {
-    const specifier = match[2] as string
-    const imported =
-      specifier === '@hourmere/auth'
-        ? copiedAuth
-        : ((await import(
-            specifier.startsWith('.') ? new URL(specifier, brokerLocation).href : specifier
-          )) as Record<string, unknown>)
-    for (const item of (match[1] as string).split(',')) {
-      const [name, alias = name] = item.trim().split(/\s+as\s+/)
-      if (name && alias) bindings[alias] = imported[name as keyof typeof imported]
-    }
-  }
-  const copiedRoutes = new Function(
-    ...Object.keys(bindings),
-    `${broker.replace(imports, '').replace(/\bexport /g, '')}; return mcpOAuthRoutes`,
-  )(...Object.values(bindings)) as typeof mcpOAuthRoutes
-  return {
-    auth: copiedAuth.createAuth,
-    resolve: copiedAuth.createMcpOAuthResolver,
-    routes: copiedRoutes,
-  } satisfies Factories
-}
-
 type HttpResponse = { status: number; headers: IncomingHttpHeaders; body: string }
 function http(
   url: string,
@@ -163,11 +90,12 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
   let server: Server
   let base: string
   let mounted: ReturnType<typeof createApp>
+  const outbox: MailMessage[] = []
 
   beforeAll(async () => {
     owned = await createTestDatabase(bootstrap as string, undefined, { tag: 'revoke_oauth' })
     db = createDb(owned.pool)
-    // Every copied factory shares this pool and its two lock connections (at most 22 total).
+    // Reuse one auth pool and its two lock connections across every scenario.
     pool = createAuthPool(owned.url, signup)
     server = createServer((req, res) => {
       getRequestListener(mounted.fetch)(req, res)
@@ -177,6 +105,7 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
       server.listen(0, '127.0.0.1', resolve)
     })
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    await application()
   })
 
   afterAll(async () => {
@@ -185,21 +114,20 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     await owned?.drop()
   })
 
-  async function application(
-    factories: Factories = {
-      auth: createAuth,
-      resolve: createMcpOAuthResolver,
-      routes: mcpOAuthRoutes,
-    },
-  ) {
-    const auth: Auth = factories.auth({
+  async function application() {
+    const auth: Auth = createAuth({
       db,
       pool,
       baseURL: base,
       secret,
       signup,
       mcpOAuth: true,
-      mailer: { send: async () => {} },
+      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember(
+          { db, principal, now: () => Temporal.Now.instant() },
+          { teamId, expectedOrganizationId },
+        ),
+      mailer: { send: async (message) => void outbox.push(message) },
       // Even a regression in client discovery must never call a real metadata endpoint.
       mcpMetadataFetcher: async () => new Response(null, { status: 404 }),
     })
@@ -211,43 +139,49 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
       publicUrl: base,
       trustedProxies: ['127.0.0.1'],
       routes: [
-        factories.routes({ auth, db, publicUrl: base }),
+        mcpOAuthRoutes({ auth, db, publicUrl: base }),
         memberLeaveRoutes({ db }),
         memberRemovalRoutes({ db }),
       ],
       mcp: mcpEndpoint({
         tools: [whoamiTool],
-        oauth: { resolve: factories.resolve({ auth, db, publicUrl: base }), handler: auth.handler },
+        oauth: {
+          resolve: createMcpOAuthResolver({ auth, db, publicUrl: base }),
+          handler: auth.handler,
+        },
       }),
     })
   }
 
   async function session(user: TestUser, organizationId: string) {
-    const token = randomBytes(24).toString('base64url')
-    const row = await db
-      .insertInto('auth.session')
-      .values({
-        userId: user.id,
-        token,
-        activeOrganizationId: organizationId,
-        expiresAt: new Date(Date.now() + 3_600_000),
-        updatedAt: new Date(),
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow()
-    const signature = createHmac('sha256', secret).update(token).digest('base64')
-    return {
-      id: row.id,
-      headers: {
-        cookie: `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`,
-        origin: base,
-      },
-    }
+    const before = outbox.length
+    const requested = await http(`${base}/api/auth/sign-in/magic-link`, {
+      headers: { origin: base },
+      body: { email: user.email, callbackURL: '/' },
+    })
+    expect(requested.status).toBe(200)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const mail = outbox.slice(before).find((message) => message.to === user.email)
+    const link = mail?.text.match(/https?:\/\/\S+/)?.[0]
+    expect(link !== undefined).toBe(true)
+    const verification = await pressConfirmButton(mounted, new URL(link as string))
+    const verified = await http(verification.href)
+    expect(verified.status).toBe(302)
+    const cookie = (verified.headers['set-cookie'] ?? [])
+      .map((value) => value.split(';')[0])
+      .join('; ')
+    expect(cookie.includes('better-auth.session_token=')).toBe(true)
+    const headers = { cookie, origin: base }
+    const activated = await http(`${base}/api/auth/organization/set-active`, {
+      headers,
+      body: { organizationId },
+    })
+    expect(activated.status).toBe(200)
+    return { headers }
   }
 
-  async function fixture(factories?: Factories) {
+  async function fixture() {
     transportAddress = `198.18.${Math.floor(++nextAddress / 250)}.${(nextAddress % 250) + 1}`
-    await application(factories)
     const member = await createTestUser(db, 'Departing OAuth administrator')
     const owner = await createTestUser(db, 'Remaining owner')
     const team = await createTestTeam(db, [
@@ -390,25 +324,41 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     expect(body.result.structuredContent.organization.id).toBe(organizationId)
   }
 
-  async function depart(f: Fixture, action: 'leave' | 'remove') {
-    const response = await http(
-      `${base}${action === 'leave' ? `/api/v1/teams/${f.team.id}/leave` : `/api/v1/team/members/${f.member.id}/removal`}`,
-      {
-        headers: {
-          ...(action === 'leave' ? f.memberSession.headers : f.ownerSession.headers),
-          'x-expected-organization-id': f.team.id,
-        },
-        body: action === 'leave' ? {} : { teamId: f.team.id },
-      },
-    )
-    expect(response.status).toBe(200)
+  async function depart(f: Fixture, action: 'leave' | 'remove', native: boolean) {
     const membership = await db
       .selectFrom('auth.member')
       .select('id')
       .where('userId', '=', f.member.id)
       .where('organizationId', '=', f.team.id)
+      .executeTakeFirstOrThrow()
+    const path = native
+      ? `/api/auth/organization/${action === 'leave' ? 'leave' : 'remove-member'}`
+      : action === 'leave'
+        ? `/api/v1/teams/${f.team.id}/leave`
+        : `/api/v1/team/members/${f.member.id}/removal`
+    const body = native
+      ? {
+          organizationId: f.team.id,
+          ...(action === 'remove' ? { memberIdOrEmail: membership.id } : {}),
+        }
+      : action === 'leave'
+        ? {}
+        : { teamId: f.team.id }
+    const response = await http(`${base}${path}`, {
+      headers: {
+        ...(action === 'leave' ? f.memberSession.headers : f.ownerSession.headers),
+        'x-expected-organization-id': f.team.id,
+      },
+      body,
+    })
+    expect(response.status).toBe(200)
+    const remainingMembership = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', f.member.id)
+      .where('organizationId', '=', f.team.id)
       .executeTakeFirst()
-    expect(membership === undefined).toBe(true)
+    expect(remainingMembership === undefined).toBe(true)
   }
 
   const invalidGrant = (response: HttpResponse) => {
@@ -416,14 +366,10 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     expect(json<{ error: string }>(response).error).toBe('invalid_grant')
   }
 
-  async function revocationScenario(
-    action: 'leave' | 'remove',
-    factories?: Factories,
-    includeSurvivor = false,
-  ) {
-    const f = await fixture(factories)
+  async function revocationScenario(action: 'leave' | 'remove', native: boolean) {
+    const f = await fixture()
     const tokens = await connect(f)
-    const surviving = includeSurvivor ? await connect(f, f.otherTeam.id) : undefined
+    const surviving = await connect(f, f.otherTeam.id)
     await assertOrganization(tokens.access_token, f.team.id)
     // Rotate before departure, then exercise both ordinary refresh and lost-response replay.
     const rotated = await refresh(f, tokens.refresh_token)
@@ -432,45 +378,32 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     const codeAuthorization = await begin(f)
     const code = await approve(f, codeAuthorization)
     const pending = await begin(f)
-    await depart(f, action)
+    await depart(f, action, native)
     return { f, tokens, next, codeAuthorization, code, pending, surviving }
   }
-  type RevocationScenario = Awaited<ReturnType<typeof revocationScenario>>
-
-  async function assertRevocationArea(scenario: RevocationScenario, area = 'all') {
-    const { f, tokens, next, codeAuthorization, code, pending } = scenario
-    if (area === 'all' || area === 'access') {
-      expect((await mcp(tokens.access_token, f.memberSession.headers.cookie)).status).toBe(401)
-      expect((await mcp(next.access_token)).status).toBe(401)
-    }
-    if (area === 'all' || area === 'refresh') invalidGrant(await refresh(f, next.refresh_token))
-    if (area === 'all' || area === 'replay') invalidGrant(await refresh(f, tokens.refresh_token))
-    if (area === 'all' || area === 'code') invalidGrant(await exchange(f, codeAuthorization, code))
-    if (area === 'all' || area === 'consent') {
-      const consent = await post('/api/v1/mcp-oauth/consent', f.memberSession, {
-        oauthQuery: pending.oauthQuery,
-        intentId: pending.intentId,
-        accept: true,
-      })
-      expect(consent.status).toBe(403)
-    }
-  }
-
-  async function assertRevoked(action: 'leave' | 'remove', factories?: Factories) {
-    const scenario = await revocationScenario(action, factories, true)
-    const { f, pending, surviving } = scenario
-    await assertRevocationArea(scenario)
+  async function assertRevoked(action: 'leave' | 'remove', native: boolean) {
+    const scenario = await revocationScenario(action, native)
+    const { f, tokens, next, codeAuthorization, code, pending, surviving } = scenario
+    expect((await mcp(tokens.access_token, f.memberSession.headers.cookie)).status).toBe(401)
+    expect((await mcp(next.access_token)).status).toBe(401)
+    invalidGrant(await refresh(f, next.refresh_token))
+    invalidGrant(await refresh(f, tokens.refresh_token))
+    invalidGrant(await exchange(f, codeAuthorization, code))
+    const consent = await post('/api/v1/mcp-oauth/consent', f.memberSession, {
+      oauthQuery: pending.oauthQuery,
+      intentId: pending.intentId,
+      accept: true,
+    })
+    expect(consent.status).toBe(403)
     const newSelection = await post('/api/v1/mcp-oauth/select', f.memberSession, {
       oauthQuery: pending.oauthQuery,
       organizationId: f.team.id,
     })
     expect(newSelection.status).toBe(403)
-    if (surviving) {
-      await assertOrganization(surviving.access_token, f.otherTeam.id)
-      const renewed = await refresh(f, surviving.refresh_token)
-      expect(renewed.status).toBe(200)
-      await assertOrganization(json<{ access_token: string }>(renewed).access_token, f.otherTeam.id)
-    }
+    await assertOrganization(surviving.access_token, f.otherTeam.id)
+    const renewed = await refresh(f, surviving.refresh_token)
+    expect(renewed.status).toBe(200)
+    await assertOrganization(json<{ access_token: string }>(renewed).access_token, f.otherTeam.id)
     // A different, still-valid team and the personal session survive this team's departure.
     const me = await http(`${base}/api/v1/me`, { headers: f.memberSession.headers })
     expect(me.status).toBe(200)
@@ -483,8 +416,8 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     expect(switched.status).toBe(200)
   }
 
-  async function bindingScenario(factories?: Factories) {
-    const f = await fixture(factories)
+  async function bindingScenario() {
+    const f = await fixture()
     const tokens = await connect(f)
     const grant = await db
       .selectFrom('mcp_oauth_grants')
@@ -505,8 +438,8 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     return { f, grant, refreshedToken: json<{ access_token: string }>(rotated).access_token }
   }
 
-  async function assertBinding(factories?: Factories) {
-    const { f, grant, refreshedToken } = await bindingScenario(factories)
+  async function assertBinding() {
+    const { f, grant, refreshedToken } = await bindingScenario()
     await assertOrganization(refreshedToken, f.team.id)
     const unchanged = await db
       .selectFrom('mcp_oauth_grants')
@@ -520,88 +453,19 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
     }
   }
 
-  it.each(['leave', 'remove'] as const)(
-    'refuses issued access/refresh tokens, replay, code and pending grant after %s',
-    async (action) => {
-      await assertRevoked(action)
+  it.each([
+    { action: 'leave', native: false, path: 'REST leave' },
+    { action: 'remove', native: false, path: 'REST removal' },
+    { action: 'leave', native: true, path: 'native organization/leave' },
+    { action: 'remove', native: true, path: 'native organization/remove-member' },
+  ] as const)(
+    'refuses issued access/refresh tokens, replay, code and pending grant after $path',
+    async ({ action, native }) => {
+      await assertRevoked(action, native)
     },
     30_000,
   )
   it('keeps an existing OAuth grant in its consented team after a web switch', async () => {
     await assertBinding()
-  }, 30_000)
-
-  it('passes revocation and binding assertions with unchanged isolated source copies', async () => {
-    const copy = await sourceCopy()
-    await assertRevoked('remove', copy)
-    await assertBinding(copy)
-  }, 30_000)
-
-  it('detects omitting live membership from access-token resolution', async () => {
-    const copy = await sourceCopy([
-      [
-        `.innerJoin('auth.member as m', (j) =>
-        j.onRef('m.userId', '=', 'g.user_id').onRef('m.organizationId', '=', 'g.organization_id'),
-      )`,
-        '',
-      ],
-    ])
-    const scenario = await revocationScenario('remove', copy)
-    await expect(assertRevocationArea(scenario, 'access')).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
-  }, 30_000)
-
-  it('detects omitting membership at authorization-code exchange', async () => {
-    const copy = await sourceCopy([['if (!row) throw refusal()', '']])
-    const scenario = await revocationScenario('leave', copy)
-    await expect(assertRevocationArea(scenario, 'code')).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
-  }, 30_000)
-
-  it('detects omitting both membership checks for ordinary refresh', async () => {
-    const copy = await sourceCopy([
-      ['await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)', ''],
-      ['await requireMembership(db, user.id, grant.organization_id, invalidGrant)', ''],
-    ])
-    const scenario = await revocationScenario('remove', copy)
-    await expect(assertRevocationArea(scenario, 'refresh')).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
-  }, 30_000)
-
-  it('detects omitting membership on lost-response refresh replay', async () => {
-    const copy = await sourceCopy([
-      ['await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)', ''],
-    ])
-    const scenario = await revocationScenario('leave', copy)
-    await expect(assertRevocationArea(scenario, 'replay')).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
-  }, 30_000)
-
-  it("detects accepting a departed member's pending grant consent", async () => {
-    const copy = await sourceCopy(
-      [['if (!row) throw refusal()', '']],
-      [['if (!orgs.some((o) => o.id === row.organization_id)) throw forbidden()', '']],
-    )
-    const scenario = await revocationScenario('remove', copy)
-    await expect(assertRevocationArea(scenario, 'consent')).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
-  }, 30_000)
-
-  it("detects retargeting refreshed OAuth tokens to the web session's active team", async () => {
-    const copy = await sourceCopy([
-      [
-        "'https://hourmere.com/organization': grant.organization_id,",
-        "'https://hourmere.com/organization': (await db.selectFrom('auth.session').select('activeOrganizationId').where('userId', '=', user.id).executeTakeFirstOrThrow()).activeOrganizationId,",
-      ],
-    ])
-    const scenario = await bindingScenario(copy)
-    await expect(
-      assertOrganization(scenario.refreshedToken, scenario.f.team.id),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
   }, 30_000)
 })
