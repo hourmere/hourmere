@@ -16,6 +16,7 @@ registerCatalog(admin)
 const session = vi.hoisted(() => ({
   me: {
     user: { id: 'shell-user', name: 'Ada', email: 'shell@example.com' },
+    personalOrganizationId: 'personal-space' as string | null,
     organization: { id: 'personal-space', name: 'Ada', slug: 'ada', personal: true },
     principal: { kind: 'session', apiKeyId: null },
   },
@@ -35,6 +36,7 @@ vi.mock('../session.tsx', () => ({
 
 beforeEach(() => {
   session.me.organization = { id: 'personal-space', name: 'Ada', slug: 'ada', personal: true }
+  session.me.personalOrganizationId = 'personal-space'
   session.me.principal.kind = 'session'
   session.accept.mockClear()
   fakeApi({})
@@ -239,6 +241,60 @@ describe('the space selector in the admin frame', () => {
     logo: null,
     createdAt: '2026-10-01T09:00:00.000Z',
   }
+
+  it.each([
+    ['en', false, 'Personal'],
+    ['en', true, 'Personal'],
+    ['zh-CN', false, '个人空间'],
+    ['zh-CN', true, '个人空间'],
+  ] as const)(
+    'deduplicates Personal from the server marker on a cold %s start (personal: %s)',
+    async (language, personal, label) => {
+      chooseLanguage(language)
+      const storedPersonal = {
+        id: 'personal-space',
+        name: 'Renamed private workspace',
+        slug: 'renamed-workspace',
+      }
+      const sameNameTeam = { id: 'second-team', name: session.me.user.name, slug: 'ada-team' }
+      session.me.organization = personal
+        ? { ...storedPersonal, personal: true }
+        : { ...TEAM, personal: false }
+      fakeApi({
+        'GET /api/auth/organization/list': () => json(200, [storedPersonal, TEAM, sameNameTeam]),
+        'GET /api/auth/organization/get-active-member': () =>
+          json(200, {
+            organizationId: TEAM.id,
+            userId: session.me.user.id,
+            role: 'member',
+          }),
+      })
+      shell()
+      await userEvent.click(screen.getByRole('button', { name: /^(Switch space|切换空间)/ }))
+      const menu = screen.getByRole('menu')
+      await within(menu).findByRole('menuitemradio', { name: new RegExp(TEAM.name) })
+      expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(3)
+      const personalOption = within(menu).getAllByRole('menuitemradio', {
+        name: new RegExp(`^${label}`),
+      })
+      expect(personalOption).toHaveLength(1)
+      expect(personalOption[0]?.getAttribute('aria-checked')).toBe(String(personal))
+      expect(within(menu).queryByText(storedPersonal.name)).toBeNull()
+      expect(within(menu).getByRole('menuitemradio', { name: sameNameTeam.name })).toBeDefined()
+    },
+  )
+
+  it('keeps Personal and team choices usable when the personal marker is null', async () => {
+    session.me.personalOrganizationId = null
+    session.me.organization = { ...TEAM, personal: false }
+    fakeApi({ 'GET /api/auth/organization/list': () => json(200, [TEAM]) })
+    shell()
+    await userEvent.click(screen.getByRole('button', { name: /^Switch space/ }))
+    const menu = screen.getByRole('menu')
+    await within(menu).findByRole('menuitemradio', { name: new RegExp(TEAM.name) })
+    expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(2)
+    expect(within(menu).getByRole('menuitemradio', { name: 'Personal' })).toBeDefined()
+  })
 
   it.each([
     ['owner', 'Owner'],

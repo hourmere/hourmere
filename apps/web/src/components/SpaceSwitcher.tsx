@@ -12,9 +12,6 @@ import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { useMe, useSession } from '../session.tsx'
 import { useConfirmLeave } from '../unsaved-changes.tsx'
 
-// /organization/list has no personal marker. Remember only a personal ID confirmed by
-// /me, as a display hint across the context remount; it never grants access.
-let knownPersonal: { userId: string; organizationId: string } | null = null
 let handoffFocus: { userId: string; organizationId: string } | null = null
 
 export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => void }) {
@@ -35,11 +32,7 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
   const triggerLabelId = useId()
   const userId = me.user.id
   const organizationId = me.organization.id
-  const personalId = me.organization.personal
-    ? organizationId
-    : knownPersonal?.userId === userId
-      ? knownPersonal.organizationId
-      : null
+  const personalId = me.personalOrganizationId
 
   const loadRole = useCallback(
     async (signal: AbortSignal) => {
@@ -83,7 +76,6 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
   )
 
   useEffect(() => {
-    if (me.organization.personal) knownPersonal = { userId, organizationId }
     if (handoffFocus?.userId === userId && handoffFocus.organizationId === organizationId) {
       handoffFocus = null
       trigger.current?.focus()
@@ -92,7 +84,7 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
       switching.current?.controller.abort()
       switching.current?.release()
     }
-  }, [userId, organizationId, me.organization.personal])
+  }, [userId, organizationId])
 
   // Focus moves into the menu only when opening it; a delayed list response must not
   // interrupt someone already navigating its items.

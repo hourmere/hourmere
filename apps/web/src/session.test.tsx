@@ -499,6 +499,7 @@ describe('when the account or organization changes elsewhere', () => {
   const SECRET = 'hm_AdasSecretShownOnlyOnce0123456789abcdefghijklmnopqrstuvwxyzABCDEF'
   const GRACE: Schemas['Me'] = {
     user: { id: '00000000-0000-7000-8000-0000000000d1', name: 'Grace', email: 'grace@example.com' },
+    personalOrganizationId: '00000000-0000-7000-8000-0000000000d2',
     organization: {
       id: '00000000-0000-7000-8000-0000000000d2',
       name: 'Grace',
@@ -562,10 +563,12 @@ describe('when the account or organization changes elsewhere', () => {
 
   function switchableKeys({
     start = ME,
+    personal = ME,
     switchResponse,
     confirmedMe,
   }: {
     start?: Schemas['Me']
+    personal?: Schemas['Me']
     switchResponse?: () => Response | Promise<Response>
     confirmedMe?: Schemas['Me']
   } = {}) {
@@ -573,7 +576,7 @@ describe('when the account or organization changes elsewhere', () => {
     const api = fakeApi({
       ...profile(),
       'GET /api/v1/me': () => json(200, active.current),
-      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/organization/list': () => json(200, [personal.organization, TEAM]),
       'GET /api/auth/organization/get-active-member': () =>
         json(200, {
           organizationId: active.current.organization.id,
@@ -585,7 +588,7 @@ describe('when the account or organization changes elsewhere', () => {
         if (switchResponse) return switchResponse()
         active.current =
           confirmedMe ??
-          ((body as { organizationId: string | null }).organizationId === null ? ME : TEAM_ME)
+          ((body as { organizationId: string | null }).organizationId === null ? personal : TEAM_ME)
         return json(200, active.current.organization.personal ? null : TEAM)
       },
     })
@@ -596,6 +599,41 @@ describe('when the account or organization changes elsewhere', () => {
     expect(document.body.innerHTML).not.toContain(text)
     for (const field of document.querySelectorAll('input')) expect(field.value).not.toContain(text)
   }
+
+  it('keeps a single Personal entry after switching from a team and back', async () => {
+    const personal = {
+      ...ME,
+      organization: { ...ME.organization, name: 'Renamed private workspace' },
+    }
+    const { api } = switchableKeys({ start: TEAM_ME, personal })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+
+    async function expectChoices(inPersonal: boolean) {
+      const trigger = screen.getByRole('button', { name: /^Switch space/ })
+      await userEvent.click(trigger)
+      const menu = screen.getByRole('menu')
+      await within(menu).findByRole('menuitemradio', { name: /^Acme/ })
+      expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(2)
+      const choices = within(menu).getAllByRole('menuitemradio', { name: /^Personal/ })
+      expect(choices).toHaveLength(1)
+      expect(choices[0]?.getAttribute('aria-checked')).toBe(String(inPersonal))
+      expect(within(menu).queryByText(personal.organization.name)).toBeNull()
+      await userEvent.keyboard('{Escape}')
+    }
+
+    await expectChoices(false)
+    await chooseSpace('Personal')
+    await screen.findByRole('button', { name: /^Switch space Personal/ })
+    await expectChoices(true)
+    await chooseSpace('Acme')
+    await screen.findByRole('button', { name: /^Switch space Acme/ })
+    await expectChoices(false)
+    expect(api.to('POST /api/auth/organization/set-active').map((call) => call.body)).toEqual([
+      { organizationId: null },
+      { organizationId: TEAM_ID },
+    ])
+  })
 
   it("does not show the previous account's keys or secret under another account", async () => {
     const me = { current: ME }

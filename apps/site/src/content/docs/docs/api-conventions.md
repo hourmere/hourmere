@@ -186,7 +186,10 @@ configured with `PRIVACY_POLICY_URL` and `TERMS_URL`. Each field is omitted when
 empty, including on self-hosted instances; clients hide the corresponding link.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key. The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) accepts API keys and,
+session or an API key. Its additive `personalOrganizationId` is the caller's own personal
+organization UUID, derived from the stored ownership marker independently of the active
+organization, or null when no marker exists. Clients must not infer it from organization names.
+The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) accepts API keys and,
 when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
 limited to MCP tools and do not authenticate REST requests.
 

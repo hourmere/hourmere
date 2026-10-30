@@ -5,6 +5,10 @@ import type { Principal } from '@hourmere/auth'
 export const Me = z
   .object({
     user: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
+    personalOrganizationId: z.uuid().nullable().openapi({
+      description:
+        "The caller's own personal organization, independent of the active organization; null when unavailable",
+    }),
     organization: z
       .object({
         id: z.uuid(),
@@ -29,6 +33,7 @@ export const Me = z
 export function describeCaller(p: Principal): z.infer<typeof Me> {
   return {
     user: p.user,
+    personalOrganizationId: p.personalOrganizationId ?? null,
     organization: p.organization,
     principal: {
       kind: p.kind,

@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { openApiDocument } from './openapi-document.ts'
 
 describe('openApiDocument', () => {
+  it("publishes the caller's nullable personal organization separately from the active one", async () => {
+    const doc = (await openApiDocument()) as {
+      components: { schemas: { Me: { properties: Record<string, unknown>; required: string[] } } }
+    }
+    const me = doc.components.schemas.Me
+    expect(me.properties.personalOrganizationId).toMatchObject({
+      type: ['string', 'null'],
+      format: 'uuid',
+    })
+    expect(me.required).toContain('personalOrganizationId')
+  })
+
   it("lists every route group's paths, without a database", async () => {
     const doc = (await openApiDocument()) as { openapi: string; paths: Record<string, unknown> }
     expect(doc.openapi).toBe('3.1.0')
