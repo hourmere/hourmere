@@ -399,12 +399,17 @@ invitation status and expiry before every attempt. An obsolete job cannot modify
 successor's row, and completed job history is not evidence of a live job.
 
 Each generation permits at most four SMTP attempts. A short transaction locks invitation
-before delivery, reads the current recipient and organization, registers the attempt,
+before delivery, rechecks current authorization and invitation eligibility, registers the attempt,
 updates `updated_at`, debits shared mail capacity and commits a random 120-second lease
 before SMTP. This reservation is conservatively consumed if a crash or cancellation
-prevents the subsequent network call. `last_attempt_at` is left to its trigger. SMTP has
-a 60-second timeout and the pg-boss job expires after 180 seconds. Transient errors persist a 60/120/240-second
-backoff; pg-boss itself has zero retries. A crash consumes the registered attempt. The
+prevents the subsequent network call. A second, pre-SMTP transaction rechecks authorization,
+the invitation and claim, and reads the current recipient and organization for the message.
+`last_attempt_at` is left to its trigger. SMTP waits at most 60 seconds, shortened to the
+remaining lease minus a one-second safety margin; less than one second of usable time
+prevents a send. Rendering and transaction completion consume that time too. The pg-boss
+job expires after 180 seconds. Transient errors persist a 60/120/240-second
+backoff; dispatch can add up to one minute repair cycle, plus queue scheduling time.
+pg-boss itself has zero retries. A crash consumes the registered attempt. The
 repairer recovers expired claims without resetting their count, and a final crashed
 attempt becomes failed rather than receiving a fifth attempt. Permanent/configuration
 errors and budget exhaustion retain a failed summary with a fixed safe code.
@@ -413,8 +418,11 @@ Only a matching current claim can record `smtp_accepted` and its timestamp; futu
 observes that terminal state and skips SMTP. This means accepted by the mail server,
 without a claim of inbox delivery. If SMTP accepts but the following database commit
 fails, the durable row can still say sending and a later retry can send a duplicate.
-Leases and job identity cannot guarantee exactly-once external delivery. Cancellation
-after the final database check can also race an SMTP call already starting.
+An SMTP timeout or shutdown abort stops waiting, but cannot recall a message already
+submitted or guarantee the underlying exchange stops: it can still be accepted in the
+background and overlap a later finite retry. Leases and job identity cannot guarantee
+exactly-once external delivery. Cancellation or authorization changes after the final
+database check can also race an SMTP call already starting.
 
 ## Guest recipients
 

@@ -1,4 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import {
+  checkTeamManagementMembership,
+  invitationRecipientIsMember,
+  invitationRoleAllowed,
+  TeamManagementError,
+} from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import {
   type Mailer,
@@ -18,6 +24,8 @@ import {
 const MAX_ATTEMPTS = 4
 const LEASE_MS = 120_000
 const SMTP_TIMEOUT_MS = 60_000
+const LEASE_SAFETY_MS = 1_000
+const MIN_SMTP_BUDGET_MS = 1_000
 const retryDelay = (attempt: number) => 60_000 * 2 ** Math.min(attempt - 1, 2)
 
 export interface InvitationEmailSenderDeps extends Pick<NotificationMailLimits, 'mailMaxPerHour'> {
@@ -95,6 +103,24 @@ async function terminal(
     .execute()
 }
 
+async function invitationAuthorizationIsCurrent(
+  db: Db,
+  invitation: NonNullable<Awaited<ReturnType<typeof lockedDelivery>>>['invitation'],
+) {
+  if (!invitationRoleAllowed(invitation.role)) return false
+  try {
+    // A durable invitation carries the inviter identity, rather than a browser session.
+    // Read current team authority without reversing management's parent-first lock order.
+    await checkTeamManagementMembership(db, invitation.inviterId, invitation.organizationId)
+  } catch (error) {
+    if (error instanceof TeamManagementError) return false
+    throw error
+  }
+  if (await invitationRecipientIsMember(db, invitation.organizationId, invitation.email))
+    return false
+  return true
+}
+
 async function claimAttempt(deps: InvitationEmailSenderDeps, request: InvitationEmailRequest) {
   return deps.db.transaction().execute(async (trx): Promise<Claim | undefined> => {
     const current = await lockedDelivery(trx, request.invitationId)
@@ -118,9 +144,14 @@ async function claimAttempt(deps: InvitationEmailSenderDeps, request: Invitation
     }
 
     await lockNotificationEmailBudget(trx)
-    // An invitation can expire while waiting for another mail sender's budget lock.
+    const authorized = await invitationAuthorizationIsCurrent(trx, invitation)
+    // Budget and authorization reads can wait; only a fresh clock can grant an attempt.
     const now = await databaseTime(trx)
     if (invitation.status !== 'pending' || invitation.expiresAt <= now) {
+      await terminal(trx, request, 'skipped', 'invitation_ineligible', now)
+      return
+    }
+    if (!authorized) {
       await terminal(trx, request, 'skipped', 'invitation_ineligible', now)
       return
     }
@@ -179,12 +210,16 @@ function ownsClaim(delivery: Awaited<ReturnType<typeof lockedDelivery>>, claim: 
 
 /** Recheck immediately before SMTP, including recipient/template data changed since claim. */
 async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
-  return deps.db.transaction().execute(async (trx): Promise<MailMessage | undefined> => {
+  return deps.db.transaction().execute(async (trx) => {
     const current = await lockedDelivery(trx, claim.invitationId)
     const now = await databaseTime(trx)
     if (!ownsClaim(current, claim, now) || !current) return
     const { invitation } = current
     if (invitation.status !== 'pending' || invitation.expiresAt <= now) {
+      await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
+      return
+    }
+    if (!(await invitationAuthorizationIsCurrent(trx, invitation))) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
       return
     }
@@ -205,6 +240,9 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
     }
     // Template lookups can wait on database locks too. A claim or invitation that
     // expired during those reads must not start a new SMTP exchange.
+    // Anchor before the clock read so query, rendering and COMMIT time consume the
+    // remaining budget too; monotonic elapsed time does not depend on the app clock.
+    const checkedAt = performance.now()
     const readyAt = await databaseTime(trx)
     if (!ownsClaim(current, claim, readyAt)) return
     if (invitation.expiresAt <= readyAt) {
@@ -212,7 +250,7 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
       return
     }
     try {
-      return teamInvitationEmail({
+      const message = teamInvitationEmail({
         to: invitation.email,
         invitationId: invitation.id,
         teamName: organization.name,
@@ -222,8 +260,15 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
         language: inviter.locale,
         defaultLanguage: deps.defaultLanguage,
       })
+      const smtpDeadline =
+        checkedAt +
+        Math.min(
+          SMTP_TIMEOUT_MS,
+          (current.delivery.lease_until as Date).getTime() - readyAt.getTime() - LEASE_SAFETY_MS,
+        )
+      return { message, smtpDeadline }
     } catch {
-      await terminal(trx, claim, 'failed', 'smtp_not_configured', now)
+      await terminal(trx, claim, 'failed', 'transport_error', readyAt)
       return
     }
   })
@@ -311,15 +356,21 @@ export async function deliverInvitationEmail(
     const payload = InvitationEmailPayload.parse(request)
     const claim = await claimAttempt(deps, payload)
     if (!claim) return
-    const message = await currentMessage(deps, claim)
-    if (!message) return
-    const timeout = AbortSignal.timeout(SMTP_TIMEOUT_MS)
+    const prepared = await currentMessage(deps, claim)
+    if (!prepared) return
+    const remaining = Math.floor(prepared.smtpDeadline - performance.now())
+    const timeout = AbortSignal.timeout(Math.max(0, remaining))
     const sending = signal ? AbortSignal.any([signal, timeout]) : timeout
     let code: ErrorCode | undefined
-    try {
-      await boundedSend(deps, message, sending)
-    } catch (error) {
-      code = failureCode(error, sending, signal)
+    if (remaining < MIN_SMTP_BUDGET_MS) {
+      // Do not start an exchange that cannot fit safely inside the current lease.
+      code = 'interrupted'
+    } else {
+      try {
+        await boundedSend(deps, prepared.message, sending)
+      } catch (error) {
+        code = failureCode(error, sending, signal)
+      }
     }
     const outcome = await finishAttempt(deps, claim, code)
     if (outcome) {

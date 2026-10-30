@@ -112,6 +112,10 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
         .returning('id')
         .executeTakeFirstOrThrow()
     ).id
+    await db
+      .insertInto('auth.member')
+      .values({ userId: inviterId, organizationId, role: 'owner', createdAt: new Date() })
+      .execute()
   })
   afterEach(async () => {
     await Promise.all(workers.splice(0).map((worker) => worker.stop()))
@@ -240,6 +244,179 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
       expect((await delivery(payload.invitationId)).state).toBe('skipped')
     },
   )
+
+  const authorizationChanges = [
+    'inviter demoted',
+    'inviter removed',
+    'recipient joined',
+    'invitation role disallowed',
+    'team became personal',
+  ] as const
+
+  async function revokeInvitationEligibility(
+    change: (typeof authorizationChanges)[number],
+    payload: InvitationEmailRequest,
+  ) {
+    if (change === 'inviter demoted') {
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('userId', '=', inviterId)
+        .where('organizationId', '=', organizationId)
+        .execute()
+    } else if (change === 'inviter removed') {
+      await db
+        .deleteFrom('auth.member')
+        .where('userId', '=', inviterId)
+        .where('organizationId', '=', organizationId)
+        .execute()
+    } else if (change === 'recipient joined') {
+      const recipient = await db
+        .insertInto('auth.user')
+        .values({ name: 'Recipient', email: 'Original@Example.Test', emailVerified: true })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('auth.member')
+        .values({ userId: recipient.id, organizationId, role: 'member', createdAt: new Date() })
+        .execute()
+    } else if (change === 'invitation role disallowed') {
+      await db
+        .updateTable('auth.invitation')
+        .set({ role: 'admin' })
+        .where('id', '=', payload.invitationId)
+        .execute()
+    } else {
+      await db
+        .insertInto('personal_organizations')
+        .values({ user_id: inviterId, organization_id: organizationId })
+        .execute()
+    }
+  }
+
+  it.each(authorizationChanges)(
+    'skips without an attempt or retry when %s before the polling worker claims',
+    async (change) => {
+      const payload = await invitation()
+      await dispatch(payload)
+      await revokeInvitationEligibility(change, payload)
+      await startWorker()
+      expect(await waitCurrentJob(payload)).toMatchObject({
+        state: 'skipped',
+        attempts: 0,
+        last_error_code: 'invitation_ineligible',
+      })
+      await repair()
+      await idlePoll()
+      expect(send).not.toHaveBeenCalled()
+      expect(await ledger()).toHaveLength(0)
+      expect(await delivery(payload.invitationId)).toMatchObject({ state: 'skipped', attempts: 0 })
+    },
+  )
+
+  it.each(authorizationChanges)(
+    'rechecks authorization before SMTP when %s after the claim commits',
+    async (change) => {
+      const payload = await invitation()
+      let commits = 0
+      const interleaved = new Proxy(db, {
+        get(target, property, receiver) {
+          if (property !== 'transaction') return Reflect.get(target, property, receiver)
+          return () => {
+            const builder = target.transaction()
+            return new Proxy(builder, {
+              get(transaction, key, transactionReceiver) {
+                if (key !== 'execute') return Reflect.get(transaction, key, transactionReceiver)
+                return async (callback: Parameters<typeof builder.execute>[0]) => {
+                  const result = await transaction.execute(callback)
+                  if (++commits === 1) await revokeInvitationEligibility(change, payload)
+                  return result
+                }
+              },
+            })
+          }
+        },
+      })
+      await dispatch(payload)
+      await startWorker({ db: interleaved })
+      expect(await waitCurrentJob(payload)).toMatchObject({
+        state: 'skipped',
+        attempts: 1,
+        last_error_code: 'invitation_ineligible',
+      })
+      await repair()
+      await idlePoll()
+      expect(send).not.toHaveBeenCalled()
+      expect(await ledger()).toHaveLength(1)
+      expect(await delivery(payload.invitationId)).toMatchObject({ state: 'skipped', attempts: 1 })
+    },
+  )
+
+  it('allows a current admin under the shared team management policy', async () => {
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('userId', '=', inviterId)
+      .where('organizationId', '=', organizationId)
+      .execute()
+    const payload = await invitation()
+    await dispatch(payload)
+    await startWorker()
+    expect(await waitCurrentJob(payload)).toMatchObject({ state: 'smtp_accepted', attempts: 1 })
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips an invitation that expires while claim authorization waits on a member table lock', async () => {
+    const payload = await invitation()
+    await db
+      .updateTable('auth.invitation')
+      .set({ expiresAt: sql`clock_timestamp() + INTERVAL '2 seconds'` })
+      .where('id', '=', payload.invitationId)
+      .execute()
+    const sender = await senderCopy()
+    const blocker = await owned.pool.connect()
+    await blocker.query('BEGIN')
+    await blocker.query('LOCK TABLE auth.member IN ACCESS EXCLUSIVE MODE')
+    const sending = sender.deliverInvitationEmail(deps(), payload)
+    try {
+      await expect
+        .poll(
+          async () =>
+            Number(
+              (
+                await owned.pool.query<{ count: string }>(
+                  "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%member%'",
+                )
+              ).rows[0]?.count,
+            ),
+          { timeout: 5_000, interval: 10 },
+        )
+        .toBe(1)
+      await expect
+        .poll(
+          async () =>
+            (
+              await owned.pool.query<{ expired: boolean }>(
+                'SELECT "expiresAt" <= clock_timestamp() AS expired FROM auth.invitation WHERE id=$1',
+                [payload.invitationId],
+              )
+            ).rows[0]?.expired,
+          { timeout: 5_000, interval: 25 },
+        )
+        .toBe(true)
+    } finally {
+      await blocker.query('COMMIT')
+      blocker.release()
+      await sending
+    }
+    expect(await delivery(payload.invitationId)).toMatchObject({
+      state: 'skipped',
+      attempts: 0,
+      last_error_code: 'invitation_ineligible',
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(await ledger()).toHaveLength(0)
+  }, 10_000)
 
   it('ignores a queued stale generation without retiring or sending its successor', async () => {
     const payload = await invitation()
@@ -392,6 +569,15 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
       .values({ name: 'Replacement team', slug: 'replacement-team', createdAt: new Date() })
       .returning('id')
       .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.member')
+      .values({
+        userId: inviterId,
+        organizationId: replacement.id,
+        role: 'owner',
+        createdAt: new Date(),
+      })
+      .execute()
     await db
       .updateTable('auth.invitation')
       .set({ email: 'current@example.test', organizationId: replacement.id })
@@ -921,6 +1107,16 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
       await verify((await senderCopy(timing)).deliverInvitationEmail)
       const mutation = await senderCopy([
         ...timing,
+        // Both final protections independently prevent an expired lease from sending.
+        ...(expiring === 'lease'
+          ? [
+              {
+                before:
+                  '(current.delivery.lease_until as Date).getTime() - readyAt.getTime() - LEASE_SAFETY_MS',
+                after: 'SMTP_TIMEOUT_MS',
+              },
+            ]
+          : []),
         expiring === 'lease'
           ? {
               before: 'if (!ownsClaim(current, claim, readyAt)) return',

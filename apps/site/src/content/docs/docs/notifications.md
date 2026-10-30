@@ -574,7 +574,8 @@ later passes reuse the current live replacement. Completed history is never a li
 A previously queued job may remain after its delivery generation is skipped or superseded;
 the sender rereads the current row, generation, invitation status and expiry before every
 attempt. It reads the recipient address and organization from the current invitation,
-never from the queued job. Shared non-reserved mail capacity is checked and debited at
+never from the queued job. The sender must recheck authorization before SMTP.
+Shared non-reserved mail capacity is checked and debited at
 send time, once for the authorized attempt, independently of admission accounting.
 
 Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
@@ -680,10 +681,15 @@ Each generation has at most four SMTP attempts. Before contacting the mail serve
 worker commits an incremented attempt count, an updated `updated_at`, a shared-capacity
 debit and a random 120-second lease. Two workers racing the same generation wait for
 the delivery-row lock and then check the committed state, so a live claim prevents a
-second send. SMTP has a 60-second timeout; the job expires after 180 seconds.
+second send. SMTP waits at most 60 seconds, bounded by the remaining lease minus a
+one-second safety margin. Less than one second of usable time prevents a new send;
+template rendering and the pre-send transaction's completion consume that budget too.
+The job expires after 180 seconds.
 The capacity reservation remains consumed if a crash or cancellation follows the claim
 but prevents its network call; admission never consumes this shared sending budget.
 Transient failures retain the same generation and persist 60, 120 and 240-second backoffs.
+The every-minute repairer can add up to one repair cycle to that delay, plus queue
+scheduling time before a worker actually starts the retry.
 The application and repairer own this budget, with zero pg-boss retries. A crash after
 the attempt commit consumes that attempt. An expired final claim becomes `failed`;
 it never receives a fifth attempt. Permanent refusal, configuration errors, rate limits
@@ -692,11 +698,21 @@ and exhaustion also retain a fixed safe failure code in the administrator's summ
 The sender rechecks invitation eligibility before each attempt: accepted, canceled,
 rejected, expired or unknown-status invitations stop, and stale jobs cannot send or
 change a successor generation. An already recorded `smtp_accepted` generation is also
-terminal. Its timestamp means only **accepted by the mail server**. It does not promise
+terminal. Both the claim and pre-SMTP transactions use the shared team-management and
+invitation eligibility policy: the inviter must still be a current owner/admin of the
+non-personal team, the invitation role must be allowed, and the recipient must not
+already belong to the team. Otherwise the generation becomes terminal
+`skipped/invitation_ineligible` without SMTP or automatic retries. Template rendering
+failure is terminal `failed/transport_error`, distinct from `smtp_not_configured`.
+Its SMTP acceptance timestamp means only **accepted by the mail server**. It does not promise
 inbox placement, reading or team membership. SMTP acceptance followed by a failed database
 commit leaves a duplicate window: a later attempt within the remaining budget may send
-a duplicate. Leases do not provide exactly-once SMTP delivery.
-Cancellation can still race an SMTP call after its final database check.
+a duplicate. A timeout or shutdown abort only stops waiting for the mail transport;
+an exchange already under way may still be accepted in the background and overlap a
+later retry. The shorter deadline prevents the worker from intentionally waiting past
+its lease, but cannot recall submitted mail. Leases do not provide exactly-once SMTP
+delivery. Cancellation or authorization changes can still race an SMTP call after its
+final database check.
 
 Mail bodies, usable invitation links, tokens and raw provider/database errors never enter
 job logs. Invitation mail uses the sensitive transport path; diagnostics contain safe IDs,
