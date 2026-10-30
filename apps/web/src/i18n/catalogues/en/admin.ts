@@ -1,5 +1,63 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Leave team': 'Leave team',
+  'You left the team. Reload to open your personal space.':
+    'You left the team. Reload to open your personal space.',
+  'Review leaving this team': 'Review leaving this team',
+  'Remove member': 'Remove member',
+  'Remove member: {0}': 'Remove member: {0}',
+  'Remove team member': 'Remove team member',
+  'Loading departure impact…': 'Loading departure impact…',
+  'Leave this team': 'Leave this team',
+  'Leaving team…': 'Leaving team…',
+  'Removing member…': 'Removing member…',
+  'Member removed. Access was revoked immediately.':
+    'Member removed. Access was revoked immediately.',
+  'Access is revoked immediately after confirmation.':
+    'Access is revoked immediately after confirmation.',
+  'Future bookings are kept and still need handling.':
+    'Future bookings are kept and still need handling.',
+  '{0} affected event types': '{0} affected event types',
+  '{0} future or in-progress bookings': '{0} future or in-progress bookings',
+  'No affected event types or bookings.': 'No affected event types or bookings.',
+  'Ask a team owner or admin to replace or remove you as a host.':
+    'Ask a team owner or admin to replace or remove you as a host.',
+  'Replace or remove this member as a host. Disable the event type to stop new bookings.':
+    'Replace or remove this member as a host. Disable the event type to stop new bookings.',
+  'This member is no longer in the team. Reload the member list.':
+    'This member is no longer in the team. Reload the member list.',
+  'Disabled event types still need their host assignments repaired before you can leave.':
+    'Disabled event types still need their host assignments repaired before you can leave.',
+  'Manage event type': 'Manage event type',
+  'Review team bookings': 'Review team bookings',
+  'Coordinate cancellation with the hosts and attendees.':
+    'Coordinate cancellation with the hosts and attendees.',
+  'Wait until the meeting ends or coordinate offline.':
+    'Wait until the meeting ends or coordinate offline.',
+  'Team owners and admins can handle team bookings.':
+    'Team owners and admins can handle team bookings.',
+  'More event types': 'More event types',
+  'More bookings': 'More bookings',
+  'You cannot leave while team events or bookings still need handling.':
+    'You cannot leave while team events or bookings still need handling.',
+  'The team must retain at least one owner. Ownership transfer is not available here.':
+    'The team must retain at least one owner. Ownership transfer is not available here.',
+  'Your permission or this member’s team membership changed. Reload to check before trying again.':
+    'Your permission or this member’s team membership changed. Reload to check before trying again.',
+  'Reload team': 'Reload team',
+  'Loading handling list…': 'Loading handling list…',
+  'Could not load the handling list. The member is still removed.':
+    'Could not load the handling list. The member is still removed.',
+  'Retry handling list': 'Retry handling list',
+  '{0} event types deactivated.': '{0} event types deactivated.',
+  'Handling list': 'Handling list',
+  'Affected event types': 'Affected event types',
+  'Deactivated event types': 'Deactivated event types',
+  'Repair the host assignments, then review and reactivate these event types when ready.':
+    'Repair the host assignments, then review and reactivate these event types when ready.',
+  'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.':
+    'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.',
+  'Bookings needing handling': 'Bookings needing handling',
   Pending: 'Pending',
   'Team members': 'Team members',
   'Pending invitations are not members or hosts.': 'Pending invitations are not members or hosts.',

@@ -25,6 +25,7 @@ export function SettingsPage() {
 
   usePageTitle('Settings')
   const me = useMe()
+  const { refresh, confirmReload } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
   // Keep the creation response through a failed read in this view. Consume history state
@@ -116,6 +117,9 @@ export function SettingsPage() {
           key={organizationId}
           organizationId={organizationId}
           role={role.status === 'ready' ? role.data : null}
+          currentUserId={userId}
+          onLeft={() => void refresh({ fresh: true })}
+          onReload={confirmReload}
         />
       )}
     </>
