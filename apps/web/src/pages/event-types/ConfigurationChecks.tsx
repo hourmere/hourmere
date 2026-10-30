@@ -134,7 +134,10 @@ export function ConfigurationChecks({
     ),
   ])
   const eventTargets: { path: string; label: MessageKey }[] = []
-  if (result.issues.some((issue) => issue.label === 'Host settings need attention.'))
+  if (
+    event.ownerUserId === null &&
+    result.issues.some((issue) => issue.label === 'Host settings need attention.')
+  )
     eventTargets.push({ path: '#hosts', label: 'Review event settings' })
   if (result.issues.some((issue) => issue.label === 'Automatic meeting settings need attention.'))
     eventTargets.push({ path: '#location-heading', label: 'Review meeting settings' })

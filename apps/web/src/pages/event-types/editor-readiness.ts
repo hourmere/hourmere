@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { EventType } from '../../api/resources.ts'
 import type { Me } from '../../session.tsx'
-import { type EventReadiness, loadEventReadiness } from './event-readiness.ts'
+import { type EventReadiness, loadEventReadiness, readinessErrorStatus } from './event-readiness.ts'
 
 type EditorReadiness =
   | { status: 'unchecked' | 'loading' | 'error' | 'unavailable' }
@@ -45,9 +45,9 @@ export function useEditorReadiness(me: Me, saved: EventType | null, contextChang
           state: items ? { status: 'ready', item: items.get(saved.id) } : { status: 'unavailable' },
         })
       },
-      () => {
+      (err: unknown) => {
         if (controller.signal.aborted || observedRevision !== revision.current) return
-        setObservation({ version: saved, state: { status: 'error' } })
+        setObservation({ version: saved, state: { status: readinessErrorStatus(me, err) } })
       },
     )
     return () => controller.abort()

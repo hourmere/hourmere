@@ -353,17 +353,18 @@ function EventTypeForm({
           attempt={attempt}
         />
 
-        {contextChanged && (
-          <p>
-            <button type="button" className="button button-small" onClick={confirmReload}>
-              {t('Reload')}
-            </button>
-          </p>
-        )}
-
         <section className="panel" aria-labelledby="saved-readiness-heading">
           <h2 id="saved-readiness-heading">{t('Saved version readiness')}</h2>
-          {dirty || !saved ? (
+          {contextChanged ? (
+            <>
+              <p role="status">{t('Your team context changed. Reload before making changes.')}</p>
+              <p>
+                <button type="button" className="button button-small" onClick={confirmReload}>
+                  {t('Reload')}
+                </button>
+              </p>
+            </>
+          ) : dirty || !saved ? (
             <p role="status">
               {t(
                 'These unsaved changes have not been checked yet. Save to check the saved version.',

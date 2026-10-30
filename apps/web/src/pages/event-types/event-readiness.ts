@@ -8,6 +8,15 @@ export type SelfEventReadiness = Schemas['SelfReadinessPage']['eventTypes']['dat
 export type TeamEventReadiness = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
 export type EventReadiness = SelfEventReadiness | TeamEventReadiness
 
+export function readinessErrorStatus(me: Me, err: unknown): 'unavailable' | 'error' {
+  return !me.organization.personal &&
+    err instanceof RequestError &&
+    err.status === 403 &&
+    err.code === 'team_management_access_denied'
+    ? 'unavailable'
+    : 'error'
+}
+
 export function useEventReadiness(me: Me) {
   const [state, setState] = useState<
     | { status: 'loading' | 'error' | 'unavailable' }
@@ -25,16 +34,7 @@ export function useEventReadiness(me: Me) {
           setState(data ? { status: 'ready', data } : { status: 'unavailable' })
       },
       (err: unknown) => {
-        if (!controller.signal.aborted)
-          setState({
-            status:
-              !me.organization.personal &&
-              err instanceof RequestError &&
-              err.status === 403 &&
-              err.code === 'team_management_access_denied'
-                ? 'unavailable'
-                : 'error',
-          })
+        if (!controller.signal.aborted) setState({ status: readinessErrorStatus(me, err) })
       },
     )
     return () => controller.abort()

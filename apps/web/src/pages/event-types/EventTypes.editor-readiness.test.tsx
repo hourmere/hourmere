@@ -142,6 +142,40 @@ async function save() {
 }
 
 describe('saved event type readiness in the editor', () => {
+  it('requests exactly one summary for the saved version only after the save returns', async () => {
+    const user = userEvent.setup()
+    const patch = later()
+    let stored = eventType()
+    const checkedTitles: string[] = []
+    const api = server(stored, {
+      [SELF_ROUTE]: () => {
+        checkedTitles.push(stored.title)
+        return json(200, selfPage())
+      },
+      [PATCH_ROUTE]: () => patch.response,
+    })
+    await open()
+    await within(readiness()).findByText('Configuration checks passed')
+    expect(api.to(SELF_ROUTE)).toHaveLength(1)
+    await user.clear(title())
+    await user.type(title(), 'Submitted title')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.to(PATCH_ROUTE)).toHaveLength(1))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Saving…' }).disabled).toBe(true)
+    expect(screen.queryByText('Saved.')).toBeNull()
+    expect(api.to(SELF_ROUTE)).toHaveLength(1)
+    expect(checkedTitles).toEqual(['Intro call'])
+
+    stored = eventType({ title: 'Saved server title' })
+    await patch.answer(json(200, stored))
+    await screen.findByText('Saved.')
+    await within(readiness()).findByText('Configuration checks passed')
+    expect(api.to(SELF_ROUTE)).toHaveLength(2)
+    expect(checkedTitles).toEqual(['Intro call', 'Saved server title'])
+    expect(title().value).toBe('Saved server title')
+    expect(api.to(PATCH_ROUTE)[0]?.body).toHaveProperty('title', 'Submitted title')
+  })
+
   it('refreshes the summary after save and keeps saved separate from configuration success', async () => {
     const user = userEvent.setup()
     const pending = later()
@@ -600,5 +634,46 @@ describe('saved event type readiness in the editor', () => {
     expect(within(readiness()).queryByRole('link')).toBeNull()
     expect(api.to(TEAM_ROUTE)).toHaveLength(0)
     expect(api.to(SELF_ROUTE)).toHaveLength(0)
+  })
+
+  it('links personal identity and meeting problems to existing repair destinations', async () => {
+    server(eventType(), {
+      [SELF_ROUTE]: () =>
+        json(
+          200,
+          selfPage(
+            selfCheck({
+              summary: 'configuration_blocked',
+              signals: [
+                signal({
+                  id: 'host_eligibility',
+                  state: 'configuration_blocker',
+                  reasonCode: 'host_configuration_required',
+                  fixKind: 'self_profile',
+                }),
+                signal({
+                  id: 'optional_conference_dependency',
+                  state: 'configuration_blocker',
+                  reasonCode: 'optional_feature_attention_required',
+                  fixKind: 'event_editor',
+                }),
+              ],
+            }),
+          ),
+        ),
+    })
+    await open()
+    const checks = within(readiness())
+    expect((await checks.findByRole('link', { name: 'Review profile' })).getAttribute('href')).toBe(
+      '/app/settings',
+    )
+    const meetingTarget = checks
+      .getByRole('link', { name: 'Review meeting settings' })
+      .getAttribute('href')
+    expect(meetingTarget).toBe('#location-heading')
+    expect(document.querySelector(meetingTarget as string)).not.toBeNull()
+    expect(document.getElementById('hosts')).toBeNull()
+    expect(readiness().querySelector('a[href="#hosts"]')).toBeNull()
+    expect(checks.queryByRole('link', { name: 'Review event settings' })).toBeNull()
   })
 })
