@@ -23,6 +23,8 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
+import { ConfigurationChecks } from './ConfigurationChecks.tsx'
+import { useEventReadiness } from './event-readiness.ts'
 
 async function loadPage(signal: AbortSignal) {
   const [eventTypes, profile, schedules] = await Promise.all([
@@ -139,10 +141,18 @@ function EventTypeTable({
   profile: Profile | null
 }) {
   const { t, locale: displayLocale } = useI18n()
+  const [readiness, retryChecks] = useEventReadiness(me)
 
   return (
     <div className="table-container">
       <table className="table table-event-types">
+        {readiness.status !== 'unavailable' && (
+          <caption>
+            {t(
+              'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+            )}
+          </caption>
+        )}
         <thead>
           <tr>
             <th scope="col">{t('Title')}</th>
@@ -153,6 +163,7 @@ function EventTypeTable({
             <th scope="col" className="fit nowrap">
               {t('Status')}
             </th>
+            {readiness.status !== 'unavailable' && <th scope="col">{t('Configuration checks')}</th>}
             <th scope="col" className="fit">
               <span className="visually-hidden">{t('Actions')}</span>
             </th>
@@ -221,17 +232,33 @@ function EventTypeTable({
                   </div>
                 </td>
                 <td data-label={t('Status')} className="fit">
-                  <div className="table-value">
+                  <div className="table-value event-enablement">
                     {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
-                    {e.schedulingType === 'round_robin' && !e.roundRobinActive ? (
-                      <span className="badge">{t('Needs activation')}</span>
-                    ) : e.isActive ? (
+                    {e.isActive ? (
                       <span className="badge badge-success">{t('Active')}</span>
                     ) : (
                       <span className="badge">{t('Inactive')}</span>
                     )}
+                    {e.schedulingType === 'round_robin' &&
+                      (e.roundRobinActive ? (
+                        <span className="badge">{t('Round robin activated')}</span>
+                      ) : (
+                        <Link to={eventTypePath(e.id)} className="badge">
+                          {t('Needs activation')}
+                        </Link>
+                      ))}
                   </div>
                 </td>
+                {readiness.status !== 'unavailable' && (
+                  <td data-label={t('Configuration checks')}>
+                    <ConfigurationChecks
+                      event={e}
+                      item={readiness.status === 'ready' ? readiness.data.get(e.id) : undefined}
+                      status={readiness.status}
+                      retry={retryChecks}
+                    />
+                  </td>
+                )}
                 <td className="actions">
                   <Link
                     to={eventTypePath(e.id)}
