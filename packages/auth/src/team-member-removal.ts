@@ -8,6 +8,7 @@ import {
   teamManagementDenied,
   teamRoles,
 } from './team-management.ts'
+import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 
 export interface TeamMemberRemovalInput {
   teamId: string
@@ -39,9 +40,8 @@ export async function teamMemberRemovalTarget(
   const roles = teamRoles(member?.role)
   if (
     !member ||
-    roles.includes('owner') ||
-    (!roles.includes('admin') && !roles.includes('member')) ||
-    (actor.role !== 'owner' && roles.includes('admin'))
+    (!roles.includes('owner') && !roles.includes('admin') && !roles.includes('member')) ||
+    (actor.role !== 'owner' && (roles.includes('owner') || roles.includes('admin')))
   ) {
     throw teamManagementDenied()
   }
@@ -59,6 +59,11 @@ async function removeTeamMemberInTransaction(
   input: { memberUserId: string },
 ): Promise<TeamMemberRemoval> {
   const member = await teamMemberRemovalTarget(trx, actor, input.memberUserId, true)
+  if (teamRoles(member.role).includes('owner')) {
+    await assertTeamOwnerRemains(trx, actor.organizationId, member.userId)
+  }
+  // Self departure must use scheduling's impact check and atomic personal fallback.
+  if (member.userId === actor.userId) throw teamManagementDenied()
 
   const configured = await trx
     .selectFrom('event_types as event')

@@ -752,7 +752,10 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       expect(await response.json()).toEqual({
         code: 'member_departure_owner_required',
         message: 'Another owner is needed before you can leave.',
-        handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+        handling: {
+          owner: 'another_owner_is_needed_before_you_can_leave',
+          nextStep: 'add_another_owner_first',
+        },
       })
       await unchanged(f)
     } finally {
@@ -775,7 +778,10 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     expect(await response.json()).toEqual({
       error: 'member_departure_owner_required',
       message: 'Another owner is needed before you can leave.',
-      handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+      handling: {
+        owner: 'another_owner_is_needed_before_you_can_leave',
+        nextStep: 'add_another_owner_first',
+      },
     })
     await unchanged(f)
   }
@@ -796,14 +802,10 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
         .where('userId', '=', f.survivor.id)
         .execute()
       const response = await native(f)
-      // Preserve Better Auth's early check; legacy whitespace roles also reach the
-      // shared locked check at the persistence boundary.
-      expect(response.status).toBe(role === 'owner' ? 400 : 409)
+      expect(response.status).toBe(409)
       expect(await response.json()).toMatchObject({
-        code:
-          role === 'owner'
-            ? 'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER'
-            : 'member_departure_owner_required',
+        code: 'member_departure_owner_required',
+        handling: { nextStep: 'add_another_owner_first' },
       })
       await unchanged(f)
     },
@@ -904,7 +906,10 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       expect(await responses[loserIndex]?.json()).toMatchObject({
         [entries[loserIndex] === 'REST' ? 'error' : 'code']: 'member_departure_owner_required',
         message: 'Another owner is needed before you can leave.',
-        handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+        handling: {
+          owner: 'another_owner_is_needed_before_you_can_leave',
+          nextStep: 'add_another_owner_first',
+        },
       })
       expect(
         await db

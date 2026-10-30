@@ -11,7 +11,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
-import { isUuid } from './organizations.ts'
+import { isUuid, personalOwner } from './organizations.ts'
 import {
   checkTeamManagementAccess,
   TeamManagementError,
@@ -20,12 +20,17 @@ import {
   teamSessionUser,
 } from './team-management.ts'
 import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
+import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
 const remove = '/organization/remove-member'
 const selfDeparturePaths = new Set(['/organization/leave', remove])
 const protectedPaths = new Set([changeRole, accept, remove])
+const nativeOwnerRequiredCodes = new Set([
+  'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER',
+  'YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER',
+])
 
 export const teamRoleDenied = () =>
   new APIError('FORBIDDEN', {
@@ -90,6 +95,13 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation()
   } catch (error) {
+    if (error instanceof MemberDepartureOwnerRequiredError) {
+      throw new APIError('CONFLICT', {
+        code: error.code,
+        message: error.message,
+        handling: error.handling,
+      })
+    }
     if (error instanceof TeamManagementError) {
       if (error.code === 'organization_context_changed') {
         throw new APIError('CONFLICT', {
@@ -120,17 +132,18 @@ export function createTeamRolePolicy(
 ) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
 
-  function removalContext() {
+  function operationContext() {
     const current = requests.getStore()?.ctx
     if (current) return current
     // Server-side auth.api calls have the native endpoint context but do not pass
-    // through the HTTP handler's request storage. Protect their removal writes too.
+    // through the HTTP handler's request storage. Protect their membership writes too.
     const endpoint = tryGetCurrentAuthEndpointContext()
     if (
       !endpoint ||
-      !selfDeparturePaths.has(endpoint.path ?? '') ||
+      (!selfDeparturePaths.has(endpoint.path ?? '') && endpoint.path !== changeRole) ||
       !endpoint.context.session?.session?.id ||
-      (endpoint.path === remove && !endpoint.body?.memberIdOrEmail)
+      (endpoint.path === remove && !endpoint.body?.memberIdOrEmail) ||
+      (endpoint.path === changeRole && !endpoint.body?.memberId)
     )
       return undefined
     return endpoint as AuthMiddlewareContext
@@ -207,8 +220,9 @@ export function createTeamRolePolicy(
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
     const target = await targetQuery.executeTakeFirst()
-    if (!target || teamRoles(target.role).includes('owner') || target.userId === facts.userId) {
-      throw teamRoleDenied()
+    if (!target) throw teamRoleDenied()
+    if (lock && teamRoles(target.role).includes('owner')) {
+      await assertTeamOwnerRemains(targetDb, facts.organizationId, target.userId)
     }
     return { facts, target, role }
   }
@@ -305,13 +319,43 @@ export function createTeamRolePolicy(
     },
 
     handler(handler: (request: Request) => Promise<Response>) {
-      return (request: Request) => requests.run({}, () => handler(request))
+      return (request: Request) =>
+        requests.run({}, async () => {
+          const response = await handler(request)
+          if (response.status !== 400) return response
+          let result: unknown
+          try {
+            result = await response.clone().json()
+          } catch {
+            return response
+          }
+          if (
+            !result ||
+            typeof result !== 'object' ||
+            !('code' in result) ||
+            typeof result.code !== 'string' ||
+            !nativeOwnerRequiredCodes.has(result.code)
+          )
+            return response
+          const ctx = requests.getStore()?.ctx
+          const actor = ctx ? await principal(ctx) : null
+          if (!actor || (await personalOwner(db, actor.organization.id))) return response
+          // Keep Better Auth's early sole-owner refusal intact. Its native 400 and our
+          // locked write refusal describe the same conflict, including legacy roles.
+          const error = new MemberDepartureOwnerRequiredError()
+          const headers = new Headers(response.headers)
+          headers.delete('content-length')
+          return new Response(
+            JSON.stringify({ code: error.code, message: error.message, handling: error.handling }),
+            { status: 409, headers },
+          )
+        })
     },
 
     adapter(adapter: DBTransactionAdapter): DBTransactionAdapter {
-      const { update, findOne, incrementOne, delete: deleteOne } = adapter
+      const { update, findOne, findMany, incrementOne, delete: deleteOne } = adapter
       adapter.delete = async (request) => {
-        const ctx = removalContext()
+        const ctx = operationContext()
         if (!ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {
           return deleteOne(request)
         }
@@ -391,7 +435,7 @@ export function createTeamRolePolicy(
       }
       adapter.findOne = async <T>(request: Parameters<DBTransactionAdapter['findOne']>[0]) => {
         const result = await findOne<T>(request)
-        const ctx = requests.getStore()?.ctx ?? removalContext()
+        const ctx = operationContext()
         if (
           ctx &&
           (ctx.path === changeRole || ctx.path === remove) &&
@@ -407,8 +451,28 @@ export function createTeamRolePolicy(
         }
         return result
       }
+      adapter.findMany = async <T>(request: Parameters<DBTransactionAdapter['findMany']>[0]) => {
+        const result = await findMany<T>(request)
+        const ctx = operationContext()
+        if (
+          !ctx ||
+          (!selfDeparturePaths.has(ctx.path) && ctx.path !== changeRole) ||
+          request.model !== 'member'
+        )
+          return result
+        // Native early owner counts also split untrimmed role strings. Normalize their
+        // snapshots so an actual second legacy owner is counted before our locked write.
+        return result.map((member) =>
+          member &&
+          typeof member === 'object' &&
+          'role' in member &&
+          typeof member.role === 'string'
+            ? { ...member, role: teamRoles(member.role).join(',') }
+            : member,
+        )
+      }
       adapter.update = async (request) => {
-        const ctx = requests.getStore()?.ctx
+        const ctx = operationContext()
         if (ctx?.path === changeRole && request.model === 'member') {
           return write(async (trx) => {
             const { facts, target, role } = await roleChange(ctx, trx, true, request.update.role)
@@ -429,7 +493,7 @@ export function createTeamRolePolicy(
         return update(request)
       }
       adapter.incrementOne = async (request) => {
-        const ctx = requests.getStore()?.ctx
+        const ctx = operationContext()
         if (
           ctx?.path !== accept ||
           request.model !== 'invitation' ||

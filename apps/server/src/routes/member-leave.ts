@@ -14,6 +14,7 @@ const Handling = z.object({
   futureBookings: z.literal('coordinate_cancellation').optional(),
   inProgressBookings: z.literal('wait_until_end_or_coordinate_offline').optional(),
   owner: z.literal('another_owner_is_needed_before_you_can_leave').optional(),
+  nextStep: z.literal('add_another_owner_first').optional(),
 })
 
 export function memberLeaveRoutes(deps: ServiceDeps): RouteModule {

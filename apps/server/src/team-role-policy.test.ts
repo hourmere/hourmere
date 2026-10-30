@@ -295,7 +295,6 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       actorRole,
       allowed:
         actorRole === 'owner' &&
-        cell.targetRole !== 'owner' &&
         (cell.requestedRole === 'member' ||
           cell.requestedRole === 'admin' ||
           (Array.isArray(cell.requestedRole) && cell.requestedRole.length === 1)),
@@ -379,11 +378,13 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
   })
 
   it.each(['owner', 'admin', 'member'])(
-    'refuses %s self-promotion and self-role changes without changing any membership',
+    'refuses %s self-promotion and unauthorized self-role changes',
     async (actorRole) => {
       const f = await fixture(actorRole)
       const before = await snapshot(f)
-      for (const role of ['owner', 'admin', 'member', 'member,owner']) {
+      for (const role of actorRole === 'owner'
+        ? ['owner', 'member,owner']
+        : ['owner', 'admin', 'member', 'member,owner']) {
         await refused(
           await post(f, 'update-member-role', {
             organizationId: f.teamId,
@@ -599,19 +600,23 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
   )
 
   it.each(['member,owner', 'member, owner', 'admin,owner'])(
-    'protects an owner target represented as %j against another owner and admin',
+    'allows only an owner to demote an owner target represented as %j',
     async (targetRole) => {
       for (const actorRole of ['owner', 'admin']) {
         const f = await fixture(actorRole, targetRole)
         const before = await snapshot(f)
-        await refused(
-          await post(f, 'update-member-role', {
-            organizationId: f.teamId,
-            memberId: f.targetMemberId,
-            role: 'member',
-          }),
-        )
-        expect(await snapshot(f)).toEqual(before)
+        const response = await post(f, 'update-member-role', {
+          organizationId: f.teamId,
+          memberId: f.targetMemberId,
+          role: 'member',
+        })
+        if (actorRole === 'admin') {
+          await refused(response)
+          expect(await snapshot(f)).toEqual(before)
+        } else {
+          expect(response.status).toBe(200)
+          expect(await operations(f)).toEqual([roleOperation(f, targetRole, 'member')])
+        }
       }
     },
   )
@@ -824,20 +829,23 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       return result
     }
     try {
-      await refused(
-        await post(f, 'update-member-role', {
-          organizationId: f.teamId,
-          memberId: f.targetMemberId,
-          role: 'admin',
-        }),
-      )
+      expect(
+        (
+          await post(f, 'update-member-role', {
+            organizationId: f.teamId,
+            memberId: f.targetMemberId,
+            role: 'admin',
+          })
+        ).status,
+      ).toBe(200)
       expect(
         await db
           .selectFrom('auth.member')
           .select('role')
           .where('id', '=', f.targetMemberId)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ role: 'member,owner' })
+      ).toEqual({ role: 'admin' })
+      expect(await operations(f)).toEqual([roleOperation(f, 'member,owner', 'admin')])
     } finally {
       hooks.beforeUpdateMemberRole = original as (input: HookInput) => unknown
     }
@@ -871,14 +879,15 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         { interval: 10, timeout: 1_500 },
       )
       await holder.query('COMMIT')
-      await refused(await pending)
+      expect((await pending).status).toBe(200)
       expect(
         await db
           .selectFrom('auth.member')
           .select('role')
           .where('id', '=', f.targetMemberId)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ role: 'member,owner' })
+      ).toEqual({ role: 'member' })
+      expect(await operations(f)).toEqual([roleOperation(f, 'member,owner', 'member')])
     } finally {
       await holder.query('ROLLBACK')
       holder.release()

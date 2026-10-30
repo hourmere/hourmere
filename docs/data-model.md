@@ -196,6 +196,11 @@ calendar-list access.
   address only when its inviter has a currently allowed email domain or is the earliest
   remaining auth user (creation time, then ID). Creating a team or accepting an invitation
   grants no registration authority. Existing invitations follow the current policy.
+- **Every team retains an owner through membership management.** Departure, removal and
+  demotion take the same organization row write lock before checking current owner role
+  tokens and writing the membership. Native and REST management paths share this rule.
+  Team deletion and ownership transfer are unavailable at launch; rejected deletion
+  requests cannot cascade into booking history.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a

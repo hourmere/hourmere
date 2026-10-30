@@ -21,7 +21,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
-import { isUuid, organizationGuards } from './organizations.ts'
+import { isUuid, organizationGuards, personalOwner } from './organizations.ts'
 import {
   checkTeamManagementAccess,
   TeamManagementError,
@@ -32,6 +32,7 @@ import {
 } from './team-management.ts'
 import * as removalExports from './team-member-removal.ts'
 import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
+import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 import type { createTeamRolePolicy } from './team-role-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -51,7 +52,14 @@ function sourceCopy(replacement?: Replacement): Remove {
     /\bexport /g,
     '',
   )
-  const bindings = { checkTeamManagementAccess, isUuid, teamManagementDenied, teamRoles }
+  const bindings = {
+    assertTeamOwnerRemains,
+    checkTeamManagementAccess,
+    isUuid,
+    personalOwner,
+    teamManagementDenied,
+    teamRoles,
+  }
   return new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
     ...Object.values(bindings),
   ) as Remove
@@ -72,6 +80,7 @@ function policySourceCopy(
   )
   const bindings = {
     AsyncLocalStorage,
+    assertTeamOwnerRemains,
     tryGetCurrentAuthEndpointContext,
     APIError,
     getSessionFromCtx,
@@ -79,6 +88,7 @@ function policySourceCopy(
     MemberDepartureOwnerRequiredError,
     recordTeamRoleChange,
     isUuid,
+    personalOwner,
     checkTeamManagementAccess,
     TeamManagementError,
     teamRoles,
@@ -534,7 +544,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   async function verifyTeamBinding(remove: Remove) {
     const f = await fixture()
     const other = await fixture()
-    // Isolate team binding from the independent prohibition on owner targets.
+    // Isolate team binding from the independent restrictions on elevated targets.
     await db
       .deleteFrom('auth.member')
       .where('userId', '=', other.target.id)
@@ -673,7 +683,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
 
   it('passes the removal assertions against an unmodified source copy', async () => {
     const remove = sourceCopy()
-    await verifyTarget(remove, 'owner', 'owner,member')
+    await verifyTarget(remove, 'admin', 'owner,member')
     await verifyTarget(remove, 'admin', 'admin')
     await verifyTeamBinding(remove)
     await verifyDeactivation(remove)
@@ -693,17 +703,26 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   }[] = [
     {
       name: 'owner target refusal',
-      replacement: ["roles.includes('owner') ||", 'false ||'],
-      verify: (remove) => verifyTarget(remove, 'owner', 'owner,member'),
+      replacement: [
+        "(roles.includes('owner') || roles.includes('admin'))",
+        "roles.includes('admin')",
+      ],
+      verify: (remove) => verifyTarget(remove, 'admin', 'owner,member'),
     },
     {
       name: 'admin target refusal',
-      replacement: ["(actor.role !== 'owner' && roles.includes('admin'))", 'false'],
+      replacement: [
+        "(actor.role !== 'owner' && (roles.includes('owner') || roles.includes('admin')))",
+        'false',
+      ],
       verify: (remove) => verifyTarget(remove, 'admin', 'admin'),
     },
     {
       name: 'unknown role target refusal',
-      replacement: ["(!roles.includes('admin') && !roles.includes('member')) ||", 'false ||'],
+      replacement: [
+        "(!roles.includes('owner') && !roles.includes('admin') && !roles.includes('member')) ||",
+        'false ||',
+      ],
       verify: (remove) => verifyTarget(remove, 'owner', 'custom'),
     },
     {

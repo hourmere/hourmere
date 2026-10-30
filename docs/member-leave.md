@@ -24,9 +24,13 @@ connection.
 
 An owner may leave only while another current member has an exact `owner` role token.
 This check runs after the organization write lock, serializing simultaneous owner leaves
-and role changes. The REST refusal is `409 member_departure_owner_required` with
+and role changes. Removal and demotion count current owners under this same lock
+in their membership write transaction. The REST refusal is
+`409 member_departure_owner_required` with
 `message: "Another owner is needed before you can leave."` and
-`handling: { "owner": "another_owner_is_needed_before_you_can_leave" }`.
+`handling: { "owner": "another_owner_is_needed_before_you_can_leave",
+"nextStep": "add_another_owner_first" }`. The existing owner value remains compatible;
+`nextStep` gives the shared recovery step for departure, removal and demotion.
 Legacy comma-separated roles are trimmed and matched by exact tokens. Another owner
 does not bypass the event and booking impact rules.
 
@@ -60,8 +64,18 @@ handler's session snapshot after success so its later cleanup retains the commit
 personal fallback. Administrative removal continues through its existing path.
 
 The native adapter maps the shared locked owner refusal to the same 409 code and handling
-in Better Auth's `{code,message,handling}` shape. Better Auth retains its earlier
-`400 YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER` check when it recognizes a sole
-owner before persistence. Concurrent native leaves also reach the serialized check, so
-only one of two owners may leave. Personal-organization owner guards remain in place.
-Owner demotion, removal and ownership transfer are outside this leave-path change.
+in Better Auth's `{code,message,handling}` shape. The HTTP response boundary also maps
+Better Auth's earlier sole-owner 400 refusals to this stable 409 response for teams.
+The native early checks remain intact; writes that reach persistence still recheck owner
+continuity under the lock. Concurrent leaves, demotions and removals serialize on the
+same organization row, so only one conflicting loss of ownership commits. Personal-organization owner
+guards remain in place.
+
+A verified owner may demote themselves or another owner to `admin` or `member`, or remove
+another owner, only while another current owner remains. REST immediate removal refuses
+self targets; use safe departure for dependency checks and the personal fallback.
+Admins cannot act on owners.
+Assigning an owner role and full ownership transfer remain unavailable at launch.
+`/organization/delete` is refused with `403 TEAM_OPERATION_NOT_SUPPORTED` for HTTP and
+trusted server-side calls before any booking-history cascade. There is no separate
+ownership-transfer endpoint on this instance.
