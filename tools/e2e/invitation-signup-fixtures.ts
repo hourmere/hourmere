@@ -1,10 +1,14 @@
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
+import { loadConfig } from '../../apps/server/src/config.ts'
 import type { RunningServer } from '../../apps/server/src/server.ts'
 import { createDb } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
+import { createJobs } from '../../packages/jobs/src/index.ts'
+import { createSmtpMailer } from '../../packages/mail/src/index.ts'
 import { fakeSmtpServer } from '../../packages/mail/src/smtp-testing.ts'
+import { invitationEmailJob, signInEmailJobs } from '../../packages/notifications/src/index.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { test as base, expect } from './fixtures.ts'
@@ -27,6 +31,7 @@ export interface InvitationSignupApp {
   recipientEmail: string
   teamId: string
   teamName: string
+  startInvitationDelivery: () => Promise<void>
   clearMailbox: () => void
   mailLink: (kind: 'invitation' | 'sign-in', email: string) => string | undefined
   state: () => Promise<InvitationSignupState>
@@ -64,6 +69,8 @@ export const test = base.extend<{
     if (!bootstrap) throw new Error('Invitation signup requires HOURMERE_E2E_BOOTSTRAP_URL')
     const owned = await createTestDatabase(bootstrap, undefined, { tag: 'invite_signup' })
     let app: RunningServer | undefined
+    let signInWorker: Pick<ReturnType<typeof createJobs>, 'stop'> | undefined
+    let invitationWorker: Pick<ReturnType<typeof createJobs>, 'stop'> | undefined
     let listener: OwnedListener | undefined
     let smtpListener: OwnedListener | undefined
     let externalRequests = 0
@@ -104,19 +111,47 @@ export const test = base.extend<{
       smtpListener = await listenOwned(smtp.server)
       listener = await listenOwned(createServer({ allowHalfOpen: true }))
       const { url } = listener
-      app = await startFixtureServer(listener, {
+      const env = {
         DATABASE_URL: owned.url,
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
         SIGNUP: signupMode,
         SIGNUP_ALLOWED_DOMAINS: '',
-        HOURMERE_ROLE: 'all',
+        HOURMERE_ROLE: 'web',
         AUTO_MIGRATE: 'true',
+        PORT: '0',
+        PUBLIC_URL: url,
         SMTP_URL: `smtp://127.0.0.1:${smtpListener.port}`,
         MAIL_FROM: 'Hourmere <sender@hourmere.invalid>',
         WEB_DIST:
           process.env.HOURMERE_E2E_WEB_DIST ??
           fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+      }
+      const config = loadConfig(env)
+      app = await startFixtureServer(listener, env)
+      const mailer = createSmtpMailer({ url: env.SMTP_URL, from: env.MAIL_FROM })
+      const mailDeps = {
+        db,
+        mailer,
+        publicUrl: config.PUBLIC_URL,
+        secret: config.BETTER_AUTH_SECRET,
+        mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
+      }
+      const signInJobs = createJobs({
+        connectionString: owned.url,
+        definitions: signInEmailJobs({
+          ...mailDeps,
+          signup: config.signup,
+          signInMailMaxPerHour: config.SIGN_IN_MAIL_MAX_PER_HOUR,
+          signInMailMaxPerDay: config.SIGN_IN_MAIL_MAX_PER_DAY,
+        }),
+        work: true,
+        migrate: false,
+        maxConnections: 1,
+        instanceName: 'invitation-signup-sign-in',
       })
+      signInWorker = signInJobs
+      await signInJobs.start()
+      let invitationStartup: Promise<void> | undefined
       await context.route('**/*', async (route) => {
         if (new URL(route.request().url()).origin === url) return route.continue()
         externalRequests++
@@ -128,6 +163,27 @@ export const test = base.extend<{
         recipientEmail,
         teamId,
         teamName,
+        startInvitationDelivery: async () => {
+          if (!invitationStartup) {
+            // Keep the real queued result observable until the browser has checked it.
+            const worker = createJobs({
+              connectionString: owned.url,
+              definitions: [
+                invitationEmailJob({
+                  ...mailDeps,
+                  smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+                }),
+              ],
+              work: true,
+              migrate: false,
+              maxConnections: 1,
+              instanceName: 'invitation-signup-invitation',
+            })
+            invitationWorker = worker
+            invitationStartup = worker.start()
+          }
+          await invitationStartup
+        },
         clearMailbox: () => {
           smtp.received.data = undefined
           smtp.received.to.length = 0
@@ -226,17 +282,25 @@ export const test = base.extend<{
       expect(externalRequests, 'No third-party browser request is permitted').toBe(0)
     } finally {
       try {
-        await app?.close()
+        try {
+          await invitationWorker?.stop()
+        } finally {
+          await signInWorker?.stop()
+        }
       } finally {
         try {
-          await listener?.close()
+          await app?.close()
         } finally {
           try {
-            await smtpListener?.close()
+            await listener?.close()
           } finally {
-            await owned.drop()
-            await listener?.assertClosed()
-            await smtpListener?.assertClosed()
+            try {
+              await smtpListener?.close()
+            } finally {
+              await owned.drop()
+              await listener?.assertClosed()
+              await smtpListener?.assertClosed()
+            }
           }
         }
       }

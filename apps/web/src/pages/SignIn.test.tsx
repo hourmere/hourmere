@@ -62,6 +62,34 @@ describe('the sign-in page', () => {
     expect(screen.getByText('请使用收到此邀请的邮箱登录。登录不会自动加入团队。')).toBeDefined()
   })
 
+  it.each(['en', 'zh-CN'] as const)(
+    'offers administrator recovery before and after an invitation sign-in request in %s',
+    async (language) => {
+      fakeApi({
+        ...signedOut,
+        ...instance(),
+        'POST /api/auth/sign-in/magic-link': linkSent,
+      })
+      renderApp(invitationSignIn)
+      await heading()
+      await userEvent.selectOptions(screen.getByLabelText('Interface language'), language)
+      const chinese = language === 'zh-CN'
+      const guidance = chinese
+        ? '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请，或联系此实例的管理员咨询注册权限。'
+        : 'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.'
+      expect(screen.getByText(guidance, { exact: true })).toBeDefined()
+
+      await userEvent.type(screen.getByLabelText(chinese ? '邮箱' : 'Email'), 'ada@example.com')
+      await userEvent.click(
+        screen.getByRole('button', {
+          name: chinese ? '通过邮件发送登录链接' : 'Email me a sign-in link',
+        }),
+      )
+      await screen.findByRole('heading', { name: chinese ? '查看邮件' : 'Check your email' })
+      expect(screen.getByText(guidance, { exact: true })).toBeDefined()
+    },
+  )
+
   it('preserves the invitation in magic-link success, error, resend and retry paths', async () => {
     const api = fakeApi({
       ...signedOut,

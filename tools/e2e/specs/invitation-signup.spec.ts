@@ -8,6 +8,11 @@ const copy = {
     send: 'Email me a sign-in link',
     sent: 'Check your email',
     space: /^Switch space/,
+    invite: 'Invite member',
+    queued: 'Invitation queued for delivery.',
+    pending: 'Pending invitations',
+    waiting: 'Waiting to send',
+    invitation: (email: string) => `Invitation to ${email}`,
     join: 'Join team',
     invited: 'Invited email',
     signedIn: 'Signed in as',
@@ -22,6 +27,11 @@ const copy = {
     send: '通过邮件发送登录链接',
     sent: '查看邮件',
     space: /^切换空间/,
+    invite: '邀请成员',
+    queued: '邀请已加入投递队列。',
+    pending: '待接受的邀请',
+    waiting: '等待发送',
+    invitation: (email: string) => `发给 ${email} 的邀请`,
     join: '加入团队',
     invited: '受邀邮箱',
     signedIn: '当前登录账号',
@@ -69,19 +79,36 @@ async function prepareInvitation(
     activeTeam: false,
   })
   app.clearMailbox()
-  // The current web app has no invitation form. Exercise the real public
-  // invitation API using the owner's browser session, without pretending
-  // this setup step establishes invite-form coverage.
-  const created = await page.request.post(`${app.url}/api/auth/organization/invite-member`, {
-    headers: { origin: app.url, 'X-Expected-Organization-Id': app.teamId },
-    data: { email: app.recipientEmail, role: 'member', organizationId: app.teamId },
-  })
+  await page.goto(`${app.url}/app/settings`)
+  const form = page.getByRole('region', { name: labels.invite, exact: true })
+  await form.getByRole('textbox', { name: labels.email, exact: true }).fill(app.recipientEmail)
+  const queued = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/auth/organization/invite-member',
+  )
+  await form.getByRole('button', { name: labels.invite, exact: true }).click()
+  const created = await queued
   expect(created.status()).toBe(200)
-  const result = (await created.json()) as { delivery: { state: string } }
+  expect(created.request().headers()['x-expected-organization-id']).toBe(app.teamId)
+  const result = (await created.json()) as { role: string; delivery: { state: string } }
+  expect(result.role).toBe('member')
   expect(result.delivery.state).toBe('queued')
+  await expect(form.getByRole('status')).toHaveText(labels.queued)
+  const pending = page.getByRole('region', { name: labels.pending, exact: true })
+  const invitation = pending.getByRole('listitem').filter({
+    has: page.getByRole('heading', { name: labels.invitation(app.recipientEmail), exact: true }),
+  })
+  await expect(invitation.getByText(labels.waiting, { exact: true })).toBeVisible()
   await expect
     .poll(() => app.state())
-    .toMatchObject({ status: 'pending', queuedJobs: 1, memberships: 0, activeTeam: false })
+    .toMatchObject({
+      status: 'pending',
+      delivery: 'queued',
+      attempts: 0,
+      queuedJobs: 1,
+      memberships: 0,
+      activeTeam: false,
+    })
+  await app.startInvitationDelivery()
   await expect.poll(() => Boolean(app.mailLink('invitation', app.recipientEmail))).toBe(true)
   await expect
     .poll(() => app.state())
@@ -104,7 +131,7 @@ for (const mode of ['closed', 'first-user'] as const) {
     test.describe(`${mode} ${existing ? 'existing account' : 'new account'}`, () => {
       test.use({ signupMode: mode, existingRecipient: existing })
       for (const language of ['en', 'zh-CN'] as const) {
-        test(`${language}: owner UI sign-in → invitation API → real SMTP mail → recipient UI sign-in → explicit join`, async ({
+        test(`${language}: owner UI sign-in → invite form → queued pending invitation → real SMTP mail → recipient UI sign-in → explicit join`, async ({
           page,
           context,
           invitationSignupApp: app,
@@ -191,7 +218,7 @@ for (const mode of ['closed', 'first-user'] as const) {
 
 for (const language of ['en', 'zh-CN'] as const) {
   for (const source of ['different address', 'expired', 'canceled'] as const) {
-    test(`${language}: ${source} gives the same mailbox acknowledgement and team-owner recovery without registration`, async ({
+    test(`${language}: ${source} gives the same mailbox acknowledgement and administrator recovery without registration`, async ({
       page,
       context,
       invitationSignupApp: app,
