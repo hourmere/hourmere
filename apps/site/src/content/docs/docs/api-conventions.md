@@ -265,6 +265,8 @@ permission and do not affect API-key or MCP OAuth authority.
 | REST `POST /api/v1/team/bookings/{id}/cancel`: malformed expected ID, or a different expected team the caller no longer owns/administers | 409 `organization_context_changed` | 403 `team_management_access_denied` |
 | REST `POST /api/v1/teams/{teamId}/leave`: malformed expected ID, or a different expected team the caller no longer belongs to, including missing/personal organizations | 409 `organization_context_changed` | 403 `team_management_access_denied` |
 | Team reads with the optional header: a different expected team still authorized for that read (any member for their own departure preview; owner/admin for management reads) | 403 `team_management_access_denied` | 409 `organization_context_changed` |
+| Team reads that did not previously read the header (`GET /api/v1/team/bookings`, `GET /api/v1/teams/{teamId}/readiness`, departure impact, removal records, removal handling): malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
+| The same reads: the expected team differs from the current team | 200 (header ignored) | 409 `organization_context_changed` when still authorized for the expected team, otherwise 403 `team_management_access_denied` |
 
 A still-current ordinary member's stale REST or native leave request retains 409.
 Missing required write headers retain 409, and optional-header omission retains existing
