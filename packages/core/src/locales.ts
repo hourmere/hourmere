@@ -55,6 +55,15 @@ export const localeRegistry = {
     direction: 'ltr',
     interfaces: ['public'],
   },
+  'pt-BR': {
+    code: 'pt-BR',
+    nativeName: 'Português (Brasil)',
+    fallbacks: ['en'],
+    formatLocale: 'pt-BR',
+    direction: 'ltr',
+    interfaces: ['public'],
+    excludedRegions: ['PT'],
+  },
 } as const satisfies Record<string, LocaleDefinition>
 
 /** Account locale remains an independent BCP 47 setting. */
