@@ -62,6 +62,12 @@ checking every host again. A concurrent host-set change is refused; no extra hos
 appended out of order. All booking hosts, invitees, retry state, calendar targets and queued
 notifications commit or roll back together. Existing overlap constraints remain the final
 protection, with advisory locks also serializing buffers and daily limits.
+Host eligibility then share-locks verified users before their member rows, in sorted
+user-ID order. Leave, administrative removal and role changes take the organization
+update lock before any member lock, so they wait for this booking transaction and apply
+their policy to its committed result. See the repository's
+[team lock order](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#team-membership-and-host-lock-order)
+for the complete transaction phases.
 
 ## Existing meetings and changes
 
