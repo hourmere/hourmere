@@ -63,7 +63,10 @@ type ReadinessModule = {
 type Mutation = readonly [string, string]
 
 /** Evaluate an in-memory source copy; a negative control never changes repository files. */
-function sourceCopy(mutation?: Mutation): ReadinessModule {
+function sourceCopy(
+  mutation?: Mutation,
+  calendarSyncGuard = assertCachedCalendarSync,
+): ReadinessModule {
   let source = readFileSync('packages/scheduling/src/readiness.ts', 'utf8')
   if (mutation) {
     expect(source.includes(mutation[0]), 'mutation must match source').toBe(true)
@@ -77,7 +80,7 @@ function sourceCopy(mutation?: Mutation): ReadinessModule {
     validateWeeklyHours,
     sql,
     z,
-    assertCachedCalendarSync,
+    assertCachedCalendarSync: calendarSyncGuard,
     servedHandle,
     checkedCatalogPage,
     automaticMeet,
@@ -433,13 +436,112 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     await rejectsMutation(
       reason === 'sync_not_ready'
         ? ["? 'sync_not_ready'", "? 'calendar_attention_required'"]
-        : [
-            "selected.some((c) => c.provider === 'google' && (c.status !== 'active' || c.sync_error))",
-            'false',
-          ],
+        : ["calendar.status !== 'active' || calendar.sync_error", 'false'],
       verify,
     )
   })
+
+  it.each([
+    ['stale', { syncedAt: new Date(now().epochMilliseconds - 600001) }],
+    [
+      'time-zone mismatched',
+      {
+        syncState: {
+          version: 2,
+          timeZone: 'America/New_York',
+          start: '2026-10-01T00:00:00Z',
+          end: '2026-12-01T00:00:00Z',
+        },
+      },
+    ],
+  ] as const)(
+    'keeps a %s calendar actionable while another selected calendar lacks sync metadata',
+    async (_kind, options) => {
+      const s = await personal()
+      await calendar(s.user.id, { syncedAt: null, syncState: null })
+      await calendar(s.user.id, options)
+      const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+        const result = await read(s.ctx)
+        for (const item of [result.member, required(result.eventTypes.data[0])]) {
+          const issues = item.signals.filter((row) => row.id === 'selected_calendar_sync')
+          expect(issues).toHaveLength(1)
+          expect(issues[0]).toMatchObject({
+            state: 'dependency_unavailable',
+            reasonCode: 'calendar_attention_required',
+            fixKind: 'self_calendars',
+          })
+          expect(item.signals.map((row) => row.reasonCode)).not.toContain('sync_not_ready')
+        }
+      }
+      await verify({ getSelfReadiness, getTeamReadiness })
+      await rejectsMutation(
+        [
+          "syncIssues.find((issue) => issue.reasonCode === 'calendar_attention_required') ??",
+          "syncIssues.find((issue) => issue.reasonCode === 'sync_not_ready') ??",
+        ],
+        verify,
+      )
+    },
+  )
+
+  it('keeps missing sync metadata distinct from another healthy selected calendar', async () => {
+    const s = await personal()
+    await calendar(s.user.id, { syncedAt: null, syncState: null })
+    await calendar(s.user.id)
+    const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+      const result = await read(s.ctx)
+      for (const item of [result.member, required(result.eventTypes.data[0])]) {
+        expect(signal(item, 'selected_calendar_sync')).toMatchObject({
+          state: 'dependency_unavailable',
+          reasonCode: 'sync_not_ready',
+          fixKind: 'self_calendars',
+        })
+      }
+    }
+    await verify({ getSelfReadiness, getTeamReadiness })
+    await rejectsMutation(
+      [
+        'assertCachedCalendarSync([calendar], now)',
+        "assertCachedCalendarSync(selected.filter((c) => c.provider === 'google'), now)",
+      ],
+      verify,
+    )
+  })
+
+  it.each([
+    ['stale', { syncedAt: new Date(now().epochMilliseconds - 600001) }],
+    ['missing sync metadata', { syncedAt: null, syncState: null }],
+  ] as const)(
+    'retains an unexpected calendar evaluation failure alongside a %s calendar',
+    async (_kind, options) => {
+      const s = await personal()
+      const failingTime = new Date(now().epochMilliseconds + 1)
+      await calendar(s.user.id, { syncedAt: failingTime })
+      await calendar(s.user.id, options)
+      const guard: typeof assertCachedCalendarSync = (calendars, checkedAt, window) => {
+        if (calendars.some((row) => row.last_synced_at?.getTime() === failingTime.getTime()))
+          throw new Error('synthetic-calendar-evaluation-failure')
+        assertCachedCalendarSync(calendars, checkedAt, window)
+      }
+      const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+        const result = await read(s.ctx)
+        for (const item of [result.member, required(result.eventTypes.data[0])]) {
+          expect(signal(item, 'selected_calendar_sync')).toMatchObject({
+            state: 'check_failed',
+            reasonCode: 'check_failed',
+            fixKind: 'retry_summary',
+          })
+          expect(item.summary).toBe('check_failed')
+          expect(item.completeness).toBe('partial')
+        }
+      }
+      await rejectsMutation(
+        ["syncIssues.find((issue) => issue.state === 'check_failed') ??", ''],
+        verify,
+        guard,
+      )
+    },
+  )
 
   it('keeps missing or explicitly failed sync behind one coarse team issue', async () => {
     const s = await team('individual', 1)
@@ -497,10 +599,13 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
   async function rejectsMutation(
     mutation: Mutation,
     verify: (module: ReadinessModule) => Promise<void>,
+    calendarSyncGuard = assertCachedCalendarSync,
   ) {
-    await verify(sourceCopy())
-    await expect(verify(sourceCopy(mutation))).rejects.toMatchObject({ name: 'AssertionError' })
-    await verify(sourceCopy())
+    await verify(sourceCopy(undefined, calendarSyncGuard))
+    await expect(verify(sourceCopy(mutation, calendarSyncGuard))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await verify(sourceCopy(undefined, calendarSyncGuard))
   }
 
   it('distinguishes member default schedule gaps from a valid individual custom schedule', async () => {
