@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import type { Principal } from '@hourmere/auth'
+import { checkTeamManagementAccess, type Principal, TeamManagementError } from '@hourmere/auth'
 import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import { createDb, type Db, type Json } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -21,7 +21,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { eligibleHostIds, hasValidHostShape } from './hosts.ts'
 import { isUuid } from './internal.ts'
-import { getSelfReadiness, getTeamReadiness } from './readiness.ts'
+import { getSelfReadiness, getTeamMemberReadiness, getTeamReadiness } from './readiness.ts'
 import { createFixtures, createTestTeam, createTestUser, type TestUser } from './testing.ts'
 import { cleanText } from './text.ts'
 
@@ -60,13 +60,16 @@ type ReadinessModule = {
   getSelfReadiness: typeof getSelfReadiness
   getTeamReadiness: typeof getTeamReadiness
 }
+type MemberReadinessModule = ReadinessModule & {
+  getTeamMemberReadiness: typeof getTeamMemberReadiness
+}
 type Mutation = readonly [string, string]
 
 /** Evaluate an in-memory source copy; a negative control never changes repository files. */
 function sourceCopy(
   mutation?: Mutation,
   calendarSyncGuard = assertCachedCalendarSync,
-): ReadinessModule {
+): MemberReadinessModule {
   let source = readFileSync('packages/scheduling/src/readiness.ts', 'utf8')
   if (mutation) {
     expect(source.includes(mutation[0]), 'mutation must match source').toBe(true)
@@ -93,11 +96,13 @@ function sourceCopy(
     hasValidHostShape,
     isUuid,
     cleanText,
+    checkTeamManagementAccess,
+    TeamManagementError,
   }
   return new Function(
     ...Object.keys(bindings),
-    `${script}; return { getSelfReadiness, getTeamReadiness }`,
-  )(...Object.values(bindings)) as ReadinessModule
+    `${script}; return { getSelfReadiness, getTeamReadiness, getTeamMemberReadiness }`,
+  )(...Object.values(bindings)) as MemberReadinessModule
 }
 
 describe.skipIf(!serverUrl)('booking readiness from current cached facts (real Postgres)', () => {
@@ -1725,5 +1730,324 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     expect(large.count).toBeLessThanOrEqual(small.count + 2)
     expect(large.count).toBeLessThanOrEqual(20)
     expect(owned.pool.totalCount).toBeLessThanOrEqual(10)
+  })
+
+  async function membershipIds(organizationId: string) {
+    return db
+      .selectFrom('auth.member')
+      .select(['id', 'userId'])
+      .where('organizationId', '=', organizationId)
+      .orderBy('id')
+      .execute()
+  }
+
+  it.each(['owner', 'admin', 'member'])(
+    'projects only permitted member health for a %s without fetching private metadata',
+    async (role) => {
+      const actor = await createTestUser(db)
+      const peer = await createTestUser(db)
+      const organization = await createTestTeam(db, [
+        { user: actor, role },
+        { user: peer, role: 'member' },
+      ])
+      const ctx = await session(actor, organization.as(actor))
+      const schedules = createFixtures(db)
+      const scheduleId = await schedules.schedule(peer.id, { timeZone: 'UTC' })
+      await db
+        .updateTable('schedules')
+        .set({ name: 'private-member-schedule-canary' })
+        .where('id', '=', scheduleId)
+        .execute()
+      const calendar = await meetCalendar(peer.id)
+      await db
+        .updateTable('calendars')
+        .set({
+          name: 'private-member-calendar-canary',
+          check_conflicts: true,
+          sync_error: 'needs_reauth',
+        })
+        .where('id', '=', calendar.id)
+        .execute()
+      await db
+        .insertInto('conference_connections')
+        .values({
+          user_id: peer.id,
+          provider: 'zoom',
+          external_user_id: randomUUID(),
+          account_email: 'private-member-conference-canary@example.com',
+          display_name: 'private-member-conference-canary',
+          status: 'needs_reauth',
+        })
+        .execute()
+      const rows = await membershipIds(organization.id)
+      const queries: string[] = []
+      const response = await getTeamMemberReadiness(
+        { ...ctx, db: db.withPlugin(queryPlugin((node) => queries.push(JSON.stringify(node)))) },
+        organization.id,
+        rows.map((row) => row.id),
+      )
+      expect(response.members).toHaveLength(role === 'member' ? 1 : 2)
+      const own = required(
+        response.members.find(
+          (row) => row.memberId === rows.find((r) => r.userId === actor.id)?.id,
+        ),
+      )
+      expect(own.health).toEqual({
+        defaultSchedule: 'configuration_blocker',
+        selectedCalendars: 'not_applicable',
+        conferenceAccounts: 'not_connected',
+      })
+      if (role !== 'member') {
+        const other = required(response.members.find((row) => row.memberId !== own.memberId))
+        expect(other.health).toEqual({
+          defaultSchedule: 'satisfied',
+          selectedCalendars: 'dependency_unavailable',
+          conferenceAccounts: 'attention_required',
+        })
+      }
+      for (const row of response.members)
+        expect(Object.keys(row).sort()).toEqual([
+          'completeness',
+          'displayName',
+          'evaluatedAt',
+          'fixKinds',
+          'health',
+          'memberId',
+          'reasonCodes',
+          'summary',
+        ])
+      const serialized = JSON.stringify(response)
+      for (const canary of ['private-member-', scheduleId, calendar.id, peer.email])
+        expect(serialized.includes(canary)).toBe(false)
+      const facts = queries.filter((query) =>
+        ['schedules', 'calendar_connections', 'conference_connections'].some((table) =>
+          query.includes(`"name":"${table}"`),
+        ),
+      )
+      expect(facts).toHaveLength(3)
+      for (const query of facts) {
+        expect(query).not.toContain('account_email')
+        expect(query).not.toContain('"name":"name"')
+        if (role === 'member') expect(query).not.toContain(peer.id)
+      }
+      expect(
+        queries.some(
+          (query) => query.includes('event_type_hosts') || query.includes('calendar_busy'),
+        ),
+      ).toBe(false)
+    },
+  )
+
+  it('reuses a user default across teams and distinguishes closed hours from no default', async () => {
+    const user = await createTestUser(db)
+    const first = await createTestTeam(db, [{ user, role: 'member' }])
+    const second = await createTestTeam(db, [{ user, role: 'member' }])
+    const schedule = await createFixtures(db).schedule(user.id)
+    await db
+      .updateTable('schedules')
+      .set({
+        weekly_hours: {
+          monday: [],
+          tuesday: [],
+          wednesday: [],
+          thursday: [],
+          friday: [],
+          saturday: [],
+          sunday: [],
+        },
+      })
+      .where('id', '=', schedule)
+      .execute()
+    const read = async (team: typeof first) => {
+      const ids = await membershipIds(team.id)
+      return getTeamMemberReadiness(
+        await session(user, team.as(user)),
+        team.id,
+        ids.map((row) => row.id),
+      )
+    }
+    for (const team of [first, second]) {
+      const result = await read(team)
+      expect(result.members[0]?.health.defaultSchedule).toBe('satisfied')
+      expect(result.members[0]?.summary).toBe('checks_passed')
+    }
+    await db.deleteFrom('schedules').where('id', '=', schedule).execute()
+    for (const team of [first, second]) {
+      const result = await read(team)
+      expect(result.members[0]?.health.defaultSchedule).toBe('configuration_blocker')
+      expect(result.members[0]?.reasonCodes).toContain('default_schedule_required')
+    }
+  })
+
+  it('reports member dependency read failures without inventing missing configuration', async () => {
+    const user = await createTestUser(db)
+    const organization = await createTestTeam(db, [{ user, role: 'owner' }])
+    const ctx = await session(user, organization.as(user))
+    const ids = (await membershipIds(organization.id)).map((row) => row.id)
+    const broken = db.withPlugin(
+      queryPlugin((node) => {
+        if (
+          ['schedules', 'calendar_connections', 'conference_connections'].some((table) =>
+            JSON.stringify(node).includes(`"name":"${table}"`),
+          )
+        )
+          throw new Error('Synthetic member dependency failure')
+      }),
+    )
+    const result = await getTeamMemberReadiness({ ...ctx, db: broken }, organization.id, ids)
+    expect(result.members[0]?.health).toEqual({
+      defaultSchedule: 'check_failed',
+      selectedCalendars: 'check_failed',
+      conferenceAccounts: 'check_failed',
+    })
+    expect(result.members[0]?.summary).toBe('check_failed')
+    expect(result.members[0]?.reasonCodes).not.toContain('default_schedule_required')
+  })
+
+  it('summarizes optional conference accounts without claiming automatic-meeting eligibility', async () => {
+    const user = await createTestUser(db)
+    const organization = await createTestTeam(db, [{ user, role: 'member' }])
+    const ctx = await session(user, organization.as(user))
+    const ids = (await membershipIds(organization.id)).map((row) => row.id)
+    const connection = await db
+      .insertInto('conference_connections')
+      .values({
+        user_id: user.id,
+        provider: 'zoom',
+        external_user_id: randomUUID(),
+        status: 'active',
+        mode: 'identity',
+        credentials: Buffer.from('synthetic'),
+        scopes: ['user:read:user'],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const connected = await getTeamMemberReadiness(ctx, organization.id, ids)
+    expect(connected.members[0]?.health.conferenceAccounts).toBe('connected')
+    expect(connected.members[0]?.health.defaultSchedule).toBe('configuration_blocker')
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'disconnected', credentials: null, scopes: [] })
+      .where('id', '=', connection.id)
+      .execute()
+    const disconnected = await getTeamMemberReadiness(ctx, organization.id, ids)
+    expect(disconnected.members[0]?.health.conferenceAccounts).toBe('not_connected')
+  })
+
+  it.each([
+    [".$if(privateDetails, (query) => query.select('name'))", ".select('name')"],
+    [
+      ".$if(privateDetails, (query) => query.select(['cc.account_email', 'c.name']))",
+      ".select(['cc.account_email', 'c.name'])",
+    ],
+  ] as const)(
+    'detects private metadata selection in a source-copy member batch (%s)',
+    async (original, mutation) => {
+      const user = await createTestUser(db)
+      const organization = await createTestTeam(db, [{ user, role: 'owner' }])
+      const ctx = await session(user, organization.as(user))
+      const ids = (await membershipIds(organization.id)).map((row) => row.id)
+      const verify = async (read = getTeamMemberReadiness) => {
+        const facts: string[] = []
+        await read(
+          {
+            ...ctx,
+            db: db.withPlugin(
+              queryPlugin((node) => {
+                const query = JSON.stringify(node)
+                if (
+                  query.includes('"name":"schedules"') ||
+                  query.includes('"name":"calendar_connections"')
+                )
+                  facts.push(query)
+              }),
+            ),
+          },
+          organization.id,
+          ids,
+        )
+        expect(
+          facts.some((query) => query.includes('account_email') || query.includes('"name":"name"')),
+        ).toBe(false)
+      }
+      await verify(sourceCopy().getTeamMemberReadiness)
+      await expect(
+        verify(sourceCopy([original, mutation]).getTeamMemberReadiness),
+      ).rejects.toMatchObject({ name: 'AssertionError', actual: true, expected: false })
+      await verify(sourceCopy().getTeamMemberReadiness)
+    },
+  )
+
+  it('uses a constant bounded query count for the displayed member batch', async () => {
+    const user = await createTestUser(db)
+    const organization = await createTestTeam(db, [{ user, role: 'owner' }])
+    const ctx = await session(user, organization.as(user))
+    const measure = async () => {
+      const ids = (await membershipIds(organization.id)).map((row) => row.id)
+      let count = 0
+      const result = await getTeamMemberReadiness(
+        {
+          ...ctx,
+          db: db.withPlugin(
+            queryPlugin(() => {
+              count++
+            }),
+          ),
+        },
+        organization.id,
+        ids,
+      )
+      return { result, count }
+    }
+    const small = await measure()
+    const fixtures = createFixtures(db)
+    for (let index = 0; index < 24; index++) {
+      const member = await createTestUser(db)
+      await fixtures.member(member.id, organization.id)
+    }
+    const large = await measure()
+    expect(large.result.members).toHaveLength(25)
+    expect(large.count).toBe(small.count)
+    expect(large.count).toBeLessThanOrEqual(15)
+    expect(owned.pool.totalCount).toBeLessThanOrEqual(10)
+  })
+
+  it('detects removal of own-row and team scoping in source-copy member summaries', async () => {
+    const user = await createTestUser(db)
+    const peer = await createTestUser(db)
+    const organization = await createTestTeam(db, [
+      { user, role: 'member' },
+      { user: peer, role: 'member' },
+    ])
+    const ctx = await session(user, organization.as(user))
+    const ids = (await membershipIds(organization.id)).map((row) => row.id)
+    const verifyOwn = async (read = getTeamMemberReadiness) => {
+      const result = await read(ctx, organization.id, ids)
+      expect(result.members).toHaveLength(1)
+    }
+    await verifyOwn(sourceCopy().getTeamMemberReadiness)
+    await expect(
+      verifyOwn(
+        sourceCopy([
+          "    .$if(actor.role === 'member', (query) => query.where('m.userId', '=', actor.userId))",
+          '',
+        ]).getTeamMemberReadiness,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    const otherTeam = await createTestTeam(db, [{ user, role: 'member' }])
+    const otherIds = (await membershipIds(otherTeam.id)).map((row) => row.id)
+    const verifyTeam = async (read = getTeamMemberReadiness) => {
+      const result = await read(ctx, organization.id, otherIds)
+      expect(result.members).toHaveLength(0)
+    }
+    await verifyTeam(sourceCopy().getTeamMemberReadiness)
+    await expect(
+      verifyTeam(
+        sourceCopy(["    .where('m.organizationId', '=', actor.organizationId)", ''])
+          .getTeamMemberReadiness,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verifyOwn(sourceCopy().getTeamMemberReadiness)
+    await verifyTeam(sourceCopy().getTeamMemberReadiness)
   })
 })

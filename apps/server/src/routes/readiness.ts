@@ -1,7 +1,9 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   getSelfReadiness,
+  getTeamMemberReadiness,
   getTeamReadiness,
+  MemberReadinessPageSchema,
   SelfReadinessPageSchema,
   TeamReadinessPageSchema,
 } from '@hourmere/scheduling'
@@ -16,13 +18,20 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
-import { teamManagementAccess } from '../team-management.ts'
+import { teamManagementAccess, teamManagementSessionCaller } from '../team-management.ts'
 
 const selfPageQuery = z.strictObject({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   eventTypeCursor: z.uuid().optional(),
 })
 const teamPageQuery = selfPageQuery.extend({ memberCursor: z.uuid().optional() })
+const memberPageQuery = z.strictObject({
+  memberIds: z
+    .string()
+    .max(3699)
+    .transform((value) => value.split(','))
+    .pipe(z.array(z.uuid()).min(1).max(100)),
+})
 const sessionSecurity = [{ session: [] }]
 const checkSemantics =
   'Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed.'
@@ -40,6 +49,7 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
       await next()
     })
     const access = teamManagementAccess(deps.db, caller)
+    const memberSessionCaller = teamManagementSessionCaller(caller)
     const currentTeamSession = createMiddleware<CallerEnv>(async (c, next) => {
       const principal = c.var.principal
       if (principal.kind !== 'session')
@@ -55,6 +65,49 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
       if (!current) throw new DomainError('forbidden', 'team_management_access_denied')
       await next()
     })
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/teams/{teamId}/member-readiness',
+        summary: 'Read coarse shared health checks for visible team member rows',
+        description:
+          'Requires a current verified web session in this team. Owners and admins receive only the requested current-team membership rows; ordinary members receive only their own requested row. Missing, departed and other-team membership IDs are omitted without revealing existence. Reads the same cached configuration and sync evaluator as event-type readiness, with no slot search or provider request. No private schedule names, calendar names or IDs, account emails, events or busy maps are returned. Default-schedule health is user-owned and reused across teams. Conference account state is optional account health, not automatic-meeting eligibility or a booking promise. Pass 1–100 comma-separated membership IDs from the displayed members page in one request. X-Expected-Organization-Id binds this read to its opening team; a still-authorized member whose context changed receives 409 reload guidance, while inaccessible teams receive uniform 403. Every Authorization header is denied even with a valid session cookie.',
+        tags: ['Readiness'],
+        security: sessionSecurity,
+        middleware: [memberSessionCaller] as [typeof memberSessionCaller],
+        request: {
+          params: z.object({ teamId: z.uuid() }),
+          headers: z.object({ 'x-expected-organization-id': z.string().optional() }),
+          query: memberPageQuery,
+        },
+        responses: {
+          200: {
+            description: 'Only the authorized requested member rows with coarse health checks',
+            content: json(
+              MemberReadinessPageSchema.openapi('MemberReadinessPage', {
+                description: checkSemantics,
+              }),
+            ),
+          },
+          ...errorResponses({
+            400: 'invalid_request or invalid_member_ids: provide 1–100 membership UUIDs',
+            403: 'team_management_access_denied: requires current verified team membership',
+            409: 'organization_context_changed: reload the page before retrying',
+          }),
+          500: internalError,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getTeamMemberReadiness(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').teamId,
+            c.req.valid('query').memberIds,
+            c.req.valid('header')['x-expected-organization-id'],
+          ),
+          200,
+        ),
+    )
     app.openapi(
       createRoute({
         method: 'get',

@@ -114,6 +114,8 @@ export const signedInAs = (me: Schemas['Me']): Routes => ({
       eventTypes: { data: [], nextCursor: null },
     }),
   'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
+  [`GET /api/v1/teams/${me.organization.id}/member-readiness`]: () =>
+    json(200, { organizationId: me.organization.id, members: [] }),
 })
 export const signedIn = signedInAs(ME)
 /** Opt in when a scenario opens team settings but makes no claims about either list. */

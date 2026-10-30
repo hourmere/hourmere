@@ -1,5 +1,33 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Member readiness': '成员就绪状态',
+  'Default schedule set': '已设置默认时间表',
+  'No default schedule': '未设置默认时间表',
+  'Default schedule not checked': '尚未检查默认时间表',
+  'Default schedule needs attention': '默认时间表需要处理',
+  'Default schedule check failed': '默认时间表检查失败',
+  'Selected calendar checks passed': '所选日历检查通过',
+  'No external conflict calendar required for basic bookings': '基本预约无需外部冲突检查日历',
+  'Selected calendars need attention': '所选日历需要处理',
+  'Selected calendars not checked': '尚未检查所选日历',
+  'Selected calendar check failed': '所选日历检查失败',
+  'Conference account connected': '已连接会议账户',
+  'No conference account connected; basic bookings do not require one':
+    '未连接会议账户；基本预约无需会议账户',
+  'Conference accounts need attention': '会议账户需要处理',
+  'Conference accounts not checked': '尚未检查会议账户',
+  'Conference account check failed': '会议账户检查失败',
+  'Only team owners and admins can view other members’ readiness.':
+    '仅团队所有者和管理员可查看其他成员的就绪状态。',
+  'Your default schedule is reused in every team you belong to.':
+    '你加入的所有团队共用你的个人默认时间表。',
+  'Configure default schedule': '配置默认时间表',
+  'Configure calendars': '配置日历',
+  'A missing default schedule is a configuration gap, not a report of no free time.':
+    '未设置默认时间表表示配置缺失，不表示当前没有空闲时间。',
+  'An external calendar is optional for basic bookings.': '基本预约无需连接外部日历。',
+  'Checking member configuration…': '正在检查成员配置…',
+  'Could not check member configuration.': '无法检查成员配置。',
   'Only owners can manage admins. Ownership transfer is not available yet.':
     '只有所有者可以管理管理员。暂不支持转移所有权。',
   'Owner roles cannot be changed here. The team must retain at least one owner.':

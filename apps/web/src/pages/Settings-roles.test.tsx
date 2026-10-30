@@ -45,6 +45,10 @@ function teamServer(routes: Routes = {}, members = [self, owner, admin, ordinary
   return fakeApi({
     'GET /api/auth/organization/list-members': () => json(200, { members, total: members.length }),
     'GET /api/v1/team/invitations': () => json(200, { data: [], nextCursor: null }),
+    [`GET /api/v1/teams/${TEAM_ID}/member-readiness`]: () =>
+      json(200, { organizationId: TEAM_ID, members: [] }),
+    [`GET /api/v1/teams/${OTHER_TEAM_ID}/member-readiness`]: () =>
+      json(200, { organizationId: OTHER_TEAM_ID, members: [] }),
     ...routes,
   })
 }

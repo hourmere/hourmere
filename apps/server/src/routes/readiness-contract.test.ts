@@ -5,7 +5,9 @@ import { createRoute, z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
   getSelfReadiness,
+  getTeamMemberReadiness,
   getTeamReadiness,
+  MemberReadinessPageSchema,
   SelfReadinessPageSchema,
   TeamReadinessPageSchema,
 } from '@hourmere/scheduling'
@@ -14,7 +16,7 @@ import { createFixtures, createTestTeam, createTestUser } from '@hourmere/schedu
 import { createMiddleware } from 'hono/factory'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
-import { teamManagementAccess } from '../team-management.ts'
+import { teamManagementAccess, teamManagementSessionCaller } from '../team-management.ts'
 import { readinessRoutes } from './readiness.ts'
 import {
   createTestApp,
@@ -163,7 +165,9 @@ function routeCopy(mutation: [string, string]) {
     createRoute,
     z,
     getSelfReadiness,
+    getTeamMemberReadiness,
     getTeamReadiness,
+    MemberReadinessPageSchema,
     SelfReadinessPageSchema,
     TeamReadinessPageSchema,
     DomainError,
@@ -173,6 +177,7 @@ function routeCopy(mutation: [string, string]) {
     json,
     serviceContext,
     teamManagementAccess,
+    teamManagementSessionCaller,
   }
   return new Function(...Object.keys(bindings), `${script}; return readinessRoutes`)(
     ...Object.values(bindings),
