@@ -75,13 +75,14 @@ const changed = () =>
  * existing semantics, as do global profile, calendar and API-key operations.
  */
 export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
-  if (!ctx.request) return
+  // Launch limits also apply to trusted auth.api calls, before any native cascade.
   if (ctx.path === '/organization/delete') {
     throw new APIError('FORBIDDEN', {
       code: 'TEAM_OPERATION_NOT_SUPPORTED',
       message: 'Deleting a team is not supported.',
     })
   }
+  if (!ctx.request) return
   const expected = ctx.request.headers.get('x-expected-organization-id')
   // Automatic follow-ups bind the source context; deliberate switching without an
   // expectation keeps its existing explicit-target contract.
