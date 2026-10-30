@@ -9,10 +9,22 @@ const origin = 'http://localhost:43827'
 const signup = { mode: 'open', allowedDomains: [] } as const
 const scenarios = [
   {
-    name: 'maps a public-only cookie through the admin fallback',
-    headers: { cookie: 'hourmere-language=de', 'accept-language': 'de-CH,zh-CN;q=0.8' },
+    name: 'ignores a public-only cookie for a Chinese browser',
+    headers: { cookie: 'hourmere-language=de', 'accept-language': 'zh-CN' },
+    language: 'zh-CN',
+    subject: '登录 Hourmere',
+  },
+  {
+    name: 'falls back to English for a public-only cookie and browser language',
+    headers: { cookie: 'hourmere-language=de', 'accept-language': 'de-CH' },
     language: 'en',
     subject: 'Sign in to Hourmere',
+  },
+  {
+    name: 'ignores a public-only cookie before negotiating weighted browser languages',
+    headers: { cookie: 'hourmere-language=de', 'accept-language': 'de-CH,zh-CN;q=0.8' },
+    language: 'zh-CN',
+    subject: '登录 Hourmere',
   },
   {
     name: 'negotiates the next browser language available on the admin surface',
@@ -25,6 +37,30 @@ const scenarios = [
     headers: { cookie: 'hourmere-language=zh-CN', 'accept-language': 'en' },
     language: 'zh-CN',
     subject: '登录 Hourmere',
+  },
+  {
+    name: 'keeps an explicit English cookie ahead of a Chinese browser',
+    headers: { cookie: 'hourmere-language=en', 'accept-language': 'zh-CN' },
+    language: 'en',
+    subject: 'Sign in to Hourmere',
+  },
+  {
+    name: 'ignores an invalid cookie before negotiating the browser language',
+    headers: { cookie: 'hourmere-language=invalid', 'accept-language': 'zh-CN' },
+    language: 'zh-CN',
+    subject: '登录 Hourmere',
+  },
+  {
+    name: 'requires the exact registered cookie language',
+    headers: { cookie: 'hourmere-language=zh-cn', 'accept-language': 'en' },
+    language: 'en',
+    subject: 'Sign in to Hourmere',
+  },
+  {
+    name: 'falls back to English without a language cookie or browser preference',
+    headers: {},
+    language: 'en',
+    subject: 'Sign in to Hourmere',
   },
 ] as const
 
@@ -81,14 +117,14 @@ describe.skipIf(!serverUrl)('sign-in email interface language', () => {
       )
       expect(response?.status).toBe(200)
       if (delivery === 'queued') {
-        expect(queued).toHaveLength(1)
+        expect(queued.length).toBe(1)
         expect(queued[0]?.language).toBe(language)
-        expect(messages).toHaveLength(0)
+        expect(messages.length).toBe(0)
       } else {
         await expect.poll(() => messages.length).toBe(1)
         expect(messages[0]?.subject).toBe(subject)
-        expect(messages[0]?.html).toContain(`<html lang="${language}">`)
-        expect(queued).toHaveLength(0)
+        expect(messages[0]?.html?.includes(`<html lang="${language}">`)).toBe(true)
+        expect(queued.length).toBe(0)
       }
     })
   })
