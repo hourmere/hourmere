@@ -12,6 +12,16 @@ const content = async (headers: Record<string, string> = {}) => {
   return { response, html: await response.text() }
 }
 
+it.each<Record<string, string>>([
+  { 'accept-language': 'de-AT,en;q=0.5' },
+  { cookie: 'hourmere-language=de' },
+])('keeps public-only languages out of the sign-in interface: %j', async (headers) => {
+  const { html } = await content(headers)
+  expect(html).toContain('<html lang="en">')
+  expect(html).not.toContain('<option value="de"')
+  expect(inlineAsset(html, 'script')).not.toContain('"de":')
+})
+
 interface Element {
   hidden: boolean
   value: string
@@ -129,6 +139,12 @@ describe('server-rendered sign-in confirmation languages', () => {
     [{ 'Accept-Language': 'en;q=0.2, zh-CN;q=0.9' }, 'zh-CN'],
     [{ 'Accept-Language': 'zh-CN;q=0, en;q=0.1' }, 'en'],
     [{ 'Accept-Language': 'zh-TW' }, 'en'],
+    [{ Cookie: `${LANGUAGE_COOKIE}=de`, 'Accept-Language': 'zh-CN' }, 'zh-CN'],
+    [{ Cookie: `${LANGUAGE_COOKIE}=de`, 'Accept-Language': 'de-CH' }, 'en'],
+    [{ Cookie: `${LANGUAGE_COOKIE}=de`, 'Accept-Language': 'de-CH,zh-CN;q=0.8,en;q=0.5' }, 'zh-CN'],
+    [{ Cookie: `${LANGUAGE_COOKIE}=de`, 'Accept-Language': 'en;q=0.2,zh-CN;q=0.9' }, 'zh-CN'],
+    [{ Cookie: `${LANGUAGE_COOKIE}=de`, 'Accept-Language': 'zh-CN;q=0.2,en;q=0.9' }, 'en'],
+    [{ Cookie: `${LANGUAGE_COOKIE}=de`, 'Accept-Language': 'zh-CN;q=0,en;q=0.1' }, 'en'],
     [{ Cookie: `${LANGUAGE_COOKIE}=en`, 'Accept-Language': 'zh-CN' }, 'en'],
     [{ Cookie: `${LANGUAGE_COOKIE}=zh-CN`, 'Accept-Language': 'en' }, 'zh-CN'],
     [{ Cookie: `${LANGUAGE_COOKIE}=__proto__`, 'Accept-Language': 'zh-CN' }, 'zh-CN'],
@@ -230,4 +246,10 @@ describe('server-rendered sign-in confirmation languages', () => {
       errorCallbackURL: '/sign-in',
     })
   })
+})
+
+it('negotiates the next supported sign-in language after a public-only preference', async () => {
+  const { html } = await content({ 'accept-language': 'de-CH,zh-CN;q=0.8,en;q=0.5' })
+  expect(html).toContain('<html lang="zh-CN">')
+  expect(html).not.toContain('<option value="de"')
 })

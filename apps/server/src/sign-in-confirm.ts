@@ -3,14 +3,12 @@
 import { createHash } from 'node:crypto'
 import { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from '@hourmere/auth'
 import {
-  acceptLanguage,
-  cookieLanguage,
   type InterfaceLanguage,
   LANGUAGE_COOKIE,
-  registeredLocales,
+  resolveAdminLanguage,
 } from '@hourmere/core/language'
 import type { Context } from 'hono'
-import { confirmationCatalogues } from './i18n/confirmation.ts'
+import { confirmationCatalogues, confirmationLocales } from './i18n/confirmation.ts'
 
 const escapeHtml = (value: string) =>
   value
@@ -191,7 +189,7 @@ function page(language: InterfaceLanguage) {
 <label class="language-picker">
 <span id="language-label">${escapeHtml(words.language)}</span>
 <select id="language-select" aria-label="${escapeHtml(words.language)}">
-${registeredLocales.map(({ code, nativeName }) => `<option value="${code}" lang="${code}"${language === code ? ' selected' : ''}>${escapeHtml(nativeName)}</option>`).join('\n')}
+${confirmationLocales.map(({ code, nativeName }) => `<option value="${code}" lang="${code}"${language === code ? ' selected' : ''}>${escapeHtml(nativeName)}</option>`).join('\n')}
 </select>
 </label>
 </header>
@@ -213,8 +211,10 @@ ${registeredLocales.map(({ code, nativeName }) => `<option value="${code}" lang=
 
 /** GET/HEAD renders only static language data. Opening a link creates no preference cookie. */
 export function signInConfirmPage(c: Context) {
-  const language =
-    cookieLanguage(c.req.header('Cookie')) ?? acceptLanguage(c.req.header('Accept-Language'))
+  const language = resolveAdminLanguage({
+    cookie: c.req.header('Cookie'),
+    acceptLanguage: c.req.header('Accept-Language'),
+  })
   return c.html(page(language), 200, {
     'Content-Security-Policy': CSP,
     'Referrer-Policy': 'no-referrer',

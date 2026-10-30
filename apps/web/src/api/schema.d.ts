@@ -5380,6 +5380,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teams/{teamId}/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave a team after resolving event types and unfinished bookings
+         * @description Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied before credentials are resolved, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. Rechecks owner continuity and departure impact inside the locked membership transaction. A sole owner must arrange another owner before leaving. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "X-Expected-Organization-Id"?: string;
+                };
+                path: {
+                    teamId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Membership revoked; personal organization active */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            organizationId: string;
+                        };
+                    };
+                };
+                /** @description Invalid parameters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires a current team session without Authorization */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner (another owner is needed before you can leave), or organization_context_changed: reload before retrying */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"] & {
+                            handling?: {
+                                /** @enum {string} */
+                                eventTypes?: "ask_admin_to_replace_or_remove_host";
+                                /** @enum {string} */
+                                futureBookings?: "coordinate_cancellation";
+                                /** @enum {string} */
+                                inProgressBookings?: "wait_until_end_or_coordinate_offline";
+                                /** @enum {string} */
+                                owner?: "another_owner_is_needed_before_you_can_leave";
+                            };
+                            impact?: components["schemas"]["MemberDepartureImpact"];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/readiness": {
         parameters: {
             query?: never;
@@ -5533,7 +5622,7 @@ export interface components {
             email: string;
             /** @description The invitee who made the booking; the others are guests they added */
             isBooker: boolean;
-            /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+            /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
             locale: string | null;
             name: string;
             /** @description IANA time zone */
@@ -5713,7 +5802,7 @@ export interface components {
             invitee: {
                 /** Format: email */
                 email: string;
-                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
                 locale?: string;
                 name: string;
                 /** @description IANA time zone */
@@ -6222,7 +6311,7 @@ export interface components {
             /** @example ada */
             handle: string;
             /**
-             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
+             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
              * @example en
              */
             locale: string;
@@ -6238,7 +6327,7 @@ export interface components {
              */
             handle: string;
             /**
-             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
+             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
              * @example en
              */
             locale: string;

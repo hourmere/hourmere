@@ -9,6 +9,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { leaveTeamMember } from '@hourmere/scheduling'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -37,6 +38,11 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
     auth = createAuth({
       pool,
       db,
+      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember(
+          { db, principal, now: () => Temporal.Now.instant() },
+          { teamId, expectedOrganizationId },
+        ),
       baseURL: origin,
       secret,
       signup: policy,

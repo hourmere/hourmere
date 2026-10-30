@@ -740,7 +740,7 @@ function ConfirmReschedule({
       <DetailList
         items={[
           [
-            'From',
+            'reschedule.previousTime',
             <span key="from" className="struck">
               {t('{date}, {time}', {
                 date: formatDate(Date.parse(current.start), timeZone, locale),
@@ -754,7 +754,7 @@ function ConfirmReschedule({
             </span>,
           ],
           [
-            'To',
+            'reschedule.newTime',
             <strong key="to">
               {t('{date}, {time}', {
                 date: formatDate(start, timeZone, locale),

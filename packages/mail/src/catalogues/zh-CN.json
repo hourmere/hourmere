@@ -58,5 +58,15 @@
   "signIn.button": "登录",
   "signIn.expiry": "此链接将在 {minutes} 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。",
   "signIn.fallback": "如果按钮无法使用，请将此链接复制到浏览器中：",
-  "signIn.footer": "你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。"
+  "signIn.footer": "你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。",
+  "teamInvitation.defaultTeam": "你的团队",
+  "teamInvitation.defaultInviter": "团队成员",
+  "teamInvitation.subject": "邀请你加入团队：{team}",
+  "teamInvitation.introduction": "{inviter} 邀请你加入 Hourmere 上的团队「{team}」。",
+  "teamInvitation.identity": "请使用受邀邮箱 {email} 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。",
+  "teamInvitation.acceptance": "仅登录不会加入团队；你需要在页面上明确接受邀请。",
+  "teamInvitation.expiry": "邀请有效期至：{expiry}。",
+  "teamInvitation.button": "查看并接受邀请",
+  "teamInvitation.fallback": "如果按钮无法使用，请将此链接复制到浏览器中：",
+  "teamInvitation.footer": "如果你不认识此团队或不想加入，可以忽略此邮件。"
 }

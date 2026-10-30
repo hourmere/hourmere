@@ -6,6 +6,10 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import type { Transaction } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import type { Principal } from './caller.ts'
+import {
+  MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
+} from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid } from './organizations.ts'
 import {
@@ -21,6 +25,7 @@ const invite = '/organization/invite-member'
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
 const remove = '/organization/remove-member'
+const selfDeparturePaths = new Set(['/organization/leave', remove])
 const protectedPaths = new Set([invite, changeRole, accept, remove])
 
 export const teamRoleDenied = () =>
@@ -100,7 +105,14 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
  * block its own FK checks; wrapping the whole handler would also change invitation hooks
  * that deliberately observe committed rows.
  */
-export function createTeamRolePolicy(db: Db) {
+export function createTeamRolePolicy(
+  db: Db,
+  leaveTeamMember?: (
+    principal: Principal,
+    teamId: string,
+    expectedOrganizationId: string,
+  ) => Promise<{ organizationId: string }>,
+) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
 
   function removalContext() {
@@ -109,8 +121,28 @@ export function createTeamRolePolicy(db: Db) {
     // Server-side auth.api calls have the native endpoint context but do not pass
     // through the HTTP handler's request storage. Protect their removal writes too.
     const endpoint = tryGetCurrentAuthEndpointContext()
-    if (endpoint?.path !== remove || !endpoint.body?.memberIdOrEmail) return undefined
+    if (
+      !endpoint ||
+      !selfDeparturePaths.has(endpoint.path ?? '') ||
+      !endpoint.context.session?.session?.id ||
+      (endpoint.path === remove && !endpoint.body?.memberIdOrEmail)
+    )
+      return undefined
     return endpoint as AuthMiddlewareContext
+  }
+
+  async function targetsSelf(ctx: AuthMiddlewareContext) {
+    const actor = await principal(ctx)
+    const idOrEmail = body(ctx).memberIdOrEmail
+    if (!actor || typeof idOrEmail !== 'string') return false
+    if (idOrEmail.includes('@')) return idOrEmail.toLowerCase() === actor.user.email.toLowerCase()
+    const member = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', actor.organization.id)
+      .where('userId', '=', actor.user.id)
+      .executeTakeFirst()
+    return member?.id.toLowerCase() === idOrEmail.toLowerCase()
   }
 
   async function removal(ctx: AuthMiddlewareContext, targetDb: Db, lock: boolean) {
@@ -250,14 +282,17 @@ export function createTeamRolePolicy(db: Db) {
   return {
     /** Run before native lookups so denied targets never reveal whether they exist. */
     async before(ctx: AuthMiddlewareContext) {
-      if (!protectedPaths.has(ctx.path)) return
       const state = requests.getStore()
-      if (state) state.ctx = ctx
+      if (state && (protectedPaths.has(ctx.path) || selfDeparturePaths.has(ctx.path)))
+        state.ctx = ctx
+      if (!protectedPaths.has(ctx.path)) return
       if (!(await getSessionFromCtx(ctx))) return
       const input = body(ctx)
       if (ctx.path === invite && input.role === undefined) input.role = 'member'
       await asAuthError(async () => {
-        if (ctx.path === remove) await removal(ctx, db, false)
+        // Self-removal keeps the safe leave policy, including member access and the
+        // locked final-owner refusal. Other targets require administrative removal.
+        if (ctx.path === remove && !(await targetsSelf(ctx))) await removal(ctx, db, false)
         if (ctx.path === changeRole) await roleChange(ctx, db, false)
         if (ctx.path === invite) await invitation(ctx, db, false)
         if (ctx.path === accept && typeof input.invitationId === 'string') {
@@ -288,6 +323,85 @@ export function createTeamRolePolicy(db: Db) {
 
     adapter(adapter: DBTransactionAdapter): DBTransactionAdapter {
       const { create, update, findOne, incrementOne, delete: deleteOne } = adapter
+      adapter.delete = async (request) => {
+        const ctx = removalContext()
+        if (!ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {
+          return deleteOne(request)
+        }
+        const actor = await principal(ctx)
+        const target = await findOne<{
+          id: string
+          userId: string
+          organizationId: string
+        }>(request)
+        if (!actor || !target || target.userId !== actor.user.id) {
+          if (ctx.path !== remove) return deleteOne(request)
+          return write(async (trx) => {
+            const { actor, member, principal, expectedOrganizationId } = await removal(
+              ctx,
+              trx,
+              true,
+            )
+            if (!selects(request.where, { id: member.id })) throw teamRoleDenied()
+            // Bypass the native recorder here: this helper owns the member deletion,
+            // dependent deactivation and one operation record on the same connection.
+            await removeTeamMember(trx, principal, {
+              teamId: actor.organizationId,
+              memberUserId: member.userId,
+              expectedOrganizationId,
+            })
+          })
+        }
+        if (!leaveTeamMember) {
+          throw new APIError('SERVICE_UNAVAILABLE', {
+            code: 'TEAM_LEAVE_UNAVAILABLE',
+            message: 'Safe team departure is unavailable. Try again later.',
+          })
+        }
+        if (
+          target.organizationId.toLowerCase() !== actor.organization.id.toLowerCase() ||
+          !selects(request.where, { id: target.id })
+        )
+          throw teamRoleDenied()
+        try {
+          const fallback = await leaveTeamMember(
+            actor,
+            target.organizationId,
+            ctx.request?.headers.get('x-expected-organization-id') ?? target.organizationId,
+          )
+          // The native handler clears the old active organization after deleteMember.
+          // Refresh its request snapshot so that cleanup cannot overwrite the personal
+          // fallback already committed atomically with the membership revocation.
+          const session = await getSessionFromCtx(ctx)
+          if (session?.session.id === actor.sessionId) {
+            session.session.activeOrganizationId = fallback.organizationId
+          }
+        } catch (error) {
+          if (error instanceof MemberDepartureBlockedError) {
+            throw new APIError('CONFLICT', {
+              code: error.code,
+              message: error.message,
+              impact: error.impact,
+              handling: error.handling,
+            })
+          }
+          if (error instanceof MemberDepartureOwnerRequiredError) {
+            throw new APIError('CONFLICT', {
+              code: error.code,
+              message: error.message,
+              handling: error.handling,
+            })
+          }
+          // The injected service uses domain errors; translate only the shared access
+          // codes, without importing scheduling into auth or exposing arbitrary errors.
+          const code = error instanceof Error && 'code' in error ? error.code : undefined
+          if (code === 'organization_context_changed') {
+            throw new APIError('CONFLICT', { code: 'ORGANIZATION_CONTEXT_CHANGED', message: code })
+          }
+          if (code === 'team_management_access_denied') throw teamRoleDenied()
+          throw error
+        }
+      }
       adapter.findOne = async <T>(request: Parameters<DBTransactionAdapter['findOne']>[0]) => {
         const result = await findOne<T>(request)
         const ctx = requests.getStore()?.ctx ?? removalContext()
@@ -305,21 +419,6 @@ export function createTeamRolePolicy(db: Db) {
           return { ...result, role: teamRoles(result.role).join(',') } as never
         }
         return result
-      }
-      adapter.delete = async (request) => {
-        const ctx = removalContext()
-        if (ctx?.path !== remove || request.model !== 'member') return deleteOne(request)
-        return write(async (trx) => {
-          const { actor, member, principal, expectedOrganizationId } = await removal(ctx, trx, true)
-          if (!selects(request.where, { id: member.id })) throw teamRoleDenied()
-          // Bypass the native recorder here: this helper owns the member deletion,
-          // dependent deactivation and one operation record on the same connection.
-          await removeTeamMember(trx, principal, {
-            teamId: actor.organizationId,
-            memberUserId: member.userId,
-            expectedOrganizationId,
-          })
-        })
       }
       adapter.create = async (request) => {
         const ctx = requests.getStore()?.ctx

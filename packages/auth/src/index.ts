@@ -1,5 +1,5 @@
 import { apiKey } from '@better-auth/api-key'
-import { acceptLanguage, cookieLanguage, type InterfaceLanguage } from '@hourmere/core/language'
+import { type InterfaceLanguage, resolveAdminLanguage } from '@hourmere/core/language'
 import { createDb, type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
@@ -11,6 +11,7 @@ import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-provide
 import pg from 'pg'
 import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
+import type { Principal } from './caller.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { sanitizeInitialDisplayName } from './display-name.ts'
 import { beforeHook } from './hooks.ts'
@@ -46,6 +47,10 @@ export {
   mcpOAuthUrls,
   withMcpOAuthIntent,
 } from './mcp-oauth.ts'
+export {
+  MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
+} from './member-departure.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
 export {
   assertSignupEnforced,
@@ -60,6 +65,7 @@ export {
   checkTeamManagementAccess,
   TeamManagementError,
   type TeamManager,
+  teamRoles,
 } from './team-management.ts'
 export {
   removeTeamMember,
@@ -126,6 +132,14 @@ export interface AuthConfig {
   pool: pg.Pool
   /** The application database, for the personal organization and membership checks. */
   db: Db
+  /** Scheduling owns safe self departure. Omission disables native self departure. */
+  leaveTeamMember?:
+    | ((
+        principal: Principal,
+        teamId: string,
+        expectedOrganizationId: string,
+      ) => Promise<{ organizationId: string }>)
+    | undefined
   /** Where people reach Hourmere (PUBLIC_URL); sign-in links and cookies are built from it. */
   baseURL: string
   secret: string
@@ -174,11 +188,12 @@ export function createAuth({
   socialProviderOptions = {},
   mcpOAuth = false,
   mcpMetadataFetcher,
+  leaveTeamMember,
 }: AuthConfig) {
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
-  const teamRolePolicy = createTeamRolePolicy(db)
+  const teamRolePolicy = createTeamRolePolicy(db, leaveTeamMember)
   const auth = betterAuth({
     database: pool,
     disabledPaths: [
@@ -393,9 +408,10 @@ export function createAuth({
         storeToken: 'hashed',
         sendMagicLink: async ({ email, url }, ctx) => {
           const headers = ctx?.headers ?? ctx?.request?.headers
-          const language =
-            cookieLanguage(headers?.get('cookie') ?? undefined) ??
-            acceptLanguage(headers?.get('accept-language') ?? undefined)
+          const language = resolveAdminLanguage({
+            cookie: headers?.get('cookie') ?? undefined,
+            acceptLanguage: headers?.get('accept-language') ?? undefined,
+          })
           // No address-dependent reads or SMTP work on the production request path.
           if (queueSignInEmail) {
             await queueSignInEmail({ email, url: confirmLink(url), language })

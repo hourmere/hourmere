@@ -3,7 +3,21 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import * as time from '../public/time.ts'
-import { matchTimeZones, TimeZonePicker, timeZoneNames } from './TimeZonePicker.tsx'
+import { matchTimeZones, TimeZoneName, TimeZonePicker, timeZoneNames } from './TimeZonePicker.tsx'
+
+describe('the time zone name', () => {
+  it.each(['Host time zone unavailable', ''])(
+    'preserves a supplied label without the zone name: %j',
+    (label) => {
+      const { container } = render(
+        <TimeZoneName name="Europe/Berlin" label={label} className="host-time-zone" />,
+      )
+      const name = container.querySelector('.host-time-zone')
+      expect(name?.textContent).toBe(label)
+      expect(name?.childElementCount).toBe(0)
+    },
+  )
+})
 
 function Picker({ initial = '' }: { initial?: string }) {
   const [value, setValue] = useState(initial)

@@ -1,5 +1,6 @@
 // Rendering only. Invitation business state and eventual mail delivery belong to callers.
 import { interfaceLanguage } from '@hourmere/core/language'
+import { mailMessage } from './catalogue.ts'
 import type { MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
@@ -77,32 +78,20 @@ export function teamInvitationEmail({
   const url = acceptUrl(publicUrl, invitationId)
   const expiry = expiryText(expiresAt)
   if (!to || safeText(to) !== to) throw new Error('Invalid invitation recipient')
-  const team = safeText(teamName) || (language === 'zh-CN' ? '你的团队' : 'Your team')
-  const inviter = safeText(inviterName) || (language === 'zh-CN' ? '团队成员' : 'A team member')
-  const words =
-    language === 'zh-CN'
-      ? {
-          subject: `邀请你加入团队：${team}`,
-          introduction: `${inviter} 邀请你加入 Hourmere 上的团队「${team}」。`,
-          identity: `请使用受邀邮箱 ${to} 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。`,
-          acceptance: '仅登录不会加入团队；你需要在页面上明确接受邀请。',
-          expiry: `邀请有效期至：${expiry}。`,
-          button: '查看并接受邀请',
-          fallback: '如果按钮无法使用，请将此链接复制到浏览器中：',
-          footer: '如果你不认识此团队或不想加入，可以忽略此邮件。',
-        }
-      : {
-          subject: `Invitation to join ${team}`,
-          introduction: `${inviter} invited you to join the team “${team}” on Hourmere.`,
-          identity: `Sign in with the invited email address ${to} and verify it, then accept the invitation on the page. Email aliases cannot replace this address.`,
-          acceptance:
-            'Signing in alone does not join the team; you must explicitly accept on the page.',
-          expiry: `This invitation expires at ${expiry}.`,
-          button: 'View and accept invitation',
-          fallback: 'If the button does not work, copy this link into your browser:',
-          footer:
-            'If you do not recognize this team or do not want to join, you can ignore this email.',
-        }
+  const team = safeText(teamName) || mailMessage(language, 'teamInvitation.defaultTeam')
+  const inviter = safeText(inviterName) || mailMessage(language, 'teamInvitation.defaultInviter')
+  const t = (key: Parameters<typeof mailMessage>[1]) =>
+    mailMessage(language, key, { team, inviter, email: to, expiry })
+  const words = {
+    subject: t('teamInvitation.subject'),
+    introduction: t('teamInvitation.introduction'),
+    identity: t('teamInvitation.identity'),
+    acceptance: t('teamInvitation.acceptance'),
+    expiry: t('teamInvitation.expiry'),
+    button: t('teamInvitation.button'),
+    fallback: t('teamInvitation.fallback'),
+    footer: t('teamInvitation.footer'),
+  }
   // The shared header limit counts UTF-16 units and can split an astral character.
   const subject = subjectLine(words.subject).toWellFormed()
   const facts = [words.introduction, words.identity, words.acceptance, words.expiry]

@@ -1,3 +1,5 @@
+// Install the schema extension before scheduling constructs shared response schemas.
+import '@hono/zod-openapi'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
@@ -36,7 +38,7 @@ import {
   queuedSignInEmail,
   signInEmailJobs,
 } from '@hourmere/notifications'
-import type { BookingNotifier } from '@hourmere/scheduling'
+import { type BookingNotifier, leaveTeamMember } from '@hourmere/scheduling'
 import { webhookBookingNotifier, webhookCleanupJob, webhookDeliveryJob } from '@hourmere/webhooks'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
@@ -58,6 +60,7 @@ import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
+import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
@@ -148,6 +151,7 @@ export function productRoutes({
     teamBookingRoutes({ db, notify }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({ db }),
+    memberLeaveRoutes({ db }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
   ]
@@ -415,6 +419,11 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     const auth = createAuth({
       pool: authPool,
       db,
+      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember(
+          { db, principal, now: () => Temporal.Now.instant() },
+          { teamId, expectedOrganizationId },
+        ),
       baseURL: config.PUBLIC_URL,
       secret: config.BETTER_AUTH_SECRET,
       mailer: countingMailer,

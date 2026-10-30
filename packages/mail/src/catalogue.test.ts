@@ -11,9 +11,8 @@ describe('mail catalogue coverage', () => {
       console.info(
         `Mail ${code}: ${Object.keys(english).length - missing.length}/${Object.keys(english).length} keys`,
       )
-      if (code === 'en' || code === 'zh-CN') expect(missing).toEqual([])
-      else if (missing.length)
-        console.warn(`Mail ${code}: ${missing.length} keys fall back to English`)
+      // Every shipped locale is complete; runtime still accepts partial future catalogues.
+      expect(missing).toEqual([])
       expect(mailCatalogueProblems(catalogue)).toEqual([])
     })
   }

@@ -399,9 +399,11 @@ not prove the attendee's identity. Reschedule withdrawals retain their existing 
 attribution and do not create cancellation-operation records.
 
 Better Auth's remove-member, leave and update-member-role persistence paths record the
-actual changed membership in the same write transaction. HTTP role changes use the launch
-role policy's locked application transaction for both the update and its attribution;
-other native member operations use the adapter transaction. The policy wraps the native
+actual changed membership in the same write transaction. HTTP role changes, administrative
+removal and self departure use the launch role policy's locked application transaction for
+the membership write and its attribution; other native member operations use the adapter transaction.
+Safe departure also commits the session's personal fallback in that transaction after
+rechecking current event and booking impact. The policy wraps the native
 recorder so neither a second connection nor a second record is needed. A role no-op, rejected request
 or rolled-back operation creates no record. Personal-organization maintenance and direct
 adapter maintenance are excluded; this recorder does not add authorization or change

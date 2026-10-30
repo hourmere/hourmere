@@ -6,13 +6,53 @@ import {
   explicitLanguage,
   formattingLocale,
   interfaceLanguage,
+  interfaceLanguages,
   localeCodes,
   localeFallbacks,
   localeRegistry,
   registeredLocales,
+  resolveAdminLanguage,
 } from './language.ts'
 
 describe('shared locale registry', () => {
+  it('offers public translations independently of admin and notification languages', () => {
+    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de'])
+    expect(interfaceLanguages('admin')).toEqual(['en', 'zh-CN'])
+    expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
+    expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('de')
+    expect(localeFallbacks('de')).toEqual(['de', 'en'])
+    const fixture = createLocaleResolver({
+      ...localeRegistry,
+      qaa: {
+        code: 'qaa',
+        nativeName: 'Fixture',
+        fallbacks: ['en'],
+        formatLocale: 'fr-FR',
+        direction: 'ltr',
+        interfaces: ['admin'],
+      },
+    })
+    expect(fixture.interfaceLanguages('public')).not.toContain('qaa')
+    expect(fixture.interfaceLanguages('admin')).toContain('qaa')
+    expect(fixture.acceptLanguage('qaa')).toBe('qaa')
+  })
+
+  it.each(['de', 'de-DE', 'de-AT', 'de-CH'])(
+    'negotiates %s and formats German dates through registry metadata',
+    (value) => {
+      expect(interfaceLanguage(value)).toBe('de')
+      expect(acceptLanguage(`fr,${value};q=0.8,en;q=0.5`)).toBe('de')
+      expect(
+        new Intl.DateTimeFormat(formattingLocale('de'), {
+          calendar: 'gregory',
+          timeZone: 'UTC',
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }).format(new Date('2026-10-27T15:30:00Z')),
+      ).toBe('27. Oktober 2026 um 15:30')
+    },
+  )
+
   it('provides language metadata and explicit choices from the same entries', () => {
     expect(localeCodes).toEqual(Object.keys(localeRegistry))
     expect(registeredLocales).toEqual(Object.values(localeRegistry))
@@ -192,5 +232,49 @@ describe('bounded interface language preferences', () => {
     expect(acceptLanguage(`${'xx,'.repeat(32)}zh-CN`)).toBe('en')
     expect(acceptLanguage(`zh-CN${' '.repeat(4096)}`)).toBe('en')
     expect(acceptLanguage(undefined)).toBe('en')
+  })
+})
+
+describe('server admin language precedence', () => {
+  it.each([
+    [{ cookie: 'hourmere-language=de', acceptLanguage: 'zh-CN' }, 'zh-CN'],
+    [{ cookie: 'hourmere-language=de', acceptLanguage: 'de-CH' }, 'en'],
+    [{ cookie: 'hourmere-language=de', acceptLanguage: 'de-CH,zh-CN;q=0.8' }, 'zh-CN'],
+    [{ cookie: 'hourmere-language=zh-CN', accountLocale: 'en', acceptLanguage: 'en' }, 'zh-CN'],
+    [{ cookie: 'hourmere-language=en', accountLocale: 'zh-CN', acceptLanguage: 'zh-CN' }, 'en'],
+    [{ cookie: 'hourmere-language=de', accountLocale: 'zh-SG', acceptLanguage: 'en' }, 'zh-CN'],
+    [{ cookie: 'hourmere-language=de', accountLocale: 'en-GB', acceptLanguage: 'zh-CN' }, 'en'],
+    [{ accountLocale: 'de-CH', acceptLanguage: 'zh-CN' }, 'zh-CN'],
+    [{ accountLocale: 'zh-TW', acceptLanguage: 'zh-CN' }, 'zh-CN'],
+    [{ accountLocale: 'invalid_locale', acceptLanguage: 'zh-CN' }, 'zh-CN'],
+    [{ cookie: 'hourmere-language=__proto__', acceptLanguage: 'zh-CN' }, 'zh-CN'],
+    [{ acceptLanguage: 'en;q=0.2,zh-CN;q=0.9' }, 'zh-CN'],
+    [{ acceptLanguage: 'zh-CN;q=0,de-CH' }, 'en'],
+    [{}, 'en'],
+  ] as const)('resolves %j to %s', (preferences, language) => {
+    expect(resolveAdminLanguage(preferences)).toBe(language)
+  })
+
+  it('takes admin availability from the registry without using locale fallbacks', () => {
+    const languages = createLocaleResolver({
+      ...localeRegistry,
+      de: { ...localeRegistry.de, fallbacks: ['zh-CN'] },
+      qaa: {
+        code: 'qaa',
+        nativeName: 'Fixture',
+        fallbacks: ['en'],
+        formatLocale: 'fr-FR',
+        direction: 'ltr',
+        interfaces: ['admin'],
+      },
+    })
+    expect(languages.resolveAdminLanguage({ cookie: 'hourmere-language=de' })).toBe('en')
+    expect(
+      languages.resolveAdminLanguage({ cookie: 'hourmere-language=qaa', acceptLanguage: 'en' }),
+    ).toBe('qaa')
+    expect(languages.resolveAdminLanguage({ accountLocale: 'qaa', acceptLanguage: 'en' })).toBe(
+      'qaa',
+    )
+    expect(languages.resolveAdminLanguage({ acceptLanguage: 'qaa' })).toBe('qaa')
   })
 })

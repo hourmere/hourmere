@@ -11,6 +11,7 @@ import { encryptCredential } from '../../packages/calendars/src/credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../packages/calendars/src/google.ts'
 import { tokenAad } from '../../packages/calendars/src/index.ts'
 import { fakeGoogle, TEST_CALENDAR_KEY } from '../../packages/calendars/src/testing.ts'
+import { explicitLanguage } from '../../packages/core/src/language.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
 import { icsHasLocation, textHasUrl } from '../../packages/mail/src/booking-link-testing.ts'
@@ -388,8 +389,9 @@ export const test = base.extend<{
         const language = new URL(request.url ?? '/', 'http://localhost').searchParams.get(
           'language',
         )
-        const languageAttribute =
-          language === 'en' || language === 'zh-CN' ? ` data-hourmere-language="${language}"` : ''
+        const languageAttribute = explicitLanguage(language)
+          ? ` data-hourmere-language="${language}"`
+          : ''
         response.setHeader('Cache-Control', 'no-store')
         if (request.url === '/parent.js') {
           response.setHeader('Content-Type', 'application/javascript')

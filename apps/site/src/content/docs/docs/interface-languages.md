@@ -3,15 +3,25 @@ title: Interface languages
 description: Choose a registered interface language, with English fallback and localized dates.
 ---
 
-The web interface is available in English and Simplified Chinese. The language control is
+Public booking, cancellation and rescheduling pages, embedded widgets and notification
+emails are available in English, Simplified Chinese and German. The account and sign-in
+interfaces remain available in English and Simplified Chinese. The language control is
 available on sign-in, account and standalone public booking pages.
+
+German translations are AI-assisted (machine-translated) and have not yet been reviewed
+by a native speaker. Corrections are welcome through a GitHub issue or pull request.
+German regional preferences such as `de-AT` and `de-CH` resolve to `de`.
 Changing it updates the existing page without restarting a form, discarding a chosen time,
 reissuing a booking or replacing its private management link.
 
 An explicit interface choice takes precedence over a supported signed-in profile default,
-then the browser's supported language, then English. Signed-in routes read the existing
-profile after authentication; public routes never request a session or profile to choose a
-language. The interface choice is separate from the profile's **Language** BCP 47 field:
+then the browser's supported language, then English. A choice unavailable for the current
+interface is skipped: the profile default and browser language are checked before the
+registry's English fallback, without replacing the saved preference. For example, a saved
+German choice on an account page still allows a Chinese profile or browser default.
+Signed-in routes read the existing profile after authentication; public routes never request
+a session or profile to choose a language. The interface choice is separate from the
+profile's **Language** BCP 47 field:
 changing the interface never saves the profile. A supported profile default is loaded when
 the authenticated account becomes available. Unsupported profile locale values remain
 valid profile settings.
@@ -24,13 +34,22 @@ Gregorian calendar and the selected IANA time zone. A booking flow freezes its r
 locale independently of display changes, so retrying after a lost response keeps the same
 body and idempotency key.
 
-The language preference stores only a registered language code (currently `en` or `zh-CN`), under
+The language preference stores only a registered language code (currently `en`, `zh-CN` or `de`), under
 `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
 cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage mechanism
 does not prevent changing the current page. No account identifiers, answers or management
-capabilities enter preference storage. The standalone email sign-in confirmation page uses
-the same preference cookie, then quality-ranked `Accept-Language`, and provides the same registered language choices.
-Language changes never submit that form or change its fragment.
+capabilities enter preference storage. Sign-in emails and the standalone email sign-in
+confirmation page use the same admin-surface language rules: a valid preference cookie
+is used only when its language is available on the admin surface. An unavailable cookie,
+such as German, is treated as absent without changing the saved preference. A supported
+account default follows where the account is already known, then quality-ranked
+`Accept-Language` chooses an admin-supported language, then English. No account or profile
+lookups are added to public sign-in requests just to choose a language; the confirmation
+page uses only the request headers. A German cookie with `Accept-Language: zh-CN` therefore
+gives Simplified Chinese, while the same cookie with `Accept-Language: de-CH` gives English.
+A Simplified Chinese cookie takes precedence over `Accept-Language`. The confirmation page
+provides the supported sign-in language choices. Language changes never submit that form
+or change its fragment.
 
 Public booking and rescheduling pages also remember an explicitly selected IANA time
 zone in local storage. A valid saved choice becomes the default on later booking-page visits;
@@ -53,7 +72,7 @@ the product's translation catalogues.
 
 The standalone helper accepts an optional, strictly validated `language` value in
 `initInline` and `openPopup`, or `data-hourmere-language` on declarative elements. Values
-must be exact registered codes (currently `en` and `zh-CN`). Without an explicit value, the helper uses the host page's supported
+must be exact registered codes (currently `en`, `zh-CN` and `de`). Without an explicit value, the helper uses the host page's supported
 `<html lang>`, then a supported browser language, then English. Embedded pages hide their
 page-level language picker; choose the page or widget language before initialization.
 The iframe receives only that non-sensitive allowlisted value in its
@@ -81,18 +100,21 @@ general BCP 47 preferences rather than a closed enum.
 Add one entry to
 [`packages/core/src/locales.ts`](https://github.com/hourmere/hourmere/blob/main/packages/core/src/locales.ts):
 code, native name, ordered fallback codes, Intl formatting locale and `ltr` direction.
+An optional `interfaces` list limits a language to `public` or `admin` interfaces; omitting
+it enables both. Notification language choices remain independent of this UI scope.
 Add the corresponding catalogue files; loaders and language selectors discover them automatically:
 
 - `apps/web/src/i18n/catalogues/{code}/common.ts`: public/shared messages (`common` export).
 - `apps/web/src/i18n/catalogues/{code}/admin.ts`: account messages (`admin` export), kept in the lazy session graph.
 - `apps/web/src/i18n/catalogues/{code}/widget.ts`: widget controls (`widget` export).
-- `packages/mail/src/catalogues/{code}.json`: booking/sign-in email and generated calendar copy.
+- `packages/mail/src/catalogues/{code}.json`: booking, team invitation and sign-in email and generated calendar copy.
 - `apps/server/src/i18n/catalogues/{code}.json`: the standalone sign-in confirmation page.
 
 Use the existing English files as the key and placeholder reference. Partial catalogues are
 allowed for future languages. Catalogue tests report each locale's coverage, warn about
 missing translations for new locales, and fail for malformed or mismatched placeholders.
-English and Simplified Chinese remain complete.
+English and Simplified Chinese remain complete. German public catalogues and mail tables
+are also required to match every English key and placeholder; German has no admin catalogue.
 
 Use `t(key, values)` during render and `msg(key, values)` for a notice or validation message
 held in state. Nested messages, date arguments and lists format when rendered, so visible
