@@ -57,6 +57,35 @@ describe('Brazilian Portuguese public booking language', () => {
     expect(document.documentElement.dir).toBe('ltr')
   })
 
+  it('keeps the powered by wording in the Brazilian Portuguese attribution', async () => {
+    chooseLanguage('pt-BR')
+    fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
+    renderApp('/ada/intro')
+    await screen.findByRole('heading', { name: 'Escolha um horário' })
+    expect(screen.getByRole('link', { name: 'Powered by Hourmere' })).toBeDefined()
+  })
+
+  it('keeps the powered by wording in Brazilian Portuguese search and sharing descriptions', async () => {
+    const metas = ['description', 'og:description'].map((name) => {
+      const meta = document.createElement('meta')
+      meta.setAttribute(name.startsWith('og:') ? 'property' : 'name', name)
+      document.head.append(meta)
+      return meta
+    })
+    try {
+      chooseLanguage('pt-BR')
+      fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
+      renderApp('/ada/intro')
+      await screen.findByRole('heading', { name: 'Escolha um horário' })
+      for (const meta of metas)
+        expect(meta.getAttribute('content')).toBe(
+          'Página de agendamento powered by Hourmere — escolha um horário que funcione para você.',
+        )
+    } finally {
+      for (const meta of metas) meta.remove()
+    }
+  })
+
   it.each(['pt-BR', 'pt', 'PT-br', 'pt-Latn-BR', 'pt-AO'])(
     'uses Brazilian Portuguese dates and persists Brazilian Portuguese from browser language %s without a switcher choice',
     async (regional) => {

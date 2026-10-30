@@ -24,7 +24,7 @@ export const common = {
   'Something went wrong': 'Ocorreu um erro',
   Reload: 'Recarregar',
   'Scheduling page powered by Hourmere — pick a time that works.':
-    'Página de agendamento com tecnologia do Hourmere — escolha um horário que funcione para você.',
+    'Página de agendamento powered by Hourmere — escolha um horário que funcione para você.',
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
     'Não recebeu o e-mail? Confira a pasta de spam ou lixo eletrônico e adicione o remetente aos seus contatos.',
   'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.':
@@ -216,7 +216,7 @@ export const common = {
   'Pick a time': 'Escolha um horário',
   'Pick an event to see available times.': 'Escolha um evento para ver os horários disponíveis.',
   'Pick another time': 'Escolha outro horário',
-  'Powered by {0}': 'Com tecnologia do {0}',
+  'Powered by {0}': 'Powered by {0}',
   'Create your own booking link': 'Crie seu próprio link de agendamento',
   'Previous month': 'Mês anterior',
   Question: 'Pergunta',
