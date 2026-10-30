@@ -51,7 +51,8 @@ function invitationError(error: unknown): UiText {
     INVITATION_DELIVERY_UNAVAILABLE:
       'The invitation was saved, but delivery could not be queued. Retry with the same email address.',
     INVITATION_REQUEST_FAILED: 'The invitation request could not be queued. Try again later.',
-    INVITATION_CONFLICT: 'The invitation changed. Reload before trying again.',
+    INVITATION_CONFLICT:
+      'A newer invitation exists for this address. Review the pending invitations.',
     INVITATION_INELIGIBLE: 'This invitation is no longer pending. Reload before trying again.',
     INVITATION_DELIVERY_BUSY: 'Invitation delivery is in progress. Try again shortly.',
     INVITATION_GENERATION_LIMIT: 'This invitation has reached its resend limit.',
@@ -195,6 +196,7 @@ function PendingInvitations({
   const [version, setVersion] = useState(0)
   const [filter, setFilter] = useState<'pending' | 'expired' | 'all'>('pending')
   const observed = useRef(new Map<string, Schemas['TeamInvitationSummary']>())
+  const rowKeys = useRef(new Map<string, string>())
   const filterId = useId()
   const seekExistingInvitation = useRef(Boolean(existingInvitation))
   const [existingInvitationMissing, setExistingInvitationMissing] = useState(false)
@@ -327,10 +329,18 @@ function PendingInvitations({
           <ul className="stack">
             {state.data.data.map((invitation) => (
               <InvitationRow
-                key={invitation.id}
+                key={rowKeys.current.get(invitation.id) ?? invitation.id}
                 invitation={invitation}
                 organizationId={organizationId}
                 onObserved={(summary) => {
+                  if (summary.id !== invitation.id) {
+                    observed.current.delete(invitation.id)
+                    rowKeys.current.set(
+                      summary.id,
+                      rowKeys.current.get(invitation.id) ?? invitation.id,
+                    )
+                    rowKeys.current.set(invitation.id, `retired:${invitation.id}`)
+                  }
                   observed.current.set(summary.id, summary)
                   setResult((current) =>
                     current?.state.status === 'ready'
@@ -340,8 +350,12 @@ function PendingInvitations({
                             status: 'ready',
                             data: {
                               ...current.state.data,
-                              data: current.state.data.data.map((row) =>
-                                row.id === summary.id ? summary : row,
+                              data: current.state.data.data.flatMap((row) =>
+                                row.id === invitation.id
+                                  ? [summary]
+                                  : row.id === summary.id
+                                    ? []
+                                    : [row],
                               ),
                             },
                           },

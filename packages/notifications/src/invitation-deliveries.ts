@@ -94,11 +94,10 @@ export async function listPendingInvitationDeliveries(
 }
 
 // Both ages are conservative because Better Auth has no business-terminal timestamp.
-// Pending invitations remain renewable after expiry. Retain their generation cap,
-// original validity and replay identity until the invitation itself becomes terminal.
+// Expired pending invitations need a new invitation ID and cannot reuse this generation.
 // Unknown business statuses are retained too; delivery outcomes never permit deletion.
 const cleanupEligible = sql<boolean>`
-  i.status IN ('accepted', 'canceled', 'rejected')
+  i.status IN ('pending', 'accepted', 'canceled', 'rejected')
   AND i."expiresAt" <= clock_timestamp() - INTERVAL '7 days'
   AND d.updated_at <= clock_timestamp() - INTERVAL '7 days'
   AND (d.lease_until IS NULL OR d.lease_until <= clock_timestamp())
@@ -106,8 +105,8 @@ const cleanupEligible = sql<boolean>`
 
 /**
  * Deletes at most one bounded batch of obsolete delivery rows; never invitations.
- * Lock invitation before delivery, matching future delivery/renewal transactions.
- * SKIP LOCKED leaves an in-progress renewal or delivery update for a later cleanup.
+ * Lock invitation before delivery, matching delivery/replacement transactions.
+ * SKIP LOCKED leaves an in-progress replacement or delivery update for a later cleanup.
  */
 export async function cleanupInvitationDeliveries(db: Db, limit = 100): Promise<number> {
   const size = batchLimit(limit)

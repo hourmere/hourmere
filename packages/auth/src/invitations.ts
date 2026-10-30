@@ -6,7 +6,7 @@ import type { AuthMiddlewareContext } from './api-keys.ts'
 import {
   invitationEligibilityDenial,
   invitationRecipientIsMember,
-  invitationRenewalEligibilityDenial,
+  invitationRecoveryEligibilityDenial,
   invitationResendDeliveryDenial,
 } from './invitation-resend.ts'
 import { isUuid } from './organizations.ts'
@@ -34,11 +34,13 @@ const invalid = () =>
 const conflict = () =>
   new APIError('CONFLICT', {
     code: 'INVITATION_CONFLICT',
-    message: 'The invitation changed. Reload before trying again.',
+    message:
+      'A newer invitation exists or this invitation has changed. Review the pending invitations.',
   })
-const ineligible = () =>
+const ineligible = (invitationId?: string) =>
   new APIError('CONFLICT', {
     code: 'INVITATION_INELIGIBLE',
+    ...(invitationId ? { invitationId } : {}),
     message: 'This invitation is no longer pending. Create a new invitation if needed.',
   })
 const contextChanged = () =>
@@ -117,7 +119,7 @@ export async function manageInvitation(
     now: Date,
   ) =>
     resend
-      ? invitationRenewalEligibilityDenial(invitation)
+      ? invitationRecoveryEligibilityDenial(invitation)
       : invitationEligibilityDenial(invitation, now)
   if (
     resend &&
@@ -225,7 +227,10 @@ export async function manageInvitation(
           return result(invitation, delivery, existing)
         if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
           throw conflict()
-        const resendDenial = invitationResendDeliveryDenial(invitation, delivery, now)
+        const resendDenial =
+          invitation.expiresAt <= now
+            ? null
+            : invitationResendDeliveryDenial(invitation, delivery, now)
         if (resendDenial === 'INVITATION_GENERATION_LIMIT')
           throw new APIError('CONFLICT', {
             code: 'INVITATION_GENERATION_LIMIT',
@@ -254,6 +259,38 @@ export async function manageInvitation(
           message: 'An invitation is already pending. Reload before trying again.',
         })
       if (invitation && delivery && !resend) return result(invitation, delivery, existing)
+      // Lock every potentially expiring row before the shared mail-budget lock.
+      // A live invitation can expire while admission waits for that shared budget.
+      const retiringCandidates = await trx
+        .selectFrom('auth.invitation')
+        .select(['id', 'expiresAt'])
+        .where('organizationId', '=', organizationId)
+        .where(sql<string>`lower(btrim(email))`, '=', email)
+        .where('status', '=', 'pending')
+        .orderBy('id')
+        .forUpdate()
+        .execute()
+      for (const old of retiringCandidates) {
+        await trx
+          .selectFrom('invitation_deliveries')
+          .select('invitation_id')
+          .where('invitation_id', '=', old.id)
+          .forUpdate()
+          .execute()
+      }
+      if (
+        options.reserve &&
+        !(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))
+      )
+        throw new APIError('TOO_MANY_REQUESTS', {
+          code: 'INVITATION_RATE_LIMITED',
+          message: 'Invitation requests are temporarily limited. Try again later.',
+        })
+      // A shared mail-budget lock may have waited behind another bounded send.
+      now = await wallClock(trx)
+      if (session.expiresAt <= now) throw denied()
+      const admissionDenial = invitation ? eligibilityDenial(invitation, now) : null
+      if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()
       if (!invitation || (resend && invitation.expiresAt <= now)) {
         if (invitation) {
           const otherPending = await trx
@@ -280,19 +317,34 @@ export async function manageInvitation(
             message: 'This team has reached its pending invitation limit.',
           })
       }
-      if (
-        options.reserve &&
-        !(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))
-      )
-        throw new APIError('TOO_MANY_REQUESTS', {
-          code: 'INVITATION_RATE_LIMITED',
-          message: 'Invitation requests are temporarily limited. Try again later.',
-        })
-      // A shared mail-budget lock may have waited behind another bounded send.
-      now = await wallClock(trx)
-      if (session.expiresAt <= now) throw denied()
-      const admissionDenial = invitation ? eligibilityDenial(invitation, now) : null
-      if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()
+      const replacingExpired = Boolean(resend && invitation && invitation.expiresAt <= now)
+      if (!invitation || replacingExpired) {
+        // Both the row action and the invite form use this atomic replacement path.
+        // The team lock serializes double clicks before an old link can be retired.
+        for (const old of retiringCandidates) {
+          if (old.expiresAt > now) continue
+          await trx
+            .updateTable('auth.invitation')
+            .set({ status: 'canceled' })
+            .where('id', '=', old.id)
+            .execute()
+          // Preserve completed mail outcomes, but retire work that can no longer send.
+          await trx
+            .updateTable('invitation_deliveries')
+            .set({
+              state: 'skipped',
+              last_error_code: 'invitation_ineligible',
+              lease_id: null,
+              lease_until: null,
+              updated_at: now,
+            })
+            .where('invitation_id', '=', old.id)
+            .where('state', 'in', ['queued', 'sending'])
+            .execute()
+        }
+        invitation = undefined
+        delivery = undefined
+      }
       if (!invitation) {
         invitation = await trx
           .insertInto('auth.invitation')
@@ -311,7 +363,7 @@ export async function manageInvitation(
       // Legacy native resends changed expiresAt without changing createdAt. Missing
       // metadata uses the known 48-hour creator policy, never their inflated difference.
       const duration = Number(delivery?.expiry_duration_ms ?? lifetime)
-      if (resend) {
+      if (resend && !replacingExpired) {
         invitation = await trx
           .updateTable('auth.invitation')
           .set({ expiresAt: new Date(now.getTime() + duration) })
@@ -321,7 +373,7 @@ export async function manageInvitation(
       }
       const values = {
         authorized_by_user_id: actor.userId,
-        generation: (delivery?.generation ?? (resend ? 1 : 0)) + 1,
+        generation: (delivery?.generation ?? (resend && !replacingExpired ? 1 : 0)) + 1,
         state: 'queued',
         attempts: 0,
         due_at: now,
@@ -341,7 +393,7 @@ export async function manageInvitation(
         .onConflict((oc) => oc.column('invitation_id').doUpdateSet(values))
         .returningAll()
         .executeTakeFirstOrThrow()
-      return result(invitation, delivery, existing)
+      return result(invitation, delivery, existing && !replacingExpired)
     })
   // Admission is already committed: queue failure must not discard the invitation or
   // its due delivery intent. The repairer can enqueue that same generation later.
@@ -366,9 +418,10 @@ export async function manageInvitation(
       } catch {
         // A failed recheck cannot establish eligibility; preserve the safe queue error.
       }
-      if (retired) throw ineligible()
+      if (retired) throw ineligible(resend && !admitted.existing ? admitted.id : undefined)
       throw new APIError('SERVICE_UNAVAILABLE', {
         code: 'INVITATION_DELIVERY_UNAVAILABLE',
+        ...(resend && !admitted.existing ? { invitationId: admitted.id } : {}),
         message: 'The invitation was saved, but delivery could not be queued. Try again later.',
       })
     }

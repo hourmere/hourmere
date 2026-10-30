@@ -4,7 +4,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as auth from '../../api/auth.ts'
 import type { Schemas } from '../../api/client.ts'
 import * as client from '../../api/client.ts'
@@ -17,6 +17,7 @@ import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
 import * as translate from '../../i18n/translate.ts'
 import { fakeApi, json, later } from '../../test/fake-api.tsx'
+import * as unsavedChanges from '../../unsaved-changes.tsx'
 import { UnsavedChangesProvider } from '../../unsaved-changes.tsx'
 import { TeamInvitations } from '../TeamInvitations.tsx'
 import { InvitationRow } from './InvitationRow.tsx'
@@ -40,17 +41,19 @@ const INVITATION: Schemas['TeamInvitationSummary'] = {
   },
 }
 const READ = `GET /api/v1/team/invitations/${INVITATION.id}`
+const NEW_INVITATION_ID = '00000000-0000-7000-8000-000000000021'
+const NEW_READ = `GET /api/v1/team/invitations/${NEW_INVITATION_ID}`
 const CANCEL = `POST /api/v1/team/invitations/${INVITATION.id}/cancel`
 const RESEND = 'POST /api/auth/organization/invite-member'
 const LIST = 'GET /api/v1/team/invitations'
-function queued() {
+function queued(invitation = INVITATION, generation = 2) {
   return json(200, {
-    ...INVITATION,
+    ...invitation,
     existing: true,
     organizationId: ORGANIZATION_ID,
     inviterId: 'actor',
     role: 'member',
-    delivery: { generation: 2, state: 'queued', attempts: 0 },
+    delivery: { generation, state: 'queued', attempts: 0 },
   })
 }
 function display(invitation = INVITATION, Row = InvitationRow) {
@@ -119,7 +122,10 @@ describe('invitation recovery', () => {
       'INVITATION_PENDING_LIMIT',
       'This team has reached its pending invitation limit. Resolve pending invitations before inviting more people.',
     ],
-    ['INVITATION_CONFLICT', 'The invitation changed. Reload before trying again.'],
+    [
+      'INVITATION_CONFLICT',
+      'A newer invitation exists for this address. Review the pending invitations.',
+    ],
     ['TEAM_MANAGEMENT_ACCESS_DENIED', 'You do not have permission to manage invitations.'],
     ['INVITATION_INELIGIBLE', 'This invitation is no longer available for resending.'],
   ] as const)(
@@ -229,7 +235,7 @@ describe('invitation recovery', () => {
   it('blocks further mutations after an uncertain response until a read succeeds', async () => {
     let reads = 0
     const api = fakeApi({
-      [RESEND]: () => {
+      [CANCEL]: () => {
         throw new TypeError('network unavailable')
       },
       [READ]: () =>
@@ -238,7 +244,8 @@ describe('invitation recovery', () => {
           : json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
     })
     display()
-    await userEvent.click(screen.getByRole('button', { name: 'Resend invitation' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel invitation' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm cancellation' }))
     await screen.findByText(
       'Could not confirm the invitation status. Check its status before trying another action.',
     )
@@ -246,11 +253,11 @@ describe('invitation recovery', () => {
       (screen.getByRole('button', { name: 'Resend invitation' }) as HTMLButtonElement).disabled,
     ).toBe(true)
     expect(
-      (screen.getByRole('button', { name: 'Cancel invitation' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Confirm cancellation' }) as HTMLButtonElement).disabled,
     ).toBe(true)
     await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
     await screen.findByText('Cancelled')
-    expect(api.to(RESEND)).toHaveLength(1)
+    expect(api.to(CANCEL)).toHaveLength(1)
   })
 
   it('follows queued to SMTP acceptance to joined after the invitation leaves the pending filter', async () => {
@@ -297,7 +304,7 @@ describe('invitation recovery', () => {
   })
 
   it.each(['en', 'zh-CN'] as const)(
-    'renews one expired row through the resend generation protocol in %s',
+    'follows a new invitation ID after replacing an expired invitation in %s',
     async (language) => {
       chooseLanguage(language)
       let current: Schemas['TeamInvitationSummary'] = { ...INVITATION, status: 'expired' }
@@ -306,15 +313,17 @@ describe('invitation recovery', () => {
           const status = new URL(path, location.origin).searchParams.get('status')
           return json(200, { data: status === current.status ? [current] : [], nextCursor: null })
         },
-        [READ]: () => json(200, current),
+        [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+        [NEW_READ]: () => json(200, current),
         [RESEND]: () => {
           current = {
             ...INVITATION,
-            generation: 2,
+            id: NEW_INVITATION_ID,
+            generation: 1,
             resendAllowed: false,
             delivery: { ...INVITATION.delivery, state: 'queued' },
           }
-          return queued()
+          return queued(current, 1)
         },
       })
       render(
@@ -355,6 +364,96 @@ describe('invitation recovery', () => {
         email: INVITATION.email,
       })
       expect(api.to(RESEND)).toHaveLength(1)
+      expect(api.to(READ)).toHaveLength(0)
+      expect(api.to(NEW_READ).length).toBeGreaterThanOrEqual(1)
+      await userEvent.click(
+        screen.getByRole('button', {
+          name: language === 'en' ? 'Check invitation status' : '检查邀请状态',
+        }),
+      )
+      await waitFor(() => expect(api.to(NEW_READ).length).toBeGreaterThanOrEqual(2))
+      expect(api.to(READ)).toHaveLength(0)
+    },
+  )
+
+  it.each([
+    ['en', 'A newer invitation exists for this address. Review the pending invitations.'],
+    ['zh-CN', '此邮箱已有更新的邀请。请查看待接受的邀请。'],
+  ] as const)(
+    'explains a newer invitation without suggesting reload in %s',
+    (language, message) => {
+      chooseLanguage(language)
+      display({
+        ...INVITATION,
+        status: 'expired',
+        resendAllowed: false,
+        resendDeniedReason: 'INVITATION_CONFLICT',
+      })
+      expect(screen.getByText(message)).toBeDefined()
+    },
+  )
+
+  it('keeps the replacement ID for a status retry after its first read fails', async () => {
+    let reads = 0
+    const replacement = { ...INVITATION, id: NEW_INVITATION_ID }
+    const api = fakeApi({
+      [RESEND]: () => queued(replacement, 1),
+      [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+      [NEW_READ]: () =>
+        ++reads === 1
+          ? json(503, {})
+          : json(200, { ...replacement, delivery: { ...replacement.delivery, state: 'queued' } }),
+    })
+    display({ ...INVITATION, status: 'expired' })
+    await userEvent.click(screen.getByRole('button', { name: 'Send a new invitation' }))
+    await screen.findByText(
+      'Could not confirm the invitation status. Check its status before trying another action.',
+    )
+    expect(
+      (screen.getByRole('button', { name: 'Send a new invitation' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
+    await screen.findByText('Invitation queued for delivery.')
+    expect(api.to(NEW_READ)).toHaveLength(2)
+    expect(api.to(READ)).toHaveLength(0)
+    expect(api.to(RESEND)).toHaveLength(1)
+  })
+
+  it.each([
+    [503, 'INVITATION_DELIVERY_UNAVAILABLE', 'pending'],
+    [409, 'INVITATION_INELIGIBLE', 'accepted'],
+  ] as const)(
+    'reads the saved replacement after dispatch returns %s %s',
+    async (status, code, lifecycle) => {
+      const replacement = {
+        ...INVITATION,
+        id: NEW_INVITATION_ID,
+        status: lifecycle,
+        resendAllowed: false,
+        delivery: { ...INVITATION.delivery, state: 'queued' },
+      }
+      const api = fakeApi({
+        [RESEND]: () => json(status, { code, invitationId: NEW_INVITATION_ID }),
+        [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+        [NEW_READ]: () => json(200, replacement),
+      })
+      display({ ...INVITATION, status: 'expired' })
+      await userEvent.click(screen.getByRole('button', { name: 'Send a new invitation' }))
+      if (lifecycle === 'pending') {
+        await screen.findByText(
+          'The invitation was saved, but delivery could not be queued. Retry with the same email address.',
+        )
+        expect(screen.getByText('Pending', { selector: 'dd' })).toBeDefined()
+      } else {
+        await screen.findByText('The recipient has joined. Their membership was not changed.')
+        expect(screen.queryByRole('alert')).toBeNull()
+      }
+      expect(api.to(READ)).toHaveLength(0)
+      expect(api.to(NEW_READ)).toHaveLength(1)
+      await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
+      await waitFor(() => expect(api.to(NEW_READ)).toHaveLength(2))
+      expect(api.to(RESEND)).toHaveLength(1)
+      expect(api.to(READ)).toHaveLength(0)
     },
   )
 })
@@ -372,16 +471,24 @@ function sourceCopy(source: string): typeof InvitationRow {
     '../../i18n/runtime.tsx': runtime,
     '../../i18n/translate.ts': translate,
   }
+  return compileSource(source, dependencies, 'InvitationRow')
+}
+
+function compileSource<T>(
+  source: string,
+  dependencies: Record<string, unknown>,
+  exported: string,
+): T {
   const compiled = execFileSync(
     process.execPath,
     [
       '--input-type=module',
       '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement' }).code)",
+      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
     ],
     { input: source, encoding: 'utf8' },
   )
-  const module = { exports: {} as { InvitationRow: typeof InvitationRow } }
+  const module = { exports: {} as Record<string, T> }
   new Function('require', 'module', 'exports', 'reactRuntime', compiled)(
     (name: string) => {
       if (!(name in dependencies)) throw new Error(`Unexpected dependency ${name}`)
@@ -391,7 +498,7 @@ function sourceCopy(source: string): typeof InvitationRow {
     module.exports,
     react,
   )
-  return module.exports.InvitationRow
+  return module.exports[exported] as T
 }
 
 it('detects optimistic row removal in a production-source copy while cancellation waits', async () => {
@@ -426,3 +533,218 @@ it('detects optimistic row removal in a production-source copy while cancellatio
   await expect(assertion(sourceCopy(mutant))).rejects.toMatchObject({ name: 'AssertionError' })
   await assertion(sourceCopy(rowSource))
 })
+
+it('detects losing the replacement row or its feedback in production-source copies', async () => {
+  const source = readFileSync('apps/web/src/pages/TeamInvitations.tsx', 'utf8')
+  function managementCopy(code: string): typeof TeamInvitations {
+    return compileSource(
+      code,
+      {
+        react,
+        '../api/auth.ts': auth,
+        '../api/client.ts': client,
+        '../api/errors.ts': errors,
+        '../components/OrganizationContextConflict.tsx': conflict,
+        '../i18n/runtime.tsx': runtime,
+        '../i18n/translate.ts': translate,
+        '../unsaved-changes.tsx': unsavedChanges,
+        './team-invitations/InvitationRow.tsx': { InvitationRow },
+      },
+      'TeamInvitations',
+    )
+  }
+  async function assertion(Management: typeof TeamInvitations) {
+    let replaced = false
+    const refreshed = later()
+    const replacement = {
+      ...INVITATION,
+      id: NEW_INVITATION_ID,
+      delivery: { ...INVITATION.delivery, state: 'queued' as const },
+    }
+    fakeApi({
+      [LIST]: ({ path }) => {
+        const status = new URL(path, location.origin).searchParams.get('status')
+        if (!status && replaced)
+          return json(200, {
+            data: [{ ...INVITATION, status: 'canceled', resendAllowed: false }, replacement],
+            nextCursor: null,
+          })
+        return replaced
+          ? refreshed.response
+          : json(200, {
+              data: status === 'expired' ? [{ ...INVITATION, status: 'expired' }] : [],
+              nextCursor: null,
+            })
+      },
+      [RESEND]: () => {
+        replaced = true
+        return queued(replacement, 1)
+      },
+      [NEW_READ]: () => json(200, replacement),
+      [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+    })
+    const view = render(
+      <InterfaceScope surface="admin">
+        <UnsavedChangesProvider>
+          <Management organizationId={ORGANIZATION_ID} />
+        </UnsavedChangesProvider>
+      </InterfaceScope>,
+    )
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await screen.findByText('No pending invitations on this page.')
+      await userEvent.selectOptions(
+        screen.getByRole('combobox', { name: 'Filter invitations' }),
+        'expired',
+      )
+      await userEvent.click(await screen.findByRole('button', { name: 'Send a new invitation' }))
+      await waitFor(() =>
+        expect(screen.queryByText('Invitation queued for delivery.')).not.toBeNull(),
+      )
+      expect(screen.getAllByRole('listitem')).toHaveLength(1)
+      expect(screen.queryByText('Expired', { selector: 'dd' })).toBeNull()
+      expect(screen.getByText('Pending', { selector: 'dd' })).toBeDefined()
+      await refreshed.answer(json(200, { data: [], nextCursor: null }))
+      await userEvent.selectOptions(
+        screen.getByRole('combobox', { name: 'Filter invitations' }),
+        'all',
+      )
+      await screen.findByText('Cancelled', { selector: 'dd' })
+      expect(screen.getAllByRole('listitem')).toHaveLength(2)
+      expect(screen.getByText('Pending', { selector: 'dd' })).toBeDefined()
+      expect(screen.getAllByRole('button', { name: 'Cancel invitation' })).toHaveLength(1)
+      expect(
+        consoleError.mock.calls.some(([message]) => String(message).includes('same key')),
+      ).toBe(false)
+    } finally {
+      view.unmount()
+      await refreshed.answer(json(200, { data: [], nextCursor: null }))
+      consoleError.mockRestore()
+    }
+  }
+  await assertion(managementCopy(source))
+  for (const [before, after] of [
+    ['key={rowKeys.current.get(invitation.id) ?? invitation.id}', 'key={invitation.id}'],
+    ['row.id === invitation.id', 'row.id === summary.id'],
+    ['rowKeys.current.set(invitation.id,', 'rowKeys.current.get(invitation.id,'],
+  ] as const) {
+    expect(source.split(before)).toHaveLength(2)
+    await expect(assertion(managementCopy(source.replace(before, after)))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  }
+  await assertion(managementCopy(source))
+})
+
+it('detects reading the old invitation after replacement in a production-source copy', async () => {
+  async function assertion(Row: typeof InvitationRow, dispatchFailed = false) {
+    const replacement = {
+      ...INVITATION,
+      id: NEW_INVITATION_ID,
+      delivery: { ...INVITATION.delivery, state: 'queued' as const },
+    }
+    const api = fakeApi({
+      [RESEND]: () =>
+        dispatchFailed
+          ? json(503, { code: 'INVITATION_DELIVERY_UNAVAILABLE', invitationId: NEW_INVITATION_ID })
+          : queued(replacement, 1),
+      [NEW_READ]: () => json(200, replacement),
+      [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+    })
+    const view = display({ ...INVITATION, status: 'expired' }, Row)
+    try {
+      await userEvent.click(screen.getByRole('button', { name: 'Send a new invitation' }))
+      await waitFor(() => expect(api.to(NEW_READ)).toHaveLength(1))
+      expect(api.to(READ)).toHaveLength(0)
+      await screen.findByText(
+        dispatchFailed
+          ? 'The invitation was saved, but delivery could not be queued. Retry with the same email address.'
+          : 'Invitation queued for delivery.',
+      )
+    } finally {
+      view.unmount()
+    }
+  }
+  await assertion(sourceCopy(rowSource))
+  const before = 'currentInvitationId.current = result.id'
+  expect(rowSource.split(before)).toHaveLength(2)
+  const mutant = rowSource.replace(before, 'currentInvitationId.current = invitation.id')
+  await expect(assertion(sourceCopy(mutant))).rejects.toMatchObject({ name: 'AssertionError' })
+  await assertion(sourceCopy(rowSource), true)
+  const beforeFailure = 'currentInvitationId.current = caught.invitationId'
+  expect(rowSource.split(beforeFailure)).toHaveLength(2)
+  await expect(
+    assertion(sourceCopy(rowSource.replace(beforeFailure, 'void caught.invitationId')), true),
+  ).rejects.toMatchObject({ name: 'AssertionError' })
+  await assertion(sourceCopy(rowSource))
+})
+
+it.each(['expired', 'pending', 'gateway'] as const)(
+  'keeps a lost replacement response uncertain from %s when only the old canceled ID is known',
+  async (initial) => {
+    async function assertion(Row: typeof InvitationRow) {
+      const api = fakeApi({
+        [RESEND]: () => {
+          if (initial === 'gateway') return json(504, {})
+          throw new TypeError('response unavailable')
+        },
+        [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+      })
+      const button = initial === 'expired' ? 'Send a new invitation' : 'Resend invitation'
+      const view = display(
+        { ...INVITATION, status: initial === 'expired' ? 'expired' : 'pending' },
+        Row,
+      )
+      try {
+        await userEvent.click(screen.getByRole('button', { name: button }))
+        await waitFor(() => expect(api.to(READ)).toHaveLength(1))
+        expect(
+          screen.queryByText('Invitation cancelled. Its link can no longer be used.'),
+        ).toBeNull()
+        await screen.findByText(
+          'A new invitation may have been saved. Review Pending invitations before trying another action.',
+        )
+        expect((screen.getByRole('button', { name: button }) as HTMLButtonElement).disabled).toBe(
+          true,
+        )
+        await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
+        await waitFor(() => expect(api.to(READ)).toHaveLength(2))
+        expect(
+          screen.queryByText('Invitation cancelled. Its link can no longer be used.'),
+        ).toBeNull()
+        expect(screen.getByRole('alert')).toBeDefined()
+        expect(api.to(RESEND)).toHaveLength(1)
+      } finally {
+        view.unmount()
+      }
+    }
+    await assertion(InvitationRow)
+    await assertion(sourceCopy(rowSource))
+    if (initial !== 'expired') {
+      const before = "action === 'resend' &&"
+      expect(rowSource.split(before)).toHaveLength(2)
+      await expect(
+        assertion(
+          sourceCopy(
+            rowSource.replace(before, "action === 'resend' && invitation.status === 'expired' &&"),
+          ),
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    }
+    if (initial === 'gateway') {
+      const before = 'caught.status >= 500'
+      expect(rowSource.split(before)).toHaveLength(2)
+      await expect(assertion(sourceCopy(rowSource.replace(before, 'false')))).rejects.toMatchObject(
+        {
+          name: 'AssertionError',
+        },
+      )
+    }
+    const before = "current.status === 'canceled' && replacementFailure.current"
+    expect(rowSource.split(before)).toHaveLength(2)
+    await expect(assertion(sourceCopy(rowSource.replace(before, 'false')))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await assertion(sourceCopy(rowSource))
+  },
+)

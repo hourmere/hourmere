@@ -324,8 +324,12 @@ so the sender refuses it rather than falling back to a different administrator. 
 `auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
 Stop old web/all/worker processes before applying this migration and restart every role
 with the new code: old senders do not read the generation's authorizing administrator.
-Expired pending invitations may renew in place under the same cooldown, generation and mail
-budgets, with an active-duplicate and pending-limit check under the team lock. Acceptance,
+Expired invitations never renew in place. Under the team lock, the explicit expired-row
+operation atomically cancels the old invitation, finalizes its queued or sending delivery,
+and creates a new invitation ID whose inviter is the acting administrator. New-invitation
+request budgets, active-duplicate and pending-limit checks apply. Native creation likewise
+cancels expired pending rows for the address, so neither path leaves duplicate stored-pending
+rows. Signup trust follows the new inviter and the old link stays unusable. Acceptance,
 resend and cancellation share team/invitation lock ordering. Cancellation only changes a
 pending invitation's status and never deletes a joined membership.
 
@@ -361,13 +365,12 @@ timestamp. Existing writers that increment attempts need no change. See the
 [invitation delivery design notes](https://hourmere.com/docs/notifications#team-invitation-delivery-design-notes).
 See the [API contract](https://hourmere.com/docs/api-conventions#team-invitation-delivery-summaries).
 
-Every delivery row remains while its invitation is pending, including expired invitations
-and terminal delivery outcomes. Pending invitations may renew, so their generation cap and
-original validity duration must survive cleanup. Cleanup takes bounded batches, locks
-invitations before delivery records, and skips locked rows. It deletes only accepted,
-canceled or rejected invitations' delivery records once both `expiresAt` and delivery
-`updated_at` are at least seven days old and no live lease remains. Unknown invitation
-statuses are retained. Invitation rows themselves are preserved.
+Every delivery row remains while its invitation is pending and unexpired, including terminal
+delivery outcomes, so unexpired resends retain their generation cap and original validity
+length. Cleanup takes bounded batches, locks invitations before delivery records, and skips
+locked rows. It deletes expired pending invitations' records and accepted, canceled or
+rejected invitations' records once both `expiresAt` and delivery `updated_at` are at least
+seven days old and no live lease remains. Unknown invitation statuses are retained. Invitation rows themselves are preserved.
 
 Before applying the invitation-delivery migration, stop all old web/all/worker processes.
 Existing pending, unexpired invitations are backfilled as

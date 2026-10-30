@@ -32,6 +32,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
   let ownerCookie: string
   let recipientCookie: string
   let invitationId: string
+  let failEnqueue: 'unavailable' | 'ineligible' | false = false
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'invite_recovery' })
@@ -44,6 +45,15 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
       secret,
       signup: { mode: 'open', allowedDomains: [] },
       mailer: { send: async () => {} },
+      enqueueInvitationEmail: async ({ invitationId: queuedId }) => {
+        if (failEnqueue === 'ineligible')
+          await db
+            .updateTable('auth.invitation')
+            .set({ status: 'canceled' })
+            .where('id', '=', queuedId)
+            .execute()
+        if (failEnqueue) throw new Error('synthetic queue failure')
+      },
     })
     app = createApp({
       publicUrl: origin,
@@ -54,6 +64,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
     })
   })
   beforeEach(async () => {
+    failEnqueue = false
     await db.deleteFrom('auth.organization').execute()
     await db.deleteFrom('auth.user').execute()
     await db.deleteFrom('invitation_email_requests').execute()
@@ -233,6 +244,124 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
         status: 'accepted',
         resendAllowed: false,
       })
+    },
+  )
+  it.each(['REST', 'native'] as const)(
+    'cancellation through %s preserves a membership after acceptance and member insertion both commit',
+    async (protocol) => {
+      expect((await accept()).status).toBe(200)
+      const joinedMember = await member()
+      expect(
+        joinedMember,
+        'acceptance has committed its member row before cancellation',
+      ).toBeDefined()
+      const canceled = await (protocol === 'REST' ? cancel() : nativeCancel())
+      expect(canceled.status).toBe(200)
+      expect(await canceled.json()).toMatchObject({ status: 'accepted' })
+      expect(await member(), 'cancel never removes a joined member after both commits').toEqual(
+        joinedMember,
+      )
+    },
+  )
+  it('replaces an expired invitation through the native action and refuses its old link', async () => {
+    const current = await createTestUser(db, 'Replacement recovery administrator')
+    await db
+      .insertInto('auth.member')
+      .values({ userId: current.id, organizationId: teamId, role: 'admin', createdAt: new Date() })
+      .execute()
+    ownerCookie = await session(current, teamId)
+    await db
+      .updateTable('auth.invitation')
+      .set({ expiresAt: new Date(Date.now() - 3_600_000) })
+      .where('id', '=', invitationId)
+      .execute()
+    const response = await resend()
+    expect(response.status).toBe(200)
+    const fresh = (await response.json()) as { id: string }
+    expect(fresh.id, 'expired links are replaced with a new invitation ID').not.toBe(invitationId)
+    expect(
+      await db
+        .selectFrom('auth.invitation')
+        .selectAll()
+        .where('id', '=', fresh.id)
+        .executeTakeFirst(),
+    ).toMatchObject({ inviterId: current.id, status: 'pending' })
+    expect(await (await detail()).json()).toMatchObject({
+      status: 'canceled',
+      resendAllowed: false,
+    })
+    expect((await accept()).ok, 'the replaced invitation link cannot join').toBe(false)
+    expect(await member()).toBeUndefined()
+    const joined = await post('/api/auth/organization/accept-invitation', recipientCookie, {
+      invitationId: fresh.id,
+    })
+    expect(joined.status).toBe(200)
+    expect(await member(), 'the new invitation link can join').toBeDefined()
+  })
+  it.each([false, true])(
+    'queue failure exposes the saved invitation ID only for expired replacement=%s',
+    async (expired) => {
+      if (expired)
+        await db
+          .updateTable('auth.invitation')
+          .set({ expiresAt: new Date(Date.now() - 3_600_000) })
+          .where('id', '=', invitationId)
+          .execute()
+      failEnqueue = 'unavailable'
+      const response = await resend()
+      expect(response.status).toBe(503)
+      const body = (await response.json()) as { code: string; invitationId?: string }
+      expect(body.code).toBe('INVITATION_DELIVERY_UNAVAILABLE')
+      const pending = await db
+        .selectFrom('auth.invitation')
+        .select('id')
+        .where('organizationId', '=', teamId)
+        .where('status', '=', 'pending')
+        .execute()
+      expect(pending).toHaveLength(1)
+      if (expired) {
+        expect(body.invitationId).toBe(pending[0]?.id)
+        expect(body.invitationId).not.toBe(invitationId)
+        expect(await (await detail()).json()).toMatchObject({ status: 'canceled' })
+        expect(await (await detail(ownerCookie, body.invitationId)).json()).toMatchObject({
+          status: 'pending',
+          generation: 1,
+          delivery: { state: 'queued' },
+        })
+      } else {
+        expect(body.invitationId).toBeUndefined()
+        expect(pending[0]?.id).toBe(invitationId)
+      }
+    },
+  )
+  it.each([false, true])(
+    'post-commit cancellation exposes the saved invitation ID only for expired replacement=%s',
+    async (expired) => {
+      if (expired)
+        await db
+          .updateTable('auth.invitation')
+          .set({ expiresAt: new Date(Date.now() - 3_600_000) })
+          .where('id', '=', invitationId)
+          .execute()
+      failEnqueue = 'ineligible'
+      const response = await resend()
+      expect(response.status).toBe(409)
+      const body = (await response.json()) as { code: string; invitationId?: string }
+      expect(body.code).toBe('INVITATION_INELIGIBLE')
+      if (expired) {
+        const fresh = await db
+          .selectFrom('auth.invitation')
+          .select('id')
+          .where('organizationId', '=', teamId)
+          .where('id', '!=', invitationId)
+          .executeTakeFirstOrThrow()
+        expect(body.invitationId).toBe(fresh.id)
+        expect(await (await detail(ownerCookie, fresh.id)).json()).toMatchObject({
+          status: 'canceled',
+          generation: 1,
+        })
+      } else expect(body.invitationId).toBeUndefined()
+      expect(await (await detail()).json()).toMatchObject({ status: 'canceled' })
     },
   )
   it('cancellation beats a resend waiting behind its team lock', async () => {

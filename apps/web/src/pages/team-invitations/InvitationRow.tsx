@@ -33,7 +33,8 @@ const denialLabels: Record<NonNullable<Summary['resendDeniedReason']>, MessageKe
   INVITATION_DELIVERY_BUSY: 'Invitation delivery is in progress. Try again shortly.',
   INVITATION_RESEND_COOLDOWN: 'Wait for the resend cooldown before trying again.',
   INVITATION_RATE_LIMITED: 'Invitation requests are temporarily limited. Try again later.',
-  INVITATION_CONFLICT: 'The invitation changed. Reload before trying again.',
+  INVITATION_CONFLICT:
+    'A newer invitation exists for this address. Review the pending invitations.',
   INVITATION_PENDING_LIMIT:
     'This team has reached its pending invitation limit. Resolve pending invitations before inviting more people.',
 }
@@ -66,6 +67,7 @@ export function InvitationRow({
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [needsCheck, setNeedsCheck] = useState(false)
+  const [replacementUncertain, setReplacementUncertain] = useState(false)
   const [checked, setChecked] = useState(false)
   const notice = useMemo(
     () =>
@@ -84,9 +86,15 @@ export function InvitationRow({
   )
   const [remaining, setRemaining] = useState(invitation.resendRetryAfterSeconds)
   const requestIdentity = useMemo(
-    () => ({ generation: invitation.generation, requestId: crypto.randomUUID() }),
-    [invitation.generation],
+    () => ({
+      invitationId: invitation.id,
+      generation: invitation.generation,
+      requestId: crypto.randomUUID(),
+    }),
+    [invitation.id, invitation.generation],
   )
+  const currentInvitationId = useRef(invitation.id)
+  const replacementFailure = useRef<unknown>(null)
   const request = useRef<AbortController | null>(null)
   const feedback = useRef<HTMLDivElement>(null)
   const keep = useRef<HTMLButtonElement>(null)
@@ -124,18 +132,21 @@ export function InvitationRow({
     setError(null)
     let failure: unknown = null
     try {
-      if (action === 'resend')
-        await resendInvitation(
+      if (action === 'resend') {
+        const result = await resendInvitation(
           invitation,
           organizationId,
           requestIdentity.requestId,
           controller.signal,
         )
+        currentInvitationId.current = result.id
+        replacementFailure.current = null
+      }
       if (action === 'cancel')
         await unwrap(
           api.POST('/api/v1/team/invitations/{invitationId}/cancel', {
             params: {
-              path: { invitationId: invitation.id },
+              path: { invitationId: currentInvitationId.current },
               header: { 'x-expected-organization-id': organizationId },
             },
             body: {},
@@ -144,6 +155,13 @@ export function InvitationRow({
         )
     } catch (caught) {
       failure = caught
+      if (
+        action === 'resend' &&
+        (!(caught instanceof RequestError) || (caught.status >= 500 && !caught.invitationId))
+      )
+        replacementFailure.current = caught
+      if (caught instanceof RequestError && caught.invitationId)
+        currentInvitationId.current = caught.invitationId
     }
     if (controller.signal.aborted) return
     if (isOrganizationContextChanged(failure)) {
@@ -153,18 +171,26 @@ export function InvitationRow({
         const current = await unwrap(
           api.GET('/api/v1/team/invitations/{invitationId}', {
             params: {
-              path: { invitationId: invitation.id },
+              path: { invitationId: currentInvitationId.current },
               header: { 'x-expected-organization-id': organizationId },
             },
             signal: controller.signal,
           }),
         )
         if (controller.signal.aborted) return
-        onObserved(current)
-        setNeedsCheck(false)
-        setConfirming(false)
-        setError(current.status === 'pending' || current.status === 'expired' ? failure : null)
-        setChecked(true)
+        if (current.status === 'canceled' && replacementFailure.current) {
+          setNeedsCheck(true)
+          setReplacementUncertain(true)
+          setError(replacementFailure.current)
+        } else {
+          replacementFailure.current = null
+          setReplacementUncertain(false)
+          onObserved(current)
+          setNeedsCheck(false)
+          setConfirming(false)
+          setError(current.status === 'pending' || current.status === 'expired' ? failure : null)
+          setChecked(true)
+        }
       } catch (caught) {
         if (controller.signal.aborted) return
         setNeedsCheck(true)
@@ -226,6 +252,13 @@ export function InvitationRow({
               <p>
                 {t(
                   'Could not confirm the invitation status. Check its status before trying another action.',
+                )}
+              </p>
+            )}
+            {replacementUncertain && (
+              <p>
+                {t(
+                  'A new invitation may have been saved. Review Pending invitations before trying another action.',
                 )}
               </p>
             )}

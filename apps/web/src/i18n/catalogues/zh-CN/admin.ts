@@ -19,6 +19,8 @@ export const admin = {
     '已开始发送的邮件仍可能到达，但此邀请已无法使用。',
   'Could not confirm the invitation status. Check its status before trying another action.':
     '无法确认邀请状态。请先检查状态，再尝试其他操作。',
+  'A new invitation may have been saved. Review Pending invitations before trying another action.':
+    '新邀请可能已保存。请先查看待接受的邀请，再尝试其他操作。',
   'Send a new invitation': '发送新邀请',
   'Cancel invitation': '取消邀请',
   'Cancel this invitation?': '要取消此邀请吗？',
@@ -72,6 +74,8 @@ export const admin = {
   'Enter a valid email address.': '请输入有效的邮箱地址。',
   'The invitation was saved, but delivery could not be queued. Retry with the same email address.':
     '邀请已保存，但无法加入投递队列。请使用同一邮箱地址重试。',
+  'A newer invitation exists for this address. Review the pending invitations.':
+    '此邮箱已有更新的邀请。请查看待接受的邀请。',
   'The invitation changed. Reload before trying again.': '邀请已更改。请重新加载后再试。',
   'This invitation is no longer pending. Reload before trying again.':
     '此邀请已不再处于待接受状态。请重新加载后再试。',
@@ -1131,8 +1135,8 @@ export const admin = {
     '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
   'Accept invitation': '接受邀请',
   'Checking invitation…': '正在检查邀请…',
-  'This invitation is unavailable. Ask a team owner or admin to open Settings, check Pending invitations, and resend it or send a new invitation if it expired.':
-    '此邀请不可用。请团队所有者或管理员打开设置，检查待接受的邀请，并重新发送；如果邀请已过期，则发送新邀请。',
+  'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':
+    '此邀请不可用。请团队所有者或管理员打开“设置 → 团队成员”，检查待接受的邀请并重新发送。如果邀请已过期，请选择“已过期”并发送新邀请。',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     '请使用收到此邀请的完整邮箱地址。如果你使用了其他邮箱登录，请切换账号。',
   'Confirm your email address by signing in with an email link, then return to this invitation.':

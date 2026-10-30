@@ -28,7 +28,7 @@ export type InvitationResendDenial =
 /** Launch policy permits only member invitation generations. */
 export const invitationRoleAllowed = (role: string | null) => role === 'member'
 
-/** Sending requires an unexpired invitation; renewal has a separate admission rule. */
+/** Resending the same ID requires an unexpired invitation. */
 export function invitationEligibilityDenial(
   invitation: ResendInvitation,
   now: Date,
@@ -38,8 +38,8 @@ export function invitationEligibilityDenial(
   return null
 }
 
-/** Explicit renewal retains the same pending row, including after its link expires. */
-export function invitationRenewalEligibilityDenial(
+/** An expired pending invitation may only be replaced with a fresh invitation. */
+export function invitationRecoveryEligibilityDenial(
   invitation: Pick<ResendInvitation, 'role' | 'status'>,
 ): InvitationEligibilityDenial | null {
   if (!invitationRoleAllowed(invitation.role)) return 'TEAM_MANAGEMENT_ACCESS_DENIED'
@@ -54,9 +54,10 @@ export function invitationResendDenial(
   now: Date,
   recipientIsMember = false,
 ): InvitationResendDenial | null {
-  const ineligible = invitationRenewalEligibilityDenial(invitation)
+  const ineligible = invitationRecoveryEligibilityDenial(invitation)
   if (ineligible) return ineligible
   if (recipientIsMember) return 'INVITATION_RECIPIENT_ALREADY_MEMBER'
+  if (invitation.expiresAt <= now) return null
   return invitationResendDeliveryDenial(invitation, delivery, now)
 }
 

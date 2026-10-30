@@ -47,7 +47,7 @@ export {
   type InvitationResendDenial,
   invitationEligibilityDenial,
   invitationRecipientIsMember,
-  invitationRenewalEligibilityDenial,
+  invitationRecoveryEligibilityDenial,
   invitationResendDenial,
   invitationRoleAllowed,
   type ResendInvitation,

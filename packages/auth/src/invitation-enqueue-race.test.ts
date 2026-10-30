@@ -50,7 +50,8 @@ function moduleUrl(source: string, location: URL, replacements: Record<string, s
 async function authSourceCopy(disableRetirementCheck: boolean): Promise<typeof createAuth> {
   const serviceLocation = new URL('./invitations.ts', import.meta.url)
   let source = readFileSync(serviceLocation, 'utf8')
-  const seam = '      if (retired) throw ineligible()'
+  const seam =
+    '      if (retired) throw ineligible(resend && !admitted.existing ? admitted.id : undefined)'
   expect(source.includes(seam), 'mutation finds the fresh eligibility decision').toBe(true)
   if (disableRetirementCheck) source = source.replace(seam, '      void retired')
   const serviceUrl = moduleUrl(source, serviceLocation)

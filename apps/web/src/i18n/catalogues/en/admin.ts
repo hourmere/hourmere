@@ -23,6 +23,8 @@ export const admin = {
     'An email already being sent may still arrive. This invitation can no longer be used.',
   'Could not confirm the invitation status. Check its status before trying another action.':
     'Could not confirm the invitation status. Check its status before trying another action.',
+  'A new invitation may have been saved. Review Pending invitations before trying another action.':
+    'A new invitation may have been saved. Review Pending invitations before trying another action.',
   'Send a new invitation': 'Send a new invitation',
   'Cancel invitation': 'Cancel invitation',
   'Cancel this invitation?': 'Cancel this invitation?',
@@ -77,6 +79,8 @@ export const admin = {
   'Enter a valid email address.': 'Enter a valid email address.',
   'The invitation was saved, but delivery could not be queued. Retry with the same email address.':
     'The invitation was saved, but delivery could not be queued. Retry with the same email address.',
+  'A newer invitation exists for this address. Review the pending invitations.':
+    'A newer invitation exists for this address. Review the pending invitations.',
   'The invitation changed. Reload before trying again.':
     'The invitation changed. Reload before trying again.',
   'This invitation is no longer pending. Reload before trying again.':
@@ -1198,8 +1202,8 @@ export const admin = {
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
   'Accept invitation': 'Accept invitation',
   'Checking invitation…': 'Checking invitation…',
-  'This invitation is unavailable. Ask a team owner or admin to open Settings, check Pending invitations, and resend it or send a new invitation if it expired.':
-    'This invitation is unavailable. Ask a team owner or admin to open Settings, check Pending invitations, and resend it or send a new invitation if it expired.',
+  'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':
+    'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     'Use the exact email address that received this invitation. Change accounts if you signed in with another address.',
   'Confirm your email address by signing in with an email link, then return to this invitation.':

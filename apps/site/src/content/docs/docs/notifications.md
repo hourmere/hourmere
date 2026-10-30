@@ -543,7 +543,11 @@ including worker attempts, stop at 32 generations and extend expiry by the origi
 length. The invitation sender updates `updated_at` on every delivery attempt
 so this post-delivery cooldown holds. Each delivery generation retains its existing
 maximum of four SMTP attempts.
-Expired or business-terminal invitations need a new invitation. Invitation admission
+Expired or business-terminal invitations need a new invitation. The expired-row action
+atomically cancels the expired invitation and creates a new ID with the acting administrator
+as inviter, under the usual new-invitation limits. The invite form cancels expired rows for
+that address in the creation transaction too. Old links stay unusable and signup trust
+follows the new inviter. Invitation admission
 never invokes the sign-in worker's account/sign-up eligibility decision and does not
 grant an inviter any new registration authority. Errors use fixed codes and diagnostics
 omit recipients and underlying database/provider text.
@@ -679,9 +683,10 @@ authority is checked before sending. Legacy null rows use the original inviter. 
 a recorded actor does not erase the UUID or fall back to the original inviter: sending
 stops instead. The original invitation inviter remains the signup-policy identity.
 An SMTP acceptance does not mean that the recipient received, read or
-accepted the invitation. All pending invitations retain their delivery tombstones even after
-expiry, so a later renewal cannot reset the generation cap or original validity duration.
-Only accepted, canceled or rejected invitations become eligible for seven-day delivery cleanup. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
+accepted the invitation. Pending, unexpired invitations retain their delivery tombstones,
+so resends cannot reset the generation cap or original validity duration. Expired pending,
+accepted, canceled and rejected invitations become eligible for seven-day delivery cleanup;
+expired IDs are never renewed. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
 and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
 
 The session-only administrator summary includes the invited email address for verified

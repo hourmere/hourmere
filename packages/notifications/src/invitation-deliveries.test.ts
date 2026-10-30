@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, defineJob } from '@hourmere/jobs'
@@ -19,6 +21,19 @@ const states: InvitationDeliveryState[] = [
   'failed',
   'skipped',
 ]
+
+async function cleanupCopy(before: string, after: string) {
+  const location = new URL('./invitation-deliveries.ts', import.meta.url)
+  const source = readFileSync(location, 'utf8')
+  expect(source.includes(before), 'mutation finds the expired-pending cleanup condition').toBe(true)
+  const javascript = stripTypeScriptTypes(source.replace(before, after)).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) => `from '${import.meta.resolve(specifier)}'`,
+  )
+  return (await import(
+    `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+  )) as typeof import('./invitation-deliveries.ts')
+}
 
 describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
   let owned: TestDatabase
@@ -208,22 +223,24 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
     await expect(cleanupInvitationDeliveries(db, limit)).rejects.toThrow(RangeError)
   })
 
-  it('retains all pending tombstones even after expiry and deletes only old terminal records', async () => {
+  it('removes old expired pending and terminal records in every delivery state', async () => {
     const retained: string[] = []
-    for (const expiresDays of [1, -10])
-      for (const state of states) {
-        const row = await invitation({ expiresDays })
-        await delivery(row.id, { state, updatedDays: -10, leaseDays: -9 })
-        retained.push(row.id)
-      }
-    const removed: string[] = []
-    for (const status of ['accepted', 'canceled', 'rejected']) {
-      const row = await invitation({ status, expiresDays: -10 })
-      await delivery(row.id, { updatedDays: -10 })
-      removed.push(row.id)
+    for (const state of states) {
+      const row = await invitation()
+      await delivery(row.id, { state, updatedDays: -10, leaseDays: -9 })
+      retained.push(row.id)
     }
+    const removed: string[] = []
+    for (const status of ['pending', 'accepted', 'canceled', 'rejected'])
+      for (const state of states) {
+        const row = await invitation({ status, expiresDays: -10 })
+        await delivery(row.id, { state, updatedDays: -10, leaseDays: -9 })
+        removed.push(row.id)
+      }
     for (const fixture of [
       { status: 'unknown', expiresDays: -10, updatedDays: -10 },
+      { status: 'pending', expiresDays: -6, updatedDays: -10 },
+      { status: 'pending', expiresDays: -10, updatedDays: -6 },
       { status: 'accepted', expiresDays: -6, updatedDays: -10 },
       { status: 'canceled', expiresDays: -10, updatedDays: -6 },
       { status: 'rejected', expiresDays: 1, updatedDays: -10 },
@@ -237,6 +254,23 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
     expect((await db.selectFrom('auth.invitation').select('id').execute()).length).toBe(
       retained.length + removed.length,
     )
+  })
+
+  it('detects retaining expired pending records through a real failed cleanup assertion', async () => {
+    const verify = async (cleanup = cleanupInvitationDeliveries) => {
+      const row = await invitation({ expiresDays: -10 })
+      await delivery(row.id, { updatedDays: -10 })
+      expect(await cleanup(db), 'expired pending delivery metadata has a finite lifetime').toBe(1)
+      expect(await deliveryIds()).toEqual([])
+    }
+    await verify()
+    const mutation = await cleanupCopy(
+      "i.status IN ('pending', 'accepted', 'canceled', 'rejected')",
+      "i.status IN ('accepted', 'canceled', 'rejected')",
+    )
+    await expect(verify(mutation.cleanupInvitationDeliveries)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
   })
 
   it('retains a live lease and can remove an expired lease after both seven-day ages', async () => {
@@ -306,15 +340,18 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
     }
   })
 
-  it('skips an invitation being renewed and retains its record after renewal commits', async () => {
+  it('skips an invitation being replaced and retains its newly finalized delivery', async () => {
     const row = await invitation({ expiresDays: -10 })
     await delivery(row.id, { updatedDays: -10 })
-    const renewal = await owned.pool.connect()
+    const replacement = await owned.pool.connect()
     let cleanup: Promise<number> | undefined
     try {
-      await renewal.query('BEGIN')
-      await renewal.query(
-        'UPDATE auth.invitation SET "expiresAt" = clock_timestamp() + INTERVAL \'1 day\' WHERE id = $1',
+      await replacement.query('BEGIN')
+      await replacement.query("UPDATE auth.invitation SET status = 'canceled' WHERE id = $1", [
+        row.id,
+      ])
+      await replacement.query(
+        "UPDATE invitation_deliveries SET state = 'skipped', last_error_code = 'invitation_ineligible', updated_at = clock_timestamp() WHERE invitation_id = $1",
         [row.id],
       )
       cleanup = cleanupInvitationDeliveries(db)
@@ -324,13 +361,13 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
       ])
       expect(completed).toBe(0)
       expect(await deliveryIds()).toEqual([row.id])
-      await renewal.query('COMMIT')
+      await replacement.query('COMMIT')
       expect(await cleanupInvitationDeliveries(db)).toBe(0)
       expect(await deliveryIds()).toEqual([row.id])
     } finally {
-      await renewal.query('ROLLBACK')
+      await replacement.query('ROLLBACK')
       await cleanup
-      renewal.release()
+      replacement.release()
     }
   })
 
