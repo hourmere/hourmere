@@ -573,33 +573,39 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
     unsupported ? 'self_calendars' : null,
     'member_self',
   )
-  try {
-    assertCachedCalendarSync(
-      selected.filter((c) => c.provider === 'google'),
-      now,
-    )
-  } catch (error) {
+  const syncIssues: Check[] = []
+  for (const calendar of selected.filter((c) => c.provider === 'google')) {
+    try {
+      assertCachedCalendarSync([calendar], now)
+    } catch (error) {
+      syncIssues.push(
+        error instanceof DomainError && error.code === 'calendar_sync_unavailable'
+          ? check(
+              'selected_calendar_sync',
+              'dependency_unavailable',
+              now,
+              // An explicit failure takes precedence over absent success metadata.
+              calendar.status !== 'active' || calendar.sync_error
+                ? 'calendar_attention_required'
+                : !calendar.last_synced_at || calendar.sync_state === null
+                  ? 'sync_not_ready'
+                  : 'calendar_attention_required',
+              'self_calendars',
+              'calendar_worker',
+            )
+          : failed('selected_calendar_sync', now),
+      )
+    }
+  }
+  if (syncIssues.length)
     return [
       selection,
-      error instanceof DomainError && error.code === 'calendar_sync_unavailable'
-        ? check(
-            'selected_calendar_sync',
-            'dependency_unavailable',
-            now,
-            // An explicit failure takes precedence over absent success metadata.
-            selected.some((c) => c.provider === 'google' && (c.status !== 'active' || c.sync_error))
-              ? 'calendar_attention_required'
-              : selected.some(
-                    (c) => c.provider === 'google' && (!c.last_synced_at || c.sync_state === null),
-                  )
-                ? 'sync_not_ready'
-                : 'calendar_attention_required',
-            'self_calendars',
-            'calendar_worker',
-          )
-        : failed('selected_calendar_sync', now),
+      // An unexpected evaluation failure must remain unknown rather than a known sync issue.
+      syncIssues.find((issue) => issue.state === 'check_failed') ??
+        // Missing success metadata for one calendar must not hide another calendar's problem.
+        syncIssues.find((issue) => issue.reasonCode === 'calendar_attention_required') ??
+        aggregate(syncIssues, 'selected_calendar_sync', now),
     ]
-  }
   return [
     selection,
     unsupported
