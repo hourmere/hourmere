@@ -714,15 +714,6 @@ its lease, but cannot recall submitted mail. Leases do not provide exactly-once 
 delivery. Cancellation or authorization changes can still race an SMTP call after its
 final database check.
 
-A failed delivery generation cannot be accepted to join the team. The verified recipient's
-invitation lookup and acceptance return the same unavailable-invitation error as an expired
-or canceled invitation, including direct native API calls. Ask a current team owner or admin
-to explicitly resend it; a successfully queued new generation makes a still-pending,
-unexpired invitation available for explicit acceptance again. This does not cancel the
-invitation or revoke its trusted-inviter registration exception: signing in can create a
-personal account, but never joins the invited team. Missing delivery metadata and queued,
-sending or SMTP-accepted generations retain the separate verified acceptance action.
-
 Mail bodies, usable invitation links, tokens and raw provider/database errors never enter
 job logs. Invitation mail uses the sensitive transport path; diagnostics contain safe IDs,
 attempts, states and fixed error codes, with recipient addresses omitted or redacted.

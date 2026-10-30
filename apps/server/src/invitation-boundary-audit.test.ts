@@ -5,7 +5,8 @@ import { pathToFileURL } from 'node:url'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import type { MailMessage } from '@hourmere/mail'
+import { type MailMessage, MailRejectedError } from '@hourmere/mail'
+import { deliverInvitationEmail, type InvitationEmailSenderDeps } from '@hourmere/notifications'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -198,12 +199,95 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       body: JSON.stringify({ invitationId: f.invitation.id }),
     })
 
-  async function failed(f: Fixture) {
-    await db
-      .updateTable('invitation_deliveries')
-      .set({ state: 'failed', attempts: 1, last_error_code: 'smtp_permanent' })
+  async function delivery(f: Fixture) {
+    return db
+      .selectFrom('invitation_deliveries')
+      .select(['state', 'generation', 'last_error_code'])
       .where('invitation_id', '=', f.invitation.id)
-      .execute()
+      .executeTakeFirstOrThrow()
+  }
+
+  async function deliver(f: Fixture, overrides: Partial<InvitationEmailSenderDeps> = {}) {
+    const { generation } = await delivery(f)
+    await deliverInvitationEmail(
+      {
+        db,
+        secret,
+        publicUrl: origin,
+        smtpConfigured: true,
+        mailMaxPerHour: Number.POSITIVE_INFINITY,
+        mailer: { send: async () => {} },
+        log: () => {},
+        ...overrides,
+      },
+      { invitationId: f.invitation.id, generation },
+    )
+    return delivery(f)
+  }
+
+  async function terminalDelivery(f: Fixture, state: 'failed' | 'skipped') {
+    if (state === 'skipped') {
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', f.team.id)
+        .where('userId', '=', f.owner.id)
+        .execute()
+    }
+    expect(
+      await deliver(f, {
+        mailer: {
+          send: async () => {
+            throw new MailRejectedError({ responseCode: 550, atRecipient: true })
+          },
+        },
+      }),
+    ).toMatchObject({
+      state,
+      last_error_code: state === 'failed' ? 'smtp_permanent' : 'invitation_ineligible',
+    })
+    expect(await memberships(f), 'the delivery worker never creates team membership').toEqual([])
+    expect(
+      await db
+        .selectFrom('auth.invitation')
+        .select('status')
+        .where('id', '=', f.invitation.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'pending' })
+  }
+
+  async function signIn(i: Instance, f: Fixture) {
+    const link = await ask(i, f.invitation.email, f.invitation.id)
+    expect(link !== undefined).toBe(true)
+    const signedIn = await i.app.request((await pressConfirmButton(i.app, link as URL)).toString())
+    expect(signedIn.status).toBe(302)
+    const cookie = signedIn.headers
+      .getSetCookie()
+      .map((part) => part.split(';')[0])
+      .join('; ')
+    expect(cookie.includes('session_token=')).toBe(true)
+    expect(await memberships(f), 'sign-in and registration never join the invited team').toEqual([])
+    return cookie
+  }
+
+  function resend(i: Instance, f: Fixture, expectedGeneration = 1) {
+    return i.app.request('/api/auth/organization/invite-member', {
+      method: 'POST',
+      headers: {
+        origin,
+        cookie: f.ownerSession.cookie,
+        'content-type': 'application/json',
+        'x-expected-organization-id': f.team.id,
+      },
+      body: JSON.stringify({
+        organizationId: f.team.id,
+        email: f.invitation.email,
+        resend: true,
+        invitationId: f.invitation.id,
+        expectedGeneration,
+        requestId: randomUUID(),
+      }),
+    })
   }
 
   it('normalizes only case and surrounding whitespace, signs in without joining, then requires member authority', async () => {
@@ -296,78 +380,152 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
     },
   )
 
-  async function verifyFailed(factory = createAuth, direct = false) {
-    const i = instance(factory)
-    const f = await fixture(i)
-    await failed(f)
-    // Registration creates only a personal account; delivery failure cannot auto-join.
-    const link = await ask(i, f.invitation.email, f.invitation.id)
-    expect(link !== undefined).toBe(true)
-    const signedIn = await i.app.request((await pressConfirmButton(i.app, link as URL)).toString())
-    expect(signedIn.status).toBe(302)
-    const cookie = signedIn.headers
-      .getSetCookie()
-      .map((part) => part.split(';')[0])
-      .join('; ')
-    expect(await memberships(f)).toEqual([])
-    if (direct) {
-      await expect(
-        i.auth.api.acceptInvitation({
+  it.each(['failed', 'skipped'] as const)(
+    '%s delivery never joins during registration or lookup; explicit verified acceptance joins',
+    async (state) => {
+      const i = instance()
+      const f = await fixture(i)
+      await terminalDelivery(f, state)
+      const cookie = await signIn(i, f)
+      expect((await read(i, f, cookie)).status).toBe(200)
+      expect(await memberships(f), 'loading invitation details never joins').toEqual([])
+      expect((await accept(i, f, cookie)).status).toBe(200)
+      expect(await memberships(f)).toEqual([{ userId: expect.any(String), role: 'member' }])
+    },
+  )
+
+  it.each(['failed', 'skipped'] as const)(
+    '%s delivery never joins an existing account; trusted explicit acceptance joins',
+    async (state) => {
+      const i = instance()
+      const f = await fixture(i)
+      const r = await recipient(f)
+      await terminalDelivery(f, state)
+      const cookie = await signIn(i, f)
+      expect((await read(i, f, cookie)).status).toBe(200)
+      expect(await memberships(f), 'loading invitation details never joins').toEqual([])
+      const accepted = await i.auth.api.acceptInvitation({
+        body: { invitationId: f.invitation.id },
+        headers: new Headers({ cookie }),
+        asResponse: true,
+      })
+      expect(accepted.status).toBe(200)
+      expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
+    },
+  )
+
+  it.each(['failed', 'skipped'] as const)(
+    '%s delivery preserves native wrong-recipient 403 responses without revealing its state',
+    async (state) => {
+      const i = instance()
+      const f = await fixture(i)
+      await terminalDelivery(f, state)
+      const other = await db
+        .insertInto('auth.user')
+        .values({ name: 'Other account', email: 'other@outside.example', emailVerified: true })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const { cookie } = await session(other.id)
+      const responses = [
+        await read(i, f, cookie),
+        await accept(i, f, cookie),
+        await i.auth.api.acceptInvitation({
           body: { invitationId: f.invitation.id },
           headers: new Headers({ cookie }),
           asResponse: true,
         }),
-      ).rejects.toMatchObject({ statusCode: 400, body: { code: 'INVITATION_NOT_FOUND' } })
-      expect(await memberships(f), 'failed delivery never creates team membership').toEqual([])
-      return
-    }
-    const response = await read(i, f, cookie)
-    expect(await memberships(f), 'failed delivery never creates team membership').toEqual([])
-    expect(response.status, 'failed invitation delivery is unavailable for joining').toBe(400)
-    expect(await response.json()).toMatchObject({ code: 'INVITATION_NOT_FOUND' })
-    expect((await accept(i, f, cookie)).status).toBe(400)
-    expect(await memberships(f), 'failed delivery never creates team membership').toEqual([])
-  }
+      ]
+      for (const response of responses) {
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({
+          code: 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION',
+          message: 'You are not the recipient of the invitation',
+        })
+      }
+      expect(await memberships(f)).toEqual([])
+    },
+  )
 
-  it('keeps failed mail separate from registration and refuses page/native acceptance', async () => {
-    await verifyFailed()
-  })
-
-  it('refuses failed mail through trusted native accept API calls', async () => {
-    await verifyFailed(createAuth, true)
-  })
-
-  it('recovers a failed generation only after an authorized explicit resend', async () => {
+  it('keeps the earlier delivered link usable when an authorized resend is rate-limited', async () => {
     const i = instance()
     const f = await fixture(i)
     const r = await recipient(f)
-    await failed(f)
+    expect(await deliver(f)).toMatchObject({ state: 'smtp_accepted', generation: 1 })
+    expect((await read(i, f, r.cookie)).status).toBe(200)
     const earlier = new Date(Date.now() - 120_000)
     await db
       .updateTable('invitation_deliveries')
       .set({ generation_started_at: earlier, updated_at: earlier })
       .where('invitation_id', '=', f.invitation.id)
       .execute()
-    expect((await read(i, f, r.cookie)).status).toBe(400)
-    const resend = await i.app.request('/api/auth/organization/invite-member', {
-      method: 'POST',
-      headers: {
-        origin,
-        cookie: f.ownerSession.cookie,
-        'content-type': 'application/json',
-        'x-expected-organization-id': f.team.id,
-      },
-      body: JSON.stringify({
-        organizationId: f.team.id,
-        email: f.invitation.email,
-        resend: true,
-        invitationId: f.invitation.id,
-        expectedGeneration: 1,
-        requestId: randomUUID(),
-      }),
+    const resent = await resend(i, f)
+    expect(resent.status).toBe(200)
+    expect(await resent.json()).toMatchObject({
+      id: f.invitation.id,
+      delivery: { state: 'queued', generation: 2 },
     })
-    expect(resend.status).toBe(200)
-    expect(await resend.json()).toMatchObject({ delivery: { state: 'queued', generation: 2 } })
+    expect(await deliver(f, { mailMaxPerHour: 1 })).toMatchObject({
+      state: 'failed',
+      generation: 2,
+      last_error_code: 'mail_rate_limited',
+    })
+    expect(await memberships(f), 'a failed resend never joins the recipient').toEqual([])
+    expect((await read(i, f, r.cookie)).status).toBe(200)
+    expect((await accept(i, f, r.cookie)).status).toBe(200)
+    expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
+  })
+
+  it('allows explicit acceptance when SMTP is not configured', async () => {
+    const i = instance()
+    const f = await fixture(i)
+    const r = await recipient(f)
+    expect(await deliver(f, { smtpConfigured: false })).toMatchObject({
+      state: 'failed',
+      last_error_code: 'smtp_not_configured',
+    })
+    expect(await memberships(f)).toEqual([])
+    expect((await read(i, f, r.cookie)).status).toBe(200)
+    expect((await accept(i, f, r.cookie)).status).toBe(200)
+    expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
+  })
+
+  it('keeps pre-upgrade pending invitations joinable despite unknown legacy delivery', async () => {
+    const i = instance()
+    const f = await fixture(i)
+    const r = await recipient(f)
+    // Match the terminal delivery tombstone backfilled by the delivery migration.
+    await db
+      .updateTable('invitation_deliveries')
+      .set({ state: 'failed', last_error_code: 'legacy_delivery_unknown' })
+      .where('invitation_id', '=', f.invitation.id)
+      .execute()
+    expect((await read(i, f, r.cookie)).status).toBe(200)
+    expect(await memberships(f)).toEqual([])
+    const accepted = await i.auth.api.acceptInvitation({
+      body: { invitationId: f.invitation.id },
+      headers: new Headers({ cookie: r.cookie }),
+      asResponse: true,
+    })
+    expect(accepted.status).toBe(200)
+    expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
+  })
+
+  it('allows explicit acceptance after the final delivery generation fails', async () => {
+    const i = instance()
+    const f = await fixture(i)
+    const r = await recipient(f)
+    await db
+      .updateTable('invitation_deliveries')
+      .set({ generation: 32 })
+      .where('invitation_id', '=', f.invitation.id)
+      .execute()
+    expect(await deliver(f, { smtpConfigured: false })).toMatchObject({
+      state: 'failed',
+      generation: 32,
+    })
+    const exhausted = await resend(i, f, 32)
+    expect(exhausted.status).toBe(409)
+    expect(await exhausted.json()).toMatchObject({ code: 'INVITATION_GENERATION_LIMIT' })
     expect(await memberships(f)).toEqual([])
     expect((await read(i, f, r.cookie)).status).toBe(200)
     expect((await accept(i, f, r.cookie)).status).toBe(200)
@@ -398,78 +556,91 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
     },
   )
 
-  async function verifyLateFailure(factory = createAuth, direct = false) {
+  it.each([false, true])(
+    'keeps acceptance available if delivery fails after preflight (trusted API: %s)',
+    async (direct) => {
+      const i = instance()
+      const f = await fixture(i)
+      const r = await recipient(f)
+      const adapter = (await i.auth.$context).adapter
+      const increment = adapter.incrementOne.bind(adapter)
+      const spy = vi.spyOn(adapter, 'incrementOne').mockImplementation(async (request) => {
+        if (request.model === 'invitation' && request.set?.status === 'accepted') {
+          await terminalDelivery(f, 'failed')
+        }
+        return increment(request)
+      })
+      try {
+        const response = direct
+          ? await i.auth.api.acceptInvitation({
+              body: { invitationId: f.invitation.id },
+              headers: new Headers({ cookie: r.cookie }),
+              asResponse: true,
+            })
+          : await accept(i, f, r.cookie)
+        expect(response.status).toBe(200)
+        expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
+      } finally {
+        spy.mockRestore()
+      }
+    },
+  )
+
+  async function verifyTrustedRoleRecheck(factory = createAuth) {
     const i = instance(factory)
     const f = await fixture(i)
     const r = await recipient(f)
     const adapter = (await i.auth.$context).adapter
     const increment = adapter.incrementOne.bind(adapter)
     const spy = vi.spyOn(adapter, 'incrementOne').mockImplementation(async (request) => {
-      if (request.model === 'invitation' && request.set?.status === 'accepted') await failed(f)
+      if (request.model === 'invitation' && request.set?.status === 'accepted') {
+        await db
+          .updateTable('auth.invitation')
+          .set({ role: 'admin' })
+          .where('id', '=', f.invitation.id)
+          .execute()
+      }
       return increment(request)
     })
     try {
-      const response = direct
-        ? await i.auth.api.acceptInvitation({
-            body: { invitationId: f.invitation.id },
-            headers: new Headers({ cookie: r.cookie }),
-            asResponse: true,
-          })
-        : await accept(i, f, r.cookie)
+      const response = await i.auth.api.acceptInvitation({
+        body: { invitationId: f.invitation.id },
+        headers: new Headers({ cookie: r.cookie }),
+        asResponse: true,
+      })
       expect(
         await memberships(f),
-        'a delivery failure committed after preflight never creates a team member',
+        'trusted acceptance rechecks the stored member role before claiming the invitation',
       ).toEqual([])
-      expect(response.status).toBe(400)
-      expect(await response.json()).toMatchObject({ code: 'INVITATION_NOT_FOUND' })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
       expect(
         await db
           .selectFrom('auth.invitation')
-          .select('status')
+          .select(['status', 'role'])
           .where('id', '=', f.invitation.id)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ status: 'pending' })
+      ).toEqual({ status: 'pending', role: 'admin' })
     } finally {
       spy.mockRestore()
     }
   }
 
-  it.each([false, true])(
-    'rechecks failed delivery after preflight (trusted API: %s)',
-    async (direct) => {
-      await verifyLateFailure(createAuth, direct)
-    },
-  )
-
-  it('runs an unchanged source copy through the acceptance invariant', async () => {
-    const guard = 'await requireJoinableDelivery(trx, invitationId, true)'
-    await verifyLateFailure(await sourceCopy(guard, guard), true)
+  it('rechecks the member role for trusted acceptance after native preflight', async () => {
+    await verifyTrustedRoleRecheck()
   })
 
-  it('detects removal of the page/preflight delivery refusal in a source copy', async () => {
-    const factory = await sourceCopy('await requireJoinableDelivery(db, invitationId)', '')
-    await expect(verifyFailed(factory)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('failed invitation delivery is unavailable for joining'),
-    })
+  it('runs an unchanged source copy through the trusted member-role recheck', async () => {
+    const guard = 'endpoint.path !== accept'
+    await verifyTrustedRoleRecheck(await sourceCopy(guard, guard))
   })
 
-  it('detects removal of the locked delivery recheck in a source copy', async () => {
-    const factory = await sourceCopy('await requireJoinableDelivery(trx, invitationId, true)', '')
-    await expect(verifyLateFailure(factory)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining(
-        'a delivery failure committed after preflight never creates a team member',
-      ),
-    })
-  })
-
-  it('detects removal of trusted acceptance context in a source copy', async () => {
+  it('detects removal of trusted acceptance context independently of delivery state', async () => {
     const factory = await sourceCopy(' &&\n        endpoint.path !== accept', '')
-    await expect(verifyLateFailure(factory, true)).rejects.toMatchObject({
+    await expect(verifyTrustedRoleRecheck(factory)).rejects.toMatchObject({
       name: 'AssertionError',
       message: expect.stringContaining(
-        'a delivery failure committed after preflight never creates a team member',
+        'trusted acceptance rechecks the stored member role before claiming the invitation',
       ),
     })
   })

@@ -24,10 +24,9 @@ import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
-const getInvitation = '/organization/get-invitation'
 const remove = '/organization/remove-member'
 const selfDeparturePaths = new Set(['/organization/leave', remove])
-const protectedPaths = new Set([changeRole, accept, getInvitation, remove])
+const protectedPaths = new Set([changeRole, accept, remove])
 const nativeOwnerRequiredCodes = new Set([
   'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER',
   'YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER',
@@ -53,21 +52,6 @@ export function fixedTeamRole(value: unknown): 'admin' | 'member' | undefined {
 
 function body(ctx: AuthMiddlewareContext): Record<string, unknown> {
   return ctx.body && typeof ctx.body === 'object' && !Array.isArray(ctx.body) ? ctx.body : {}
-}
-
-async function requireJoinableDelivery(db: Db, invitationId: string, lock = false) {
-  let query = db
-    .selectFrom('invitation_deliveries')
-    .select('state')
-    .where('invitation_id', '=', invitationId)
-  if (lock) query = query.forUpdate()
-  const delivery = await query.executeTakeFirst()
-  if (delivery?.state === 'failed') {
-    throw new APIError('BAD_REQUEST', {
-      code: 'INVITATION_NOT_FOUND',
-      message: 'Invitation not found',
-    })
-  }
 }
 
 /** Only the pinned native adapter selectors are supported by these narrow write mappings. */
@@ -295,9 +279,6 @@ export function createTeamRolePolicy(
       .where('userId', '=', actor.user.id)
       .executeTakeFirst()
     if (member) throw recipientAlreadyMember()
-    // Match the sender's invitation -> delivery lock order. A failure committed after
-    // page/preflight lookup must still prevent the native acceptance claim.
-    await requireJoinableDelivery(trx, invitationId, true)
     return stored
   }
 
@@ -318,17 +299,12 @@ export function createTeamRolePolicy(
         // locked final-owner refusal. Other targets require administrative removal.
         if (ctx.path === remove && !(await targetsSelf(ctx))) await removal(ctx, db, false)
         if (ctx.path === changeRole) await roleChange(ctx, db, false)
-        const invitationId = ctx.path === getInvitation ? ctx.query?.id : input.invitationId
-        if (
-          (ctx.path === accept || ctx.path === getInvitation) &&
-          typeof invitationId === 'string' &&
-          isUuid(invitationId)
-        ) {
+        if (ctx.path === accept && typeof input.invitationId === 'string') {
           const session = await getSessionFromCtx(ctx)
           const stored = await db
             .selectFrom('auth.invitation')
             .select(['email', 'role'])
-            .where('id', '=', invitationId)
+            .where('id', '=', input.invitationId)
             .where('status', '=', 'pending')
             .where('expiresAt', '>', new Date())
             .executeTakeFirst()
@@ -336,12 +312,10 @@ export function createTeamRolePolicy(
           // is visible only to the verified recipient, never as an invitation-id probe.
           if (
             session?.user.emailVerified &&
-            stored?.email.toLowerCase() === session.user.email.toLowerCase()
+            stored?.email.toLowerCase() === session.user.email.toLowerCase() &&
+            stored.role !== 'member'
           ) {
-            if (ctx.path === accept && stored.role !== 'member') throw teamRoleDenied()
-            // A failed generation requires an authorized resend before it can join.
-            // Keep this refusal indistinguishable from native unavailable invitations.
-            await requireJoinableDelivery(db, invitationId)
+            throw teamRoleDenied()
           }
         }
       })

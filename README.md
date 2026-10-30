@@ -236,9 +236,6 @@ page. Signing in does not join the team: review the team and signed-in account, 
 If you used a different account, **Change account** signs you out while keeping the invitation
 for your next sign-in. Invitation details remain restricted to the verified recipient.
 An existing member can open the team without accepting again.
-If invitation delivery has failed, ask a team owner or admin to resend it before joining.
-The pending invitation can still permit its exact address to register a personal account
-under the trusted-inviter rule; registration never accepts the invitation or joins the team.
 
 The signed-in header's space menu switches between **Personal** and your member organizations
 and shows your role in the current space. Switching asks before discarding unsaved changes
