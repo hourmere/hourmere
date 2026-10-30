@@ -21,6 +21,7 @@ import {
   getTeamMemberDepartureImpact,
   leaveTeamMember,
   MemberDepartureImpactSchema,
+  MemberRemovalHandlingSchema,
 } from '@hourmere/scheduling'
 import {
   createFixtures,
@@ -537,6 +538,134 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     },
   )
 
+  it('routes native self-removal by an owner to safe leave and preserves its personal fallback', async () => {
+    const f = await fixture('owner')
+    expect((await native(f, 'remove-member')).status).toBe(200)
+    await departed(f)
+    expect(
+      await db
+        .selectFrom('auth.member')
+        .select('role')
+        .where('organizationId', '=', f.team.id)
+        .where('userId', '=', f.survivor.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ role: 'owner' })
+  })
+
+  it('routes native removal of another member to checked removal with immediate revocation', async () => {
+    const f = await fixture('admin')
+    const eventId = await event(f)
+    const bookingId = await booking(f, 'future', eventId)
+    const managerLogin = await session(f.survivor, f.team.id)
+    const production = application(auth, true)
+    const key = await auth.api.createApiKey({
+      body: { userId: f.actor.id, metadata: { organizationId: f.team.id } },
+    })
+    const bearer = { authorization: `Bearer ${key.key}` }
+    expect((await production.request('/api/v1/me', { headers: bearer })).status).toBe(200)
+
+    const response = await native(
+      { ...f, login: managerLogin },
+      'remove-member',
+      f.memberId,
+      production,
+    )
+    expect(response.status).toBe(200)
+    expect(
+      await db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('id', '=', f.memberId)
+        .executeTakeFirst(),
+    ).toBeUndefined()
+    expect(
+      await db
+        .selectFrom('event_types')
+        .select('is_active')
+        .where('id', '=', eventId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ is_active: false })
+    expect(
+      await db
+        .selectFrom('organization_operations')
+        .select(['operation', 'actor_user_id', 'target_user_id'])
+        .where('organization_id', '=', f.team.id)
+        .execute(),
+    ).toEqual([
+      { operation: 'member_removed', actor_user_id: f.survivor.id, target_user_id: f.actor.id },
+    ])
+    const revoked = await production.request('/api/v1/me', { headers: bearer })
+    expect(revoked.status).toBe(401)
+    expect(await revoked.json()).toMatchObject({ error: 'unauthorized' })
+    const staleWrite = await production.request(`/api/v1/event-types/${eventId}`, {
+      method: 'PATCH',
+      headers: headers(f),
+      body: JSON.stringify({ title: 'Removed administrator write' }),
+    })
+    expect(staleWrite.status).toBe(409)
+    expect(await staleWrite.json()).toMatchObject({ error: 'organization_context_changed' })
+    const handlingResponse = await production.request(
+      `/api/v1/team/members/${f.actor.id}/removal-handling?teamId=${f.team.id}`,
+      { headers: { cookie: managerLogin.cookie } },
+    )
+    expect(handlingResponse.status).toBe(200)
+    const removal = MemberRemovalHandlingSchema.parse(await handlingResponse.json())
+    expect(removal).toMatchObject({ memberUserId: f.actor.id, reason: 'member_removed' })
+    expect(removal.bookings.data.map(({ id }) => id)).toEqual([bookingId])
+    expect(
+      await db
+        .selectFrom('booking_hosts')
+        .select('user_id')
+        .where('booking_id', '=', bookingId)
+        .execute(),
+    ).toEqual([{ user_id: f.actor.id }])
+  })
+
+  it('protects native removal before target lookups with uniform real and missing target denials', async () => {
+    const f = await fixture()
+    const other = await createTestUser(db, 'Other member')
+    const member = await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: f.team.id,
+        userId: other.id,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const targets = [member.id, other.email, randomUUID(), 'missing-member@example.com']
+    const lookup = vi.spyOn((await auth.$context).adapter, 'findOne')
+    try {
+      for (const target of targets) {
+        const response = await native(f, 'remove-member', target)
+        expect(response.status, 'native removal must deny before looking up its target').toBe(403)
+        expect(await response.json()).toEqual({
+          code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+          message: 'team_management_access_denied',
+        })
+      }
+      expect(
+        lookup.mock.calls.filter(([request]) =>
+          request.where?.some(
+            (condition) => typeof condition.value === 'string' && targets.includes(condition.value),
+          ),
+        ),
+        'denied native targets must not reach the native adapter lookup',
+      ).toEqual([])
+      await unchanged(f)
+      expect(
+        await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('id', '=', member.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual(member)
+    } finally {
+      lookup.mockRestore()
+    }
+  })
+
   it('accepts uppercase organization UUIDs for native departure and falls back to personal space', async () => {
     const f = await fixture()
     const organizationId = f.team.id.toUpperCase()
@@ -602,6 +731,36 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       { timeout: 3000, interval: 10 },
     )
   }
+
+  it('rechecks the sole-owner refusal under the organization lock for native self-removal', async () => {
+    const f = await fixture('owner')
+    const holder = await owned.pool.connect()
+    let pending: Promise<Response> | undefined
+    try {
+      await holder.query('BEGIN')
+      await holder.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [f.team.id])
+      pending = Promise.resolve(native(f, 'remove-member'))
+      // The native two-owner precheck has passed before the leave service waits here.
+      await waitForBlocker(holder)
+      await holder.query(
+        'UPDATE auth.member SET role=$1 WHERE "organizationId"=$2 AND "userId"=$3',
+        ['member', f.team.id, f.survivor.id],
+      )
+      await holder.query('COMMIT')
+      const response = await pending
+      expect(response.status, 'self-removal must retain the final owner after waiting').toBe(409)
+      expect(await response.json()).toEqual({
+        code: 'member_departure_owner_required',
+        message: 'Another owner is needed before you can leave.',
+        handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+      })
+      await unchanged(f)
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+      await pending
+    }
+  })
 
   async function verifySoleOwner(depart: Departure = leaveTeamMember, otherRole = 'member') {
     const f = await fixture('member, owner')

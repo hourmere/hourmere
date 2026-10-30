@@ -1,5 +1,5 @@
 import '@hono/zod-openapi'
-import { createHmac, randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -166,7 +166,12 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     })
   }
 
-  function post(server: ReturnType<typeof app>, f: Fixture, path = 'leave') {
+  function post(
+    server: ReturnType<typeof app>,
+    f: Fixture,
+    path = 'leave',
+    memberIdOrEmail = f.memberId,
+  ) {
     return server.request(`/api/auth/organization/${path}`, {
       method: 'POST',
       headers: {
@@ -178,7 +183,7 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
       body: JSON.stringify(
         path === 'leave'
           ? { organizationId: f.teamId }
-          : { organizationId: f.teamId, memberIdOrEmail: f.memberId },
+          : { organizationId: f.teamId, memberIdOrEmail },
       ),
     })
   }
@@ -228,6 +233,32 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
       impact: { eventTypes: { totalCount: 1, data: [{ id: f.eventId }] } },
     })
     expect(await currentMembership(f)).toEqual({ id: f.memberId })
+  }
+
+  async function assertProtectedRemoval(copy: NativeCopy) {
+    const f = await fixture(false)
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('id', '=', f.memberId)
+      .execute()
+    const server = app(copy)
+    for (const target of [f.owner.email, randomUUID(), 'missing-member@example.test']) {
+      const response = await post(server, f, 'remove-member', target)
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({
+        code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+        message: 'team_management_access_denied',
+      })
+    }
+    expect(await currentMembership(f)).toEqual({ id: f.memberId })
+    expect(
+      await db
+        .selectFrom('organization_operations')
+        .select('id')
+        .where('organization_id', '=', f.teamId)
+        .execute(),
+    ).toEqual([])
   }
 
   async function assertUnavailable(factory: NativeCopy) {
@@ -303,6 +334,28 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     await assertOwnerRequired(await sourceCopy())
   })
 
+  it('passes native removal protection assertions with an unchanged source copy', async () => {
+    await assertProtectedRemoval(await sourceCopy())
+  })
+
+  it('detects routing self-removal to administrative removal with a real assertion failure', async () => {
+    const copy = await sourceCopy([
+      'if (!actor || !target || target.userId !== actor.user.id)',
+      'if (ctx.path === remove || !actor || !target || target.userId !== actor.user.id)',
+    ])
+    await expect(assertBlocked(copy, 'remove-member')).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it('detects dropping native removal protection with a real assertion failure', async () => {
+    const copy = await sourceCopy([
+      'new Set([invite, changeRole, accept, remove])',
+      'new Set([invite, changeRole, accept])',
+    ])
+    await expect(assertProtectedRemoval(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
   it('detects an omitted native owner refusal mapping with a real assertion failure', async () => {
     await expect(
       assertOwnerRequired(
@@ -312,14 +365,10 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   })
 
   it.each([
-    [
-      'leave',
-      "new Set(['/organization/leave', '/organization/remove-member'])",
-      "new Set(['/organization/remove-member'])",
-    ],
+    ['leave', "new Set(['/organization/leave', remove])", 'new Set([remove])'],
     [
       'remove-member',
-      "new Set(['/organization/leave', '/organization/remove-member'])",
+      "new Set(['/organization/leave', remove])",
       "new Set(['/organization/leave'])",
     ],
   ])(
@@ -339,7 +388,9 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
           })
         }`
     await expect(
-      assertUnavailable(await sourceCopy([before, 'if (!leaveTeamMember) return remove(request)'])),
+      assertUnavailable(
+        await sourceCopy([before, 'if (!leaveTeamMember) return deleteOne(request)']),
+      ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
@@ -365,8 +416,8 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     'detects the trusted %s context fallback being omitted with a real assertion failure',
     async (path) => {
       const copy = await sourceCopy([
-        '(endpoint?.context.session?.session?.id ? (endpoint as AuthMiddlewareContext) : undefined)',
-        'undefined',
+        'return endpoint as AuthMiddlewareContext',
+        'return undefined',
       ])
       await expect(assertTrustedBlocked(copy, path)).rejects.toMatchObject({
         name: 'AssertionError',

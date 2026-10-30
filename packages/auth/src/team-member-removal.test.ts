@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
@@ -15,6 +16,10 @@ import { createCallerResolver } from './caller.ts'
 import { beforeHook } from './hooks.ts'
 import * as authExports from './index.ts'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
+import {
+  MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
+} from './member-departure.ts'
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, organizationGuards } from './organizations.ts'
 import {
@@ -70,6 +75,8 @@ function policySourceCopy(
     tryGetCurrentAuthEndpointContext,
     APIError,
     getSessionFromCtx,
+    MemberDepartureBlockedError,
+    MemberDepartureOwnerRequiredError,
     recordTeamRoleChange,
     isUuid,
     checkTeamManagementAccess,
@@ -497,8 +504,16 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
           change,
           copiedNativePolicy(
             [
-              'const { actor, member, principal, expectedOrganizationId } = await removal(ctx, trx, true)',
-              'const { actor, member, principal, expectedOrganizationId } = await removal(ctx, trx, false)',
+              `const { actor, member, principal, expectedOrganizationId } = await removal(
+              ctx,
+              trx,
+              true,
+            )`,
+              `const { actor, member, principal, expectedOrganizationId } = await removal(
+              ctx,
+              trx,
+              false,
+            )`,
             ],
             sourceCopy([
               'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
@@ -787,5 +802,3 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     },
   )
 })
-
-import { AsyncLocalStorage } from 'node:async_hooks'
