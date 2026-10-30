@@ -520,6 +520,22 @@ describe('complete public documentation', () => {
       expect(read(original).trim()).toBe(
         '[Notifications and background jobs](https://hourmere.com/docs/notifications).',
       )
+    } else if (guide === 'api-conventions') {
+      // Retain only the requested compatibility excerpt; the full guide stays canonical.
+      const webhookRows = source.split('\n').filter((line) => line.startsWith('| Session webhook'))
+      expect(webhookRows.length).toBeGreaterThan(0)
+      expect(read(original)).toBe(
+        [
+          '[API conventions](https://hourmere.com/docs/api-conventions).',
+          '',
+          'These session webhook compatibility rows mirror the canonical documentation for repository readers.',
+          '',
+          '| Request and supplied expectation | Previous response | Current response |',
+          '|---|---|---|',
+          ...webhookRows,
+          '',
+        ].join('\n'),
+      )
     } else {
       expect(existsSync(join(root, original)), original).toBe(false)
     }

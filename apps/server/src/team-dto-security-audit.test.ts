@@ -1235,7 +1235,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     }
   })
 
-  it('characterizes the existing webhook expected-organization gap without sending provider traffic', async () => {
+  it('refuses stale webhook creation without writing in either team or sending provider traffic', async () => {
     const actor = fixture.actors[0]
     if (!actor) throw new Error('Missing owner fixture')
     let createdId: string | undefined
@@ -1250,13 +1250,27 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       .returning('id')
       .executeTakeFirstOrThrow()
     try {
+      const snapshot = async () => ({
+        webhooks: await db
+          .selectFrom('webhooks')
+          .select(['id', 'organization_id'])
+          .where('organization_id', 'in', [fixture.team.id, fixture.other.id])
+          .orderBy('id')
+          .execute(),
+        deliveries: await db
+          .selectFrom('webhook_deliveries')
+          .select(['id', 'organization_id'])
+          .where('organization_id', 'in', [fixture.team.id, fixture.other.id])
+          .orderBy('id')
+          .execute(),
+      })
+      const before = await snapshot()
       await db
         .updateTable('auth.session')
         .set({ activeOrganizationId: fixture.other.id })
         .where('id', '=', actor.sessionId)
         .execute()
-      // This is a documented audit finding: existing webhook writes use current
-      // session context and ignore the browser's supplied expected organization.
+      // An authorized old draft must ask for a reload after a session switch.
       const response = await app.request('/api/v1/webhooks', {
         method: 'POST',
         headers: {
@@ -1270,26 +1284,11 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
           events: ['booking.created'],
         }),
       })
-      const created = await body(response, 201)
-      keys(created, ['secret', 'webhook'])
-      createdId = created.webhook.id
-      expect(created.webhook.organizationId).toBe(fixture.other.id)
-      expect(
-        (
-          await db
-            .selectFrom('webhooks')
-            .select('organization_id')
-            .where('id', '=', createdId as string)
-            .executeTakeFirstOrThrow()
-        ).organization_id,
-      ).toBe(fixture.other.id)
-      expect(
-        await db
-          .selectFrom('webhook_deliveries')
-          .select('id')
-          .where('webhook_id', '=', createdId as string)
-          .execute(),
-      ).toEqual([])
+      const result = (await response.json()) as Json
+      createdId = result.webhook?.id
+      expect(response.status).toBe(409)
+      expect(result).toMatchObject({ error: 'organization_context_changed' })
+      expect(await snapshot()).toEqual(before)
     } finally {
       if (createdId) await db.deleteFrom('webhooks').where('id', '=', createdId).execute()
       await db.deleteFrom('auth.member').where('id', '=', added.id).execute()

@@ -67,7 +67,7 @@ export async function checkTeamManagementAccess(
   db: Db,
   principal: Principal,
   teamId: string,
-  lock = false,
+  lock: boolean | 'key share' = false,
   context?: { expectedOrganizationId: string; allowPersonal: boolean },
   allowMemberRead = false,
 ): Promise<TeamReader> {
@@ -95,7 +95,7 @@ export async function checkTeamManagementAccess(
   )
     throw denied()
 
-  await teamSessionUser(db, principal, lock)
+  await teamSessionUser(db, principal, Boolean(lock))
 
   let organizationQuery = db
     .selectFrom('auth.organization')
@@ -103,21 +103,25 @@ export async function checkTeamManagementAccess(
     .where('id', '=', authorizationTeamId)
   // Serialize team-management writes, including organization edits and self role changes,
   // without competing SHARE → UPDATE upgrades in their callbacks.
-  if (lock) organizationQuery = organizationQuery.forUpdate()
+  if (lock === true) organizationQuery = organizationQuery.forUpdate()
+  // Webhook mutations already hold user → organization → endpoint locks. Rechecking
+  // member/session authority must not upgrade their organization KEY SHARE to UPDATE,
+  // which could deadlock mutations of different endpoints in the same organization.
+  if (lock === 'key share') organizationQuery = organizationQuery.forKeyShare()
   const organization = await organizationQuery.executeTakeFirst()
   if (!organization) throw denied()
   const membership = await checkTeamManagementMembership(
     db,
     principal.user.id,
     authorizationTeamId,
-    lock,
+    Boolean(lock),
     context?.allowPersonal,
     allowMemberRead,
   )
   const { personal, role } = membership
 
   // Refuse a session invalidated since caller resolution, including email-proof rotation.
-  const session = await teamSession(db, principal, lock)
+  const session = await teamSession(db, principal, Boolean(lock))
 
   // A stale browser page may now be in personal space or a member-only team. Validate
   // its expected team's authority before distinguishing a context change. Self-service
