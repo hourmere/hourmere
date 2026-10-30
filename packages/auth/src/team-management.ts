@@ -112,7 +112,7 @@ export async function checkTeamManagementAccess(
     authorizationTeamId,
     lock,
     context?.allowPersonal,
-    allowMemberRead && !expectedTeamId,
+    allowMemberRead,
   )
   const { personal, role } = membership
 
@@ -120,7 +120,8 @@ export async function checkTeamManagementAccess(
   const session = await teamSession(db, principal, lock)
 
   // A stale browser page may now be in personal space or a member-only team. Validate
-  // its expected team's management authority before distinguishing a context change.
+  // its expected team's authority before distinguishing a context change. Self-service
+  // callers may retain any member role; management callers still require owner/admin.
   if (expectedTeamId) throw contextChanged()
 
   if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase()) {
@@ -136,7 +137,7 @@ export async function checkTeamManagementAccess(
             .executeTakeFirst()
         : undefined
     if (activeMembership || !personal) {
-      if (role === 'member' && !context.allowPersonal) throw denied()
+      if (role === 'member' && !context.allowPersonal && !allowMemberRead) throw denied()
       throw contextChanged()
     }
   }

@@ -10,6 +10,7 @@ import { type MessageKey, msg, type UiText } from '../i18n/translate.ts'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
 const PAGE_SIZE = 20
+const EXISTING_INVITATION_PAGE_LIMIT = 5
 const deliveryLabels: Record<Schemas['TeamInvitationSummary']['delivery']['state'], MessageKey> = {
   queued: 'Waiting to send',
   sending: 'Submitting to the mail server',
@@ -133,9 +134,9 @@ function InviteMember({
     try {
       const invitation = await inviteMember(email.trim(), organizationId, controller.signal)
       if (controller.signal.aborted) return
+      setEmail('')
       if (!invitation.existing && invitation.delivery.state === 'queued') {
         setNotice(msg('Invitation queued for delivery.'))
-        setEmail('')
       } else {
         setNotice(msg('An invitation already exists. Review its mail submission status below.'))
       }
@@ -227,6 +228,8 @@ function PendingInvitations({
   const { t, ui, locale } = useI18n()
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined])
   const [version, setVersion] = useState(0)
+  const seekExistingInvitation = useRef(Boolean(existingInvitation))
+  const [existingInvitationMissing, setExistingInvitationMissing] = useState(false)
   const cursor = cursors[cursors.length - 1]
   const load = useCallback(
     (signal: AbortSignal) =>
@@ -245,14 +248,25 @@ function PendingInvitations({
     const controller = new AbortController()
     load(controller.signal).then(
       (data) => {
-        if (!controller.signal.aborted) setResult({ load, state: { status: 'ready', data } })
+        if (controller.signal.aborted) return
+        if (seekExistingInvitation.current && existingInvitation) {
+          const found = data.data.some(({ id }) => id === existingInvitation.id)
+          // Pending invitations are capped at 100; seek once without trapping manual paging.
+          if (!found && data.nextCursor && cursors.length < EXISTING_INVITATION_PAGE_LIMIT) {
+            setCursors((value) => [...value, data.nextCursor ?? undefined])
+            return
+          }
+          seekExistingInvitation.current = false
+          setExistingInvitationMissing(!found)
+        }
+        setResult({ load, state: { status: 'ready', data } })
       },
       (error: unknown) => {
         if (!controller.signal.aborted) setResult({ load, state: { status: 'error', error } })
       },
     )
     return () => controller.abort()
-  }, [load, version])
+  }, [load, version, existingInvitation, cursors.length])
   const state = result?.load === load ? result.state : undefined
   const fmt = zoned(browserTimeZone(), locale)
   const conflict = state?.status === 'error' && isOrganizationContextChanged(state.error)
@@ -260,6 +274,9 @@ function PendingInvitations({
     <section className="panel" aria-labelledby="pending-invitations-heading">
       <h2 id="pending-invitations-heading">{t('Pending invitations')}</h2>
       <p className="hint">{t('Mail server acceptance does not confirm receipt in the inbox.')}</p>
+      {existingInvitationMissing && (
+        <p role="status">{t('The invitation changed. Reload before trying again.')}</p>
+      )}
       {!state && <p role="status">{t('Loading pending invitations…')}</p>}
       {state?.status === 'error' &&
         (conflict ? (

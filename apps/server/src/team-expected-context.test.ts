@@ -31,6 +31,11 @@ const families = [
   'native team update',
 ] as const
 type Family = (typeof families)[number]
+const selfServiceFamilies: readonly Family[] = [
+  'departure impact',
+  'member leave',
+  'native member leave',
+]
 
 describe.skipIf(!serverUrl)('expected team authority before current team eligibility', () => {
   let owned: TestDatabase
@@ -212,7 +217,7 @@ describe.skipIf(!serverUrl)('expected team authority before current team eligibi
     },
   )
 
-  it.each(families)(
+  it.each(families.filter((family) => !selfServiceFamilies.includes(family)))(
     '%s does not reveal expected teams after management is revoked',
     async (family) => {
       for (const current of ['personal', 'member'] as const) {
@@ -229,6 +234,65 @@ describe.skipIf(!serverUrl)('expected team authority before current team eligibi
       }
     },
   )
+
+  it.each(selfServiceFamilies)('%s retains stale member context as a conflict', async (family) => {
+    for (const current of ['personal', 'member'] as const) {
+      const f = await fixture(current, 'member')
+      const response = await request(f, family)
+      expect(response.status, `${family}: current ${current}`).toBe(409)
+      expect(await response.json()).toMatchObject(
+        family.startsWith('native')
+          ? { code: 'ORGANIZATION_CONTEXT_CHANGED' }
+          : { error: 'organization_context_changed' },
+      )
+      expect(
+        await db
+          .selectFrom('auth.member')
+          .select('role')
+          .where('organizationId', '=', f.expected.id)
+          .where('userId', '=', f.user.id)
+          .executeTakeFirst(),
+      ).toEqual({ role: 'member' })
+    }
+  })
+
+  it.each(selfServiceFamilies)('%s uniformly denies former members', async (family) => {
+    for (const current of ['personal', 'member'] as const) {
+      const f = await fixture(current, 'member')
+      await db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', f.expected.id)
+        .where('userId', '=', f.user.id)
+        .execute()
+      for (const expectedId of [f.expected.id, randomUUID()]) {
+        const response = await request(f, family, expectedId)
+        expect(response.status, `${family}: current ${current}`).toBe(403)
+        expect(await response.json()).toMatchObject(
+          family.startsWith('native')
+            ? { code: 'TEAM_MANAGEMENT_ACCESS_DENIED' }
+            : { error: 'team_management_access_denied' },
+        )
+      }
+    }
+  })
+
+  it('does not apply the member self-preview recovery rule to another member', async () => {
+    for (const current of ['personal', 'member'] as const) {
+      const f = await fixture(current, 'member')
+      const peer = await db
+        .selectFrom('auth.member')
+        .select('userId')
+        .where('organizationId', '=', f.expected.id)
+        .where('userId', '!=', f.user.id)
+        .executeTakeFirstOrThrow()
+      const response = await app.request(
+        `/api/v1/team/members/${peer.userId}/departure-impact?teamId=${f.expected.id}`,
+        { headers: { cookie: f.cookie, [EXPECTED_ORGANIZATION_HEADER]: f.expected.id } },
+      )
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+    }
+  })
 
   it.each([
     'bookings',
@@ -255,25 +319,28 @@ describe.skipIf(!serverUrl)('expected team authority before current team eligibi
     }
   })
 
-  it('keeps live member self-impact reads but denies their stale expected context', async () => {
-    for (const current of ['personal', 'member'] as const) {
-      const f = await fixture('expected', 'member')
-      expect((await request(f, 'departure impact')).status).toBe(200)
-      const guarded = application(async () => {
-        await db
-          .updateTable('auth.session')
-          .set({
-            activeOrganizationId:
-              current === 'personal' ? f.user.principal.organization.id : f.memberTeam.id,
-          })
-          .where('id', '=', f.sessionId)
-          .execute()
-      })
-      const response = await request(f, 'departure impact', f.expected.id, guarded)
-      expect(response.status).toBe(403)
-      expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
-    }
-  })
+  it.each(['departure impact', 'member leave'] as const)(
+    '%s retains member recovery when a switch follows caller resolution',
+    async (family) => {
+      for (const current of ['personal', 'member'] as const) {
+        const f = await fixture('expected', 'member')
+        expect((await request(f, 'departure impact')).status).toBe(200)
+        const guarded = application(async () => {
+          await db
+            .updateTable('auth.session')
+            .set({
+              activeOrganizationId:
+                current === 'personal' ? f.user.principal.organization.id : f.memberTeam.id,
+            })
+            .where('id', '=', f.sessionId)
+            .execute()
+        })
+        const response = await request(f, family, f.expected.id, guarded)
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+      }
+    },
+  )
 
   it.each(families)('%s uniformly denies malformed expected teams', async (family) => {
     const f = await fixture('expected')

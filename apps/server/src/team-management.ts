@@ -231,7 +231,11 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
   // Entry to self-impact reads only. The service must still scope the target to the
   // caller for ordinary members and recheck the current session organization.
   const memberRead = createMiddleware<CallerEnv>(async (c, next) => {
-    await expectedContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER), true)
+    await expectedContext(
+      c.var.principal,
+      c.req.header(EXPECTED_ORGANIZATION_HEADER),
+      c.req.param('memberUserId')?.toLowerCase() === c.var.principal.user.id.toLowerCase(),
+    )
     await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)
     await next()
   })

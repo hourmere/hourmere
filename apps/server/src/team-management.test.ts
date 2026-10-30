@@ -143,6 +143,11 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
         ...access.memberReadMiddleware,
         (c) => c.json({ entered: true }),
       )
+      app.get(
+        '/api/v1/team-management-test/:teamId/:memberUserId/member-entry',
+        ...access.memberReadMiddleware,
+        (c) => c.json({ entered: true }),
+      )
     }
     const app = createApp({
       authHandler: auth.handler,
@@ -375,14 +380,12 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
           .execute()
       })
       const response = await f.app.request(
-        `/api/v1/team-management-test/${f.team.id}/${role === 'member' ? 'member-entry' : 'entry'}`,
+        `/api/v1/team-management-test/${f.team.id}/${role === 'member' ? `${f.user.id}/member-entry` : 'entry'}`,
         {
           headers: { cookie: f.cookie, 'X-Expected-Organization-Id': f.team.id },
         },
       )
-      expect(response.status, `post-resolution current ${current}`).toBe(
-        role === 'member' ? 403 : 409,
-      )
+      expect(response.status, `post-resolution current ${current}`).toBe(409)
     }
   }
 
@@ -404,15 +407,18 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     )
   })
 
-  it('keeps ordinary expected members denied when a switch follows caller resolution', async () => {
+  it('keeps ordinary members recoverable for self reads after caller resolution', async () => {
     await verifyPostResolutionContext(teamManagementAccess, 'member')
     await expect(
       verifyPostResolutionContext(
-        accessCopy(["if (role === 'member' && !context.allowPersonal) throw denied()", '']),
+        accessCopy([
+          "if (role === 'member' && !context.allowPersonal && !allowMemberRead) throw denied()",
+          "if (role === 'member' && !context.allowPersonal) throw denied()",
+        ]),
         'member',
       ),
     ).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError', actual: 409, expected: 403 }),
+      expect.objectContaining({ name: 'AssertionError', actual: 403, expected: 409 }),
     )
   })
 

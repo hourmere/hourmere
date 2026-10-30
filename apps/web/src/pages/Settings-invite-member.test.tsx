@@ -194,7 +194,7 @@ describe('inviting a team member in settings', () => {
         ),
       ).toBeDefined()
       expect(within(invitationForm).queryByText('Invitation queued for delivery.')).toBeNull()
-      expect(emailInput.value).toBe(EMAIL)
+      expect(emailInput.value).toBe('')
       await waitFor(() => expect(api.to(PENDING_ROUTE)).toHaveLength(2))
     },
   )
@@ -220,7 +220,7 @@ describe('inviting a team member in settings', () => {
       await within(invitationForm).findByText(
         'An invitation already exists. Review its mail submission status below.',
       )
-      expect(emailInput.value).toBe(EMAIL)
+      expect(emailInput.value).toBe('')
       const pending = await screen.findByRole('region', { name: 'Pending invitations' })
       await within(pending).findByRole('heading', { name: `Invitation to ${EMAIL}` })
       if (!resendAllowed) {
@@ -249,6 +249,129 @@ describe('inviting a team member in settings', () => {
       expect(screen.queryByRole('button', { name: 'Resend invitation' })).toBeNull()
     },
   )
+
+  it('finds an existing invitation across multiple pages and leaves manual paging available', async () => {
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({
+      ...INVITATION,
+      id: `00000000-0000-7000-8000-${String(index + 100).padStart(12, '0')}`,
+      email: `other-${index}@example.com`,
+    }))
+    const secondPage = firstPage.map((invitation, index) => ({
+      ...invitation,
+      id: `00000000-0000-7000-8000-${String(index + 200).padStart(12, '0')}`,
+    }))
+    const api = server({
+      [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing: true }),
+      [PENDING_ROUTE]: ({ path }) => {
+        const cursor = new URL(path, window.location.origin).searchParams.get('cursor')
+        if (!cursor) return json(200, { data: firstPage, nextCursor: firstPage.at(-1)?.id })
+        if (cursor === firstPage.at(-1)?.id)
+          return json(200, { data: secondPage, nextCursor: secondPage.at(-1)?.id })
+        return json(200, { data: [{ ...INVITATION, resendAllowed: true }], nextCursor: null })
+      },
+    })
+    renderApp(PATHS.settings)
+    const { user, emailInput } = await fillAndSubmit()
+    const pending = await screen.findByRole('region', { name: 'Pending invitations' })
+    await within(pending).findByRole('button', { name: 'Resend invitation' })
+    expect(within(pending).getByRole('heading', { name: `Invitation to ${EMAIL}` })).toBeDefined()
+    expect(emailInput.value).toBe('')
+    expect(api.to(PENDING_ROUTE)).toHaveLength(4)
+    expect(
+      api
+        .to(PENDING_ROUTE)
+        .map(({ path }) => new URL(path, window.location.origin).searchParams.get('cursor')),
+    ).toEqual([null, null, firstPage.at(-1)?.id, secondPage.at(-1)?.id])
+    await user.click(within(pending).getByRole('button', { name: 'Previous invitations page' }))
+    await within(pending).findByRole('heading', { name: `Invitation to ${secondPage[0]?.email}` })
+    expect(api.to(PENDING_ROUTE)).toHaveLength(5)
+    expect(within(pending).queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+    expect(
+      within(pending).queryByText('The invitation changed. Reload before trying again.'),
+    ).toBeNull()
+    await user.click(within(pending).getByRole('button', { name: 'Next invitations page' }))
+    await user.click(await within(pending).findByRole('button', { name: 'Resend invitation' }))
+    await screen.findByText('Invitation queued for delivery.')
+    expect(api.to(INVITE_ROUTE)[1]?.body).toMatchObject({
+      email: EMAIL,
+      invitationId: INVITATION.id,
+      expectedGeneration: 1,
+      resend: true,
+    })
+  })
+
+  it.each([false, true])(
+    'clears the confirmed invitation draft and unload guard when existing=%s',
+    async (existing) => {
+      server({
+        [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing }),
+        [PENDING_ROUTE]: () => json(200, { data: [INVITATION], nextCursor: null }),
+      })
+      renderApp(PATHS.settings)
+      const invitationForm = await form()
+      const user = userEvent.setup()
+      const emailInput = within(invitationForm).getByRole('textbox', { name: 'Email' })
+      await user.type(emailInput, EMAIL)
+      const draftUnload = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(draftUnload)
+      expect(draftUnload.defaultPrevented).toBe(true)
+      await user.click(within(invitationForm).getByRole('button', { name: 'Invite member' }))
+      await within(invitationForm).findByRole('status')
+      expect((emailInput as HTMLInputElement).value).toBe('')
+      const confirmedUnload = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(confirmedUnload)
+      expect(confirmedUnload.defaultPrevented).toBe(false)
+    },
+  )
+
+  it.each(['no matching invitation', 'page limit'])(
+    'stops seeking with reload guidance after %s',
+    async (ending) => {
+      let page = 0
+      const api = server({
+        [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing: true }),
+        [PENDING_ROUTE]: () => {
+          page += 1
+          return json(200, {
+            data: [],
+            nextCursor: ending === 'page limit' ? `cursor-${page}` : null,
+          })
+        },
+      })
+      renderApp(PATHS.settings)
+      await fillAndSubmit()
+      const pending = await screen.findByRole('region', { name: 'Pending invitations' })
+      await within(pending).findByText('The invitation changed. Reload before trying again.')
+      expect(api.to(PENDING_ROUTE)).toHaveLength(ending === 'page limit' ? 6 : 2)
+      expect(within(pending).queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+      expect(within(pending).queryByText('Loading pending invitations…')).toBeNull()
+    },
+  )
+
+  it('stops seeking on a failed page and continues only after an explicit retry', async () => {
+    let fail = true
+    const api = server({
+      [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing: true }),
+      [PENDING_ROUTE]: ({ path }) => {
+        const cursor = new URL(path, window.location.origin).searchParams.get('cursor')
+        if (!cursor) return json(200, { data: [], nextCursor: 'next-page' })
+        if (fail) return json(503, { error: { code: 'unavailable', message: 'Try later' } })
+        return json(200, { data: [{ ...INVITATION, resendAllowed: true }], nextCursor: null })
+      },
+    })
+    renderApp(PATHS.settings)
+    const { user } = await fillAndSubmit()
+    const pending = await screen.findByRole('region', { name: 'Pending invitations' })
+    expect((await within(pending).findByRole('alert')).textContent).toContain(
+      'Could not load pending invitations.',
+    )
+    expect(api.to(PENDING_ROUTE)).toHaveLength(3)
+    expect(within(pending).queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+    fail = false
+    await user.click(within(pending).getByRole('button', { name: 'Try again' }))
+    await within(pending).findByRole('button', { name: 'Resend invitation' })
+    expect(api.to(PENDING_ROUTE)).toHaveLength(4)
+  })
 
   it('moves keyboard focus to stable status feedback after the resend button is removed', async () => {
     const api = server({

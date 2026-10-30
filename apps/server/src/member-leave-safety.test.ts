@@ -59,6 +59,27 @@ const handling = {
 type Departure = typeof leaveTeamMember
 type Replacement = readonly [string, string]
 
+function managementCopy(replacement?: Replacement) {
+  let source = readFileSync('packages/auth/src/team-management.ts', 'utf8')
+  if (replacement) {
+    expect(source.includes(replacement[0]), 'mutation must match shared management source').toBe(
+      true,
+    )
+    source = source.replace(...replacement)
+  }
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
+  return new Function(
+    'sql',
+    `${source}; return { checkTeamManagementAccess, TeamManagementError }`,
+  )(sql) as {
+    checkTeamManagementAccess: typeof checkTeamManagementAccess
+    TeamManagementError: typeof TeamManagementError
+  }
+}
+
 /** Compile a disposable in-memory copy, never changing the checked-in protection. */
 function serviceCopy(
   replacements: Replacement[] = [],
@@ -314,7 +335,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     return id
   }
 
-  async function unchanged(f: Fixture) {
+  async function unchanged(f: Fixture, activeOrganizationId = f.team.id) {
     expect(
       await db
         .selectFrom('auth.member')
@@ -328,7 +349,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
         .select('activeOrganizationId')
         .where('id', '=', f.login.id)
         .executeTakeFirstOrThrow(),
-    ).toEqual({ activeOrganizationId: f.team.id })
+    ).toEqual({ activeOrganizationId })
     expect(
       await db
         .selectFrom('organization_operations')
@@ -1401,26 +1422,38 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
   })
 
   it('detects exposing departed expected-team context before verifying membership', async () => {
-    let source = readFileSync('packages/auth/src/team-management.ts', 'utf8')
-    const guard = 'if (!role) throw denied()'
-    expect(source.includes(guard), 'mutation must match shared management source').toBe(true)
-    source = source.replace(
-      guard,
+    const management = managementCopy([
+      'if (!role) throw denied()',
       "if (!role) return { userId, organizationId: teamId, role: 'admin', personal: Boolean(personal) }",
-    )
-    source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
-      /\bexport /g,
-      '',
-    )
-    const management = new Function(
-      'sql',
-      `${source}; return { checkTeamManagementAccess, TeamManagementError }`,
-    )(sql) as {
-      checkTeamManagementAccess: typeof checkTeamManagementAccess
-      TeamManagementError: typeof TeamManagementError
-    }
+    ])
     await expect(verifyService(serviceCopy([], management), 'stale')).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError', actual: 409, expected: 403 }),
+    )
+  })
+
+  async function verifyStaleMemberLeave(depart: Departure) {
+    const f = await fixture('member')
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: f.actor.principal.organization.id })
+      .where('id', '=', f.login.id)
+      .execute()
+    const response = await leave(f, application(auth, false, routeCopy(depart)))
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+    await unchanged(f, f.actor.principal.organization.id)
+  }
+
+  it('keeps stale member leave recoverable with an unchanged shared policy source copy', () =>
+    verifyStaleMemberLeave(serviceCopy([], managementCopy())))
+
+  it('detects applying management-only expected-team authority to member leave', async () => {
+    const management = managementCopy([
+      'allowMemberRead,\n  )',
+      'allowMemberRead && !expectedTeamId,\n  )',
+    ])
+    await expect(verifyStaleMemberLeave(serviceCopy([], management))).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError', actual: 403, expected: 409 }),
     )
   })
 

@@ -342,7 +342,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       )
       // Keep the draft's original context after a real session switch. Even a header
       // replaced with the current context cannot authorize the old draft's target.
-      await refused(f.organizationId, path === 'leave' ? 403 : 409)
+      await refused(f.organizationId)
       await refused(personalId)
       expect(await operations(personalId)).toEqual([])
 

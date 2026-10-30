@@ -129,6 +129,7 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
           expectedId,
           false,
           { expectedOrganizationId: expectedId, allowPersonal: false },
+          ctx.path === '/organization/leave',
         )
       } catch (error) {
         if (!(error instanceof TeamManagementError)) throw error
