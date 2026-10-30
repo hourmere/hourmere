@@ -1,0 +1,89 @@
+.team-bookings-page,
+.team-bookings-page :is(.details dd, .table-value, .team-booking-open) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.team-bookings-context {
+  margin-block: 0 1.5rem;
+}
+
+.team-bookings-filters summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.team-bookings-filters form {
+  margin-top: 1rem;
+}
+
+.team-booking-filter-fields {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.team-bookings-filters :is(input, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.team-booking-open {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.team-booking-detail {
+  margin-top: 1.5rem;
+}
+
+.team-booking-detail-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.team-booking-detail-header h2 {
+  margin: 0;
+}
+
+.team-booking-detail .plain-list li + li {
+  margin-top: 0.75rem;
+}
+
+.team-booking-cancel {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.team-bookings-page .details {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0.35rem;
+}
+
+.team-bookings-page .details dd {
+  margin-bottom: 0.65rem;
+}
+
+@media (min-width: 480px) {
+  .team-bookings-page .details {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-2) var(--space-5);
+  }
+
+  .team-bookings-page .details dd {
+    margin-bottom: 0;
+  }
+}

@@ -38,6 +38,7 @@ import {
   SettingsPage,
   SignInPage,
   TeamBookingPage,
+  TeamBookingsPage,
 } from './lazy-pages.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
@@ -70,6 +71,7 @@ export const appRoutes = createRoutesFromElements(
           <Route path="availability/new" element={<ScheduleEditorPage />} />
           <Route path="availability/:id" element={<ScheduleEditorPage />} />
           <Route path="bookings" element={<BookingsPage />} />
+          <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="bookings/:id" element={<BookingDetailPage />} />
           <Route path="conferences" element={<ConferencesPage />} />
