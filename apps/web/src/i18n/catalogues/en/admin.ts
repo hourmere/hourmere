@@ -1,5 +1,12 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Join team': 'Join team',
+  'Go to team': 'Go to team',
+  'Invited email': 'Invited email',
+  'You are already a member of {team}.': 'You are already a member of {team}.',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
+    'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+
   'Selected calendars cannot provide conflict checks.':
     'Selected calendars cannot provide conflict checks.',
   'Configuration checks': 'Configuration checks',

@@ -179,6 +179,20 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
     })
   }
 
+  function invitation(i: ReturnType<typeof instance>, cookie: string, invitationId: string) {
+    return i.app.request(`/api/auth/organization/get-invitation?id=${invitationId}`, {
+      headers: { cookie },
+    })
+  }
+
+  async function pending(f: Awaited<ReturnType<typeof fixture>>) {
+    return db
+      .selectFrom('auth.invitation')
+      .select('status')
+      .where('id', '=', f.invitations[0]?.id as string)
+      .executeTakeFirstOrThrow()
+  }
+
   async function memberships(f: Awaited<ReturnType<typeof fixture>>) {
     return db
       .selectFrom('auth.member')
@@ -187,6 +201,168 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
       .where('userId', '=', f.recipient.id)
       .execute()
   }
+
+  it('reads the team for the verified exact recipient without joining or switching on load', async () => {
+    const i = instance()
+    const f = await fixture()
+    const invitationId = f.invitations[0]?.id as string
+    await db
+      .updateTable('auth.invitation')
+      .set({ email: f.recipient.email.toUpperCase() })
+      .where('id', '=', invitationId)
+      .execute()
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await invitation(i, f.sessions[0]?.cookie as string, invitationId)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        id: invitationId,
+        organizationId: f.team.id,
+        organizationName: 'Synthetic acceptance team',
+        email: f.recipient.email.toUpperCase(),
+        status: 'pending',
+      })
+    }
+    expect(await memberships(f), 'reading an invitation never joins the team').toEqual([])
+    expect(await pending(f)).toEqual({ status: 'pending' })
+    expect(
+      await db
+        .selectFrom('auth.session')
+        .select('activeOrganizationId')
+        .where('id', '=', f.sessions[0]?.id as string)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ activeOrganizationId: null })
+  })
+
+  it('refuses a direct accept from an unverified recipient even with no client email-proof check', async () => {
+    const i = instance()
+    const f = await fixture()
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', f.recipient.id)
+      .execute()
+    const invitationId = f.invitations[0]?.id as string
+    const read = await invitation(i, f.sessions[0]?.cookie as string, invitationId)
+    expect(read.status).toBe(403)
+    expect(await read.json()).toMatchObject({
+      code: 'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
+    })
+    // The HTTP request deliberately bypasses the UI's eligibility check.
+    const response = await accept(i, f.sessions[0]?.cookie as string, invitationId)
+    expect(response.status, 'the server refuses an unverified invitation accept').toBe(403)
+    expect(await response.json()).toMatchObject({
+      code: 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+    })
+    expect(await memberships(f)).toEqual([])
+    expect(await pending(f)).toEqual({ status: 'pending' })
+  })
+
+  it('refuses a wrong account and does not disclose the recipient address', async () => {
+    const i = instance()
+    const f = await fixture()
+    const invitationId = f.invitations[0]?.id as string
+    const invitedEmail = `other-${f.recipient.email}`
+    await db
+      .updateTable('auth.invitation')
+      .set({ email: invitedEmail })
+      .where('id', '=', invitationId)
+      .execute()
+    for (const request of [invitation, accept]) {
+      const response = await request(i, f.sessions[0]?.cookie as string, invitationId)
+      expect(response.status).toBe(403)
+      const body = await response.json()
+      expect(body).toMatchObject({ code: 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION' })
+      expect(JSON.stringify(body).includes(invitedEmail)).toBe(false)
+    }
+    expect(await memberships(f)).toEqual([])
+    expect(await pending(f)).toEqual({ status: 'pending' })
+  })
+
+  it.each(['expired', 'canceled'] as const)(
+    'refuses an %s invitation without membership',
+    async (state) => {
+      const i = instance()
+      const f = await fixture()
+      const invitationId = f.invitations[0]?.id as string
+      await db
+        .updateTable('auth.invitation')
+        .set(
+          state === 'expired'
+            ? { expiresAt: new Date(Date.now() - 60_000) }
+            : { status: 'canceled' },
+        )
+        .where('id', '=', invitationId)
+        .execute()
+      for (const request of [invitation, accept]) {
+        const response = await request(i, f.sessions[0]?.cookie as string, invitationId)
+        expect(response.status).toBe(400)
+      }
+      expect(await memberships(f)).toEqual([])
+      expect(await pending(f)).toEqual({ status: state === 'expired' ? 'pending' : 'canceled' })
+    },
+  )
+
+  it('refuses invalid and nonexistent invitation ids without membership', async () => {
+    const i = instance()
+    const f = await fixture()
+    for (const invitationId of ['not-a-uuid', randomUUID()]) {
+      for (const request of [invitation, accept]) {
+        const response = await request(i, f.sessions[0]?.cookie as string, invitationId)
+        expect(response.status).toBe(400)
+      }
+    }
+    expect(await memberships(f)).toEqual([])
+    expect(await pending(f)).toEqual({ status: 'pending' })
+  })
+
+  it('keeps an already-member invitation pending and returns the recoverable refusal', async () => {
+    const i = instance()
+    const f = await fixture()
+    await db
+      .insertInto('auth.member')
+      .values({
+        userId: f.recipient.id,
+        organizationId: f.team.id,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    const invitationId = f.invitations[0]?.id as string
+    const read = await invitation(i, f.sessions[0]?.cookie as string, invitationId)
+    expect(read.status).toBe(200)
+    const response = await accept(i, f.sessions[0]?.cookie as string, invitationId)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'INVITATION_RECIPIENT_ALREADY_MEMBER' })
+    expect(await memberships(f)).toEqual([{ id: expect.any(String), role: 'member' }])
+    expect(await pending(f)).toEqual({ status: 'pending' })
+  })
+
+  it('accepts explicitly once, activates that team, and refuses repeat accepts without duplicates', async () => {
+    const i = instance()
+    const f = await fixture()
+    const invitationId = f.invitations[0]?.id as string
+    const response = await accept(i, f.sessions[0]?.cookie as string, invitationId)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      invitation: { id: invitationId, status: 'accepted' },
+      member: { organizationId: f.team.id, userId: f.recipient.id, role: 'member' },
+    })
+    const repeated = await accept(i, f.sessions[0]?.cookie as string, invitationId)
+    expect(repeated.status).toBe(400)
+    expect(await repeated.json()).toMatchObject({ code: 'INVITATION_NOT_FOUND' })
+    const legacy = await accept(i, f.sessions[1]?.cookie as string, f.invitations[1]?.id as string)
+    expect(legacy.status).toBe(409)
+    expect(await legacy.json()).toMatchObject({ code: 'INVITATION_RECIPIENT_ALREADY_MEMBER' })
+    expect(await memberships(f)).toEqual([{ id: expect.any(String), role: 'member' }])
+    expect(await pending(f)).toEqual({ status: 'accepted' })
+    expect(
+      await db
+        .selectFrom('auth.session')
+        .select('activeOrganizationId')
+        .where('id', '=', f.sessions[0]?.id as string)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ activeOrganizationId: f.team.id })
+  })
 
   it('rolls membership and active organization back when the native session update fails', async () => {
     const i = instance()
