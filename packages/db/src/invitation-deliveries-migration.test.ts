@@ -309,6 +309,8 @@ describe.skipIf(!serverUrl)('invitation delivery migration', () => {
         'due_at',
         'created_at',
         'updated_at',
+        'generation_started_at',
+        'expiry_duration_ms',
       ])
         await expect(
           insert(pool, unused, { [column]: null }),
@@ -444,6 +446,8 @@ describe.skipIf(!serverUrl)('invitation delivery migration', () => {
         'last_error_code',
         'created_at',
         'updated_at',
+        'generation_started_at',
+        'expiry_duration_ms',
       ])
       expect(
         (

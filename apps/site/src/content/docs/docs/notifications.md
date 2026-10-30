@@ -127,19 +127,20 @@ below). Legacy host notifications retain their invitations and cancellations.
 ### Email language
 
 Booking emails use the shared [locale registry](/docs/interface-languages#development),
-currently English, Simplified Chinese and German, throughout the subject, plain text, HTML and
+currently English, Simplified Chinese, German and French, throughout the subject, plain text, HTML and
 user-facing calendar SUMMARY/DESCRIPTION. Each missing translated message falls back to
 English independently; the selected locale still controls date/time formatting. The HTML `lang` matches the email language.
 The invitee's language comes from `booking_attendees.locale`, captured from the booking
 page's interface language at the first valid submission; changing the interface while
 retrying that submission keeps the original request and its language. REST/MCP callers can
 provide the same invitee locale. Guests follow the invitee's booking language. Each host
-uses their current profile locale independently. Supported English, Simplified Chinese and German
-BCP 47 tags map to registered language codes (`en`, `zh-CN` and `de` today); missing, invalid or
+uses their current profile locale independently. Supported English, Simplified Chinese, German and French
+BCP 47 tags map to registered language codes (`en`, `zh-CN`, `de` and `fr` today); missing, invalid or
 unsupported languages fall back to English. Reschedules retain the booking's saved language.
 Team invitation emails use an explicit language choice, then an instance default, then English.
 
-German translations are AI-assisted (machine-translated), have not yet been reviewed by a
+French regional preferences including `fr-CA`, `fr-BE` and `fr-CH` map to `fr`.
+German and French translations are AI-assisted (machine-translated), have not yet been reviewed by a
 native speaker, and corrections are welcome.
 
 Dates and times use that email language and the recipient time zone described above;
@@ -515,6 +516,36 @@ and calendar updates/cancellations, subject to the email limits below; retries o
 successfully committed booking preserve the original result.
 
 ## Email abuse controls
+
+Team invitation creation and explicit resends are limited at admission:
+`INVITATION_INVITER_MAX_PER_HOUR` (default 20) and `INVITATION_INVITER_MAX_PER_DAY`
+(default 100), shared across an inviter's teams; `INVITATION_TEAM_MAX_PER_HOUR` (default
+50) and `INVITATION_TEAM_MAX_PER_DAY` (default 200), shared across a team's inviters.
+Invitations use `MAIL_RECIPIENT_MAX_PER_HOUR` and
+`MAIL_RECIPIENT_MAX_PER_DAY` with an independent invitation HMAC domain. They share the
+global mail-budget lock, but admission does not debit `MAIL_MAX_PER_HOUR` or consume
+guest booking mail capacity. Ordinary request retries and exact
+resend replays do not spend another slot; explicit resends never reset rolling counts.
+Deleting invitations or teams cannot reset those counts. Request counts expire from the
+two-day accounting ledger and do not indicate SMTP delivery. Admission stores only a
+purpose-separated recipient HMAC, the inviter/team identifiers and the request time.
+
+Explicit resends require the invitation ID, expected generation and UUID request ID;
+they wait 60 seconds from the later of the generation start and latest delivery update,
+including worker attempts, stop at 32 generations and extend expiry by the original validity
+length. The future invitation sender must update `updated_at` on every delivery attempt
+for this post-delivery cooldown to hold. Each delivery generation retains its existing
+maximum of four SMTP attempts.
+Expired or business-terminal invitations need a new invitation. Invitation admission
+never invokes the sign-in worker's account/sign-up eligibility decision and does not
+grant an inviter any new registration authority. Errors use fixed codes and diagnostics
+omit recipients and underlying database/provider text.
+
+This release records queued invitation intent atomically with admission. The invitation
+sender, pg-boss dispatch and reconciler are not installed yet, so no invitation mail is
+sent by these requests. A future sender must check and debit the shared non-reserved
+mail capacity at send time, integrate its attempt budget and recheck lifecycle and
+authorization before SMTP. Admission accounting is separate from that send-time debit.
 
 Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
 5) across its entire reschedule chain. New response tokens and older email links use the

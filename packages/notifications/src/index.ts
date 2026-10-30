@@ -35,6 +35,10 @@ import {
   type SuppressionReason,
 } from './mail-limits.ts'
 
+export {
+  type InvitationMailLimits,
+  reserveInvitationEmailBudget,
+} from './invitation-mail-limits.ts'
 export { notificationEmailCleanupJob } from './mail-limits.ts'
 
 export const NOTIFICATION_KINDS = [

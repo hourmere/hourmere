@@ -8,7 +8,7 @@ delivery storage or transport configuration.
 ## Team invitations
 
 `teamInvitationEmail(options)` returns a `MailMessage` containing an English, Simplified
-Chinese or German subject, plain-text body and HTML body:
+Chinese, German or French subject, plain-text body and HTML body:
 
 ```ts
 import { teamInvitationEmail } from '@hourmere/mail'
@@ -41,7 +41,8 @@ This example renders a message only; it does not send one.
 Language selection uses `interfaceLanguage` from `@hourmere/core/language`: a supported
 `language`, then a supported `defaultLanguage`, then `en`. English locale variants resolve
 to English, Simplified Chinese variants to `zh-CN`, and German variants (including `de-AT`
-and `de-CH`) to `de`; unsupported or invalid values fall
+and `de-CH`) to `de`. French variants (including `fr-CA`, `fr-BE` and `fr-CH`) resolve to `fr`;
+unsupported or invalid values fall
 through. For example, `zh-TW` does not select the Simplified Chinese template. The renderer
 does not inspect cookies, request headers, URL language fields or cross-site callbacks.
 

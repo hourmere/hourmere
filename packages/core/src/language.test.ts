@@ -16,11 +16,14 @@ import {
 
 describe('shared locale registry', () => {
   it('offers public translations independently of admin and notification languages', () => {
-    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de'])
+    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de', 'fr'])
     expect(interfaceLanguages('admin')).toEqual(['en', 'zh-CN'])
     expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
     expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('de')
     expect(localeFallbacks('de')).toEqual(['de', 'en'])
+    expect(acceptLanguage('fr-CA,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
+    expect(acceptLanguage('fr-CA,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('fr')
+    expect(localeFallbacks('fr')).toEqual(['fr', 'en'])
     const fixture = createLocaleResolver({
       ...localeRegistry,
       qaa: {
@@ -41,7 +44,7 @@ describe('shared locale registry', () => {
     'negotiates %s and formats German dates through registry metadata',
     (value) => {
       expect(interfaceLanguage(value)).toBe('de')
-      expect(acceptLanguage(`fr,${value};q=0.8,en;q=0.5`)).toBe('de')
+      expect(acceptLanguage(`qaa,${value};q=0.8,en;q=0.5`)).toBe('de')
       expect(
         new Intl.DateTimeFormat(formattingLocale('de'), {
           calendar: 'gregory',
@@ -50,6 +53,22 @@ describe('shared locale registry', () => {
           timeStyle: 'short',
         }).format(new Date('2026-10-27T15:30:00Z')),
       ).toBe('27. Oktober 2026 um 15:30')
+    },
+  )
+
+  it.each(['fr', 'fr-FR', 'fr-CA', 'fr-BE', 'fr-CH'])(
+    'negotiates %s and formats French dates through registry metadata',
+    (value) => {
+      expect(interfaceLanguage(value)).toBe('fr')
+      expect(acceptLanguage(`qaa,${value};q=0.8,en;q=0.5`)).toBe('fr')
+      expect(
+        new Intl.DateTimeFormat(formattingLocale('fr'), {
+          calendar: 'gregory',
+          timeZone: 'UTC',
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }).format(new Date('2026-10-27T15:30:00Z')),
+      ).toBe('27 octobre 2026 à 15:30')
     },
   )
 
@@ -139,7 +158,7 @@ describe('shared locale registry', () => {
 })
 
 describe('bounded interface language preferences', () => {
-  it.each(['en', 'zh-CN'] as const)('accepts only the explicit value %s', (value) => {
+  it.each(['en', 'zh-CN', 'de', 'fr'] as const)('accepts only the explicit value %s', (value) => {
     expect(explicitLanguage(value)).toBe(value)
   })
   it.each([
@@ -148,6 +167,7 @@ describe('bounded interface language preferences', () => {
     'zh_CN',
     'zh-TW',
     'en-US',
+    'fr-CA',
     '__proto__',
     'constructor',
     '',
@@ -210,7 +230,7 @@ describe('bounded interface language preferences', () => {
       for (const tag of ['zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant', 'zh-Hant-CN', 'zh-Hans-TW'])
         expect(interfaceLanguage(tag), tag).toBeUndefined()
       expect(acceptLanguage('zh-AU,en;q=0.5')).toBe('zh-CN')
-      expect(acceptLanguage('fr,zh-US;q=0.5')).toBe('zh-CN')
+      expect(acceptLanguage('qaa,zh-US;q=0.5')).toBe('zh-CN')
     } finally {
       regionalDefaults.mockRestore()
     }
@@ -223,7 +243,7 @@ describe('bounded interface language preferences', () => {
   })
   it('respects quality values, ordering, unsupported defaults and hard bounds', () => {
     expect(acceptLanguage('zh-AU,en;q=0.5')).toBe('zh-CN')
-    expect(acceptLanguage('fr,zh-US;q=0.5')).toBe('zh-CN')
+    expect(acceptLanguage('qaa,zh-US;q=0.5')).toBe('zh-CN')
     expect(acceptLanguage('qab,zh-CN;q=0.8,en;q=0.6')).toBe('zh-CN')
     expect(acceptLanguage('zh-CN;q=0,en-US;q=0.8')).toBe('en')
     expect(acceptLanguage('zh-CN;q=broken,en;q=0.5')).toBe('en')

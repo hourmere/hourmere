@@ -211,6 +211,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         email,
         role,
         status: 'pending',
+        createdAt: new Date(Date.now() - 120_000),
         expiresAt: new Date(Date.now() + 3_600_000),
       })
       .returning(['id', 'email'])
@@ -443,6 +444,9 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       const response = await post(f, 'invite-member', {
         organizationId: f.teamId,
         email: invitation.email,
+        invitationId: invitation.id,
+        expectedGeneration: 1,
+        requestId: randomUUID(),
         resend: true,
       })
       if (actorRole === 'member') {
@@ -466,6 +470,9 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
           await post(f, 'invite-member', {
             organizationId: f.teamId,
             email: invitation.email.toUpperCase(),
+            invitationId: invitation.id,
+            expectedGeneration: 1,
+            requestId: randomUUID(),
             resend: true,
             ...(role === undefined ? {} : { role }),
           }),
@@ -707,61 +714,55 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     expect(await snapshot(f)).toEqual(before)
   })
 
-  it.each(['update-member-role', 'invite-member'])(
-    'rechecks revoked actor authority when %s reaches persistence after its before hook',
-    async (action) => {
-      const f = await fixture(action === 'invite-member' ? 'admin' : 'owner')
-      const email = `${randomUUID()}@example.com`
-      const hook = action === 'invite-member' ? 'beforeCreateInvitation' : 'beforeUpdateMemberRole'
-      const original = hooks[hook]
-      const resume = Promise.withResolvers<void>()
-      let entered = false
-      hooks[hook] = async (input) => {
-        const result = await original?.(input)
-        if (input.member?.id === f.targetMemberId || input.invitation?.email === email) {
-          entered = true
-          await resume.promise
-        }
-        return result
+  it('rechecks revoked actor authority when role change reaches persistence after its before hook', async () => {
+    const f = await fixture('owner')
+    const hook = 'beforeUpdateMemberRole'
+    const original = hooks[hook]
+    const resume = Promise.withResolvers<void>()
+    let entered = false
+    hooks[hook] = async (input) => {
+      const result = await original?.(input)
+      if (input.member?.id === f.targetMemberId) {
+        entered = true
+        await resume.promise
       }
-      let pending: Promise<Response> | undefined
-      const revoker = await owned.pool.connect()
-      try {
-        const before = await snapshot(f)
-        pending = Promise.resolve(
-          post(
-            f,
-            action,
-            action === 'invite-member'
-              ? { organizationId: f.teamId, email, role: 'member' }
-              : { organizationId: f.teamId, memberId: f.targetMemberId, role: 'admin' },
-          ),
-        )
-        await vi.waitFor(() => expect(entered).toBe(true), { interval: 10, timeout: 1_500 })
-        await revoker.query("SET lock_timeout = '1000ms'")
-        await revoker.query('UPDATE auth.member SET role = $1 WHERE id = $2', [
-          'member',
-          f.actorMemberId,
-        ])
-        resume.resolve()
-        await refused(await pending)
-        const after = await snapshot(f)
-        expect(after).toEqual([
-          before[0].map((member) =>
-            member.id === f.actorMemberId ? { ...member, role: 'member' } : member,
-          ),
-          before[1],
-          before[2],
-        ])
-      } finally {
-        resume.resolve()
-        hooks[hook] = original as (input: HookInput) => unknown
-        await revoker.query('SET lock_timeout = 0')
-        revoker.release()
-        await pending
-      }
-    },
-  )
+      return result
+    }
+    let pending: Promise<Response> | undefined
+    const revoker = await owned.pool.connect()
+    try {
+      const before = await snapshot(f)
+      pending = Promise.resolve(
+        post(f, 'update-member-role', {
+          organizationId: f.teamId,
+          memberId: f.targetMemberId,
+          role: 'admin',
+        }),
+      )
+      await vi.waitFor(() => expect(entered).toBe(true), { interval: 10, timeout: 1_500 })
+      await revoker.query("SET lock_timeout = '1000ms'")
+      await revoker.query('UPDATE auth.member SET role = $1 WHERE id = $2', [
+        'member',
+        f.actorMemberId,
+      ])
+      resume.resolve()
+      await refused(await pending)
+      const after = await snapshot(f)
+      expect(after).toEqual([
+        before[0].map((member) =>
+          member.id === f.actorMemberId ? { ...member, role: 'member' } : member,
+        ),
+        before[1],
+        before[2],
+      ])
+    } finally {
+      resume.resolve()
+      hooks[hook] = original as (input: HookInput) => unknown
+      await revoker.query('SET lock_timeout = 0')
+      revoker.release()
+      await pending
+    }
+  })
 
   it('rechecks a stored invitation role changed after the acceptance before hook', async () => {
     const f = await fixture()
@@ -885,61 +886,60 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     }
   })
 
-  it.each(['update-member-role', 'invite-member'])(
-    'refuses an elevated %s role returned by a native before hook',
-    async (action) => {
-      const f = await fixture()
-      const email = `${randomUUID()}@example.com`
-      const hook = action === 'invite-member' ? 'beforeCreateInvitation' : 'beforeUpdateMemberRole'
-      const original = hooks[hook]
-      const before = await snapshot(f)
-      hooks[hook] = async (input) => {
-        const result = await original?.(input)
-        return input.member?.id === f.targetMemberId || input.invitation?.email === email
-          ? { data: { role: 'owner' } }
-          : result
-      }
-      try {
-        await refused(
-          await post(
-            f,
-            action,
-            action === 'invite-member'
-              ? { organizationId: f.teamId, email, role: 'member' }
-              : { organizationId: f.teamId, memberId: f.targetMemberId, role: 'admin' },
-          ),
-        )
-        expect(await snapshot(f)).toEqual(before)
-      } finally {
-        hooks[hook] = original as (input: HookInput) => unknown
-      }
-    },
-  )
+  it('refuses an elevated member role returned by a native before hook', async () => {
+    const f = await fixture()
+    const hook = 'beforeUpdateMemberRole'
+    const original = hooks[hook]
+    const before = await snapshot(f)
+    hooks[hook] = async (input) => {
+      const result = await original?.(input)
+      return input.member?.id === f.targetMemberId ? { data: { role: 'owner' } } : result
+    }
+    try {
+      await refused(
+        await post(f, 'update-member-role', {
+          organizationId: f.teamId,
+          memberId: f.targetMemberId,
+          role: 'admin',
+        }),
+      )
+      expect(await snapshot(f)).toEqual(before)
+    } finally {
+      hooks[hook] = original as (input: HookInput) => unknown
+    }
+  })
 
-  it.each(['organizationId', 'inviterId'])(
-    'refuses a foreign invitation %s returned by its native before hook',
-    async (field) => {
-      const f = await fixture()
-      const other = await fixture()
-      const email = `${randomUUID()}@example.com`
-      const original = hooks.beforeCreateInvitation
-      const before = [await snapshot(f), await snapshot(other)]
-      hooks.beforeCreateInvitation = async (input) => {
-        const result = await original?.(input)
-        return input.invitation?.email === email
-          ? { data: { [field]: field === 'organizationId' ? other.teamId : other.actor.id } }
-          : result
-      }
-      try {
-        await refused(
-          await post(f, 'invite-member', { organizationId: f.teamId, email, role: 'member' }),
-        )
-        expect([await snapshot(f), await snapshot(other)]).toEqual(before)
-      } finally {
-        hooks.beforeCreateInvitation = original as (input: HookInput) => unknown
-      }
-    },
-  )
+  it('binds admission to its validated actor, team and member role independently of native create hooks', async () => {
+    const f = await fixture('admin')
+    const other = await fixture()
+    const email = `${randomUUID()}@example.com`
+    const original = hooks.beforeCreateInvitation
+    let called = false
+    hooks.beforeCreateInvitation = async () => {
+      called = true
+      return { data: { organizationId: other.teamId, inviterId: other.actor.id, role: 'owner' } }
+    }
+    try {
+      const response = await post(f, 'invite-member', { organizationId: f.teamId, email })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        organizationId: f.teamId,
+        inviterId: f.actor.id,
+        email,
+        role: 'member',
+      })
+      expect(called).toBe(false)
+      expect(
+        await db
+          .selectFrom('auth.invitation')
+          .select('id')
+          .where('organizationId', '=', other.teamId)
+          .execute(),
+      ).toEqual([])
+    } finally {
+      hooks.beforeCreateInvitation = original as (input: HookInput) => unknown
+    }
+  })
 
   it.each(['deleted', 'expired'])(
     'refuses a session %s after the role before hook and before persistence',

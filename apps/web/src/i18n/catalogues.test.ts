@@ -46,21 +46,34 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
-  for (const group of ['common', 'widget'] as const) {
-    it(`requires complete German public ${group} messages`, () => {
-      const english = groups[group][`./catalogues/en/${group}.ts`] ?? {}
-      const german = groups[group][`./catalogues/de/${group}.ts`] ?? {}
-      expect(Object.keys(english).length).toBeGreaterThan(0)
-      expect(catalogueCoverage(english, german).missing).toEqual([])
-      expect(Object.keys(german).sort()).toEqual(Object.keys(english).sort())
-    })
+  for (const [locale, name] of [
+    ['de', 'German'],
+    ['fr', 'French'],
+  ] as const)
+    for (const group of ['common', 'widget'] as const) {
+      it(`requires complete ${name} public ${group} messages`, () => {
+        const english = groups[group][`./catalogues/en/${group}.ts`] ?? {}
+        const translated = groups[group][`./catalogues/${locale}/${group}.ts`] ?? {}
+        expect(Object.keys(english).length).toBeGreaterThan(0)
+        expect(catalogueCoverage(english, translated).missing).toEqual([])
+        expect(Object.keys(translated).sort()).toEqual(Object.keys(english).sort())
+      })
 
-    it(`preserves every German public ${group} placeholder exactly`, () => {
-      const english = groups[group][`./catalogues/en/${group}.ts`] ?? {}
-      const german = groups[group][`./catalogues/de/${group}.ts`] ?? {}
-      expect(catalogueCoverage(english, german).malformed).toEqual([])
+      it(`preserves every ${name} public ${group} placeholder exactly`, () => {
+        const english = groups[group][`./catalogues/en/${group}.ts`] ?? {}
+        const translated = groups[group][`./catalogues/${locale}/${group}.ts`] ?? {}
+        expect(catalogueCoverage(english, translated).malformed).toEqual([])
+      })
+    }
+
+  for (const group of ['common', 'widget'] as const)
+    it(`keeps French non-breaking punctuation in every public ${group} message`, () => {
+      const french = groups[group][`./catalogues/fr/${group}.ts`] ?? {}
+      for (const [key, translation] of Object.entries(french)) {
+        expect(translation, key).not.toMatch(/(?:^|[^\u00a0\u202f])[:;?!]/u)
+        expect(translation, key).not.toMatch(/«[^\u00a0\u202f]|[^\u00a0\u202f]»/u)
+      }
     })
-  }
 
   it('falls back per missing German message while preserving interpolation', () => {
     registerCatalogues({

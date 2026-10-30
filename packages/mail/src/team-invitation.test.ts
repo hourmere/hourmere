@@ -77,6 +77,16 @@ describe('teamInvitationEmail', () => {
       aliases: /E-Mail-Aliasse können diese Adresse nicht ersetzen/,
       action: 'Einladung ansehen und annehmen',
     },
+    {
+      language: 'fr',
+      subject: 'Invitation à rejoindre Orbital Design',
+      identity: /Connectez-vous avec l’adresse e-mail invitée .* et vérifiez-la/,
+      acceptance:
+        /La connexion seule ne vous fait pas rejoindre l’équipe\s*; vous devez accepter explicitement/,
+      expiry: /Cette invitation expire le 2026-10-29 17:30:00 UTC/,
+      aliases: /Les alias de messagerie ne peuvent pas remplacer cette adresse/,
+      action: 'Voir et accepter l’invitation',
+    },
   ])('renders the complete $language invitation in both alternatives', (copy) => {
     const message = teamInvitationEmail({ ...invitation, language: copy.language })
     expect(message.to).toBe(invitation.to)
@@ -113,14 +123,19 @@ describe('teamInvitationEmail', () => {
     { language: 'de-AT', defaultLanguage: 'en', expected: 'de' },
     { language: 'de-CH', defaultLanguage: 'zh-CN', expected: 'de' },
     { language: 'not_a_locale', defaultLanguage: 'de-CH', expected: 'de' },
-    { language: 'fr', defaultLanguage: 'zh-CN', expected: 'zh-CN' },
+    { language: 'fr', defaultLanguage: 'zh-CN', expected: 'fr' },
+    { language: 'fr-CA', defaultLanguage: 'en', expected: 'fr' },
+    { language: 'fr-BE', defaultLanguage: 'zh-CN', expected: 'fr' },
+    { language: 'fr-CH', defaultLanguage: 'de', expected: 'fr' },
+    { language: 'not_a_locale', defaultLanguage: 'fr-CA', expected: 'fr' },
+    { language: 'qaa', defaultLanguage: 'zh-CN', expected: 'zh-CN' },
     { language: 'zh-TW', defaultLanguage: 'zh-Hans', expected: 'zh-CN' },
     { language: 'zh-Hant-CN', defaultLanguage: 'en', expected: 'en' },
     { language: null, defaultLanguage: 'zh-CN', expected: 'zh-CN' },
     { language: undefined, defaultLanguage: 'zh-CN', expected: 'zh-CN' },
     { language: 42, defaultLanguage: 'zh-CN', expected: 'zh-CN' },
     { language: {}, defaultLanguage: 'zh-CN', expected: 'zh-CN' },
-    { language: 'not_a_locale', defaultLanguage: 'fr', expected: 'en' },
+    { language: 'not_a_locale', defaultLanguage: 'qaa', expected: 'en' },
     { language: 'zh-Hant', defaultLanguage: 'zh-HK', expected: 'en' },
     { language: 'z'.repeat(129), defaultLanguage: null, expected: 'en' },
     { language: undefined, defaultLanguage: undefined, expected: 'en' },
@@ -254,7 +269,7 @@ describe('teamInvitationEmail', () => {
     expect(error.message).not.toContain('expiry-marker')
   })
 
-  it.each(['en', 'zh-CN'])('escapes every user-controlled HTML fact in %s', (language) => {
+  it.each(['en', 'zh-CN', 'fr'])('escapes every user-controlled HTML fact in %s', (language) => {
     const message = teamInvitationEmail({
       ...invitation,
       language,
@@ -276,7 +291,7 @@ describe('teamInvitationEmail', () => {
     expect(links(message.html ?? '')).toEqual([acceptLink, acceptLink])
   })
 
-  it.each(['en', 'zh-CN'])(
+  it.each(['en', 'zh-CN', 'fr'])(
     'normalizes hostile display controls and malformed Unicode in %s',
     (language) => {
       const message = teamInvitationEmail({
@@ -316,7 +331,7 @@ describe('teamInvitationEmail', () => {
     },
   )
 
-  it.each(['en', 'zh-CN'])(
+  it.each(['en', 'zh-CN', 'fr'])(
     'preserves the complete invited email address exactly in %s',
     (language) => {
       const to = 'Invited.Person+Team@Example.TEST'
@@ -333,6 +348,7 @@ describe('teamInvitationEmail', () => {
     { language: 'en', team: 'Your team', inviter: 'A team member' },
     { language: 'zh-CN', team: '你的团队', inviter: '团队成员' },
     { language: 'de', team: 'Ihr Team', inviter: 'Ein Teammitglied' },
+    { language: 'fr', team: 'Votre équipe', inviter: 'Un membre de l’équipe' },
   ])('uses localized anonymous display labels in $language', ({ language, team, inviter }) => {
     const message = teamInvitationEmail({
       ...invitation,

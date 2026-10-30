@@ -5,10 +5,10 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 
 export interface NotificationMailLimits {
-  /** Invitee/guest mail only. Positive integers; hosts do not consume this budget. */
+  /** Recipient windows, independently keyed per mail purpose; hosts do not consume them. */
   mailRecipientMaxPerHour?: number | undefined
   mailRecipientMaxPerDay?: number | undefined
-  /** All booking notification and sign-in mail. Zero disables the instance limit. */
+  /** All booking, sign-in and invitation mail. Zero disables the instance limit. */
   mailMaxPerHour?: number | undefined
 }
 
@@ -25,7 +25,11 @@ export type SuppressionReason =
   | 'recipient_daily_limit'
   | 'instance_hourly_limit'
 
-function recipientHash(email: string, secret: string, purpose: 'booking' | 'sign-in'): Buffer {
+function recipientHash(
+  email: string,
+  secret: string,
+  purpose: 'booking' | 'sign-in' | 'invitation',
+): Buffer {
   // Derive an independent key: ledger/log digests cannot be matched from an address
   // dictionary without BETTER_AUTH_SECRET, or reused in another server-secret protocol.
   const key = createHmac('sha256', secret)
@@ -43,6 +47,10 @@ export function notificationRecipientHash(email: string, secret: string): Buffer
 
 export function signInRecipientHash(email: string, secret: string): Buffer {
   return recipientHash(email, secret, 'sign-in')
+}
+
+export function invitationRecipientHash(email: string, secret: string): Buffer {
+  return recipientHash(email, secret, 'invitation')
 }
 
 /** Whole emails only: a cap of one has no fractional host allowance. */
@@ -123,6 +131,10 @@ export async function signInEmailBudget(db: Db, limits: SignInMailLimits, hash: 
 }
 
 export async function purgeNotificationEmailSends(db: Db, now = new Date()) {
+  await db
+    .deleteFrom('invitation_email_requests')
+    .where('requested_at', '<', new Date(now.getTime() - 2 * 86_400_000))
+    .executeTakeFirst()
   return db
     .deleteFrom('notification_email_sends')
     .where('sent_at', '<', new Date(now.getTime() - 2 * 86_400_000))

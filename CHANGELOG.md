@@ -163,8 +163,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 - [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
   uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
   a separate worker is supported.
-- [Interface languages](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/interface-languages.md)
-  are English and Simplified Chinese only.
+- [Public booking pages and emails](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/interface-languages.md)
+  support English, Simplified Chinese, German and French. Account and sign-in interfaces
+  support English and Simplified Chinese.
 - Schema downgrade is not automatic. Some migrations are not rolling-upgrade safe: stop
   all old app and worker processes as required by the
   [migration notes](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#changing-the-schema)
