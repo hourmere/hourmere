@@ -309,7 +309,8 @@ response objects remain extensible for additive v1 changes.
 |---|---|
 | `id` | Invitation UUID. |
 | `status` | `pending`, `accepted`, `canceled`, `rejected` or derived `expired`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. |
-| `createdAt`, `expiresAt` | Stored invitation timestamps in UTC. Reading does not renew expiry or change status. |
+| `createdAt` | Stored invitation creation time in UTC. |
+| `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
 | `delivery.state` | Current generation's `queued`, `sending`, `smtp_accepted`, `failed` or `skipped`; `unknown` if no delivery row remains. Queued includes waiting for retry; SMTP acceptance does not imply inbox delivery, reading or joining. |
 | `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
 | `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
