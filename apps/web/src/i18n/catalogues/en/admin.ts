@@ -28,6 +28,33 @@ export const admin = {
   'Try again in {0} seconds.': 'Try again in {0} seconds.',
   'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.':
     'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.',
+  'This host’s time zone is unavailable.': 'This host’s time zone is unavailable.',
+  'Host time zone: {zone}': 'Host time zone: {zone}',
+  'Book again with another host': 'Book again with another host',
+  'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.':
+    'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.',
+  'An admin cancels this booking here before it starts.':
+    'An admin cancels this booking here before it starts.',
+  'This booking is already cancelled. Continue with the next step.':
+    'This booking is already cancelled. Continue with the next step.',
+  'This booking has already started. Wait until it ends or coordinate with the hosts offline.':
+    'This booking has already started. Wait until it ends or coordinate with the hosts offline.',
+  'Then ask the guest to book again from the event’s public booking page.':
+    'Then ask the guest to book again from the event’s public booking page.',
+  'Open public booking page': 'Open public booking page',
+  'The event is no longer bookable.': 'The event is no longer bookable.',
+  'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.':
+    'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.',
+  'Cancellation notifications are queued. Email delivery is not confirmed.':
+    'Cancellation notifications are queued. Email delivery is not confirmed.',
+  'Your time zone: {zone}': 'Your time zone: {zone}',
+  'Cancellation notifications': 'Cancellation notifications',
+  'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.':
+    'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.',
+  'Email delivery is not guaranteed. Contact the invitee directly if needed.':
+    'Email delivery is not guaranteed. Contact the invitee directly if needed.',
+  'Hourmere does not automatically assign another host. A replacement requires a new booking.':
+    'Hourmere does not automatically assign another host. A replacement requires a new booking.',
   'Join team': 'Join team',
   'Go to team': 'Go to team',
   'Invited email': 'Invited email',
@@ -1145,4 +1172,14 @@ export const admin = {
     'Could not confirm the switch. Checking your current space…',
   'You are now in your personal space. Your team access or active space changed.':
     'You are now in your personal space. Your team access or active space changed.',
+  'Saved version readiness': 'Saved version readiness',
+  'These unsaved changes have not been checked yet. Save to check the saved version.':
+    'These unsaved changes have not been checked yet. Save to check the saved version.',
+  'These checks describe the saved version. Availability is confirmed when someone books.':
+    'These checks describe the saved version. Availability is confirmed when someone books.',
+  'Readiness checks are unavailable for this account.':
+    'Readiness checks are unavailable for this account.',
+  'Review enablement': 'Review enablement',
+  'Review meeting settings': 'Review meeting settings',
+  'Review round-robin activation': 'Review round-robin activation',
 } as const

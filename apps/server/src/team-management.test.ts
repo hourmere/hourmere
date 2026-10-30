@@ -285,15 +285,10 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
 
   it.each([
     ['default member admission', 'allowMemberRead = false', 'allowMemberRead = true', 'member'],
-    [
-      'lost member admission',
-      "allowMemberRead && !expectedTeamId && roles.includes('member')",
-      'false',
-      'member',
-    ],
+    ['lost member admission', "allowMemberRead && roles.includes('member')", 'false', 'member'],
     [
       'member role substring matching',
-      "allowMemberRead && !expectedTeamId && roles.includes('member')",
+      "allowMemberRead && roles.includes('member')",
       "allowMemberRead && roles.some((role) => role.includes('member'))",
       'team-member',
     ],

@@ -31,8 +31,19 @@ const BOOKING: Schemas['TeamAdminBooking'] = {
   start: '2030-03-04T09:00:00.000Z',
   end: '2030-03-04T09:30:00.000Z',
   cancelledAt: null,
-  eventType: { id: 'e0000000-0000-7000-8000-000000000001', title: 'Team discovery call' },
-  hosts: [{ userId: 'a0000000-0000-7000-8000-000000000001', name: 'Host' }],
+  eventType: {
+    id: 'e0000000-0000-7000-8000-000000000001',
+    title: 'Team discovery call',
+    publicBookingPath: null,
+  },
+  hosts: [
+    {
+      userId: 'a0000000-0000-7000-8000-000000000001',
+      name: 'Host',
+      timeZone: 'Europe/London',
+      isCurrentMember: true,
+    },
+  ],
   attendees: [{ name: 'Grace', email: 'grace@example.com', timeZone: 'UTC', isBooker: true }],
 }
 const member = (role = 'owner') => ({

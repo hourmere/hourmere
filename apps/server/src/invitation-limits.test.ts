@@ -1426,7 +1426,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
   it.each([
     {
       rule: 'role',
-      before: "if (invitation.role !== 'member')",
+      before: 'if (!invitationRoleAllowed(invitation.role))',
       after: 'if (false)',
       status: 403,
       code: 'TEAM_MANAGEMENT_ACCESS_DENIED',

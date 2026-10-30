@@ -25,12 +25,15 @@ export type InvitationResendDenial =
   | 'INVITATION_DELIVERY_BUSY'
   | 'INVITATION_RESEND_COOLDOWN'
 
+/** Launch policy permits only member invitation generations. */
+export const invitationRoleAllowed = (role: string | null) => role === 'member'
+
 /** Only member invitations that remain pending on the database clock can be resent. */
 export function invitationEligibilityDenial(
   invitation: ResendInvitation,
   now: Date,
 ): InvitationEligibilityDenial | null {
-  if (invitation.role !== 'member') return 'TEAM_MANAGEMENT_ACCESS_DENIED'
+  if (!invitationRoleAllowed(invitation.role)) return 'TEAM_MANAGEMENT_ACCESS_DENIED'
   if (invitation.status !== 'pending' || invitation.expiresAt <= now) return 'INVITATION_INELIGIBLE'
   return null
 }

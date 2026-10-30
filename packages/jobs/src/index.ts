@@ -137,6 +137,11 @@ export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
     identity: InvitationEmailJobIdentity,
     transaction?: KyselyTransactionLike,
   ): Promise<boolean>
+  /** Retires only expired matching jobs, preserving history while releasing exclusive keys. */
+  retireExpiredInvitationEmailJobs(
+    identity: Pick<InvitationEmailJobIdentity, 'invitationId' | 'generation'>,
+    transaction: KyselyTransactionLike,
+  ): Promise<void>
 }
 
 export interface JobsOptions<Defs extends readonly AnyJobDefinition[]> {
@@ -163,6 +168,8 @@ export interface JobsOptions<Defs extends readonly AnyJobDefinition[]> {
 export class JobPayloadError extends Error {
   override name = 'JobPayloadError'
 }
+
+class PgBossCompatibilityError extends Error {}
 
 const DEFAULT_RETRY: RetryPolicy = {
   limit: 3,
@@ -338,6 +345,27 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       return result.rows.length === 1
     },
 
+    async retireExpiredInvitationEmailJobs(identity, transaction) {
+      if (state !== 'running') throw new Error(`jobs are not running (${state})`)
+      // The exclusive index includes expired rows until maintenance changes/removes them.
+      // Keep their history, and release the key in the replacement's own transaction.
+      // PostgreSQL rechecks these predicates after a row-lock wait, preserving a renewed job.
+      await fromKysely(transaction).executeSql(
+        `UPDATE pgboss.job SET state = 'cancelled', completed_on = pgboss.job_now()
+         WHERE name = 'invitation-email-v1'
+           AND singleton_key = $1 AND data = $2::jsonb AND policy = 'exclusive'
+           AND (
+             (state IN ('created', 'retry') AND keep_until <= pgboss.job_now())
+             OR (state = 'active' AND started_on IS NOT NULL
+               AND started_on + expire_seconds * INTERVAL '1 second' <= pgboss.job_now())
+           )`,
+        [
+          `invitation-email:v1:${identity.invitationId}:${identity.generation}`,
+          JSON.stringify({ invitationId: identity.invitationId, generation: identity.generation }),
+        ],
+      )
+    },
+
     async enqueue(name, payload, enqueueOptions = {}) {
       const definition = definitions.get(name)
       if (!definition) throw new Error(`unknown job ${name}`)
@@ -364,7 +392,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
         // The invitation liveness query depends on these exact internal columns and expiry
         // rules. Reject an upgrade before starting any pool or workers until it is reviewed.
         if (pgBossPackage.version !== '12.38.0') {
-          throw new Error(
+          throw new PgBossCompatibilityError(
             `background jobs require pg-boss 12.38.0; found ${pgBossPackage.version}. Review the invitation job lookup before upgrading`,
           )
         }
@@ -404,7 +432,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
         state = 'stopping'
         await boss.stop({ graceful: false, close: true }).catch(() => {})
         state = 'stopped'
-        if (options.migrate) throw err
+        if (options.migrate || err instanceof PgBossCompatibilityError) throw err
         const reason = err instanceof Error ? err.message : String(err)
         throw new Error(
           `background jobs could not start: ${reason} (migrate is off, so pg-boss's schema must already be installed and current; \`npm run db:migrate\` does that)`,

@@ -73,8 +73,13 @@ describe('mail-budget upgrade documentation', () => {
 
   it('describes shared serialization and terminal sign-in suppression', () => {
     const notifications = read(`${siteDocs}/notifications.md`)
-    expect(notifications).toContain('Notification and sign-in sends are serialized per instance')
-    expect(notifications).toContain('slow SMTP holds up other notification and sign-in sends')
+    expect(notifications).toContain('Booking notification and sign-in sends retain that lock')
+    expect(notifications).toContain(
+      'slow SMTP holds up other booking notification and sign-in sends',
+    )
+    expect(notifications).toContain(
+      'Team invitation workers instead commit their shared-capacity reservation with the attempt and lease before SMTP, then release the lock',
+    )
     expect(notifications).toContain('deletes the outbox row')
     expect(notifications).toContain('Retrying that job never resends it')
     expect(notifications).toContain('recipient hash and reason only')

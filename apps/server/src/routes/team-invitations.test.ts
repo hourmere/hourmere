@@ -1189,7 +1189,8 @@ describe.skipIf(!serverUrl)(
         {
           file: 'access',
           before: 'if (!role) throw denied()',
-          after: 'if (!role && !expectedTeamId) throw denied()',
+          after:
+            "if (!role) return { userId, organizationId: teamId, role: 'admin', personal: Boolean(personal) }",
         },
         verifyInaccessibleExpectedOrganization,
       ],
@@ -1197,8 +1198,8 @@ describe.skipIf(!serverUrl)(
         'expected personal-team exclusion',
         {
           file: 'access',
-          before: 'if (personal && !context?.allowPersonal) throw denied()',
-          after: 'if (personal && !context?.allowPersonal && !expectedTeamId) throw denied()',
+          before: 'if (personal && !allowPersonal) throw denied()',
+          after: 'if (false) throw denied()',
         },
         verifyInaccessibleExpectedOrganization,
       ],

@@ -1,11 +1,13 @@
 import type { Database, Db } from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
+import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import { cancelTeamBookingInTransaction } from './bookings.ts'
 import type { BookingNotifier, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import {
+  type TeamAdminBookingListPage,
   type TeamAdminBookingPage,
   type TeamAdminBookingRecord,
   toTeamAdminBooking,
@@ -146,10 +148,93 @@ async function pageParticipants(db: Db, teamId: string, bookingIds: string[]) {
 export async function listTeamAdminBookings(
   ctx: ServiceContext,
   input: ListBookingsInput = {},
-): Promise<TeamAdminBookingPage> {
+): Promise<TeamAdminBookingListPage> {
   const teamId = await teamManager(ctx)
   const { data, nextCursor } = await readTeamBookingPage(ctx, teamId, input)
-  return { data, nextCursor }
+  if (!data.length) return { data: [], nextCursor }
+  const ids = data.map((booking) => booking.id)
+  const [hosts, events] = await Promise.all([
+    ctx.db
+      .selectFrom('booking_hosts as host')
+      .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
+      .leftJoin('profiles as profile', 'profile.user_id', 'host.user_id')
+      .select(['host.booking_id', 'host.user_id', 'profile.time_zone'])
+      .select((eb) =>
+        eb
+          .exists(
+            eb
+              .selectFrom('auth.member as current_member')
+              .select('current_member.userId')
+              .whereRef('current_member.userId', '=', 'host.user_id')
+              .whereRef('current_member.organizationId', '=', 'booking.organization_id'),
+          )
+          .as('is_current_member'),
+      )
+      .where('booking.organization_id', '=', teamId)
+      .where('booking.id', 'in', ids)
+      .execute(),
+    ctx.db
+      .selectFrom('bookings as booking')
+      .innerJoin('event_types as event', 'event.id', 'booking.event_type_id')
+      .innerJoin('auth.organization as organization', 'organization.id', 'booking.organization_id')
+      .leftJoin('profiles as owner_profile', 'owner_profile.user_id', 'event.owner_user_id')
+      .select([
+        'event.id',
+        'event.slug',
+        'event.owner_user_id',
+        'owner_profile.handle',
+        'organization.slug as team_slug',
+      ])
+      .where('booking.organization_id', '=', teamId)
+      .where('booking.id', 'in', ids)
+      .where('event.deleted_at', 'is', null)
+      .where('event.is_active', '=', true)
+      .distinct()
+      .execute(),
+  ])
+  const hostFacts = new Map(hosts.map((host) => [`${host.booking_id}:${host.user_id}`, host]))
+  // Reuse public resolution, including current configured hosts and round-robin activation.
+  // Deduplicate events before resolving so repeated bookings share one lookup per page.
+  const paths = new Map(
+    await Promise.all(
+      events.map(async (event) => {
+        const publicEvent =
+          event.owner_user_id === null
+            ? await findPublicTeamEventType(ctx.db, event.team_slug, event.slug)
+            : event.handle === null
+              ? undefined
+              : await findPublicEventType(ctx.db, event.handle, event.slug)
+        const path =
+          publicEvent?.id === event.id
+            ? event.owner_user_id === null
+              ? `/team/${encodeURIComponent(publicEvent.handle)}/${encodeURIComponent(publicEvent.slug)}`
+              : `/${encodeURIComponent(publicEvent.handle)}/${encodeURIComponent(publicEvent.slug)}`
+            : null
+        return [event.id, path] as const
+      }),
+    ),
+  )
+  return {
+    data: data.map((booking) => ({
+      ...booking,
+      eventType:
+        booking.eventType === null
+          ? null
+          : {
+              ...booking.eventType,
+              publicBookingPath: paths.get(booking.eventType.id) ?? null,
+            },
+      hosts: booking.hosts.map((host) => {
+        const facts = hostFacts.get(`${booking.id}:${host.userId}`)
+        return {
+          ...host,
+          timeZone: facts?.time_zone ?? null,
+          isCurrentMember: facts ? Boolean(facts.is_current_member) : null,
+        }
+      }),
+    })),
+    nextCursor,
+  }
 }
 
 /** Internal projection shared by authorized team reads; callers supply their checked team. */

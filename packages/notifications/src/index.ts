@@ -52,6 +52,7 @@ export {
   invitationEmailBudgetAvailable,
   reserveInvitationEmailBudget,
 } from './invitation-mail-limits.ts'
+export { deliverInvitationEmail, type InvitationEmailSenderDeps } from './invitation-sender.ts'
 export { notificationEmailCleanupJob } from './mail-limits.ts'
 
 export const NOTIFICATION_KINDS = [

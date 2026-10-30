@@ -38,6 +38,43 @@ export const TeamAdminBookingPageSchema = z.strictObject({
 
 export type TeamAdminBookingPage = z.infer<typeof TeamAdminBookingPageSchema>
 
+/** Read-only list additions; departure/removal projections retain their original contract. */
+export const TeamAdminBookingListItemSchema = TeamAdminBookingSchema.extend({
+  eventType: TeamAdminBookingSchema.shape.eventType
+    .unwrap()
+    .extend({
+      publicBookingPath: z
+        .string()
+        .nullable()
+        .describe(
+          'Additive, read-only: the public booking path when the event type still exists, is enabled and has a publicly bookable configuration; otherwise null',
+        ),
+    })
+    .nullable(),
+  hosts: z.array(
+    TeamAdminBookingSchema.shape.hosts.element.extend({
+      timeZone: z
+        .string()
+        .nullable()
+        .describe(
+          "Additive, read-only: the host's public profile IANA time zone, or null when no profile is available",
+        ),
+      isCurrentMember: z
+        .boolean()
+        .nullable()
+        .describe(
+          'Additive, read-only: whether this saved host is currently a member of the booking team; null when unavailable',
+        ),
+    }),
+  ),
+})
+
+export const TeamAdminBookingListPageSchema = TeamAdminBookingPageSchema.extend({
+  data: z.array(TeamAdminBookingListItemSchema),
+})
+
+export type TeamAdminBookingListPage = z.infer<typeof TeamAdminBookingListPageSchema>
+
 /**
  * Service read model, assembled from already-authorized booking rows and their own
  * booking_hosts / booking_attendees. Hosts are the saved booking hosts, including

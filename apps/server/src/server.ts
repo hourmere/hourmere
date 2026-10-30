@@ -351,6 +351,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   }
   const invitationQueue: InvitationEmailQueue = {
     enqueue: (name, payload, options) => jobs.enqueue(name, payload, options),
+    retireExpiredInvitationEmailJobs: (identity, transaction) =>
+      jobs.retireExpiredInvitationEmailJobs(identity, transaction),
     hasLiveInvitationEmailJob: (identity, transaction) =>
       jobs.hasLiveInvitationEmailJob(identity, transaction),
   }
@@ -380,7 +382,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       bookingNotificationJob(notificationDeps),
       conferenceNotificationDispatchJob(notificationDeps),
       notificationEmailCleanupJob(notificationDeps),
-      invitationEmailJob(),
+      invitationEmailJob({
+        ...notificationDeps,
+        smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+      }),
       invitationEmailRepairJob(repairInvitations),
       bookingConferenceJob(calendarDeps),
       conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
@@ -433,7 +438,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       await repairInvitations()
     } catch {
       // The every-minute job retries reconciliation without blocking the other workers.
-      console.error('invitation email startup repair failed; scheduled repair will retry')
+      console.error(
+        `${new Date().toISOString()} ERROR invitation-email-repair-v1: startup_repair_unavailable; scheduled repair will retry`,
+      )
     }
   }
   const checkDb = async () => {

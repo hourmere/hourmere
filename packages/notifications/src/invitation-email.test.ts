@@ -205,8 +205,8 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
 
   it('detects a completing placeholder consumer through the one-job-per-generation assertion', async () => {
     const copy = await sourceCopy({
-      before: '    deleteAfterSeconds: 604800,\n  })',
-      after: '    deleteAfterSeconds: 604800,\n    async handler() {},\n  })',
+      before: '    deleteAfterSeconds: 604800,\n  }',
+      after: '    deleteAfterSeconds: 604800,\n    async handler() {},\n  }',
     })
     await expect(verifyUnconsumedGeneration(copy.invitationEmailJob())).rejects.toMatchObject({
       name: 'AssertionError',
@@ -245,6 +245,138 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
     expect(rows[0]).toMatchObject({ data: payload, state: 'created' })
     expect(rows[0].id).not.toBe(expiredId)
     expect((await delivery(payload.invitationId)).last_job_id).toBe(rows[0].id)
+  })
+
+  async function verifyRetainedExpiry(factory = createInvitationEmailRepairer) {
+    const payload = await invitation()
+    await createInvitationEmailDispatcher({ db, queue: jobs })(payload)
+    const expiredId = (await delivery(payload.invitationId)).last_job_id as string
+    await owned.pool.query(
+      "UPDATE pgboss.job SET keep_until=pgboss.job_now() - INTERVAL '1 second' WHERE id=$1",
+      [expiredId],
+    )
+    await factory({ db, queue: jobs })()
+    const rows = await jobRows()
+    expect(
+      rows.filter((row) => row.state === 'created'),
+      'repair replaces an expired exclusive job before maintenance purges it',
+    ).toHaveLength(1)
+    expect(
+      rows.find((row) => row.id === expiredId)?.state,
+      'repair replaces an expired exclusive job before maintenance purges it',
+    ).toBe('cancelled')
+    expect((await delivery(payload.invitationId)).last_job_id).not.toBe(expiredId)
+  }
+
+  it('replaces a retained expired exclusive job without waiting for maintenance', async () => {
+    await verifyRetainedExpiry()
+  })
+
+  it('detects missing retirement of the retained exclusive job in a source copy', async () => {
+    const copy = await sourceCopy({
+      before: 'await queue.retireExpiredInvitationEmailJobs(payload, trx)',
+      after: 'void payload',
+    })
+    await expect(verifyRetainedExpiry(copy.createInvitationEmailRepairer)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('repair replaces an expired exclusive job'),
+    })
+  })
+
+  async function sending(attempts = 1, live = false, futureDue = false) {
+    const payload = await invitation()
+    await db
+      .updateTable('invitation_deliveries')
+      .set({
+        state: 'sending',
+        attempts,
+        lease_id: randomUUID(),
+        lease_until: live
+          ? sql`clock_timestamp() + INTERVAL '120 seconds'`
+          : sql`clock_timestamp() - INTERVAL '1 second'`,
+        due_at: futureDue
+          ? sql`clock_timestamp() + INTERVAL '1 minute'`
+          : sql`clock_timestamp() - INTERVAL '1 second'`,
+      })
+      .where('invitation_id', '=', payload.invitationId)
+      .execute()
+    return payload
+  }
+
+  it('does not steal a live sending lease even when its job is missing', async () => {
+    const payload = await sending(1, true)
+    const before = await delivery(payload.invitationId)
+    await createInvitationEmailRepairer({ db, queue: jobs })()
+    expect(await delivery(payload.invitationId)).toEqual(before)
+    expect(await jobRows()).toEqual([])
+  })
+
+  it('waits for the old active job even after the sending lease expires', async () => {
+    const payload = await invitation()
+    await createInvitationEmailDispatcher({ db, queue: jobs })(payload)
+    const jobId = (await delivery(payload.invitationId)).last_job_id
+    await owned.pool.query(
+      "UPDATE pgboss.job SET state='active', started_on=pgboss.job_now() WHERE id=$1",
+      [jobId],
+    )
+    await db
+      .updateTable('invitation_deliveries')
+      .set({
+        state: 'sending',
+        attempts: 1,
+        lease_id: randomUUID(),
+        lease_until: sql`clock_timestamp() - INTERVAL '1 second'`,
+      })
+      .where('invitation_id', '=', payload.invitationId)
+      .execute()
+    const before = await delivery(payload.invitationId)
+    await createInvitationEmailRepairer({ db, queue: jobs })()
+    expect(await delivery(payload.invitationId)).toEqual(before)
+    expect((await jobRows()).map((row) => row.state)).toEqual(['active'])
+  })
+
+  it('preserves an abandoned claim attempt and backoff before scheduling its retry', async () => {
+    const payload = await sending(2, false, true)
+    const before = await delivery(payload.invitationId)
+    await createInvitationEmailRepairer({ db, queue: jobs })()
+    expect(await delivery(payload.invitationId)).toMatchObject({
+      state: 'queued',
+      attempts: 2,
+      due_at: before.due_at,
+      lease_id: null,
+      lease_until: null,
+      last_error_code: 'interrupted',
+    })
+    expect(await jobRows()).toEqual([])
+  })
+
+  async function verifyLastCrash(factory = createInvitationEmailRepairer) {
+    const payload = await sending(4)
+    await factory({ db, queue: jobs })()
+    expect(
+      (await delivery(payload.invitationId)).state,
+      'the last abandoned attempt must fail without another job',
+    ).toBe('failed')
+    expect(await delivery(payload.invitationId)).toMatchObject({
+      attempts: 4,
+      last_error_code: 'attempts_exhausted',
+    })
+    expect(await jobRows()).toEqual([])
+  }
+
+  it('fails the last abandoned claim without granting another job', async () => {
+    await verifyLastCrash()
+  })
+
+  it('detects crash recovery granting a fifth attempt in a source copy', async () => {
+    const copy = await sourceCopy({
+      before: 'const exhausted = delivery.attempts >= 4',
+      after: 'const exhausted = delivery.attempts >= 5',
+    })
+    await expect(verifyLastCrash(copy.createInvitationEmailRepairer)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('the last abandoned attempt'),
+    })
   })
 
   it('preserves the committed due row on queue failure, then repairs it once', async () => {

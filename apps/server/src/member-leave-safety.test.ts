@@ -1404,7 +1404,10 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     let source = readFileSync('packages/auth/src/team-management.ts', 'utf8')
     const guard = 'if (!role) throw denied()'
     expect(source.includes(guard), 'mutation must match shared management source').toBe(true)
-    source = source.replace(guard, 'if (!role && !expectedTeamId) throw denied()')
+    source = source.replace(
+      guard,
+      "if (!role) return { userId, organizationId: teamId, role: 'admin', personal: Boolean(personal) }",
+    )
     source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
       /\bexport /g,
       '',

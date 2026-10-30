@@ -540,8 +540,8 @@ purpose-separated recipient HMAC, the inviter/team identifiers and the request t
 Explicit resends require the invitation ID, expected generation and UUID request ID;
 they wait 60 seconds from the later of the generation start and latest delivery update,
 including worker attempts, stop at 32 generations and extend expiry by the original validity
-length. The future invitation sender must update `updated_at` on every delivery attempt
-for this post-delivery cooldown to hold. Each delivery generation retains its existing
+length. The invitation sender updates `updated_at` on every delivery attempt
+so this post-delivery cooldown holds. Each delivery generation retains its existing
 maximum of four SMTP attempts.
 Expired or business-terminal invitations need a new invitation. Invitation admission
 never invokes the sign-in worker's account/sign-up eligibility decision and does not
@@ -558,22 +558,25 @@ recover without creating another generation or spending another admission slot.
 The `invitation-email-v1` queue carries only `{ invitationId, generation }`, with an
 exclusive `invitation-email:v1:<invitationId>:<generation>` key and zero pg-boss retries.
 The delivery record owns the eventual attempt budget. A worker-startup and every-minute
-repairer checks at most 100 due queued records per pass, advances its invitation-ID
+repairer checks at most 100 due records per pass, advances its invitation-ID
 cursor even after an individual failure, and repairs missing live jobs transactionally.
 It checks the pinned pg-boss job identity, payload, state and expiry before enqueueing.
 Terminal delivery records are never automatically requeued.
 
 The repairer rechecks lifecycle and generation before enqueueing: canceled, accepted,
 rejected, unknown-status or expired invitations become `skipped`; stale candidates leave
-the newer generation untouched. No delivery consumer is registered yet, so pending jobs
-remain `created` and live across repair passes. If a waiting job reaches its 24-hour
-retention expiry, pg-boss removes it and repair may create one replacement for a still-valid
-generation. Later passes reuse that replacement until its own retention expiry.
+the newer generation untouched. If a waiting job reaches its 24-hour retention expiry,
+or a running job's expiry passes, repair cancels only the matching expired job inside the
+replacement transaction. This preserves job history and releases the exclusive key even
+before pg-boss maintenance runs. Live jobs and completed, canceled or failed history stay
+intact. A delivery-row lock and the exclusive index serialize replacement attempts;
+later passes reuse the current live replacement. Completed history is never a live job.
 A previously queued job may remain after its delivery generation is skipped or superseded;
-the future sender must reread the current row, generation, invitation status and expiry
-before sending. No invitation mail is sent yet. A future sender must check and debit
-shared non-reserved mail capacity at send time, integrate attempts, leases and backoff,
-and recheck authorization before SMTP. Admission accounting is separate from that debit.
+the sender rereads the current row, generation, invitation status and expiry before every
+attempt. It reads the recipient address and organization from the current invitation,
+never from the queued job. The sender must recheck authorization before SMTP.
+Shared non-reserved mail capacity is checked and debited at
+send time, once for the authorized attempt, independently of admission accounting.
 
 Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
 5) across its entire reschedule chain. New response tokens and older email links use the
@@ -602,28 +605,34 @@ the HTTP request does not check these budgets or wait for SMTP.
 Recipient normalization is trim + lowercase only. Plus-addressing, Gmail dots and IDN
 variants are not merged; the instance cap is the backstop for those variants. Ledger and
 suppression-log recipient hashes use HMAC-SHA-256 with a key derived from
-`BETTER_AUTH_SECRET` under a fixed mail-accounting label, and separate booking/sign-in
+`BETTER_AUTH_SECRET` under a fixed mail-accounting label, and separate booking/sign-in/invitation
 domains. Without the secret, hashes cannot be matched against a dictionary of addresses.
 Use the same secret on every web and worker process. Rotating it resets the recipient
 counters because earlier hashes no longer match, while instance counts remain intact.
 
-`MAIL_MAX_PER_HOUR` (default 100, `0` means unlimited) counts **all booking notification
-and sign-in emails**, including hosts, across every worker sharing this instance's
-database. Invitee and guest messages are suppressed once that many were sent in the
+`MAIL_MAX_PER_HOUR` (default 100, `0` means unlimited) counts **booking notification and
+sign-in sends, plus team invitation attempt reservations**, including hosts, across every
+worker sharing this instance's database. Invitee, guest and team invitation messages are
+suppressed once that many were counted in the
 preceding hour. Hosts are sent first within each booking job. Host and sign-in mail may
 continue until 120% of that cap (rounded down), then are suppressed too; both share that
 reserve, and sign-in recipient limits still apply. For example, with the default cap,
-invitee/guest mail stops at 100 sends and host/sign-in mail stops at 120. Set the cap below
+invitee/guest/team invitation mail stops at 100 and host/sign-in mail stops at 120. Set the
+cap below
 your SMTP provider's hourly allowance, accounting for this reserve and any other mail
 using the same provider. For a cap below 5, rounding may leave no extra allowance.
 
-Cap checks and SMTP delivery use the existing send transactions, serialized across workers
-with one database advisory lock. Notification and sign-in sends are serialized per instance,
-so slow SMTP holds up other notification and sign-in sends until it finishes or fails.
+Cap checks use one shared database advisory lock across workers. Booking notification
+and sign-in sends retain that lock and their transaction through SMTP, so slow SMTP holds
+up other booking notification and sign-in sends until it finishes or fails.
 Successful sends add only a recipient hash for invitee/guest and sign-in mail (NULL for
 host mail) and a timestamp to `notification_email_sends`; no plain address is stored in
 this ledger. Failed sends roll back their count and remain retryable under the existing
-policy. The SMTP acceptance/failed-commit duplicate window described above still applies.
+policy. Team invitation workers instead commit their shared-capacity reservation with
+the attempt and lease before SMTP, then release the lock. That reservation remains
+counted on failure, crash or a subsequent cancellation check; admission never debits it.
+Invitation recipient request limits are accounted separately at admission. The SMTP
+acceptance/failed-commit duplicate window described above still applies.
 
 A limited booking message commits `booking_notifications.outcome = 'suppressed'`, a stable
 `suppression_reason`, and no manage-token hash. It does not fail the booking or the job,
@@ -674,8 +683,50 @@ other teams and API-key/OAuth callers cannot read it. The summary exposes no inv
 links or tokens, mail bodies, credentials or raw provider errors. Delivery storage,
 diagnostics and job payloads keep their separate recipient-privacy rules.
 
+Each generation has at most four SMTP attempts. Before contacting the mail server, the
+worker commits an incremented attempt count, an updated `updated_at`, a shared-capacity
+debit and a random 120-second lease. Two workers racing the same generation wait for
+the delivery-row lock and then check the committed state, so a live claim prevents a
+second send. SMTP waits at most 60 seconds, bounded by the remaining lease minus a
+one-second safety margin. Less than one second of usable time prevents a new send;
+template rendering and the pre-send transaction's completion consume that budget too.
+The job expires after 180 seconds.
+The capacity reservation remains consumed if a crash or cancellation follows the claim
+but prevents its network call; admission never consumes this shared sending budget.
+Transient failures retain the same generation and persist 60, 120 and 240-second backoffs.
+The every-minute repairer can add up to one repair cycle to that delay, plus queue
+scheduling time before a worker actually starts the retry.
+The application and repairer own this budget, with zero pg-boss retries. A crash after
+the attempt commit consumes that attempt. An expired final claim becomes `failed`;
+it never receives a fifth attempt. Permanent refusal, configuration errors, rate limits
+and exhaustion also retain a fixed safe failure code in the administrator's summary.
+
+The sender rechecks invitation eligibility before each attempt: accepted, canceled,
+rejected, expired or unknown-status invitations stop, and stale jobs cannot send or
+change a successor generation. An already recorded `smtp_accepted` generation is also
+terminal. Both the claim and pre-SMTP transactions use the shared team-management and
+invitation eligibility policy: the inviter must still be a current owner/admin of the
+non-personal team, the invitation role must be allowed, and the recipient must not
+already belong to the team. Otherwise the generation becomes terminal
+`skipped/invitation_ineligible` without SMTP or automatic retries. Template rendering
+failure is terminal `failed/transport_error`, distinct from `smtp_not_configured`.
+Its SMTP acceptance timestamp means only **accepted by the mail server**. It does not promise
+inbox placement, reading or team membership. SMTP acceptance followed by a failed database
+commit leaves a duplicate window: a later attempt within the remaining budget may send
+a duplicate. A timeout or shutdown abort only stops waiting for the mail transport;
+an exchange already under way may still be accepted in the background and overlap a
+later retry. The shorter deadline prevents the worker from intentionally waiting past
+its lease, but cannot recall submitted mail. Leases do not provide exactly-once SMTP
+delivery. Cancellation or authorization changes can still race an SMTP call after its
+final database check.
+
+Mail bodies, usable invitation links, tokens and raw provider/database errors never enter
+job logs. Invitation mail uses the sensitive transport path; diagnostics contain safe IDs,
+attempts, states and fixed error codes, with recipient addresses omitted or redacted.
+An unconfigured SMTP transport is a failure rather than SMTP acceptance.
+
 Migration 0044 makes `last_attempt_at` exclusively owned by the
-`invitation_delivery_attempt_time` database trigger. The future invitation sender must
+`invitation_delivery_attempt_time` database trigger. The invitation sender does
 not write this column; it records an attempt by incrementing `attempts`. The trigger
 overwrites any explicit INSERT or UPDATE value. Inserts with positive attempts,
 increased attempts and a changed generation with positive attempts receive the database's
