@@ -24,6 +24,18 @@ describe.skipIf(!serverUrl)('webhook REST API', () => {
     const principal: Principal = session
       ? { ...user.principal, kind: 'session', sessionId: randomUUID() }
       : user.principal
+    if (principal.kind === 'session')
+      await db
+        .insertInto('auth.session')
+        .values({
+          id: principal.sessionId,
+          userId: user.id,
+          token: randomUUID(),
+          activeOrganizationId: principal.organization.id,
+          expiresAt: new Date(Date.now() + 3_600_000),
+          updatedAt: new Date(),
+        })
+        .execute()
     const principals = new Map([['hm_webhook_fixture', principal]])
     const app = productApp(db, principals, [webhookRoutes({ db, enabled, encryptionKey: key })])
     const request = (
@@ -39,6 +51,7 @@ describe.skipIf(!serverUrl)('webhook REST API', () => {
             ? { cookie: syntheticSessionCookie('hm_webhook_fixture') }
             : { authorization: 'Bearer hm_webhook_fixture' }),
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(session ? { 'X-Expected-Organization-Id': principal.organization.id } : {}),
           ...headers,
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

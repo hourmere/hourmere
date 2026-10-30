@@ -23,6 +23,16 @@ endpoint can receive events about the entire organization. A host can configure 
 personal organization's webhook. Current verified membership and role are checked again in
 the service; possession of another organization's endpoint ID grants no access.
 
+Cookie-session writes require `X-Expected-Organization-Id` set to the organization where
+the action started, including personal organizations. List and delivery reads accept the
+same header optionally; omitting it preserves current-organization reads. A stale expected
+team that the caller still owns/administers returns `409 organization_context_changed`;
+reload before retrying. Inaccessible expected teams receive uniform
+`403 team_management_access_denied`. Missing or malformed write context returns the same
+409 as event-type writes; malformed read context returns 403. The service checks write
+context again inside its locked transaction. API keys ignore this header and keep their
+stored organization. See [browser organization context](/docs/api-conventions#browser-organization-context).
+
 | Method and path under `/api/v1` | Purpose |
 |---|---|
 | `POST /webhooks` | Create `{ url, events, isActive? }`; returns `{ webhook, secret }` |
@@ -210,6 +220,10 @@ demotion/removal already committed while waiting for an organization/endpoint is
 once membership is locked, revocation waits for the authorized mutation. Email
 unverification similarly serializes through the user lock. The parent-first order also
 allows organization/user deletion cascades to complete without an inverse lock order.
+Cookie-session writes first take the shared organization-context fence and recheck the
+live session under a row lock after waiting for those parents and endpoint. Native space
+switches cannot overtake an authorized write; a changed or expired session cannot commit
+using stale resolver context.
 
 An already-started attempt holds the endpoint's share lock until it acknowledges or fails.
 Pause, subscription changes, rotation and deletion wait for that attempt to finish before

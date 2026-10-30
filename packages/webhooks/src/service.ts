@@ -7,6 +7,11 @@ import { encryptWebhookSecret, newWebhookSecret } from './crypto.ts'
 import type { WebhookPrivateTarget } from './private-targets.ts'
 import { webhookUrl } from './transport.ts'
 
+/** Browser preflight/fence runs before authorization parents; final authority stays locked. */
+export interface WebhookServiceContext extends ServiceContext {
+  prepareOrganizationWrite?: ((trx: Db) => Promise<void>) | undefined
+}
+
 export const WEBHOOK_EVENTS = [
   'booking.created',
   'booking.rescheduled',
@@ -152,7 +157,7 @@ export async function listWebhooks(ctx: ServiceContext): Promise<WebhookView[]> 
 }
 
 export async function createWebhook(
-  ctx: ServiceContext,
+  ctx: WebhookServiceContext,
   settings: WebhookSettings,
   input: unknown,
 ) {
@@ -163,9 +168,12 @@ export async function createWebhook(
   if (!url) throw destinationNotAllowed(settings)
   const encryptionKey = requireEnabled(settings)
   return ctx.db.transaction().execute(async (trx) => {
-    await requireAdmin(trx, ctx)
+    await ctx.prepareOrganizationWrite?.(trx)
+    if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
+      await requireAdmin(trx, ctx)
     // Exclusive organization lock also serializes the cap across concurrent creates.
     await lockAuthorizationParents(trx, ctx, true)
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
     await requireAdmin(trx, ctx, true)
     const rows = await trx
       .selectFrom('webhooks')
@@ -202,8 +210,10 @@ export async function createWebhook(
   })
 }
 
-async function lockedWebhook(trx: Db, ctx: ServiceContext, id: unknown) {
-  await requireAdmin(trx, ctx)
+async function lockedWebhook(trx: Db, ctx: WebhookServiceContext, id: unknown) {
+  await ctx.prepareOrganizationWrite?.(trx)
+  if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
+    await requireAdmin(trx, ctx)
   if (!uuid(id)) throw missing()
   await lockAuthorizationParents(trx, ctx)
   const row = await trx
@@ -213,6 +223,7 @@ async function lockedWebhook(trx: Db, ctx: ServiceContext, id: unknown) {
     .where('organization_id', '=', ctx.principal.organization.id)
     .forUpdate()
     .executeTakeFirst()
+  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
   await requireAdmin(trx, ctx, true)
   if (!row) throw missing()
   return row
@@ -220,7 +231,7 @@ async function lockedWebhook(trx: Db, ctx: ServiceContext, id: unknown) {
 
 /** URL is immutable: changing destinations means creating a new endpoint and deleting the old. */
 export async function updateWebhook(
-  ctx: ServiceContext,
+  ctx: WebhookServiceContext,
   id: unknown,
   input: unknown,
   settings: Pick<WebhookSettings, 'privateTargets'> = {},
@@ -251,7 +262,7 @@ export async function updateWebhook(
 }
 
 export async function rotateWebhookSecret(
-  ctx: ServiceContext,
+  ctx: WebhookServiceContext,
   settings: WebhookSettings,
   id: unknown,
 ) {
@@ -271,7 +282,7 @@ export async function rotateWebhookSecret(
   })
 }
 
-export async function deleteWebhook(ctx: ServiceContext, id: unknown) {
+export async function deleteWebhook(ctx: WebhookServiceContext, id: unknown) {
   await ctx.db.transaction().execute(async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()

@@ -7135,7 +7135,10 @@ export interface operations {
     listWebhooks: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7168,7 +7171,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7186,7 +7189,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7209,7 +7212,10 @@ export interface operations {
     createWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7254,7 +7260,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7272,7 +7278,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7295,7 +7301,10 @@ export interface operations {
     deleteWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7328,7 +7337,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7346,7 +7355,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7369,7 +7378,10 @@ export interface operations {
     updateWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7411,7 +7423,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7429,7 +7441,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7454,7 +7466,10 @@ export interface operations {
             query?: {
                 after?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7492,7 +7507,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7510,7 +7525,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7533,7 +7548,10 @@ export interface operations {
     rotateWebhookSecret: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7571,7 +7589,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7589,7 +7607,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;

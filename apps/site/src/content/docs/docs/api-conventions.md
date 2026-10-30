@@ -284,6 +284,9 @@ permission and do not affect API-key or MCP OAuth authority.
 | Team reads with the optional header: a different expected team still authorized for that read (any member for their own departure preview; owner/admin for management reads) | 403 `team_management_access_denied` | 409 `organization_context_changed` |
 | Team reads that did not previously read the header (`GET /api/v1/team/bookings`, `GET /api/v1/teams/{teamId}/readiness`, departure impact, removal records, removal handling): malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
 | The same reads: the expected team differs from the current team | 200 (header ignored) | 409 `organization_context_changed` when still authorized for the expected team, otherwise 403 `team_management_access_denied` |
+| Session webhook writes: missing or malformed expected ID | Header ignored | 409 `organization_context_changed`, matching session event-type writes |
+| Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
+| Session webhook reads: malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
 
 A still-current ordinary member's stale REST or native leave request retains 409.
 Missing required write headers retain 409, and optional-header omission retains existing
@@ -294,7 +297,8 @@ The optional read header applies to `GET /api/v1/team/bookings`,
 `GET /api/v1/team/invitations`, `GET /api/v1/teams/{teamId}/readiness`,
 `GET /api/v1/team/members/{memberUserId}/departure-impact`,
 `GET /api/v1/team/member-removals/{operationId}` and
-`GET /api/v1/team/members/{memberUserId}/removal-handling`. Each retains its existing
+`GET /api/v1/team/members/{memberUserId}/removal-handling`, plus session
+`GET /api/v1/webhooks` and `GET /api/v1/webhooks/{id}/deliveries`. Each retains its existing
 role and target restrictions when the expected organization matches or the header is absent.
 
 The existing covered endpoints are:
@@ -305,6 +309,10 @@ The existing covered endpoints are:
 | Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}` |
 | Delete a personal or team event type | `DELETE /api/v1/event-types/{id}` |
 | Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
+| Create an organization webhook | `POST /api/v1/webhooks` |
+| Change subscriptions or pause a webhook | `PATCH /api/v1/webhooks/{id}` |
+| Delete a webhook | `DELETE /api/v1/webhooks/{id}` |
+| Rotate a webhook signing secret | `POST /api/v1/webhooks/{id}/rotate-secret` |
 | Cancel a current-team booking as an administrator | `POST /api/v1/team/bookings/{id}/cancel` |
 | Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
 | Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
@@ -328,6 +336,15 @@ without context from becoming a personal creation after switching or losing team
 and prevents a switch into a team from retargeting an unsaved personal draft.
 Organization writes and context transitions in the same browser session are ordered across
 server processes, so a switch cannot overtake an already checked organization write.
+
+Session webhook writes require the same header, including personal-organization writes,
+and recheck the live session context inside the locked mutation transaction. Missing or
+malformed write expectations retain the event-type 409 reload response. Supplied read
+expectations use the optional-read rule above; omitting the header preserves existing
+reads. Matching personal-organization expectations remain supported. A different expected
+personal organization, an inaccessible team or ordinary membership in the expected team
+receives uniform 403 `team_management_access_denied`. API keys ignore this browser header
+and remain pinned to their stored organization.
 
 The web booking detail also binds cancellation, rescheduling, conference reconciliation
 and calendar-copy retries to its opening organization with this header. These four

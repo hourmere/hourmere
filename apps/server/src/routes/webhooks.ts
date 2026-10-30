@@ -1,4 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import type { Principal } from '@hourmere/auth'
+import type { Db } from '@hourmere/db'
 import {
   createWebhook,
   deleteWebhook,
@@ -20,6 +22,11 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  organizationContextAccess,
+  organizationContextWriteLock,
+} from '../team-management.ts'
 
 const Webhook = z
   .object({
@@ -53,15 +60,52 @@ const Delivery = z
   })
   .openapi('WebhookDelivery')
 const Params = z.object({ id: z.string() })
+const ExpectedReadHeaders = z.object({
+  'x-expected-organization-id': z.string().optional().openapi({
+    description:
+      'Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams. Omitted headers preserve current-organization reads. Ignored for API keys.',
+  }),
+})
+const ExpectedWriteHeaders = z.object({
+  'x-expected-organization-id': z.string().optional().openapi({
+    description:
+      'Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys.',
+  }),
+})
 const errors = errorResponses({
   400: 'invalid_webhook or invalid_request',
-  403: `insufficient_role; ${CROSS_ORIGIN_WRITE}`,
+  403: `insufficient_role or team_management_access_denied; ${CROSS_ORIGIN_WRITE}`,
   404: 'webhook_not_found',
-  409: 'webhooks_disabled or webhook_limit_reached',
+  409: 'webhooks_disabled, webhook_limit_reached or organization_context_changed',
 })
 
 /** Organization-wide outbound booking events; ordinary hosts have no administrative access. */
 export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule {
+  const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
+    ...serviceContext(deps, principal),
+    prepareOrganizationWrite: async (trx: Db) => {
+      // Fence native context transitions before taking any user/organization locks.
+      await organizationContextWriteLock(principal)(trx)
+      await organizationContextAccess(
+        principal,
+        expectedOrganizationId,
+        true,
+      )(trx, principal.organization.id)
+    },
+    authorizeOrganizationWrite: organizationContextAccess(
+      principal,
+      expectedOrganizationId,
+      true,
+      'key share',
+    ),
+  })
+  const readContext = async (principal: Principal, expectedOrganizationId?: string) => {
+    await organizationContextAccess(principal, expectedOrganizationId)(
+      deps.db,
+      principal.organization.id,
+    )
+    return serviceContext(deps, principal)
+  }
   return ({ app, caller }) => {
     app.openapi(
       createRoute({
@@ -72,12 +116,19 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         summary: 'List the current organization’s webhooks (owner/admin)',
         security: authenticated,
         middleware: caller,
+        request: { headers: ExpectedReadHeaders },
         responses: {
           200: { description: 'Endpoints, without secrets', content: json(z.array(Webhook)) },
           ...errors,
         },
       }),
-      async (c) => c.json(await listWebhooks(serviceContext(deps, c.var.principal)), 200),
+      async (c) =>
+        c.json(
+          await listWebhooks(
+            await readContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          ),
+          200,
+        ),
     )
 
     app.openapi(
@@ -91,7 +142,10 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
           'Public HTTPS destinations by default. Operators may allow exact private HTTP(S) targets. URL checks do not resolve DNS; every delivery revalidates all resolved addresses. Destinations are immutable.',
         security: authenticated,
         middleware: caller,
-        request: { body: { required: true, content: json(WebhookCreateInput) } },
+        request: {
+          headers: ExpectedWriteHeaders,
+          body: { required: true, content: json(WebhookCreateInput) },
+        },
         responses: {
           201: {
             description: 'Endpoint and one-time secret',
@@ -102,7 +156,11 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
       }),
       async (c) =>
         c.json(
-          await createWebhook(serviceContext(deps, c.var.principal), deps, c.req.valid('json')),
+          await createWebhook(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            deps,
+            c.req.valid('json'),
+          ),
           201,
         ),
     )
@@ -116,13 +174,17 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         summary: 'Change event subscriptions or pause a webhook',
         security: authenticated,
         middleware: caller,
-        request: { params: Params, body: { required: true, content: json(WebhookUpdateInput) } },
+        request: {
+          params: Params,
+          headers: ExpectedWriteHeaders,
+          body: { required: true, content: json(WebhookUpdateInput) },
+        },
         responses: { 200: { description: 'Updated endpoint', content: json(Webhook) }, ...errors },
       }),
       async (c) =>
         c.json(
           await updateWebhook(
-            serviceContext(deps, c.var.principal),
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
             c.req.valid('param').id,
             c.req.valid('json'),
             deps,
@@ -140,14 +202,17 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         summary: 'Delete a webhook and its retained deliveries',
         security: authenticated,
         middleware: caller,
-        request: { params: Params },
+        request: { params: Params, headers: ExpectedWriteHeaders },
         responses: {
           204: { description: 'Deleted; pending delivery jobs safely skip' },
           ...errors,
         },
       }),
       async (c) => {
-        await deleteWebhook(serviceContext(deps, c.var.principal), c.req.valid('param').id)
+        await deleteWebhook(
+          writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          c.req.valid('param').id,
+        )
         return c.body(null, 204)
       },
     )
@@ -161,7 +226,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         summary: 'Replace the signing secret and reveal it once',
         security: authenticated,
         middleware: caller,
-        request: { params: Params },
+        request: { params: Params, headers: ExpectedWriteHeaders },
         responses: {
           200: { description: 'New one-time secret', content: json(Secret) },
           ...errors,
@@ -170,7 +235,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
       async (c) =>
         c.json(
           await rotateWebhookSecret(
-            serviceContext(deps, c.var.principal),
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
             deps,
             c.req.valid('param').id,
           ),
@@ -187,7 +252,11 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         summary: 'Page through thirty days of delivery metadata',
         security: authenticated,
         middleware: caller,
-        request: { params: Params, query: z.object({ after: z.string().optional() }) },
+        request: {
+          params: Params,
+          headers: ExpectedReadHeaders,
+          query: z.object({ after: z.string().optional() }),
+        },
         responses: {
           200: {
             description: 'Newest first, at most fifty; no payloads or signatures',
@@ -199,7 +268,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
       async (c) =>
         c.json(
           await listWebhookDeliveries(
-            serviceContext(deps, c.var.principal),
+            await readContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
             c.req.valid('param').id,
             c.req.valid('query').after,
           ),
