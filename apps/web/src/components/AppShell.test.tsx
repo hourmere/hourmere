@@ -118,6 +118,7 @@ describe('admin shell layout', () => {
     ['/app/event-types', 'main-content-wide'],
     ['/app/availability', 'main-content-wide'],
     ['/app/bookings', 'main-content-wide'],
+    ['/app/team/bookings', 'main-content-wide'],
     ['/app/analytics', 'main-content-wide'],
     ['/app/conferences', 'main-content-wide'],
     ['/app/calendars', 'main-content-wide'],

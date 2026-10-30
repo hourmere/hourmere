@@ -2,7 +2,9 @@ import type { Page } from '@playwright/test'
 import {
   AUDIT_CONFIRMATION_EMAIL,
   AUDIT_EMAIL,
+  AUDIT_GUEST_NAME,
   AUDIT_NOW,
+  AUDIT_TEAM_NAME,
   AUDIT_TITLE,
   visualMaskSelector,
   visualMaskText,
@@ -26,6 +28,8 @@ export const auditPages = [
   { id: 'availability-editor', title: 'Availability editor' },
   { id: 'bookings', title: 'Bookings list' },
   { id: 'booking-detail', title: 'Booking detail' },
+  { id: 'team-bookings', title: 'Team administrator bookings' },
+  { id: 'team-booking-detail', title: 'Team administrator booking detail' },
   { id: 'analytics', title: 'Analytics' },
   { id: 'calendars', title: 'Calendars' },
   { id: 'conferences', title: 'Conferences' },
@@ -125,6 +129,13 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
     case 'bookings':
       await page.getByText(AUDIT_EMAIL, { exact: true }).waitFor()
       break
+    case 'team-bookings':
+      await page.locator('.team-bookings-list').getByText(AUDIT_TITLE, { exact: true }).waitFor()
+      await page.locator('main').getByText(AUDIT_TEAM_NAME, { exact: true }).waitFor()
+      break
+    case 'team-booking-detail':
+      await page.locator('.team-booking-detail li').filter({ hasText: AUDIT_GUEST_NAME }).waitFor()
+      break
     case 'analytics':
       await page.locator('#activity-summary').waitFor()
       break
@@ -173,7 +184,11 @@ export async function openAuditPage(
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
     const fixture = await app.auditState()
-    await app.auditSignIn(!publicPages.has(id), locale)
+    await app.auditSignIn(
+      !publicPages.has(id),
+      locale,
+      id === 'team-bookings' || id === 'team-booking-detail' ? 'team' : undefined,
+    )
     await page.addInitScript(prepareAuditLocale, locale)
     const paths: Record<AuditPageId, string> = {
       host: '/fixture-host',
@@ -192,6 +207,8 @@ export async function openAuditPage(
       'availability-editor': `/app/availability/${fixture.scheduleId}`,
       bookings: '/app/bookings',
       'booking-detail': `/app/bookings/${fixture.bookingId}`,
+      'team-bookings': '/app/team/bookings',
+      'team-booking-detail': '/app/team/bookings',
       analytics: '/app/analytics',
       calendars: '/app/calendars',
       conferences: '/app/conferences',
@@ -255,6 +272,10 @@ export async function openAuditPage(
     if (id === 'booking-time-zone') {
       await page.locator('.tz-toggle').press('Enter')
       await page.locator('.tz-panel [role="listbox"]:visible').waitFor()
+    }
+    if (id === 'team-booking-detail') {
+      await page.locator('.team-bookings-list').getByRole('button').first().press('Enter')
+      await page.locator('.team-booking-detail').waitFor()
     }
     if (id === 'oauth-consent') {
       const organization = page.locator('#oauth-organization')

@@ -34,12 +34,13 @@ vi.mock('./lazy-pages.tsx', () => {
     'SettingsPage',
     'SignInPage',
     'TeamBookingPage',
+    'TeamBookingsPage',
   ]
   return Object.fromEntries(names.map((name) => [name, Pending]))
 })
 
 describe('before route chunks are available', () => {
-  it.each(['/app', '/app/settings', '/'])(
+  it.each(['/app', '/app/settings', '/app/team/bookings', '/'])(
     'shows the admin shell immediately at %s',
     async (path) => {
       render(
