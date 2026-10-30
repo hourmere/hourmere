@@ -20,16 +20,21 @@ import {
   teamSessionUser,
 } from './team-management.ts'
 
-const invite = '/organization/invite-member'
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
 const selfDeparturePaths = new Set(['/organization/leave', '/organization/remove-member'])
-const protectedPaths = new Set([invite, changeRole, accept])
+const protectedPaths = new Set([changeRole, accept])
 
 export const teamRoleDenied = () =>
   new APIError('FORBIDDEN', {
     code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
     message: 'team_management_access_denied',
+  })
+
+export const recipientAlreadyMember = () =>
+  new APIError('CONFLICT', {
+    code: 'INVITATION_RECIPIENT_ALREADY_MEMBER',
+    message: 'The recipient already belongs to this team.',
   })
 
 /** Requests can assign one fixed role; legacy actor/target role strings are parsed separately. */
@@ -89,8 +94,8 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Keep Better Auth's native handlers, hooks and commit order. Only their narrow persistence
- * calls use the application transaction, so the shared actor locks and actual SQL write
+ * Keep Better Auth's role-change and acceptance handlers and hooks. Their narrow persistence
+ * calls use application transactions, so the shared actor locks and actual SQL write
  * use one connection. Holding those row locks around Better Auth's separate pool would
  * block its own FK checks; wrapping the whole handler would also change invitation hooks
  * that deliberately observe committed rows.
@@ -136,29 +141,6 @@ export function createTeamRolePolicy(
     return { facts, target, role }
   }
 
-  async function invitation(
-    ctx: AuthMiddlewareContext,
-    targetDb: Db,
-    lock: boolean,
-    actualRole: unknown = body(ctx).role,
-  ) {
-    const { facts } = await manager(ctx, targetDb, lock)
-    if (fixedTeamRole(actualRole) !== 'member') throw teamRoleDenied()
-    // Native resend retains the stored role and skips beforeCreateInvitation entirely.
-    if (body(ctx).resend === true && typeof body(ctx).email === 'string') {
-      const pending = await targetDb
-        .selectFrom('auth.invitation')
-        .select('role')
-        .where('organizationId', '=', facts.organizationId)
-        .where('email', '=', (body(ctx).email as string).toLowerCase())
-        .where('status', '=', 'pending')
-        .where('expiresAt', '>', new Date())
-        .execute()
-      if (pending.some((stored) => stored.role !== 'member')) throw teamRoleDenied()
-    }
-    return facts
-  }
-
   async function acceptance(ctx: AuthMiddlewareContext, trx: Transaction<Database>) {
     const actor = await principal(ctx)
     if (!actor) throw teamRoleDenied()
@@ -189,7 +171,7 @@ export function createTeamRolePolicy(
       .executeTakeFirst()
     if (
       stored?.role !== 'member' ||
-      stored.email.toLowerCase() !== user.email.toLowerCase() ||
+      stored.email.trim().toLowerCase() !== user.email.trim().toLowerCase() ||
       stored.status !== 'pending' ||
       new Date(stored.expiresAt).getTime() <= Date.now()
     ) {
@@ -201,6 +183,13 @@ export function createTeamRolePolicy(
       .where('organization_id', '=', organization.id)
       .executeTakeFirst()
     if (personal) throw teamRoleDenied()
+    const member = await trx
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', organization.id)
+      .where('userId', '=', actor.user.id)
+      .executeTakeFirst()
+    if (member) throw recipientAlreadyMember()
     return stored
   }
 
@@ -216,10 +205,8 @@ export function createTeamRolePolicy(
       if (!protectedPaths.has(ctx.path)) return
       if (!(await getSessionFromCtx(ctx))) return
       const input = body(ctx)
-      if (ctx.path === invite && input.role === undefined) input.role = 'member'
       await asAuthError(async () => {
         if (ctx.path === changeRole) await roleChange(ctx, db, false)
-        if (ctx.path === invite) await invitation(ctx, db, false)
         if (ctx.path === accept && typeof input.invitationId === 'string') {
           const session = await getSessionFromCtx(ctx)
           const stored = await db
@@ -247,7 +234,7 @@ export function createTeamRolePolicy(
     },
 
     adapter(adapter: DBTransactionAdapter): DBTransactionAdapter {
-      const { create, update, findOne, incrementOne, delete: remove } = adapter
+      const { update, findOne, incrementOne, delete: remove } = adapter
       adapter.delete = async (request) => {
         // Trusted auth.api calls use Better Auth's endpoint context without the HTTP
         // handler wrapper. They must share the same self-departure persistence guard.
@@ -321,7 +308,7 @@ export function createTeamRolePolicy(
         const ctx = requests.getStore()?.ctx
         if (
           ctx &&
-          (ctx.path === invite || ctx.path === changeRole) &&
+          ctx.path === changeRole &&
           request.model === 'member' &&
           result &&
           typeof result === 'object' &&
@@ -333,37 +320,6 @@ export function createTeamRolePolicy(
           return { ...result, role: teamRoles(result.role).join(',') } as never
         }
         return result
-      }
-      adapter.create = async (request) => {
-        const ctx = requests.getStore()?.ctx
-        if (ctx?.path !== invite || request.model !== 'invitation') return create(request)
-        return write(async (trx) => {
-          const data: Record<string, unknown> = request.data
-          const actor = await invitation(ctx, trx, true, data.role)
-          if (data.organizationId !== actor.organizationId || data.inviterId !== actor.userId) {
-            throw teamRoleDenied()
-          }
-          if (
-            typeof data.email !== 'string' ||
-            !(data.expiresAt instanceof Date) ||
-            !(data.createdAt instanceof Date)
-          ) {
-            throw teamRoleDenied()
-          }
-          return trx
-            .insertInto('auth.invitation')
-            .values({
-              organizationId: actor.organizationId,
-              inviterId: actor.userId,
-              email: data.email,
-              role: 'member',
-              status: 'pending',
-              expiresAt: data.expiresAt,
-              createdAt: data.createdAt,
-            })
-            .returningAll()
-            .executeTakeFirstOrThrow() as never
-        })
       }
       adapter.update = async (request) => {
         const ctx = requests.getStore()?.ctx
@@ -382,35 +338,6 @@ export function createTeamRolePolicy(
               .executeTakeFirstOrThrow()
             await recordTeamRoleChange(trx, target, facts.userId, role)
             return updated as never
-          })
-        }
-        if (ctx?.path === invite && request.model === 'invitation') {
-          return write(async (trx) => {
-            const actor = await invitation(ctx, trx, true)
-            const id = request.where.find((where) => where.field === 'id')?.value
-            if (
-              typeof id !== 'string' ||
-              !isUuid(id) ||
-              !selects(request.where, { id }) ||
-              body(ctx).resend !== true ||
-              !(request.update.expiresAt instanceof Date)
-            ) {
-              throw teamRoleDenied()
-            }
-            const stored = await trx
-              .selectFrom('auth.invitation')
-              .selectAll()
-              .where('id', '=', id)
-              .where('organizationId', '=', actor.organizationId)
-              .forUpdate()
-              .executeTakeFirst()
-            if (stored?.role !== 'member') throw teamRoleDenied()
-            return trx
-              .updateTable('auth.invitation')
-              .set({ expiresAt: request.update.expiresAt })
-              .where('id', '=', stored.id)
-              .returningAll()
-              .executeTakeFirstOrThrow() as never
           })
         }
         return update(request)
@@ -432,8 +359,8 @@ export function createTeamRolePolicy(
             throw teamRoleDenied()
           }
           const stored = await acceptance(ctx, trx)
-          // Native acceptance uses this returned snapshot to create the member inside its
-          // own member/session transaction. Never change that transaction's composition.
+          // Native acceptance uses this snapshot in its atomic member/session step.
+          // The HTTP recipient lock spans that step, including distinct invitations.
           return trx
             .updateTable('auth.invitation')
             .set({ status: 'accepted' })

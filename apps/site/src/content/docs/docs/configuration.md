@@ -122,6 +122,10 @@ for configuration and delivery behavior.
 | `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_HOUR` | `5` | Maximum sign-in emails sent to the same trimmed, lowercased address in a rolling hour, separate from booking recipient limits. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_DAY` | `20` | Same sign-in recipient limit over a rolling 24 hours. Positive integer. |
+| `INVITATION_INVITER_MAX_PER_HOUR` | `20` | Maximum admitted team invitation creations and explicit resends per inviter in a rolling hour, across all their teams. Positive integer. |
+| `INVITATION_INVITER_MAX_PER_DAY` | `100` | Same per-inviter admission limit over a rolling 24 hours. Positive integer. |
+| `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. |
+| `INVITATION_TEAM_MAX_PER_DAY` | `200` | Same per-team admission limit over a rolling 24 hours. Positive integer. |
 | `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification and sign-in email limit in a rolling hour. `0` is unlimited. Invitee/guest mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
@@ -136,6 +140,12 @@ recipient limits still apply. Suppressed notifications are terminal and are neve
 later, even after a limit resets. Suppressed sign-in jobs delete their outbox row without
 sending, and every sign-in request retains the same HTTP response. See [email abuse controls](/docs/notifications#email-abuse-controls)
 for retention and diagnostics.
+
+Invitation admission uses the `MAIL_RECIPIENT_MAX_PER_HOUR` and
+`MAIL_RECIPIENT_MAX_PER_DAY` defaults in its own recipient accounting domain. Admitted
+requests do not consume the instance's `MAIL_MAX_PER_HOUR` sending allowance. The current
+release records invitation delivery intent without sending invitation mail; its future
+sender must check and debit ordinary, non-reserved shared capacity when sending.
 
 `MAIL_FROM` is the organizer for new calendar invitations. Avoid a Gmail or Google Workspace
 address, or any other address registered as a Google account: Gmail may treat it as a Google

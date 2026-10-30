@@ -35,7 +35,7 @@ const serializedReads = new Set([
 export function serializeOrganizationContext(
   lockDb: Db,
   handler: (request: Request) => Promise<Response>,
-  readSession: (headers: Headers) => Promise<{ session: { id: string } } | null>,
+  readSession: (headers: Headers) => Promise<{ session: { id: string; userId: string } } | null>,
 ) {
   return async (request: Request) => {
     const path = new URL(request.url).pathname.replace(/^\/api\/auth/, '').replace(/\/+$/, '')
@@ -49,6 +49,14 @@ export function serializeOrganizationContext(
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.organization-context:${session.session.id}`}, 0))`.execute(
         trx,
       )
+      // Distinct legacy invitations can be accepted from different sessions of one user.
+      // Hold the same recipient fence through native member/session commit or rollback;
+      // row locks here would block Better Auth's own pool and break that transaction.
+      if (path === '/organization/accept-invitation') {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.invitation-acceptance:${session.session.userId}`}, 0))`.execute(
+          trx,
+        )
+      }
       return handler(request)
     })
   }
