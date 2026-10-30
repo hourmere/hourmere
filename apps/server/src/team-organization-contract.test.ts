@@ -1,4 +1,4 @@
-// TJ-01: exercise the installed organization plugin through Hourmere's HTTP boundary.
+// Exercise the installed organization plugin through Hourmere's HTTP boundary.
 import { createHmac, randomBytes } from 'node:crypto'
 import { createAuth, createAuthPool, createCallerResolver, type SignupPolicy } from '@hourmere/auth'
 import { createDb } from '@hourmere/db'
@@ -199,8 +199,7 @@ describe.skipIf(!serverUrl)('team organization HTTP contract (Better Auth 1.7.10
             user: {
               id: owner.id,
               name: 'Contract user',
-              email: 'list-owner@contract.example',
-              image: null,
+              ...(role === 'admin' && { email: 'list-owner@contract.example', image: null }),
             },
           },
         ],

@@ -6,6 +6,7 @@ import { chooseLanguage } from './i18n/store.ts'
 import { SessionProvider, useSession } from './session.tsx'
 import {
   emptyAccount,
+  emptyTeamLists,
   fakeApi,
   instance,
   json,
@@ -202,6 +203,7 @@ describe('the session gate', () => {
   it('checks the session again when the window regains focus', async () => {
     let me: Schemas['Me'] = ME
     const api = fakeApi({
+      ...emptyTeamLists,
       ...profile(),
       'GET /api/v1/me': () => json(200, me),
       'GET /api/auth/organization/get-active-member': () =>
@@ -574,6 +576,7 @@ describe('when the account or organization changes elsewhere', () => {
   } = {}) {
     const active = { current: start }
     const api = fakeApi({
+      ...emptyTeamLists,
       ...profile(),
       'GET /api/v1/me': () => json(200, active.current),
       'GET /api/auth/organization/list': () => json(200, [personal.organization, TEAM]),

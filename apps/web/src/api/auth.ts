@@ -262,3 +262,30 @@ export function listOrganizations(signal?: AbortSignal): Promise<Organization[]>
 export function getActiveOrganizationMember(signal?: AbortSignal): Promise<OrganizationMember> {
   return authRequest('/organization/get-active-member', signal ? { signal } : {})
 }
+
+/** A joined member; ordinary members receive only the public user summary. */
+export interface ListedOrganizationMember extends OrganizationMember {
+  user: { id: string; name: string; email?: string; image?: string | null }
+}
+
+export interface OrganizationMemberPage {
+  members: ListedOrganizationMember[]
+  total: number
+}
+
+/** Explicit organization and stable ordering keep paging bound to this settings view. */
+export function listOrganizationMembers(
+  organizationId: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<OrganizationMemberPage> {
+  const query = new URLSearchParams({
+    organizationId,
+    offset: String(offset),
+    limit: String(limit),
+    sortBy: 'id',
+    sortDirection: 'asc',
+  })
+  return authRequest(`/organization/list-members?${query}`, signal ? { signal } : {})
+}
