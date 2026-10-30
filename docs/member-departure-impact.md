@@ -1,7 +1,7 @@
 # Member departure impact
 
 `GET /api/v1/team/members/{memberUserId}/departure-impact?teamId={teamId}` is a read-only
-preview for a later leave or removal flow. It requires a current verified browser session
+preview for leave or removal flows. It requires a current verified browser session
 acting in that non-personal team. An ordinary member can inspect only themselves; a current
 owner or admin can inspect any current member of that team. Roles are parsed as exact
 comma-separated tokens from the database. Missing, removed and inaccessible targets all
@@ -19,6 +19,8 @@ guarantees or locks. Each request rechecks current facts,
 including after removal, demotion or an organization switch. This preview grants no authority
 to leave, remove, edit hosts or cancel. A later write must check its own current permissions
 and impact in its write transaction.
+The [safe team departure service](member-leave.md) performs that recheck under the shared
+team write locks before revoking the caller's membership.
 
 The response contains `evaluatedAt` and two independently paginated collections:
 

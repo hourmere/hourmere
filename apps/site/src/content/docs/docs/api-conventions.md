@@ -216,6 +216,7 @@ The existing covered endpoints are:
 | Change a member's role | `POST /api/auth/organization/update-member-role` |
 | Remove a member | `POST /api/auth/organization/remove-member` |
 | Leave a team | `POST /api/auth/organization/leave` |
+| Leave a team safely after resolving impact | `POST /api/v1/teams/{teamId}/leave` |
 | Change team settings, including name or slug | `POST /api/auth/organization/update` |
 
 For the session writes above, the expected organization must match both the operation's
@@ -305,6 +306,24 @@ they end or coordinating offline (`wait_until_end_or_coordinate_offline`). Futur
 use `coordinate_cancellation`, subject to separate authorization and existing cancellation
 time rules. This read neither cancels bookings nor authorizes leaving or removing a member.
 See the [full response and pagination contract](https://github.com/hourmere/hourmere/blob/main/docs/member-departure-impact.md).
+
+### Safe team departure
+
+`POST /api/v1/teams/{teamId}/leave` requires a verified browser session, an empty JSON object
+and `X-Expected-Organization-Id` bound to the team where the action started. Missing or
+invalid sessions and any Authorization header return `403 team_management_access_denied`
+without a `WWW-Authenticate` challenge, even alongside a valid cookie. Authorization
+headers are rejected before credential resolution. Stale context returns
+`409 organization_context_changed`; reload before retrying.
+
+An owner needs another current owner before leaving. The locked refusal is
+`409 member_departure_owner_required`, with the message "Another owner is needed before
+you can leave." and `handling.owner: another_owner_is_needed_before_you_can_leave`.
+The owner check and the event/booking impact recheck share the membership transaction's
+organization write lock. Two owners leaving concurrently cannot both succeed.
+Unresolved impact returns `409 member_departure_blocked` with bounded `impact` pages and
+handling steps. Success revokes membership and returns the personal `organizationId`.
+See the [full safe departure contract](https://github.com/hourmere/hourmere/blob/main/docs/member-leave.md).
 
 ### Integration settings
 

@@ -3,11 +3,9 @@
 import { createHash } from 'node:crypto'
 import { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from '@hourmere/auth'
 import {
-  acceptLanguage,
-  cookieLanguage,
   type InterfaceLanguage,
   LANGUAGE_COOKIE,
-  localeFallbacks,
+  resolveAdminLanguage,
 } from '@hourmere/core/language'
 import type { Context } from 'hono'
 import { confirmationCatalogues, confirmationLocales } from './i18n/confirmation.ts'
@@ -213,11 +211,10 @@ ${confirmationLocales.map(({ code, nativeName }) => `<option value="${code}" lan
 
 /** GET/HEAD renders only static language data. Opening a link creates no preference cookie. */
 export function signInConfirmPage(c: Context) {
-  const preference =
-    cookieLanguage(c.req.header('Cookie')) ??
-    acceptLanguage(c.req.header('Accept-Language'), 'admin')
-  const language =
-    localeFallbacks(preference).find((code) => Object.hasOwn(confirmationCatalogues, code)) ?? 'en'
+  const language = resolveAdminLanguage({
+    cookie: c.req.header('Cookie'),
+    acceptLanguage: c.req.header('Accept-Language'),
+  })
   return c.html(page(language), 200, {
     'Content-Security-Policy': CSP,
     'Referrer-Policy': 'no-referrer',
