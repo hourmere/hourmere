@@ -362,19 +362,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     const target = await createTestTeam(db, [{ user: f.actor, role: 'member' }])
     const selected = application(selectedAuth)
     const adapter = (await selectedAuth.$context).adapter
-    const method = path === 'create' ? 'create' : 'update'
-    const original = adapter[method].bind(adapter)
-    const spy = vi.spyOn(adapter, method)
     let entered = false
-    spy.mockImplementation((async (input: Parameters<typeof original>[0]) => {
-      if (
-        !entered &&
-        (path === 'create'
-          ? input.model === 'organization'
-          : input.model === 'session' &&
-            'update' in input &&
-            input.update.activeOrganizationId === target.id)
-      ) {
+    const revoke = async () => {
+      if (!entered) {
         entered = true
         if (path === 'create')
           await db
@@ -389,10 +379,30 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
             .where('userId', '=', f.actor.id)
             .execute()
       }
-      return path === 'create'
-        ? (original as typeof adapter.create)(input as Parameters<typeof adapter.create>[0])
-        : (original as typeof adapter.update)(input as Parameters<typeof adapter.update>[0])
-    }) as typeof original)
+    }
+    const transaction = adapter.transaction.bind(adapter)
+    const update = adapter.update.bind(adapter)
+    const spy =
+      path === 'create'
+        ? vi.spyOn(adapter, 'transaction').mockImplementation((callback) =>
+            transaction(async (trx) => {
+              // Native creation inserts through its transaction adapter. Revoke on the
+              // independent connection before the policy takes its locked write snapshot.
+              const create = trx.create.bind(trx)
+              trx.create = async (input) => {
+                if (input.model === 'organization') await revoke()
+                return create(input)
+              }
+              return callback(trx)
+            }),
+          )
+        : vi.spyOn(adapter, 'update').mockImplementation((async (
+            input: Parameters<typeof update>[0],
+          ) => {
+            if (input.model === 'session' && input.update.activeOrganizationId === target.id)
+              await revoke()
+            return update(input)
+          }) as typeof update)
     const slug = randomUUID()
     try {
       const response = await selected.request(`/api/auth/organization/${path}`, {
@@ -1087,7 +1097,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         path === 'create' ? 'ctx.path === createOrganization' : 'ctx.path === setActiveOrganization'
       await expect(
         verifyContextPersistence(path, await policyCopy(branch, 'false')),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+      ).rejects.toMatchObject({ name: 'AssertionError', actual: 200, expected: 403 })
     },
   )
 })

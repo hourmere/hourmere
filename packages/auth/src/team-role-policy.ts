@@ -131,9 +131,10 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Keep Better Auth's handlers and hooks. Native creation and acceptance share an enclosing
- * adapter transaction with this policy's locks and writes. Other membership operations
- * retain their short application transactions; invitation admission/delivery is separate.
+ * Keep Better Auth's handlers and hooks. Whenever a native adapter transaction is active,
+ * this policy's locks and writes join it, including administrative member removal.
+ * Creation and acceptance add an enclosing native transaction. Policy writes without a
+ * native transaction use their own short transaction; invitation admission/delivery is separate.
  */
 export function createTeamRolePolicy(
   db: Db,
@@ -274,7 +275,9 @@ export function createTeamRolePolicy(
       .forUpdate()
       .executeTakeFirst()
     if (!organization) throw teamRoleDenied()
-    await teamSession(trx, actor, true)
+    // Native session activation writes this row before commit. Reserve that mode now
+    // so concurrent trusted acceptances cannot both take SHARE and deadlock upgrading.
+    await teamSession(trx, actor, 'no-key-update')
     const stored = await trx
       .selectFrom('auth.invitation')
       .selectAll()

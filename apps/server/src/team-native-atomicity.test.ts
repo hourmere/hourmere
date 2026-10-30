@@ -14,7 +14,7 @@ const origin = 'http://localhost:4397'
 const secret = randomBytes(32).toString('base64')
 const barrier = [1848329061, 1668440435]
 
-type Mutation = 'create' | 'accept' | 'binding' | 'clock' | 'limit'
+type Mutation = 'create' | 'accept' | 'binding' | 'clock' | 'limit' | 'session'
 
 function moduleUrl(source: string, location: URL, replacements: Record<string, string> = {}) {
   const code = stripTypeScriptTypes(source).replace(/from '([^']+)'/g, (_, specifier: string) => {
@@ -48,6 +48,10 @@ async function sourceCopy(mutation?: Mutation): Promise<typeof createAuth> {
     binding: ['const trx = transactions.getStore()', 'const trx = undefined'],
     clock: ['if (!validity.active) throw teamRoleDenied()', 'if (false) throw teamRoleDenied()'],
     limit: ['if (Number(count.total) >= teamMembershipLimit) {', 'if (false) {'],
+    session: [
+      "await teamSession(trx, actor, 'no-key-update')",
+      'await teamSession(trx, actor, true)',
+    ],
   }
   const copy = (path: string, bindings: Record<string, string> = {}) => {
     const location = new URL(`../../../packages/auth/src/${path}`, import.meta.url)
@@ -175,9 +179,9 @@ describe.skipIf(!serverUrl)('native team write durability through HTTP and Postg
     })
   }
 
-  async function invitationFixture() {
+  async function invitationFixture(invited?: Awaited<ReturnType<typeof account>>) {
     const owner = await account()
-    const recipient = await account()
+    const recipient = invited ?? (await account())
     const team = await db
       .insertInto('auth.organization')
       .values({ name: 'Synthetic durable team', slug: randomUUID(), createdAt: new Date() })
@@ -204,7 +208,163 @@ describe.skipIf(!serverUrl)('native team write durability through HTTP and Postg
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    return { recipient, team, invitation }
+    return { owner, recipient, team, invitation }
+  }
+
+  async function verifySameSessionAcceptances(factory = createAuth) {
+    const auth = authentication(factory)
+    const recipient = await account()
+    // Avoid an unrelated pre-handler session renewal while the test holds its row.
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(Date.now() + 7 * 86_400_000) })
+      .where('id', '=', recipient.sessionId)
+      .execute()
+    const rounds: { successes: number; statuses: string[]; memberships: number }[] = []
+    // Widen the actual database write gap after both requests have reached the session
+    // lock. SHARE locks then deadlock on session activation; NO KEY UPDATE queues them.
+    await owned.pool.query(`CREATE FUNCTION public.pause_concurrent_acceptance() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.status = 'accepted' THEN PERFORM pg_sleep(0.03); END IF;
+        RETURN NEW;
+      END $$`)
+    await owned.pool.query(`CREATE TRIGGER pause_concurrent_acceptance
+      BEFORE UPDATE ON auth.invitation FOR EACH ROW
+      EXECUTE FUNCTION public.pause_concurrent_acceptance()`)
+    try {
+      for (let round = 0; round < 10; round++) {
+        const fixtures = [await invitationFixture(recipient), await invitationFixture(recipient)]
+        const holder = await owned.pool.connect()
+        const pending: Promise<unknown>[] = []
+        let outcomes: PromiseSettledResult<unknown>[]
+        try {
+          await holder.query('BEGIN')
+          await holder.query('SELECT id FROM auth.session WHERE id=$1 FOR UPDATE', [
+            recipient.sessionId,
+          ])
+          for (const f of fixtures) {
+            pending.push(
+              auth.api.acceptInvitation({
+                body: { invitationId: f.invitation.id },
+                headers: new Headers({ cookie: recipient.cookie, origin }),
+              }),
+            )
+          }
+          // Install rejection handlers before releasing either database request.
+          const settled = Promise.allSettled(pending)
+          await vi.waitFor(
+            async () => {
+              const blocked = await owned.pool.query<{ pid: number }>(
+                `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+                  AND wait_event_type='Lock'`,
+              )
+              expect(
+                blocked.rows,
+                'both trusted acceptances reach the same session row',
+              ).toHaveLength(2)
+            },
+            { timeout: 5000, interval: 10 },
+          )
+          await holder.query('COMMIT')
+          outcomes = await settled
+        } finally {
+          await holder.query('ROLLBACK')
+          holder.release()
+          await Promise.allSettled(pending)
+        }
+        const teamIds = fixtures.map((f) => f.team.id)
+        const invitations = await db
+          .selectFrom('auth.invitation')
+          .select('status')
+          .where('organizationId', 'in', teamIds)
+          .execute()
+        const members = await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('organizationId', 'in', teamIds)
+          .where('userId', '=', recipient.id)
+          .execute()
+        rounds.push({
+          successes: outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
+          statuses: invitations.map((invitation) => invitation.status).sort(),
+          memberships: members.length,
+        })
+      }
+      expect(rounds, 'both trusted acceptances on one session succeed in all ten rounds').toEqual(
+        Array.from({ length: 10 }, () => ({
+          successes: 2,
+          statuses: ['accepted', 'accepted'],
+          memberships: 2,
+        })),
+      )
+    } finally {
+      await owned.pool.query('DROP TRIGGER pause_concurrent_acceptance ON auth.invitation')
+      await owned.pool.query('DROP FUNCTION public.pause_concurrent_acceptance()')
+    }
+  }
+
+  async function verifyJoinedRemoval(factory = createAuth) {
+    const auth = authentication(factory)
+    const f = await invitationFixture()
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: f.team.id,
+        userId: f.recipient.id,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: f.team.id })
+      .where('id', '=', f.owner.sessionId)
+      .execute()
+    const context = await auth.$context
+    const transaction = context.adapter.transaction.bind(context.adapter)
+    let completed = false
+    context.adapter.transaction = (operation) =>
+      transaction(async (adapter) => {
+        await operation(adapter)
+        completed = true
+        throw new Error('Synthetic failure after native member removal')
+      })
+    const app = createApp({
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      checkDb: async () => {},
+      publicUrl: origin,
+    })
+    const response = await app.request('/api/auth/organization/remove-member', {
+      method: 'POST',
+      headers: {
+        cookie: f.owner.cookie,
+        origin,
+        'content-type': 'application/json',
+        'x-expected-organization-id': f.team.id,
+      },
+      body: JSON.stringify({ organizationId: f.team.id, memberIdOrEmail: f.recipient.email }),
+    })
+    expect(completed, 'the native removal finishes before the enclosing transaction aborts').toBe(
+      true,
+    )
+    expect(response.status).toBe(500)
+    expect(
+      await db
+        .selectFrom('auth.member')
+        .select('userId')
+        .where('organizationId', '=', f.team.id)
+        .where('userId', '=', f.recipient.id)
+        .execute(),
+      'member removal rolls back with the joined native transaction',
+    ).toEqual([{ userId: f.recipient.id }])
+    expect(
+      await db
+        .selectFrom('organization_operations')
+        .select('id')
+        .where('organization_id', '=', f.team.id)
+        .execute(),
+    ).toEqual([])
   }
 
   /**
@@ -513,6 +673,32 @@ describe.skipIf(!serverUrl)('native team write durability through HTTP and Postg
   it('serializes different recipients competing for the last team membership slot', async () => {
     await verifyMembershipLimit()
   })
+
+  it('accepts two teams concurrently on the same trusted session for ten rounds', async () => {
+    await verifySameSessionAcceptances()
+  }, 30_000)
+
+  it('rolls member removal and its operation record back with the joined native transaction', async () => {
+    await verifyJoinedRemoval()
+  })
+
+  it('detects a policy transaction detached from native member removal', async () => {
+    await expect(verifyJoinedRemoval(await sourceCopy('binding'))).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining(
+        'member removal rolls back with the joined native transaction',
+      ),
+    })
+  })
+
+  it('detects session SHARE lock upgrades with ten real database races', async () => {
+    await expect(verifySameSessionAcceptances(await sourceCopy('session'))).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining(
+        'both trusted acceptances on one session succeed in all ten rounds',
+      ),
+    })
+  }, 30_000)
 
   it('rolls a trusted sessionless creation back and permits a later native API retry', async () => {
     const auth = authentication()
