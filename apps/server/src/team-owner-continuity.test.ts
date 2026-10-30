@@ -304,7 +304,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
         .execute(),
       bookings: await db
         .selectFrom('bookings')
-        .select(['id', 'status'])
+        .select(['id', 'status', 'required_host_user_ids'])
         .where('organization_id', '=', f.teamId)
         .orderBy('id')
         .execute(),
@@ -317,6 +317,63 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
         .orderBy('host.user_id')
         .execute(),
     }
+  }
+
+  async function retainedHistory(f: Fixture) {
+    const eventId = await createFixtures(db).eventType(f.teamId, null, {
+      title: 'Inactive configuration retained through departure',
+      isActive: false,
+      deletedAt: '2026-01-02T12:00:00Z',
+      hosts: [{ userId: f.first.user.id }, { userId: f.second.user.id }],
+    })
+    const hostIds = [f.first.user.id, f.second.user.id].sort()
+    const booking = await db
+      .insertInto('bookings')
+      .values({
+        organization_id: f.teamId,
+        event_type_id: eventId,
+        title: 'Completed owner booking retained through departure',
+        start_at: '2026-01-01T12:00:00Z',
+        end_at: '2026-01-01T13:00:00Z',
+        required_host_user_ids: hostIds,
+        manage_token_hash: randomBytes(32),
+        source: 'web',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_hosts')
+      .values(hostIds.map((userId) => ({ booking_id: booking.id, user_id: userId })))
+      .execute()
+  }
+
+  async function onlySafeLeaveWrites(
+    f: Fixture,
+    before: Awaited<ReturnType<typeof state>>,
+    departing: Participant,
+  ) {
+    const after = await state(f)
+    expect(
+      after,
+      'the departure is the only write, including sessions and saved booking hosts',
+    ).toEqual({
+      ...before,
+      members: before.members.filter((member) => member.userId !== departing.user.id),
+      sessions: before.sessions.map((session) =>
+        session.id === departing.login.id
+          ? { ...session, activeOrganizationId: departing.user.principal.organization.id }
+          : session,
+      ),
+      operations: after.operations,
+    })
+    expect(after.operations).toHaveLength(1)
+    expect(after.operations[0]).toMatchObject({
+      operation: 'member_removed',
+      actor_user_id: departing.user.id,
+      target_user_id: departing.user.id,
+      previous_role: 'owner',
+      new_role: null,
+    })
   }
 
   it.each(['leave', 'remove', 'REST leave'] as const)(
@@ -596,6 +653,8 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
 
   async function ownerLeaveRace(actions: readonly [Action, Action], copy?: SourceCopy) {
     const f = await fixture()
+    await retainedHistory(f)
+    const before = await state(f)
     const responses = await lockedRequests(
       f,
       [
@@ -616,6 +675,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     )
     expect(await memberships(f), 'the team retains exactly one owner').toHaveLength(1)
     expect((await memberships(f))[0]?.role).toBe('owner')
+    await onlySafeLeaveWrites(f, before, responses[0]?.status === 200 ? f.first : f.second)
   }
 
   it.each([
@@ -678,10 +738,131 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
   it('serializes REST owner leave with an administrator role change of another member', () =>
     memberChangeRace('demote', undefined, 'REST leave'))
 
+  async function blockedWrite(blocker: number, table: string, message: string) {
+    let pid: number | undefined
+    await vi.waitFor(
+      async () => {
+        const waiting = await owned.pool.query<{ pid: number }>(
+          `SELECT pid FROM pg_stat_activity
+           WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))
+             AND query ILIKE $2 AND query ILIKE '%for update%'`,
+          [blocker, `%"auth"."${table}"%`],
+        )
+        expect(waiting.rows, message).toHaveLength(1)
+        pid = waiting.rows[0]?.pid
+      },
+      { timeout: 3000, interval: 10 },
+    )
+    return pid as number
+  }
+
+  async function removalRoleRace(action: 'remove' | 'REST remove', copy?: SourceCopy) {
+    const f = await fixture()
+    const user = await createTestUser(db, 'Member removed during a role change')
+    const member = await db
+      .insertInto('auth.member')
+      .values({ organizationId: f.teamId, userId: user.id, role: 'admin', createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const target = { user, memberId: member.id, login: await login(user, f.teamId) }
+    const eventId = await createFixtures(db).eventType(f.teamId, null, {
+      title: 'Hosting deactivated by removal',
+      hosts: [{ userId: user.id }],
+    })
+    const saved = await db
+      .insertInto('bookings')
+      .values({
+        organization_id: f.teamId,
+        event_type_id: eventId,
+        title: 'Saved required hosts survive concurrent membership changes',
+        start_at: '2026-01-01T12:00:00Z',
+        end_at: '2026-01-01T13:00:00Z',
+        required_host_user_ids: [user.id],
+        manage_token_hash: randomBytes(32),
+        source: 'web',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_hosts')
+      .values({ booking_id: saved.id, user_id: user.id })
+      .execute()
+    const before = await state(f)
+    const server = copy ? application(copy).app : app
+    const holder = await owned.pool.connect()
+    const pending: Promise<Response>[] = []
+    try {
+      await holder.query('BEGIN')
+      await holder.query('SELECT id FROM auth.member WHERE id=$1 FOR UPDATE', [member.id])
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+        .rows[0]?.pid as number
+      pending.push(Promise.resolve(request(f, action, f.first, target, server)))
+      const removalPid = await blockedWrite(
+        holderPid,
+        'member',
+        'removal must hold the organization before waiting for its target member',
+      )
+      pending.push(Promise.resolve(request(f, 'demote', f.second, target, server)))
+      await blockedWrite(
+        removalPid,
+        'organization',
+        'role change must wait for the removal organization lock before its target member',
+      )
+      // The graph is holder ← removal(target) ← role change(organization), with no cycle.
+      // A role writer that locks its target first would instead join the holder wait.
+      await holder.query('COMMIT')
+      const [removed, changed] = await Promise.all(pending)
+      expect(removed?.status, 'removal must commit without a deadlock').toBe(200)
+      await accessDenied(changed as Response)
+      const after = await state(f)
+      expect(after.members).toEqual(before.members.filter((current) => current.userId !== user.id))
+      expect(after.members.filter((current) => current.role === 'owner')).toHaveLength(2)
+      expect(after.sessions).toEqual(before.sessions)
+      expect(after.events).toEqual([{ id: eventId, is_active: false }])
+      expect(after.bookings, 'removal must preserve the original required-host snapshot').toEqual(
+        before.bookings,
+      )
+      expect(after.hosts).toEqual(before.hosts)
+      expect(after.operations).toHaveLength(1)
+      expect(after.operations[0]).toMatchObject({
+        operation: 'member_removed',
+        actor_user_id: f.first.user.id,
+        target_user_id: user.id,
+        previous_role: 'admin',
+        new_role: null,
+      })
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+      await Promise.allSettled(pending)
+    }
+  }
+
+  it.each(['remove', 'REST remove'] as const)(
+    'takes the organization before target member locks for %s racing a native role change',
+    (action) => removalRoleRace(action),
+  )
+
+  it('detects reversing native role target and organization locks with a real wait-graph assertion', async () => {
+    const copy = await sourceCopy({
+      policy: [
+        [
+          'const { facts } = await manager(ctx, targetDb, lock)',
+          `if (lock) await targetDb.selectFrom('auth.member').select('id').where('id', '=', body(ctx).memberId).forUpdate().execute()
+    const { facts } = await manager(ctx, targetDb, lock)`,
+        ],
+      ],
+    })
+    await expect(removalRoleRace('remove', copy)).rejects.toThrow(
+      'role change must wait for the removal organization lock before its target member',
+    )
+  })
+
   it.each(['demote', 'remove', 'REST remove'] as const)(
     'refuses concurrent owner-on-owner %s requests without writing',
     async (action) => {
       const f = await fixture()
+      await retainedHistory(f)
       const before = await state(f)
       const responses = await Promise.all([
         request(f, action, f.first, f.second),
@@ -696,6 +877,8 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     'refuses an owner-on-owner %s while that owner safely leaves',
     async (action) => {
       const f = await fixture()
+      await retainedHistory(f)
+      const before = await state(f)
       const responses = await lockedRequests(
         f,
         [
@@ -707,13 +890,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
       expect(responses[0]?.status).toBe(200)
       await accessDenied(responses[1] as Response, action.startsWith('REST'))
       expect(await memberships(f)).toEqual([{ userId: f.second.user.id, role: 'owner' }])
-      const operations = (await state(f)).operations
-      expect(operations).toHaveLength(1)
-      expect(operations[0]).toMatchObject({
-        operation: 'member_removed',
-        actor_user_id: f.first.user.id,
-        target_user_id: f.first.user.id,
-      })
+      await onlySafeLeaveWrites(f, before, f.first)
     },
   )
 
@@ -864,6 +1041,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     const copy = await sourceCopy()
     await ownerLeaveRace(['leave', 'leave'], copy)
     await memberChangeRace('REST remove', copy)
+    await removalRoleRace('remove', copy)
     await destructiveRefusal(copy)
   })
 

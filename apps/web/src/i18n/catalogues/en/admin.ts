@@ -27,6 +27,12 @@ export const admin = {
     'Email delivery is not guaranteed. Contact the invitee directly if needed.',
   'Hourmere does not automatically assign another host. A replacement requires a new booking.':
     'Hourmere does not automatically assign another host. A replacement requires a new booking.',
+  'Join team': 'Join team',
+  'Go to team': 'Go to team',
+  'Invited email': 'Invited email',
+  'You are already a member of {team}.': 'You are already a member of {team}.',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
+    'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
   Pending: 'Pending',
   'Team members': 'Team members',
   'Pending invitations are not members or hosts.': 'Pending invitations are not members or hosts.',
