@@ -276,9 +276,9 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       },
       f.organizationId,
     )
-    expect(denied.status).toBe(400)
+    expect(denied.status).toBe(403)
     expect(await denied.json()).toMatchObject({
-      code: 'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER',
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
     })
     const other = await fixture()
     const crossTeam = await post(
@@ -419,8 +419,9 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       },
       personalId,
     )
-    expect(removed.status).toBe(200)
-    expect(await membership(legacy.id)).toBeUndefined()
+    expect(removed.status).toBe(403)
+    expect(await removed.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
+    expect(await membership(legacy.id)).toBeDefined()
     expect(await operations(personalId)).toEqual([])
   })
 
@@ -575,7 +576,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         LANGUAGE plpgsql AS $$ BEGIN
           RAISE EXCEPTION 'Synthetic operation record failure';
         END $$;
-        CREATE TRIGGER reject_synthetic_member_operation BEFORE ${path === 'remove-member' ? 'UPDATE' : 'INSERT'}
+        CREATE TRIGGER reject_synthetic_member_operation BEFORE INSERT
         ON public.organization_operations FOR EACH ROW
         EXECUTE FUNCTION public.reject_synthetic_member_operation();
       `)

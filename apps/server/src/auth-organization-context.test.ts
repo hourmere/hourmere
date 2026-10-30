@@ -319,14 +319,14 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
       )
       expect(denied.status).toBe(403)
       expect(await denied.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
-      await refused(
-        await post(
-          'remove-member',
-          f.cookie,
-          { organizationId: f.first.id, memberIdOrEmail: memberId },
-          f.first.id,
-        ),
+      const removed = await post(
+        'remove-member',
+        f.cookie,
+        { organizationId: f.first.id, memberIdOrEmail: memberId },
+        f.first.id,
       )
+      expect(removed.status).toBe(403)
+      expect(await removed.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
     }
     expect(await snapshot(f)).toEqual(before)
   })

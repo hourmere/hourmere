@@ -224,6 +224,7 @@ The existing covered endpoints are:
 | Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
 | Change a member's role | `POST /api/auth/organization/update-member-role` |
 | Remove a member | `POST /api/auth/organization/remove-member` |
+| Remove a member and return the handling record | `POST /api/v1/team/members/{memberUserId}/removal` |
 | Leave a team | `POST /api/auth/organization/leave` |
 | Leave a team safely after resolving impact | `POST /api/v1/teams/{teamId}/leave` |
 | Change team settings, including name or slug | `POST /api/auth/organization/update` |
@@ -315,6 +316,45 @@ they end or coordinating offline (`wait_until_end_or_coordinate_offline`). Futur
 use `coordinate_cancellation`, subject to separate authorization and existing cancellation
 time rules. This read neither cancels bookings nor authorizes leaving or removing a member.
 See the [full response and pagination contract](https://github.com/hourmere/hourmere/blob/main/docs/member-departure-impact.md).
+
+### Immediate member removal
+
+`POST /api/v1/team/members/{memberUserId}/removal` accepts the strict body `{teamId}`
+and requires `X-Expected-Organization-Id`. A current verified owner can remove an admin
+or member; an admin can remove a member. Owner targets are refused. Missing and
+inaccessible members receive the same `403 team_management_access_denied`.
+Missing or invalid sessions and any Authorization header, even with a valid session
+cookie, receive that same denial without a `WWW-Authenticate` challenge. Authorization
+headers are refused before credentials are resolved. Cookie writes require a same-origin
+Origin or Referer. The header and body `teamId` must match the current session team;
+missing or stale context returns `409 organization_context_changed` without writing.
+Reload the page before submitting again.
+
+The membership revocation, affected event-type deactivation and removal operation record
+commit together. Individual and collective team types using the member are deactivated;
+round-robin types are deactivated when no other current verified team host remains.
+Personal event types and other teams are untouched. Existing bookings and saved hosts
+remain intact. Repair affected configurations and explicitly reactivate them before taking
+new bookings. For another member, Better Auth's native `remove-member` endpoint uses the
+same transaction and target policy, with its own response and error format. A self target
+uses safe team departure instead, including the owner and impact checks described below.
+
+The REST response is `{operationId, memberUserId, deactivatedEventTypeIds}`.
+`GET /api/v1/team/member-removals/{operationId}?teamId={teamId}` lets current verified
+owners/admins read the handling list after the member has been removed. It returns
+`id`, `memberUserId`, `removedAt`, `evaluatedAt`, `reason: "member_removed"` and
+`bookings: {data, nextCursor, totalCount}`. Bookings use the departure preview's field
+whitelist and handling reasons, with confirmed bookings ending after `evaluatedAt`.
+`limit` accepts 1–100 (default 50); follow `nextCursor` as `cursor` with the same team
+and removal ID. Pages use exact stored start time and ID; counts cover all current matches.
+Each request recalculates unfinished bookings. The record does not grant cancellation
+permission or relax cancellation time rules. Inaccessible and missing records share the
+same 403 denial. This read is session-only and does not expose the general operation log.
+After a native removal, use
+`GET /api/v1/team/members/{memberUserId}/removal-handling?teamId={teamId}` to discover
+the latest removal's handling list without an operation ID. It has the same response,
+access rules and pagination bounds; its returned `id` pins that record for subsequent
+requests through the removal-record route.
 
 ### Safe team departure
 

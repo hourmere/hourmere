@@ -182,8 +182,9 @@ describe.skipIf(!serverUrl)('team organization HTTP contract (Better Auth 1.7.10
       const user = await actor(`list-${role}@contract.example`)
       await testDb.pool.query(
         `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt")
-         VALUES ($1, $2, $3, now())`,
-        [team.id, user.id, role],
+         VALUES ($1, $2, $3, $4::timestamptz + interval '1 second')`,
+        // The application and database clocks need not agree on fixture ordering.
+        [team.id, user.id, role, team.members[0]?.createdAt],
       )
       const response = await get(
         `list-members?organizationId=${team.id}&limit=1&offset=0&sortBy=createdAt&sortDirection=asc`,
