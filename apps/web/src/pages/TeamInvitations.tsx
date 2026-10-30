@@ -1,69 +1,36 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
-import { inviteMember, type QueuedInvitation, resendInvitation } from '../api/auth.ts'
+import { inviteMember, type QueuedInvitation } from '../api/auth.ts'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
-import { BreakableText } from '../components/BreakableText.tsx'
 import { OrganizationContextConflict } from '../components/OrganizationContextConflict.tsx'
-import { browserTimeZone, zoned } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { type MessageKey, msg, type UiText } from '../i18n/translate.ts'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
+import { InvitationRow } from './team-invitations/InvitationRow.tsx'
 
 const PAGE_SIZE = 20
 const EXISTING_INVITATION_PAGE_LIMIT = 5
-const deliveryLabels: Record<Schemas['TeamInvitationSummary']['delivery']['state'], MessageKey> = {
-  queued: 'Waiting to send',
-  sending: 'Submitting to the mail server',
-  smtp_accepted: 'Accepted by the mail server',
-  failed: 'Submission failed',
-  skipped: 'Submission skipped',
-  unknown: 'Submission status unknown',
-}
-
 /** A remount discards observations and drafts belonging to the previous team. */
 export function TeamInvitations({ organizationId }: { organizationId: string }) {
   return <InvitationManagement key={organizationId} organizationId={organizationId} />
 }
 
 function InvitationManagement({ organizationId }: { organizationId: string }) {
-  const { ui } = useI18n()
   const [revision, setRevision] = useState(0)
   const [existingInvitation, setExistingInvitation] = useState<QueuedInvitation | null>(null)
-  const [resendNotice, setResendNotice] = useState<UiText | null>(null)
-  const resendFeedback = useRef<HTMLParagraphElement>(null)
-  useEffect(() => {
-    if (resendNotice) resendFeedback.current?.focus()
-  }, [resendNotice])
   return (
     <>
       <InviteMember
         organizationId={organizationId}
         onQueued={(invitation) => {
           setExistingInvitation(invitation.existing ? invitation : null)
-          setResendNotice(null)
           setRevision((value) => value + 1)
         }}
       />
-      {resendNotice && (
-        <p ref={resendFeedback} role="status" tabIndex={-1}>
-          {ui(resendNotice)}
-        </p>
-      )}
       <PendingInvitations
         key={revision}
         organizationId={organizationId}
         existingInvitation={existingInvitation}
-        onResent={(invitation) => {
-          setExistingInvitation(null)
-          setResendNotice(
-            msg(
-              invitation.delivery.state === 'queued'
-                ? 'Invitation queued for delivery.'
-                : 'An invitation already exists. Review its mail submission status below.',
-            ),
-          )
-          setRevision((value) => value + 1)
-        }}
       />
     </>
   )
@@ -84,7 +51,8 @@ function invitationError(error: unknown): UiText {
     INVITATION_DELIVERY_UNAVAILABLE:
       'The invitation was saved, but delivery could not be queued. Retry with the same email address.',
     INVITATION_REQUEST_FAILED: 'The invitation request could not be queued. Try again later.',
-    INVITATION_CONFLICT: 'The invitation changed. Reload before trying again.',
+    INVITATION_CONFLICT:
+      'A newer invitation exists for this address. Review the pending invitations.',
     INVITATION_INELIGIBLE: 'This invitation is no longer pending. Reload before trying again.',
     INVITATION_DELIVERY_BUSY: 'Invitation delivery is in progress. Try again shortly.',
     INVITATION_GENERATION_LIMIT: 'This invitation has reached its resend limit.',
@@ -219,28 +187,58 @@ type PageState = { status: 'ready'; data: InvitationPage } | { status: 'error'; 
 function PendingInvitations({
   organizationId,
   existingInvitation,
-  onResent,
 }: {
   organizationId: string
   existingInvitation: QueuedInvitation | null
-  onResent: (invitation: QueuedInvitation) => void
 }) {
-  const { t, ui, locale } = useI18n()
+  const { t, ui } = useI18n()
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined])
   const [version, setVersion] = useState(0)
+  const [filter, setFilter] = useState<'pending' | 'expired' | 'all'>('pending')
+  const observed = useRef(new Map<string, Schemas['TeamInvitationSummary']>())
+  const rowKeys = useRef(new Map<string, string>())
+  const filterId = useId()
   const seekExistingInvitation = useRef(Boolean(existingInvitation))
   const [existingInvitationMissing, setExistingInvitationMissing] = useState(false)
   const cursor = cursors[cursors.length - 1]
   const load = useCallback(
-    (signal: AbortSignal) =>
-      unwrap(
+    async (signal: AbortSignal) => {
+      const data = await unwrap(
         api.GET('/api/v1/team/invitations', {
           headers: { 'X-Expected-Organization-Id': organizationId },
-          params: { query: { status: 'pending', limit: PAGE_SIZE, ...(cursor && { cursor }) } },
+          params: {
+            query: {
+              ...(filter !== 'all' && { status: filter }),
+              limit: PAGE_SIZE,
+              ...(cursor && { cursor }),
+            },
+          },
           signal,
         }),
-      ),
-    [cursor, organizationId],
+      )
+      const seen = new Set(data.data.map(({ id }) => id))
+      const retained = await Promise.all(
+        [...observed.current.keys()]
+          .filter((id) => !seen.has(id))
+          .map((invitationId) =>
+            unwrap(
+              api.GET('/api/v1/team/invitations/{invitationId}', {
+                params: {
+                  path: { invitationId },
+                  header: { 'x-expected-organization-id': organizationId },
+                },
+                signal,
+              }),
+            ),
+          ),
+      )
+      signal.throwIfAborted()
+      for (const summary of [...data.data, ...retained]) {
+        if (observed.current.has(summary.id)) observed.current.set(summary.id, summary)
+      }
+      return { ...data, data: [...data.data, ...retained] }
+    },
+    [cursor, filter, organizationId],
   )
   const [result, setResult] = useState<{ load: typeof load; state: PageState }>()
   // biome-ignore lint/correctness/useExhaustiveDependencies: version requests a fresh page after failure
@@ -259,7 +257,10 @@ function PendingInvitations({
           seekExistingInvitation.current = false
           setExistingInvitationMissing(!found)
         }
-        setResult({ load, state: { status: 'ready', data } })
+        setResult({
+          load,
+          state: { status: 'ready', data },
+        })
       },
       (error: unknown) => {
         if (!controller.signal.aborted) setResult({ load, state: { status: 'error', error } })
@@ -268,12 +269,29 @@ function PendingInvitations({
     return () => controller.abort()
   }, [load, version, existingInvitation, cursors.length])
   const state = result?.load === load ? result.state : undefined
-  const fmt = zoned(browserTimeZone(), locale)
   const conflict = state?.status === 'error' && isOrganizationContextChanged(state.error)
   return (
     <section className="panel" aria-labelledby="pending-invitations-heading">
       <h2 id="pending-invitations-heading">{t('Pending invitations')}</h2>
       <p className="hint">{t('Mail server acceptance does not confirm receipt in the inbox.')}</p>
+      <div className="field">
+        <label htmlFor={filterId}>{t('Filter invitations')}</label>
+        <select
+          id={filterId}
+          value={filter}
+          onChange={(event) => {
+            observed.current.clear()
+            seekExistingInvitation.current = false
+            setExistingInvitationMissing(false)
+            setCursors([undefined])
+            setFilter(event.target.value as typeof filter)
+          }}
+        >
+          <option value="pending">{t('Pending')}</option>
+          <option value="expired">{t('Expired')}</option>
+          <option value="all">{t('All statuses')}</option>
+        </select>
+      </div>
       {existingInvitationMissing && (
         <p role="status">{t('The invitation changed. Reload before trying again.')}</p>
       )}
@@ -310,37 +328,43 @@ function PendingInvitations({
           {state.data.data.length === 0 && <p>{t('No pending invitations on this page.')}</p>}
           <ul className="stack">
             {state.data.data.map((invitation) => (
-              <li key={invitation.id}>
-                <h3 className="user-content">
-                  <BreakableText>
-                    {t('Invitation to {email}', { email: invitation.email })}
-                  </BreakableText>
-                </h3>
-                <p className="hint">
-                  <time dateTime={invitation.createdAt}>
-                    {t('Invited {time}', { time: fmt.dateTime(invitation.createdAt) })}
-                  </time>
-                </p>
-                <dl className="details">
-                  <dt>{t('Status')}</dt>
-                  <dd>{t('Pending')}</dd>
-                  <dt>{t('Mail submission')}</dt>
-                  <dd>{t(deliveryLabels[invitation.delivery.state])}</dd>
-                  <dt>{t('Expires')}</dt>
-                  <dd>
-                    <time dateTime={invitation.expiresAt}>
-                      {fmt.dateTime(invitation.expiresAt)}
-                    </time>
-                  </dd>
-                </dl>
-                {existingInvitation?.id === invitation.id && invitation.resendAllowed && (
-                  <ResendExistingInvitation
-                    invitation={existingInvitation}
-                    organizationId={organizationId}
-                    onQueued={onResent}
-                  />
-                )}
-              </li>
+              <InvitationRow
+                key={rowKeys.current.get(invitation.id) ?? invitation.id}
+                invitation={invitation}
+                organizationId={organizationId}
+                onObserved={(summary) => {
+                  if (summary.id !== invitation.id) {
+                    observed.current.delete(invitation.id)
+                    rowKeys.current.set(
+                      summary.id,
+                      rowKeys.current.get(invitation.id) ?? invitation.id,
+                    )
+                    rowKeys.current.set(invitation.id, `retired:${invitation.id}`)
+                  }
+                  observed.current.set(summary.id, summary)
+                  setResult((current) =>
+                    current?.state.status === 'ready'
+                      ? {
+                          ...current,
+                          state: {
+                            status: 'ready',
+                            data: {
+                              ...current.state.data,
+                              data: current.state.data.data.flatMap((row) =>
+                                row.id === invitation.id
+                                  ? [summary]
+                                  : row.id === summary.id
+                                    ? []
+                                    : [row],
+                              ),
+                            },
+                          },
+                        }
+                      : current,
+                  )
+                  setVersion((value) => value + 1)
+                }}
+              />
             ))}
           </ul>
         </>
@@ -351,7 +375,10 @@ function PendingInvitations({
             type="button"
             className="button button-small"
             disabled={!state || conflict}
-            onClick={() => setCursors((value) => value.slice(0, -1))}
+            onClick={() => {
+              observed.current.clear()
+              setCursors((value) => value.slice(0, -1))
+            }}
           >
             {t('Previous invitations page')}
           </button>
@@ -360,82 +387,15 @@ function PendingInvitations({
           <button
             type="button"
             className="button button-small"
-            onClick={() => setCursors((value) => [...value, state.data.nextCursor ?? undefined])}
+            onClick={() => {
+              observed.current.clear()
+              setCursors((value) => [...value, state.data.nextCursor ?? undefined])
+            }}
           >
             {t('Next invitations page')}
           </button>
         )}
       </div>
     </section>
-  )
-}
-
-/** An ordinary retry retains the invitation; another generation needs an explicit action. */
-function ResendExistingInvitation({
-  invitation,
-  organizationId,
-  onQueued,
-}: {
-  invitation: QueuedInvitation
-  organizationId: string
-  onQueued: (invitation: QueuedInvitation) => void
-}) {
-  const { t, ui } = useI18n()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<unknown>(null)
-  const [requestId] = useState(() => crypto.randomUUID())
-  const request = useRef<AbortController | null>(null)
-  useEffect(() => () => request.current?.abort(), [])
-  const conflict = isOrganizationContextChanged(error)
-
-  async function resend() {
-    if (request.current || conflict) return
-    const controller = new AbortController()
-    request.current = controller
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await resendInvitation(
-        invitation,
-        organizationId,
-        requestId,
-        controller.signal,
-      )
-      if (!controller.signal.aborted) onQueued(result)
-    } catch (failure) {
-      if (!controller.signal.aborted) setError(failure)
-    } finally {
-      if (!controller.signal.aborted) {
-        request.current = null
-        setBusy(false)
-      }
-    }
-  }
-
-  return (
-    <div className="stack">
-      {conflict ? (
-        <OrganizationContextConflict error={error} />
-      ) : error ? (
-        <div className="alert alert-error" role="alert">
-          <p>{ui(invitationError(error))}</p>
-          {error instanceof RequestError &&
-            error.retryAfterSeconds !== undefined &&
-            error.status === 429 && (
-              <p>{t('Try again in {0} seconds.', { '0': error.retryAfterSeconds })}</p>
-            )}
-        </div>
-      ) : null}
-      <div className="form-actions">
-        <button
-          type="button"
-          className="button button-small"
-          disabled={busy || conflict}
-          onClick={resend}
-        >
-          {busy ? t('Queueing invitation…') : t('Resend invitation')}
-        </button>
-      </div>
-    </div>
   )
 }

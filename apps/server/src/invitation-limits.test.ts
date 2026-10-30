@@ -87,7 +87,12 @@ async function authModuleSourceCopy(
   const mutationLocation = new URL(`../../../packages/auth/src/${sourceFile}`, import.meta.url)
   const mutationSource = readFileSync(mutationLocation, 'utf8')
   expect(mutationSource.includes(before), 'mutation matches real auth source').toBe(true)
-  const mutationUrl = moduleUrl(mutationSource.replace(before, after), mutationLocation)
+  const mutationUrl = moduleUrl(
+    sourceFile === 'invitation-resend.ts'
+      ? mutationSource.replaceAll(before, after)
+      : mutationSource.replace(before, after),
+    mutationLocation,
+  )
   const managerLocation = new URL('../../../packages/auth/src/team-management.ts', import.meta.url)
   const managerUrl =
     sourceFile === 'team-management.ts'
@@ -1197,7 +1202,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
   async function verifyIneligible(factory = createAuth) {
     const i = instance(factory)
     const a = await actor()
-    for (const state of ['accepted', 'canceled', 'rejected', 'expired']) {
+    for (const state of ['accepted', 'canceled', 'rejected']) {
       const invitation = await created(i, a)
       await ageGeneration(invitation)
       await db
@@ -1211,7 +1216,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     }
   }
 
-  it('never revives accepted, canceled, rejected or expired invitation IDs', async () => {
+  it('never revives accepted, canceled or rejected invitation IDs', async () => {
     await verifyIneligible()
   })
 
@@ -1276,7 +1281,10 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     const i = instance(factory)
     const a = await actor()
     const invitation = await created(i, a)
-    await ageGeneration(invitation)
+    await db
+      .deleteFrom('invitation_deliveries')
+      .where('invitation_id', '=', invitation.id)
+      .execute()
     await db
       .updateTable('auth.invitation')
       .set({ expiresAt: new Date(Date.now() + 1_500) })
@@ -1293,7 +1301,9 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     try {
       await blocker.query('BEGIN')
       await blocker.query('SELECT pg_advisory_xact_lock(1852798057, 1835100524)')
-      pending = Promise.resolve(resend(i, a, invitation))
+      pending = Promise.resolve(
+        invite(i, a, { email: invitation.email, invitationId: invitation.id }),
+      )
       expect(
         await Promise.race([
           reached.promise.then(() => 'waiting'),
@@ -1433,15 +1443,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     },
     {
       rule: 'pending status',
-      before: "invitation.status !== 'pending' || invitation.expiresAt <= now",
-      after: 'false',
-      status: 409,
-      code: 'INVITATION_INELIGIBLE',
-    },
-    {
-      rule: 'expiry',
-      before: 'invitation.expiresAt <= now',
-      after: 'false',
+      before: "if (invitation.status !== 'pending') return",
+      after: 'if (false) return',
       status: 409,
       code: 'INVITATION_INELIGIBLE',
     },
@@ -1616,8 +1619,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     ],
     [
       'business lifecycle guard',
-      "invitation.status !== 'pending' || invitation.expiresAt <= now",
-      'false',
+      "if (invitation.status !== 'pending') return",
+      'if (false) return',
       verifyIneligible,
       'invitation-resend.ts',
     ],

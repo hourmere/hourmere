@@ -10,6 +10,7 @@ import { type MailMessage, MailRejectedError } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import { manageInvitation } from '../../auth/src/invitations.ts'
 import { listPendingInvitationDeliveries } from './invitation-deliveries.ts'
 import {
   createInvitationEmailDispatcher,
@@ -365,6 +366,101 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
     expect(await waitCurrentJob(payload)).toMatchObject({ state: 'smtp_accepted', attempts: 1 })
     expect(send).toHaveBeenCalledTimes(1)
   })
+
+  it('polls a resend after the original inviter is demoted and sends under the acting admin', async () => {
+    const replacementId = (
+      await db
+        .insertInto('auth.user')
+        .values({
+          name: 'Current administrator',
+          email: 'current-admin@example.test',
+          emailVerified: true,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id
+    await db
+      .insertInto('auth.member')
+      .values({ userId: replacementId, organizationId, role: 'admin', createdAt: new Date() })
+      .execute()
+    const actor = async (userId: string) => {
+      const sessionId = (
+        await db
+          .insertInto('auth.session')
+          .values({
+            userId,
+            token: randomUUID(),
+            expiresAt: new Date(Date.now() + 3_600_000),
+            updatedAt: new Date(),
+            activeOrganizationId: organizationId,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id
+      return { userId, sessionId, activeOrganizationId: organizationId }
+    }
+    const original = await actor(inviterId)
+    const replacement = await actor(replacementId)
+    const enqueue = createInvitationEmailDispatcher({ db, queue })
+    const first = await manageInvitation(
+      db,
+      original,
+      { organizationId, email: 'resend-recipient@example.test' },
+      { enqueue },
+    )
+    await startWorker()
+    const firstDelivery = await waitCurrentJob({ invitationId: first.id, generation: 1 })
+    expect(firstDelivery).toMatchObject({ state: 'smtp_accepted', attempts: 1 })
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.text).toContain('Synthetic inviter')
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', organizationId)
+      .where('userId', '=', inviterId)
+      .execute()
+    await db
+      .updateTable('invitation_deliveries')
+      .set({
+        generation_started_at: sql`clock_timestamp() - INTERVAL '5 minutes'`,
+        updated_at: sql`clock_timestamp() - INTERVAL '5 minutes'`,
+      })
+      .where('invitation_id', '=', first.id)
+      .execute()
+    const request = {
+      organizationId,
+      invitationId: first.id,
+      email: first.email,
+      resend: true,
+      expectedGeneration: 1,
+      requestId: randomUUID(),
+    }
+    await expect(manageInvitation(db, original, request, { enqueue })).rejects.toMatchObject({
+      body: { code: 'TEAM_MANAGEMENT_ACCESS_DENIED' },
+    })
+    const resent = await manageInvitation(db, replacement, request, { enqueue })
+    expect(resent.inviterId, 'unexpired invitation sign-up trust retains its inviter').toBe(
+      inviterId,
+    )
+    const result = await waitCurrentJob({ invitationId: first.id, generation: 2 })
+    expect(result).toMatchObject({
+      state: 'smtp_accepted',
+      generation: 2,
+      attempts: 1,
+      authorized_by_user_id: replacementId,
+    })
+    expect(sent).toHaveLength(2)
+    expect(sent[1]?.text).toContain('Current administrator')
+    expect(sent[1]?.text).not.toContain('Synthetic inviter')
+    const jobs = await owned.pool.query<{ state: string; data: InvitationEmailRequest }>(
+      'SELECT state, data FROM pgboss.job WHERE name = $1 ORDER BY created_on',
+      [INVITATION_EMAIL_JOB],
+    )
+    expect(jobs.rows).toEqual([
+      { state: 'completed', data: { invitationId: first.id, generation: 1 } },
+      { state: 'completed', data: { invitationId: first.id, generation: 2 } },
+    ])
+  }, 30_000)
 
   it('skips an invitation that expires while claim authorization waits on a member table lock', async () => {
     const payload = await invitation()

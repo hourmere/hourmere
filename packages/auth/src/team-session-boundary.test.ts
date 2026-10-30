@@ -16,6 +16,7 @@ import {
   createCallerResolver,
   createMcpOAuthResolver,
 } from './index.ts'
+import { invitationCancellationRules } from './invitation-cancellation.ts'
 import { invitationRules } from './invitations.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
@@ -408,6 +409,7 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
       apiKeyRules,
       displayNameRules,
       invitationRules,
+      invitationCancellationRules,
       checkListQuery,
       emptyMemberList,
       defaultMagicLinkErrorRedirect,

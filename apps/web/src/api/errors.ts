@@ -14,6 +14,8 @@ export class RequestError extends Error {
   /** A recognized additive alias; `code` retains the original API error. */
   readonly codeAlias: string | undefined
   readonly retryAfterSeconds: number | undefined
+  /** Saved replacement to inspect when its invitation delivery could not be queued. */
+  readonly invitationId: string | undefined
 
   constructor(
     status: number,
@@ -22,6 +24,7 @@ export class RequestError extends Error {
     displayMessage?: UiText,
     codeAlias?: string,
     retryAfterSeconds?: number,
+    invitationId?: string,
   ) {
     super(message)
     this.name = 'RequestError'
@@ -30,6 +33,7 @@ export class RequestError extends Error {
     this.code = code
     this.codeAlias = codeAlias
     this.retryAfterSeconds = retryAfterSeconds
+    this.invitationId = invitationId
   }
 }
 
@@ -110,7 +114,21 @@ export function requestError(
     seconds !== undefined && Number.isFinite(seconds) && seconds >= 0
       ? Math.ceil(seconds)
       : undefined
-  return new RequestError(status, code, message, displayMessage, codeAlias, retryAfterSeconds)
+  const invitationId =
+    (code === 'INVITATION_DELIVERY_UNAVAILABLE' || code === 'INVITATION_INELIGIBLE') &&
+    typeof record.invitationId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.invitationId)
+      ? record.invitationId
+      : undefined
+  return new RequestError(
+    status,
+    code,
+    message,
+    displayMessage,
+    codeAlias,
+    retryAfterSeconds,
+    invitationId,
+  )
 }
 
 export async function errorFromResponse(response: Response): Promise<RequestError> {
