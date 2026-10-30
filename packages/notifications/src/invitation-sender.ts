@@ -109,6 +109,13 @@ async function invitationAuthorizationIsCurrent(
   authorizedByUserId: string,
 ) {
   if (!invitationRoleAllowed(invitation.role)) return false
+  const actor = await db
+    .selectFrom('auth.user')
+    .select('id')
+    .where('id', '=', authorizedByUserId)
+    .where('emailVerified', '=', true)
+    .executeTakeFirst()
+  if (!actor) return false
   try {
     // Each generation carries its authorizing administrator, rather than a browser session.
     // Read current team authority without reversing management's parent-first lock order.

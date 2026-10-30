@@ -43,7 +43,13 @@ export function teamInvitationRoutes(
     throw new Error('Invitation summary requires mail admission configuration')
   return ({ app, caller }) => {
     const access = teamManagementAccess(deps.db, caller)
-    const headers = z.object({ 'x-expected-organization-id': z.uuid() })
+    const headers = z.object({ 'x-expected-organization-id': z.string().optional() })
+    const writeHeaders = z.object({
+      'x-expected-organization-id': z
+        .string()
+        .optional()
+        .openapi({ param: { required: true } }),
+    })
     const params = z.object({ invitationId: z.uuid() })
     const summary = async (
       db: Parameters<typeof listTeamInvitationSummaries>[0],
@@ -66,7 +72,7 @@ export function teamInvitationRoutes(
         path: '/api/v1/team/invitations/{invitationId}',
         summary: 'Read the current state of one team invitation',
         description:
-          'Verified current team owner/admin session only. Reads the final invitation lifecycle and current mail generation independently of list filters. Missing and other-team IDs receive the same access denial. X-Expected-Organization-Id binds the page to its team.',
+          'Verified current team owner/admin session only. Reads the final invitation lifecycle and current mail generation independently of list filters. Missing and other-team IDs receive the same access denial. Optional X-Expected-Organization-Id binds the page to its team; omitting it reads the current team.',
         tags: ['Team invitations'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -85,7 +91,7 @@ export function teamInvitationRoutes(
         c.json(
           await access.read(
             c.var.principal,
-            c.req.valid('header')['x-expected-organization-id'],
+            c.req.valid('header')['x-expected-organization-id'] ?? c.var.principal.organization.id,
             (db, actor) => summary(db, actor, c.req.valid('param').invitationId),
           ),
           200,
@@ -97,11 +103,15 @@ export function teamInvitationRoutes(
         path: '/api/v1/team/invitations/{invitationId}/cancel',
         summary: 'Cancel a pending team invitation',
         description:
-          'Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required.',
+          'Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required for a successful write. Omitting it returns 409 organization_context_changed for an authorized manager; unauthorized callers retain 403 team_management_access_denied.',
         tags: ['Team invitations'],
         security: [{ session: [] }],
         middleware: access.middleware,
-        request: { headers, params, body: { content: json(z.strictObject({})), required: true } },
+        request: {
+          headers: writeHeaders,
+          params,
+          body: { content: json(z.strictObject({})), required: true },
+        },
         responses: {
           200: {
             description: 'Final invitation summary; accepted if joining won the race',
@@ -116,12 +126,12 @@ export function teamInvitationRoutes(
         },
       }),
       async (c) => {
-        const expectedOrganizationId = c.req.valid('header')['x-expected-organization-id']
+        const expectedOrganizationId = c.req.valid('header')['x-expected-organization-id'] ?? ''
         const invitationId = c.req.valid('param').invitationId
         try {
           const row = await access.write(
             c.var.principal,
-            expectedOrganizationId,
+            c.var.principal.organization.id,
             async (trx, actor) => {
               await cancelTeamInvitation(trx, actor, invitationId)
               return summary(trx, actor, invitationId)

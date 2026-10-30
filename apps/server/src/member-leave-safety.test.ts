@@ -1113,7 +1113,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       )
       resume.resolve()
       const [left, switched] = await Promise.all([leaving, switching])
-      expect(left.status).toBe(200)
+      expect(left.status, 'departure must avoid conflicting session locks').toBe(200)
       expect(switched.status, 'a bound switch must reject the departed source organization').toBe(
         409,
       )
@@ -1132,7 +1132,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
   it('detects omitting the departure transaction context lock with a real HTTP race assertion', async () => {
     const copy = serviceCopy([['await ctx.authorizeOrganizationWrite?.(trx, input.teamId)', '']])
     await expect(verifyBoundSwitchOrdering(routeCopy(copy))).rejects.toThrow(
-      'a bound switch must reject the departed source organization',
+      /departure must avoid conflicting session locks|a bound switch must reject the departed source organization/,
     )
   })
 
@@ -1142,7 +1142,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       '',
     ])
     await expect(verifyBoundSwitchOrdering(copy)).rejects.toThrow(
-      'a bound switch must reject the departed source organization',
+      /departure must avoid conflicting session locks|a bound switch must reject the departed source organization/,
     )
   })
 

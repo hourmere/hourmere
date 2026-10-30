@@ -67,6 +67,12 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   worker rechecks invitation status, expiry and generation before every send, using the
   current address. `smtp_accepted` means accepted by the mail server; it does not promise
   inbox delivery. A failed result commit after SMTP acceptance can cause a duplicate.
+  `POST /api/auth/organization/cancel-invitation` uses the same verified management
+  authority and expected-team rule, rechecked in the cancellation transaction. Only a
+  pending invitation can become canceled; accepted, rejected and already canceled
+  invitations return unchanged without rewriting their history.
+  Recipient rejection also rechecks the verified recipient and pending, unexpired state
+  in its write transaction, so it cannot overwrite a concurrent acceptance or cancellation.
   If cancellation, acceptance, expiry or deletion overtakes dispatch, the request returns
   `409 INVITATION_INELIGIBLE` with the existing no-longer-pending wording. A newer generation
   overtaking dispatch still returns 503; reload before retrying an obsolete resend.

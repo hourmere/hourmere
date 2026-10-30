@@ -3,7 +3,7 @@ import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database, Db } from '@hourmere/db'
 import type { DBTransactionAdapter, Where } from 'better-auth/adapters'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
-import type { Transaction } from 'kysely'
+import { type Insertable, sql, type Transaction } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import type { Principal } from './caller.ts'
 import {
@@ -14,6 +14,7 @@ import { recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, personalOwner } from './organizations.ts'
 import {
   checkTeamManagementAccess,
+  checkTeamManagementMembership,
   TeamManagementError,
   teamRoles,
   teamSession,
@@ -25,8 +26,20 @@ import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
 const remove = '/organization/remove-member'
+const updateOrganization = '/organization/update'
+const rejectInvitation = '/organization/reject-invitation'
+const createOrganization = '/organization/create'
+const setActiveOrganization = '/organization/set-active'
 const selfDeparturePaths = new Set(['/organization/leave', remove])
-const protectedPaths = new Set([changeRole, accept, remove])
+const protectedPaths = new Set([
+  changeRole,
+  accept,
+  remove,
+  updateOrganization,
+  rejectInvitation,
+  createOrganization,
+  setActiveOrganization,
+])
 const nativeOwnerRequiredCodes = new Set([
   'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER',
   'YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER',
@@ -140,9 +153,7 @@ export function createTeamRolePolicy(
     const endpoint = tryGetCurrentAuthEndpointContext()
     if (
       !endpoint ||
-      (!selfDeparturePaths.has(endpoint.path ?? '') &&
-        endpoint.path !== changeRole &&
-        endpoint.path !== accept) ||
+      (!selfDeparturePaths.has(endpoint.path ?? '') && !protectedPaths.has(endpoint.path ?? '')) ||
       !endpoint.context.session?.session?.id ||
       (endpoint.path === remove && !endpoint.body?.memberIdOrEmail) ||
       (endpoint.path === changeRole && !endpoint.body?.memberId)
@@ -202,6 +213,18 @@ export function createTeamRolePolicy(
     if (!actor) throw teamRoleDenied()
     const facts = await checkTeamManagementAccess(targetDb, actor, actor.organization.id, lock)
     return { actor, facts }
+  }
+
+  async function managementWrite(ctx: AuthMiddlewareContext, trx: Transaction<Database>) {
+    const actor = await principal(ctx)
+    if (!actor) throw teamRoleDenied()
+    const expectedOrganizationId =
+      ctx.request?.headers.get('x-expected-organization-id') ?? actor.organization.id
+    const facts = await checkTeamManagementAccess(trx, actor, actor.organization.id, true, {
+      expectedOrganizationId,
+      allowPersonal: ctx.path === updateOrganization,
+    })
+    return facts
   }
 
   async function roleChange(
@@ -356,7 +379,30 @@ export function createTeamRolePolicy(
     },
 
     adapter(adapter: DBTransactionAdapter): DBTransactionAdapter {
-      const { update, findOne, findMany, incrementOne, delete: deleteOne } = adapter
+      const { create, update, findOne, findMany, incrementOne, delete: deleteOne } = adapter
+      adapter.create = async (request) => {
+        const ctx = operationContext()
+        if (ctx?.request && ctx.path === createOrganization && request.model === 'organization') {
+          return write(async (trx) => {
+            const actor = await principal(ctx)
+            if (!actor) throw teamRoleDenied()
+            await teamSessionUser(trx, actor, true)
+            await teamSession(trx, actor, true)
+            if (
+              Object.keys(request.data).some(
+                (key) => !['id', 'name', 'slug', 'logo', 'metadata', 'createdAt'].includes(key),
+              )
+            )
+              throw teamRoleDenied()
+            return trx
+              .insertInto('auth.organization')
+              .values(request.data as Insertable<Database['auth.organization']>)
+              .returningAll()
+              .executeTakeFirstOrThrow() as never
+          })
+        }
+        return create(request)
+      }
       adapter.delete = async (request) => {
         const ctx = operationContext()
         if (!ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {
@@ -476,6 +522,93 @@ export function createTeamRolePolicy(
       }
       adapter.update = async (request) => {
         const ctx = operationContext()
+        if (
+          ctx?.request &&
+          ctx.path === setActiveOrganization &&
+          request.model === 'session' &&
+          'activeOrganizationId' in request.update
+        ) {
+          return write(async (trx) => {
+            const actor = await principal(ctx)
+            const session = await getSessionFromCtx(ctx)
+            if (
+              !actor ||
+              !session ||
+              !selects(request.where, { token: session.session.token }) ||
+              Object.keys(request.update).some((key) => key !== 'activeOrganizationId')
+            )
+              throw teamRoleDenied()
+            await teamSessionUser(trx, actor, true)
+            const targetId = request.update.activeOrganizationId
+            if (targetId !== null) {
+              if (typeof targetId !== 'string' || !isUuid(targetId)) throw teamRoleDenied()
+              const organization = await trx
+                .selectFrom('auth.organization')
+                .select('id')
+                .where('id', '=', targetId)
+                .forShare()
+                .executeTakeFirst()
+              if (!organization) throw teamRoleDenied()
+              await checkTeamManagementMembership(trx, actor.user.id, targetId, true, true, true)
+            }
+            const live = await teamSession(trx, actor, true)
+            const expected = ctx.request?.headers.get('x-expected-organization-id') ?? null
+            if (expected !== null) {
+              const activeMember =
+                live.activeOrganizationId && isUuid(live.activeOrganizationId)
+                  ? await trx
+                      .selectFrom('auth.member')
+                      .select('id')
+                      .where('organizationId', '=', live.activeOrganizationId)
+                      .where('userId', '=', actor.user.id)
+                      .executeTakeFirst()
+                  : undefined
+              const personal = activeMember
+                ? undefined
+                : await trx
+                    .selectFrom('personal_organizations')
+                    .select('organization_id')
+                    .where('user_id', '=', actor.user.id)
+                    .executeTakeFirst()
+              const effective = activeMember ? live.activeOrganizationId : personal?.organization_id
+              if (effective?.toLowerCase() !== expected.toLowerCase())
+                throw new TeamManagementError('organization_context_changed')
+            }
+            return trx
+              .updateTable('auth.session')
+              .set({ activeOrganizationId: targetId as string | null, updatedAt: new Date() })
+              .where('id', '=', actor.sessionId)
+              .where('userId', '=', actor.user.id)
+              .returningAll()
+              .executeTakeFirstOrThrow() as never
+          })
+        }
+        if (ctx?.path === updateOrganization && request.model === 'organization') {
+          return write(async (trx) => {
+            // Native authorization happened before this persistence boundary. Keep its
+            // actual update and fresh actor/context checks in the shared lock transaction.
+            const facts = await managementWrite(ctx, trx)
+            if (
+              !selects(request.where, { id: facts.organizationId }) ||
+              Object.keys(request.update).some(
+                (key) => !['name', 'slug', 'logo', 'metadata'].includes(key),
+              )
+            )
+              throw teamRoleDenied()
+            const patch = request.update as {
+              name?: string
+              slug?: string
+              logo?: string | null
+              metadata?: string | null
+            }
+            return trx
+              .updateTable('auth.organization')
+              .set(patch)
+              .where('id', '=', facts.organizationId)
+              .returningAll()
+              .executeTakeFirstOrThrow() as never
+          })
+        }
         if (ctx?.path === changeRole && request.model === 'member') {
           return write(async (trx) => {
             const { facts, target, role } = await roleChange(ctx, trx, true, request.update.role)
@@ -497,6 +630,62 @@ export function createTeamRolePolicy(
       }
       adapter.incrementOne = async (request) => {
         const ctx = operationContext()
+        if (ctx?.path === rejectInvitation && request.model === 'invitation') {
+          return write(async (trx) => {
+            const actor = await principal(ctx)
+            if (!actor) throw teamRoleDenied()
+            const user = await teamSessionUser(trx, actor, true)
+            const invitationId = body(ctx).invitationId
+            if (
+              typeof invitationId !== 'string' ||
+              !isUuid(invitationId) ||
+              !selects(request.where, { id: invitationId }) ||
+              Object.keys(request.increment).length !== 0 ||
+              Object.keys(request.set ?? {}).length !== 1 ||
+              request.set?.status !== 'rejected'
+            )
+              throw teamRoleDenied()
+            const target = await trx
+              .selectFrom('auth.invitation')
+              .select('organizationId')
+              .where('id', '=', invitationId)
+              .executeTakeFirst()
+            if (!target) throw teamRoleDenied()
+            const organization = await trx
+              .selectFrom('auth.organization')
+              .select('id')
+              .where('id', '=', target.organizationId)
+              .forUpdate()
+              .executeTakeFirst()
+            if (!organization) throw teamRoleDenied()
+            await teamSession(trx, actor, true)
+            const invitation = await trx
+              .selectFrom('auth.invitation')
+              .selectAll()
+              .where('id', '=', invitationId)
+              .where('organizationId', '=', organization.id)
+              .forUpdate()
+              .executeTakeFirst()
+            if (invitation?.email.toLowerCase() !== user.email.toLowerCase()) throw teamRoleDenied()
+            const clock = await trx
+              .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
+              .executeTakeFirstOrThrow()
+            if (invitation.status !== 'pending' || invitation.expiresAt <= clock.now) {
+              throw new APIError('CONFLICT', {
+                code: 'INVITATION_INELIGIBLE',
+                message: 'This invitation is no longer pending.',
+              })
+            }
+            return trx
+              .updateTable('auth.invitation')
+              .set({ status: 'rejected' })
+              .where('id', '=', invitationId)
+              .where('organizationId', '=', organization.id)
+              .where('status', '=', 'pending')
+              .returningAll()
+              .executeTakeFirstOrThrow() as never
+          })
+        }
         if (
           ctx?.path !== accept ||
           request.model !== 'invitation' ||
