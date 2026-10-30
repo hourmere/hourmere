@@ -202,6 +202,15 @@ calendar-list access.
   Owners cannot be demoted or administratively removed; only their own safe departure
   is allowed. Team deletion and ownership transfer are unavailable at launch; rejected
   deletion requests cannot cascade into booking history.
+- **Native team creation and joining commit together.** Better Auth's organization,
+  creator-owner membership and session activation use one PostgreSQL transaction.
+  Invitation acceptance likewise commits its accepted status, membership and session
+  activation together. The policy's user → organization → session → invitation locks
+  and native writes share that connection. Expiry uses database wall time after lock
+  waits, and the membership limit is rechecked under the organization lock. A lost
+  connection or process death before commit publishes none of these writes. A lost
+  response after commit can still require rereading the team or invitation; these
+  operations do not add response replay or repair historical incomplete rows.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a

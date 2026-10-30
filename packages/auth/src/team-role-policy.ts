@@ -3,7 +3,7 @@ import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database, Db } from '@hourmere/db'
 import type { DBTransactionAdapter, Where } from 'better-auth/adapters'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
-import type { Transaction } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import type { Principal } from './caller.ts'
 import {
@@ -24,6 +24,8 @@ import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
+/** Pinned alongside the native organization plugin's membership limit. */
+export const teamMembershipLimit = 100
 const remove = '/organization/remove-member'
 const selfDeparturePaths = new Set(['/organization/leave', remove])
 const protectedPaths = new Set([changeRole, accept, remove])
@@ -116,11 +118,9 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Keep Better Auth's role-change and acceptance handlers and hooks. Their narrow persistence
- * calls use application transactions, so the shared actor locks and actual SQL write
- * use one connection. Holding those row locks around Better Auth's separate pool would
- * block its own FK checks; wrapping the whole handler would also change invitation hooks
- * that deliberately observe committed rows.
+ * Keep Better Auth's handlers and hooks. Native creation and acceptance share an enclosing
+ * adapter transaction with this policy's locks and writes. Other membership operations
+ * retain their short application transactions; invitation admission/delivery is separate.
  */
 export function createTeamRolePolicy(
   db: Db,
@@ -131,6 +131,7 @@ export function createTeamRolePolicy(
   ) => Promise<{ organizationId: string }>,
 ) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
+  const transactions = new AsyncLocalStorage<Transaction<Database>>()
 
   function operationContext() {
     const current = requests.getStore()?.ctx
@@ -261,11 +262,16 @@ export function createTeamRolePolicy(
     if (
       stored?.role !== 'member' ||
       stored.email.trim().toLowerCase() !== user.email.trim().toLowerCase() ||
-      stored.status !== 'pending' ||
-      new Date(stored.expiresAt).getTime() <= Date.now()
+      stored.status !== 'pending'
     ) {
       throw teamRoleDenied()
     }
+    // Check wall time after every lock wait, on the database clock rather than the
+    // process clock or transaction start time.
+    const validity = await trx
+      .selectNoFrom(sql<boolean>`${stored.expiresAt}::timestamptz > clock_timestamp()`.as('active'))
+      .executeTakeFirstOrThrow()
+    if (!validity.active) throw teamRoleDenied()
     const personal = await trx
       .selectFrom('personal_organizations')
       .select('organization_id')
@@ -279,13 +285,35 @@ export function createTeamRolePolicy(
       .where('userId', '=', actor.user.id)
       .executeTakeFirst()
     if (member) throw recipientAlreadyMember()
+    // Native counts before taking the organization lock. Recheck under it so two
+    // different recipients cannot consume the same last membership slot.
+    const count = await trx
+      .selectFrom('auth.member')
+      .select((eb) => eb.fn.countAll<string>().as('total'))
+      .where('organizationId', '=', organization.id)
+      .executeTakeFirstOrThrow()
+    if (Number(count.total) >= teamMembershipLimit) {
+      throw new APIError('FORBIDDEN', {
+        code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED',
+        message: 'Organization membership limit reached',
+      })
+    }
     return stored
   }
 
   const write = <T>(operation: (trx: Transaction<Database>) => Promise<T>) =>
-    asAuthError(() => db.transaction().setIsolationLevel('read committed').execute(operation))
+    asAuthError(() => {
+      const trx = transactions.getStore()
+      return trx
+        ? operation(trx)
+        : db.transaction().setIsolationLevel('read committed').execute(operation)
+    })
 
   return {
+    /** The native adapter's transaction owns the policy locks and their writes too. */
+    withTransaction<T>(trx: Transaction<Database>, operation: () => Promise<T>): Promise<T> {
+      return transactions.run(trx, operation)
+    },
     /** Run before native lookups so denied targets never reveal whether they exist. */
     async before(ctx: AuthMiddlewareContext) {
       const state = requests.getStore()
@@ -512,8 +540,8 @@ export function createTeamRolePolicy(
             throw teamRoleDenied()
           }
           const stored = await acceptance(ctx, trx)
-          // Native acceptance uses this snapshot in its atomic member/session step.
-          // The HTTP recipient lock spans that step, including distinct invitations.
+          // The native endpoint's enclosing transaction also owns the member/session
+          // writes, so neither an exception nor process death can publish this alone.
           return trx
             .updateTable('auth.invitation')
             .set({ status: 'accepted' })
