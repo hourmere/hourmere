@@ -47,7 +47,7 @@ export function teamInvitationRoutes(
         path: '/api/v1/team/invitations',
         summary: "Invitation delivery summaries of the session's current team",
         description:
-          'Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; a different current team is denied. Omitting it retains current-team reads for existing clients. All access denials are 403 team_management_access_denied without WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Delivery state is independent: queued is waiting, smtp_accepted means SMTP acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team for the next page. No email, links, tokens, credentials, job or lease identities or raw provider errors are returned.',
+          'Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching to any other organization, including personal space or a member-role team, returns 409 organization_context_changed with reload guidance when the reader still owns or administers the expected team. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. The invited email address is returned only to verified owners/admins of the current team; members, other teams and API-key/OAuth callers cannot read it. No links, tokens, mail bodies, credentials, job or lease identities or raw provider errors are returned.',
         tags: ['Team invitations'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -55,12 +55,16 @@ export function teamInvitationRoutes(
           headers: z.object({
             'x-expected-organization-id': z.string().optional().openapi({
               description:
-                'Optional team where the page opened; mismatched or inaccessible targets receive the same access denial',
+                'Optional team where the page opened; a switch to any other organization returns 409 reload guidance while the reader still owns or administers the expected team, otherwise uniform 403 access denial',
             }),
           }),
           query: z.object({
             limit: z.coerce.number().int().min(1).max(100).optional(),
             cursor: z.string().max(2000).optional(),
+            status: TeamInvitationSummarySchema.shape.status.optional().openapi({
+              description:
+                'Filter the database-clock-derived invitation lifecycle before pagination. Omit for all lifecycle states. Keep this filter unchanged while following nextCursor.',
+            }),
           }),
         },
         responses: {
@@ -75,7 +79,12 @@ export function teamInvitationRoutes(
           },
           403: {
             description:
-              'team_management_access_denied: requires a current verified team owner/admin session without Authorization; a supplied expected organization must match the current team',
+              'team_management_access_denied: requires a current verified team owner/admin session without Authorization; invalid, personal or inaccessible expected organizations receive the same denial',
+            content: json(ErrorBody),
+          },
+          409: {
+            description:
+              'organization_context_changed: the reader still owns or administers the expected team but the session switched to another organization; reload the page before trying again',
             content: json(ErrorBody),
           },
         },

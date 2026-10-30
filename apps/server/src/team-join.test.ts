@@ -166,9 +166,11 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       organizationId,
     })
     expect(response.status).toBe(200)
-    const { delivery: _delivery, ...invitation } = (await response.json()) as Invitation & {
-      delivery: unknown
+    const { delivery, existing, ...invitation } = (await response.json()) as Invitation & {
+      delivery?: unknown
+      existing?: boolean
     }
+    if (delivery !== undefined) expect(existing).toBe(false)
     return invitation
   }
   async function state(organizationId: string) {
@@ -333,12 +335,12 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       const canceled = await post(i.app, 'cancel-invitation', actor.cookie, {
         invitationId: invitation.id,
       })
-      expect(canceled.status).toBe(actor === member ? 403 : 409)
+      expect(canceled.status).toBe(403)
       expect(await canceled.json()).toMatchObject({
         code:
           actor === member
             ? 'YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION'
-            : 'ORGANIZATION_CONTEXT_CHANGED',
+            : 'TEAM_MANAGEMENT_ACCESS_DENIED',
       })
       expect(await state(org.id)).toEqual([{ status: 'pending', members: 3 }])
     }

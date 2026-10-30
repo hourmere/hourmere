@@ -85,6 +85,7 @@ export function TeamMemberActions({
   onReload,
   onReviewChange,
   removalOpener,
+  disabled = false,
 }: {
   organizationId: string
   currentUserId?: string
@@ -96,6 +97,7 @@ export function TeamMemberActions({
   onReload: () => void
   onReviewChange?: (open: boolean) => void
   removalOpener?: HTMLElement | null
+  disabled?: boolean
 }) {
   const { t } = useI18n()
   const [leavingOrganization, setLeavingOrganization] = useState<string | null>(null)
@@ -137,7 +139,7 @@ export function TeamMemberActions({
           ref={leaveButton}
           type="button"
           className="button button-small"
-          disabled={mode !== null}
+          disabled={mode !== null || disabled}
           onClick={() => {
             opener.current = leaveButton.current
             setLeavingOrganization(organizationId)

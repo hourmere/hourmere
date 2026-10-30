@@ -55,6 +55,7 @@ function invitation(
 ): Schemas['TeamInvitationSummary'] {
   return {
     id: `00000000-0000-7000-8000-${String(number).padStart(12, '0')}`,
+    email: `invitee-${number}@example.com`,
     status,
     createdAt: '2026-10-27T10:00:00.000Z',
     expiresAt: '2026-11-10T10:00:00.000Z',
@@ -123,10 +124,21 @@ describe('joined team members and pending invitations in settings', () => {
       const manage = within(members).getByRole('link', { name: 'Manage team events' })
       expect(manage.getAttribute('href')).toBe(PATHS.eventTypes)
       const invitations = await screen.findByRole('region', { name: 'Pending invitations' })
-      expect(await within(invitations).findByText('Invitation 1')).toBeDefined()
-      expect(within(invitations).getByText('Invitation 2')).toBeDefined()
+      expect(
+        await within(invitations).findByText(`Invitation to ${invitation(1).email}`),
+      ).toBeDefined()
+      expect(within(invitations).getByText(`Invitation to ${invitation(2).email}`)).toBeDefined()
+      const rowHeading = within(invitations).getByRole('heading', {
+        name: `Invitation to ${invitation(1).email}`,
+      })
+      expect(rowHeading.classList.contains('user-content')).toBe(true)
+      expect(rowHeading.querySelector('wbr')).not.toBeNull()
+      expect(invitations.textContent).not.toContain(invitation(1).id)
+      const invitedTime = rowHeading.nextElementSibling?.querySelector('time')
+      expect(invitedTime?.getAttribute('datetime')).toBe(invitation(1).createdAt)
+      expect(invitedTime?.textContent).toMatch(/^Invited /)
       expect(within(invitations).getAllByText('Pending')).toHaveLength(2)
-      expect(within(invitations).getByText('Submitted')).toBeDefined()
+      expect(within(invitations).getByText('Waiting to send')).toBeDefined()
       expect(within(invitations).getByText('Accepted by the mail server')).toBeDefined()
       expect(members.contains(invitations)).toBe(false)
       expect(members.textContent).not.toContain('@example.com')
@@ -235,7 +247,7 @@ describe('joined team members and pending invitations in settings', () => {
     expect(await within(members).findByText('No team members found.')).toBeDefined()
     expect(within(members).getByText('0 joined members')).toBeDefined()
     const invitations = await screen.findByRole('region', { name: 'Pending invitations' })
-    await within(invitations).findByText('Invitation 2')
+    await within(invitations).findByText(`Invitation to ${invitation(2).email}`)
     expect(within(members).getByText('0 joined members')).toBeDefined()
     expect(within(members).queryByText(ME.user.name)).toBeNull()
     expect(within(members).queryByText('2 joined members')).toBeNull()
@@ -335,7 +347,9 @@ describe('joined team members and pending invitations in settings', () => {
     )
     expect(within(invitations).queryByText('No pending invitations on this page.')).toBeNull()
     await response.answer(json(200, { data: [invitation(1)], nextCursor: null }))
-    expect(await within(invitations).findByText('Invitation 1')).toBeDefined()
+    expect(
+      await within(invitations).findByText(`Invitation to ${invitation(1).email}`),
+    ).toBeDefined()
     expect(within(invitations).queryByText('Loading pending invitations…')).toBeNull()
   })
 
@@ -352,7 +366,7 @@ describe('joined team members and pending invitations in settings', () => {
     const invitations = await screen.findByRole('region', { name: 'Pending invitations' })
     await within(invitations).findByText('Submission status unknown')
     for (const label of [
-      'Submitted',
+      'Waiting to send',
       'Submitting to the mail server',
       'Accepted by the mail server',
       'Submission failed',
@@ -364,43 +378,54 @@ describe('joined team members and pending invitations in settings', () => {
     expect(invitations.textContent).not.toMatch(/delivered/i)
   })
 
-  it('keeps cursor paging available when a page has no pending invitations', async () => {
+  it('filters pending invitations on the server before paging and keeps stable row identities', async () => {
     const user = userEvent.setup()
-    const cursor = invitation(5).id
+    const cursor = invitation(20).id
     const api = teamServer('admin', {
       'GET /api/v1/team/invitations': ({ path }) => {
         const query = new URL(path, window.location.origin).searchParams
+        // Without the server filter, terminal history fills the page before pending rows.
+        if (query.get('status') !== 'pending')
+          return json(200, {
+            data: Array.from({ length: 20 }, (_, index) =>
+              invitation(index + 1, 'smtp_accepted', 'accepted'),
+            ),
+            nextCursor: cursor,
+          })
         return json(
           200,
           query.has('cursor')
-            ? { data: [invitation(6)], nextCursor: null }
-            : {
-                data: (['accepted', 'canceled', 'rejected', 'expired', 'unknown'] as const).map(
-                  (status, index) => invitation(index + 1, 'smtp_accepted', status),
-                ),
-                nextCursor: cursor,
-              },
+            ? { data: [invitation(21)], nextCursor: null }
+            : { data: [invitation(20)], nextCursor: cursor },
         )
       },
     })
     renderApp(PATHS.settings)
     const invitations = await screen.findByRole('region', { name: 'Pending invitations' })
-    await within(invitations).findByText('No pending invitations on this page.')
-    expect(within(invitations).queryByText('Pending')).toBeNull()
-    expect(
-      within(invitations).queryByRole('button', { name: 'Previous invitations page' }),
-    ).toBeNull()
-    await user.click(within(invitations).getByRole('button', { name: 'Next invitations page' }))
-    await within(invitations).findByText('Pending')
+    await within(invitations).findByRole('heading', {
+      name: `Invitation to ${invitation(20).email}`,
+    })
     expect(within(invitations).queryByText('No pending invitations on this page.')).toBeNull()
+    expect(within(invitations).queryByRole('heading', { name: 'Invitation 1' })).toBeNull()
+    await user.click(within(invitations).getByRole('button', { name: 'Next invitations page' }))
+    await within(invitations).findByRole('heading', {
+      name: `Invitation to ${invitation(21).email}`,
+    })
+    expect(within(invitations).queryByRole('heading', { name: 'Invitation 1' })).toBeNull()
     expect(within(invitations).queryByRole('button', { name: 'Next invitations page' })).toBeNull()
     await user.click(within(invitations).getByRole('button', { name: 'Previous invitations page' }))
-    await within(invitations).findByText('No pending invitations on this page.')
+    await within(invitations).findByRole('heading', {
+      name: `Invitation to ${invitation(20).email}`,
+    })
     expect(
       api
         .to('GET /api/v1/team/invitations')
         .map(({ path }) => Object.fromEntries(new URL(path, window.location.origin).searchParams)),
-    ).toEqual([{ limit: '20' }, { limit: '20', cursor }, { limit: '20' }])
+    ).toEqual([
+      { limit: '20', status: 'pending' },
+      { limit: '20', status: 'pending', cursor },
+      { limit: '20', status: 'pending' },
+    ])
   })
 
   it('recovers an invitation network failure while retaining joined members and their count', async () => {
@@ -420,7 +445,7 @@ describe('joined team members and pending invitations in settings', () => {
     expect(within(invitations).queryByText('No pending invitations on this page.')).toBeNull()
     fail = false
     await user.click(within(invitations).getByRole('button', { name: 'Try again' }))
-    await within(invitations).findByText('Invitation 1')
+    await within(invitations).findByText(`Invitation to ${invitation(1).email}`)
     expect(within(invitations).queryByRole('alert')).toBeNull()
     expect(within(members).getByText('2 joined members')).toBeDefined()
     expect(api.to('GET /api/v1/team/invitations')).toHaveLength(2)
@@ -490,7 +515,7 @@ describe('joined team members and pending invitations in settings', () => {
     })
     renderApp(PATHS.settings)
     const invitations = await screen.findByRole('region', { name: 'Pending invitations' })
-    await within(invitations).findByText('Submitted')
+    await within(invitations).findByText('Waiting to send')
     await user.click(within(invitations).getByRole('button', { name: 'Next invitations page' }))
     await within(invitations).findByRole('alert')
     expect(within(invitations).queryByText('No pending invitations on this page.')).toBeNull()
@@ -521,8 +546,11 @@ describe('joined team members and pending invitations in settings', () => {
     expect(within(members).getByRole('link', { name: '管理团队活动' })).toBeDefined()
     expect(within(members).getByText('待接受的邀请不计入成员或主持人。')).toBeDefined()
     const invitations = screen.getByRole('region', { name: '待接受的邀请' })
+    expect(
+      within(invitations).getByRole('heading', { name: '发给 invitee-1@example.com 的邀请' }),
+    ).toBeDefined()
     expect(within(invitations).getAllByText('待接受')).toHaveLength(2)
-    expect(within(invitations).getByText('已提交')).toBeDefined()
+    expect(within(invitations).getByText('等待发送')).toBeDefined()
     expect(within(invitations).getByText('邮件服务器已接受')).toBeDefined()
     expect(
       within(invitations).getByText('邮件服务器接受邮件并不代表邮件已到达收件箱。'),
@@ -548,7 +576,7 @@ describe('joined team members and pending invitations in settings', () => {
         }),
     })
     renderApp(PATHS.settings)
-    await screen.findByText('Invitation 2')
+    await screen.findByText(`Invitation to ${invitation(2).email}`)
     expect(screen.getByText('2 joined members')).toBeDefined()
     await user.click(screen.getByRole('link', { name: 'Manage team events' }))
     await screen.findByRole('heading', { name: 'Event types', level: 1 })
@@ -597,26 +625,27 @@ describe('joined team members and pending invitations in settings', () => {
     expect(within(members).queryByText('Loading team members…')).toBeNull()
   })
 
-  it('binds the first invitation page and retries to the displayed team after a session switch', async () => {
-    const user = userEvent.setup()
+  it('binds the invitation page to its team and shows reload guidance after a session switch', async () => {
     const api = teamServer('admin', {
       'GET /api/v1/team/invitations': ({ headers }) =>
         headers.get('X-Expected-Organization-Id') === TEAM_ME.organization.id
-          ? json(403, { error: 'team_management_access_denied' })
+          ? json(409, { error: 'organization_context_changed' })
           : json(200, { data: [invitation(1, 'smtp_accepted')], nextCursor: null }),
     })
     renderApp(PATHS.settings)
     const invitations = await screen.findByRole('region', { name: 'Pending invitations' })
-    await within(invitations).findByRole('alert')
-    expect(within(invitations).queryByText('Invitation 1')).toBeNull()
-    await user.click(within(invitations).getByRole('button', { name: 'Try again' }))
-    await within(invitations).findByRole('alert')
-    expect(within(invitations).queryByText('Invitation 1')).toBeNull()
+    expect((await within(invitations).findByRole('alert')).textContent).toContain(
+      'Your team context changed. Reload before making changes.',
+    )
+    expect(within(invitations).getByRole('button', { name: 'Reload' })).toBeDefined()
+    expect(invitations.textContent).not.toMatch(/permission/i)
+    expect(within(invitations).queryByText(`Invitation to ${invitation(1).email}`)).toBeNull()
+    expect(within(invitations).queryByText(`Invitation to ${invitation(1).email}`)).toBeNull()
     expect(
       api
         .to('GET /api/v1/team/invitations')
         .map(({ headers }) => headers.get('X-Expected-Organization-Id')),
-    ).toEqual([TEAM_ME.organization.id, TEAM_ME.organization.id])
+    ).toEqual([TEAM_ME.organization.id])
     expect(screen.getByText('2 joined members')).toBeDefined()
   })
 })

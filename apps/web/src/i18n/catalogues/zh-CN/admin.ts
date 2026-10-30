@@ -1,5 +1,59 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Only owners can manage admins. Ownership transfer is not available yet.':
+    '只有所有者可以管理管理员。暂不支持转移所有权。',
+  'Owner roles cannot be changed here. The team must retain at least one owner.':
+    '此处不能更改所有者角色。团队必须保留至少一位所有者。',
+  'Make admin': '设为管理员',
+  'Make member': '设为成员',
+  'Make admin: {0}': '设为管理员：{0}',
+  'Make member: {0}': '设为成员：{0}',
+  'Change team role': '更改团队角色',
+  'Change {name} from {oldRole} to {newRole}?': '将{name}从{oldRole}改为{newRole}？',
+  'They will gain admin permissions.': '此人将获得管理员权限。',
+  'They will lose admin permissions and keep member access.':
+    '此人将失去管理员权限，保留成员访问权限。',
+  'Admins can invite and remove ordinary members, manage team events, and view team bookings and cancel them before they start.':
+    '管理员可以邀请和移除普通成员、管理团队活动、查看团队预约，以及在会议开始前取消预约。',
+  'Members can view team members and manage their own availability, calendars and hosted bookings.':
+    '成员可以查看团队成员，管理自己的可预约时间、日历及本人主持的预约。',
+  'Confirm role change': '确认更改角色',
+  'Changing role…': '正在更改角色…',
+  '{name} is now {role}.': '已将{name}设为{role}。',
+  'This role change was denied. Your permission or this member’s team membership may have changed. Reload to check.':
+    '此次角色更改被拒绝。你的权限或此人的团队成员关系可能已变更，请重新加载并核实。',
+  'This person is no longer a member of this team. Reload the member list.':
+    '此人已不再是此团队的成员。请重新加载成员列表。',
+  'This role change conflicts with the current team state. Reload before trying again.':
+    '此次角色更改与当前团队状态冲突。请重新加载后再试。',
+  'Could not confirm the role change. Reload to check this person’s current role before trying again.':
+    '无法确认角色更改结果。请重新加载并核实此人的当前角色后再试。',
+  'The invitation request could not be queued. Try again later.':
+    '无法将邀请请求加入队列。请稍后再试。',
+  'Invite member': '邀请成员',
+  'Invitations always use the member role.': '邀请的角色固定为普通成员。',
+  'Invitation queued for delivery.': '邀请已加入投递队列。',
+  'Queueing invitation…': '正在将邀请加入队列…',
+  'Waiting to send': '等待发送',
+  'An invitation already exists. Review its mail submission status below.':
+    '邀请已存在。请查看下方的邮件提交状态。',
+  'An invitation is already pending for this address. Review the pending invitations.':
+    '此邮箱已有待接受的邀请。请查看待接受的邀请列表。',
+  'This address already belongs to a team member.': '此邮箱已属于团队成员。',
+  'This team has reached its pending invitation limit. Resolve pending invitations before inviting more people.':
+    '本团队已达到待接受邀请数量上限。请先处理现有邀请，再邀请更多成员。',
+  'Enter a valid email address.': '请输入有效的邮箱地址。',
+  'The invitation was saved, but delivery could not be queued. Retry with the same email address.':
+    '邀请已保存，但无法加入投递队列。请使用同一邮箱地址重试。',
+  'The invitation changed. Reload before trying again.': '邀请已更改。请重新加载后再试。',
+  'This invitation is no longer pending. Reload before trying again.':
+    '此邀请已不再处于待接受状态。请重新加载后再试。',
+  'You do not have permission to invite members.': '你没有邀请成员的权限。',
+  'Invitation requests are temporarily limited. Try again later.':
+    '邀请请求暂时受到限制。请稍后再试。',
+  'Try again in {0} seconds.': '请在{0}秒后重试。',
+  'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.':
+    '在限制注册的实例上，仅当邀请者为实例首位用户，或其当前邮箱域名在允许名单中时，邀请才允许注册。受邀者须验证该确切邮箱地址，并另行接受邀请才能加入团队。',
   'This host’s time zone is unavailable.': '无法获取此主持人的时区。',
   'Host time zone: {zone}': '主持人时区：{zone}',
   'Book again with another host': '重新预约其他主持人',
@@ -48,7 +102,11 @@ export const admin = {
   'Could not load pending invitations.': '无法加载待接受的邀请。',
   'You do not have permission to view pending invitations.': '你没有查看待接受邀请的权限。',
   'No pending invitations on this page.': '本页没有待接受的邀请。',
-  'Invitation {0}': '邀请{0}',
+  'Invitation to {email}': '发给{email}的邀请',
+  'Invited {time}': '邀请时间：{time}',
+  'Resend invitation': '重新发送邀请',
+  'Invitation delivery is in progress. Try again shortly.': '邀请正在投递中。请稍后再试。',
+  'This invitation has reached its resend limit.': '此邀请已达到重新发送次数上限。',
   'Mail submission': '邮件提交状态',
   Submitted: '已提交',
   'Submitting to the mail server': '正在提交至邮件服务器',

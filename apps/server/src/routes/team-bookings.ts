@@ -53,11 +53,19 @@ export function teamBookingRoutes(
         path: '/api/v1/team/bookings',
         summary: "Bookings of the session's current team",
         description:
-          'Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.',
+          'Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
-        request: { query: ListBookingsQuery },
+        request: {
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
+            }),
+          }),
+          query: ListBookingsQuery,
+        },
         responses: {
           200: { description: 'A page of team bookings', content: json(TeamAdminBookingPage) },
           400: {
@@ -67,6 +75,10 @@ export function teamBookingRoutes(
           403: {
             description:
               'team_management_access_denied: requires a current team owner/admin session without Authorization',
+            content: json(ErrorBody),
+          },
+          409: {
+            description: ORGANIZATION_CONTEXT_CHANGED,
             content: json(ErrorBody),
           },
         },
@@ -92,7 +104,7 @@ export function teamBookingRoutes(
         path: '/api/v1/team/bookings/{id}/cancel',
         summary: "Cancel a booking of the session's current team",
         description:
-          'Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.',
+          'Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,

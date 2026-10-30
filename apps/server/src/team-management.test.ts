@@ -118,6 +118,7 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     const resolved = await resolve(new Headers({ cookie }))
     if (!resolved.ok) throw new Error('Synthetic session did not resolve')
     let beforeWrite: (() => Promise<void>) | undefined
+    let afterResolve: (() => Promise<void>) | undefined
     const routes: RouteModule = ({ app, caller }) => {
       const access = accessFactory(db, caller)
       app.post('/api/v1/team-management-test/:teamId', ...access.middleware, async (c) => {
@@ -142,10 +143,19 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
         ...access.memberReadMiddleware,
         (c) => c.json({ entered: true }),
       )
+      app.get(
+        '/api/v1/team-management-test/:teamId/:memberUserId/member-entry',
+        ...access.memberReadMiddleware,
+        (c) => c.json({ entered: true }),
+      )
     }
     const app = createApp({
       authHandler: auth.handler,
-      resolveCaller: resolve,
+      resolveCaller: async (headers) => {
+        const caller = await resolve(headers)
+        if (caller.ok) await afterResolve?.()
+        return caller
+      },
       checkDb: async () => {},
       publicUrl: origin,
       routes: [routes],
@@ -158,6 +168,9 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
       principal: resolved.principal,
       app,
       access: accessFactory(db, requireCaller(resolve, { allowedOrigin: origin })),
+      afterResolve: (hook: () => Promise<void>) => {
+        afterResolve = hook
+      },
       beforeWrite: (hook: () => Promise<void>) => {
         beforeWrite = hook
       },
@@ -306,6 +319,106 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
       {
         name: 'AssertionError',
       },
+    )
+  })
+
+  async function verifyExpectedTeamContext(accessFactory: Access = teamManagementAccess) {
+    for (const current of ['personal', 'member'] as const) {
+      const f = await fixture('admin', false, accessFactory)
+      const currentId =
+        current === 'personal'
+          ? f.user.principal.organization.id
+          : (await createTestTeam(db, [{ user: f.user, role: 'member' }])).id
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: currentId })
+        .where('id', '=', f.sessionId)
+        .execute()
+      const response = await f.app.request(`/api/v1/team-management-test/${f.team.id}/entry`, {
+        headers: { cookie: f.cookie, 'X-Expected-Organization-Id': f.team.id },
+      })
+      expect(response.status, `expected team retained; current ${current}`).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+    }
+  }
+
+  it('checks expected team authority before current personal or member eligibility', () =>
+    verifyExpectedTeamContext())
+
+  it('keeps expected-team context behavior in unchanged source copies', () =>
+    verifyExpectedTeamContext(accessCopy()))
+
+  it('detects rejecting the current team before checking expected management', async () => {
+    await expect(
+      verifyExpectedTeamContext(
+        accessCopy(undefined, [
+          'await expectedContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))',
+          `await check(db, c.var.principal, c.var.principal.organization.id)
+    await expectedContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))`,
+        ]),
+      ),
+    ).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError', actual: 403, expected: 409 }),
+    )
+  })
+
+  async function verifyPostResolutionContext(
+    accessFactory: Access = teamManagementAccess,
+    role = 'admin',
+  ) {
+    for (const current of ['personal', 'member'] as const) {
+      const f = await fixture(role, false, accessFactory)
+      const currentId =
+        current === 'personal'
+          ? f.user.principal.organization.id
+          : (await createTestTeam(db, [{ user: f.user, role: 'member' }])).id
+      f.afterResolve(async () => {
+        await db
+          .updateTable('auth.session')
+          .set({ activeOrganizationId: currentId })
+          .where('id', '=', f.sessionId)
+          .execute()
+      })
+      const response = await f.app.request(
+        `/api/v1/team-management-test/${f.team.id}/${role === 'member' ? `${f.user.id}/member-entry` : 'entry'}`,
+        {
+          headers: { cookie: f.cookie, 'X-Expected-Organization-Id': f.team.id },
+        },
+      )
+      expect(response.status, `post-resolution current ${current}`).toBe(409)
+    }
+  }
+
+  it('checks live context even when the expected ID matches the resolved principal', () =>
+    verifyPostResolutionContext())
+
+  it('detects skipping the live check for an expected ID matching a stale principal', async () => {
+    await verifyPostResolutionContext(accessCopy())
+    await expect(
+      verifyPostResolutionContext(
+        accessCopy(undefined, [
+          'if (!uuid(expectedOrganizationId)) throw denied()',
+          `if (!uuid(expectedOrganizationId)) throw denied()
+    if (expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase()) return`,
+        ]),
+      ),
+    ).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError', actual: 200, expected: 409 }),
+    )
+  })
+
+  it('keeps ordinary members recoverable for self reads after caller resolution', async () => {
+    await verifyPostResolutionContext(teamManagementAccess, 'member')
+    await expect(
+      verifyPostResolutionContext(
+        accessCopy([
+          "if (role === 'member' && !context.allowPersonal && !allowMemberRead) throw denied()",
+          "if (role === 'member' && !context.allowPersonal) throw denied()",
+        ]),
+        'member',
+      ),
+    ).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError', actual: 403, expected: 409 }),
     )
   })
 

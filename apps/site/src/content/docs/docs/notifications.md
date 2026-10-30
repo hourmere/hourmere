@@ -677,6 +677,12 @@ safe outcome/error code, SMTP acceptance time, creation/update times and nullabl
 accepted the invitation. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
 and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
 
+The session-only administrator summary includes the invited email address for verified
+owners/admins of that team, so they can identify their own team's invitations. Members,
+other teams and API-key/OAuth callers cannot read it. The summary exposes no invitation
+links or tokens, mail bodies, credentials or raw provider errors. Delivery storage,
+diagnostics and job payloads keep their separate recipient-privacy rules.
+
 Each generation has at most four SMTP attempts. Before contacting the mail server, the
 worker commits an incremented attempt count, an updated `updated_at`, a shared-capacity
 debit and a random 120-second lease. Two workers racing the same generation wait for

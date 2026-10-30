@@ -21,6 +21,9 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `member` may be invited (also the default when `role` is omitted). Ordinary retries by
   the original inviter preserve an unambiguous pending invitation's generation/outcome;
   another inviter receives `409 INVITATION_ALREADY_PENDING` and must reload.
+  The additive `existing` boolean is false only for a newly created invitation and true
+  when a pending invitation is retained, including explicit resend and replay. A repeated
+  queued result therefore identifies the existing invitation instead of implying creation.
   Explicit resend additionally requires `resend: true`, `invitationId`,
   `expectedGeneration` (1–32) and a fresh UUID `requestId`. An identical request replays
   its current result; stale generations or ambiguous matches return 409
@@ -228,6 +231,55 @@ where the form or action started. Do not replace that value with the active orga
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
 separate protocol, without adding fields to either body.
 
+For team REST routes that accept this header, a different current organization returns
+`409 organization_context_changed` when the verified session user still owns or administers
+the expected non-personal team. For the self-service routes
+`POST /api/v1/teams/{teamId}/leave` and the caller's own
+`GET /api/v1/team/members/{memberUserId}/departure-impact`, any current member of the
+expected team receives that 409, including an ordinary member. Previewing another member
+still requires expected-team owner/admin authority. This includes a switch to personal
+space or a team where the user is only a member. Expected-team authority is checked before
+current-team eligibility; the header never authorizes reading or writing that team's data.
+Invalid, personal, missing or inaccessible expected teams receive the uniform
+`403 team_management_access_denied`, without revealing existence. For management routes,
+a caller who is only an ordinary member of the expected team receives that same 403.
+Omitting an optional read header keeps its existing current-team behavior, while required
+write headers remain required.
+Native team writes use the same mismatch rule with their uppercase
+`ORGANIZATION_CONTEXT_CHANGED` and `TEAM_MANAGEMENT_ACCESS_DENIED` codes. Native
+`POST /api/auth/organization/leave` also accepts any current expected-team member for
+409 recovery; the other native writes retain the owner/admin rule. A missing required
+header retains the existing 409 reload refusal. Explicit switching retains its
+source-context contract rather than requiring management authority in the previously
+active organization.
+
+These browser context checks include the following status changes. They grant no new
+permission and do not affect API-key or MCP OAuth authority.
+
+| Request and supplied expectation | Previous response | Current response |
+|---|---|---|
+| Native `invite-member`, `cancel-invitation`, `update-member-role`, `remove-member`, `leave` or `update`: malformed expected ID | 409 `ORGANIZATION_CONTEXT_CHANGED` | 403 `TEAM_MANAGEMENT_ACCESS_DENIED` |
+| The same native management writes (all above except `leave`): expected team differs from the current space and the caller no longer owns/administers it, including ordinary membership, missing teams and personal organizations | 409 `ORGANIZATION_CONTEXT_CHANGED` | 403 `TEAM_MANAGEMENT_ACCESS_DENIED` |
+| Native `leave`: expected team differs from the current space and the caller is no longer a member, or the expectation names a missing/personal organization | 409 `ORGANIZATION_CONTEXT_CHANGED` | 403 `TEAM_MANAGEMENT_ACCESS_DENIED` |
+| REST `POST /api/v1/team/members/{memberUserId}/removal`: malformed expected ID, or a different expected team the caller no longer owns/administers | 409 `organization_context_changed` | 403 `team_management_access_denied` |
+| REST `POST /api/v1/team/bookings/{id}/cancel`: malformed expected ID, or a different expected team the caller no longer owns/administers | 409 `organization_context_changed` | 403 `team_management_access_denied` |
+| REST `POST /api/v1/teams/{teamId}/leave`: malformed expected ID, or a different expected team the caller no longer belongs to, including missing/personal organizations | 409 `organization_context_changed` | 403 `team_management_access_denied` |
+| Team reads with the optional header: a different expected team still authorized for that read (any member for their own departure preview; owner/admin for management reads) | 403 `team_management_access_denied` | 409 `organization_context_changed` |
+| Team reads that did not previously read the header (`GET /api/v1/team/bookings`, `GET /api/v1/teams/{teamId}/readiness`, departure impact, removal records, removal handling): malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
+| The same reads: the expected team differs from the current team | 200 (header ignored) | 409 `organization_context_changed` when still authorized for the expected team, otherwise 403 `team_management_access_denied` |
+
+A still-current ordinary member's stale REST or native leave request retains 409.
+Missing required write headers retain 409, and optional-header omission retains existing
+reads. The management 403 cases above intentionally avoid distinguishing unknown teams
+from teams the caller cannot manage.
+
+The optional read header applies to `GET /api/v1/team/bookings`,
+`GET /api/v1/team/invitations`, `GET /api/v1/teams/{teamId}/readiness`,
+`GET /api/v1/team/members/{memberUserId}/departure-impact`,
+`GET /api/v1/team/member-removals/{operationId}` and
+`GET /api/v1/team/members/{memberUserId}/removal-handling`. Each retains its existing
+role and target restrictions when the expected organization matches or the header is absent.
+
 The existing covered endpoints are:
 
 | Write | Endpoint |
@@ -247,9 +299,10 @@ The existing covered endpoints are:
 | Change team settings, including name or slug | `POST /api/auth/organization/update` |
 
 For the session writes above, the expected organization must match both the operation's
-target organization and the current valid session organization. Missing or mismatched
-context returns HTTP 409: `organization_context_changed` under `/api/v1`, or
-`ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. The message asks the person to reload.
+target organization and the current valid session organization. Missing context and
+an authorized context mismatch return HTTP 409: `organization_context_changed` under
+`/api/v1`, or `ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. Inaccessible expectations
+use the 403 rules above. The 409 message asks the person to reload.
 Inaccessible and missing event-type targets receive the same context refusal on bound
 browser writes, so the error cannot reveal another team's objects. The expected ID grants
 no access: current membership, verification and role checks still apply. Every session
@@ -326,8 +379,8 @@ transfer endpoint. Personal-organization protections remain unchanged.
 
 These rules apply to direct Better Auth requests as well as the web app. Policy denials
 use HTTP 403 `TEAM_MANAGEMENT_ACCESS_DENIED` in Better Auth's error shape; missing and
-inaccessible role targets receive the same denial. Browser context mismatches retain the
-409 response above. The server-only Better Auth add-member operation is not an HTTP
+inaccessible role targets receive the same denial. Browser context mismatches use the
+409 or uniform 403 rules above. The server-only Better Auth add-member operation is not an HTTP
 onboarding path; joining a team requires accepting a member invitation.
 
 ### Team invitation delivery summaries
@@ -343,13 +396,22 @@ before reading invitations. It is session-only REST; MCP and CLI credentials gra
 team invitation management authority.
 
 Browsers may send optional `X-Expected-Organization-Id` to bind every page and retry to
-the team where the invitation section opened. A mismatched, invalid or inaccessible
-expected team receives the same `403 team_management_access_denied` before summaries
-are read, including the first page without a cursor. The header grants no authority and
-must match the session's current team. Omitting it preserves existing current-team reads.
+the team where the invitation section opened. A switch to any other organization, including
+personal space or a team where the reader is only a member, returns
+`409 organization_context_changed` if the reader still owns or administers the expected
+team, with guidance to reload, before any summaries are read. Invalid, personal or
+inaccessible expected teams retain the same `403 team_management_access_denied`.
+These checks cover the first page without a cursor. The header grants no
+authority and must match the session's current team. Omitting it preserves existing
+current-team reads.
 
 The envelope is `{data,nextCursor}`. `limit` accepts 1–100 (default 50); pass the opaque
-`nextCursor` as `cursor` in the same team until it is null. Ordering is invitation ID
+`nextCursor` as `cursor` in the same team with the same filters until it is null. Optional
+`status` accepts `pending`, `accepted`, `canceled`, `rejected`, `expired` or `unknown` and
+filters the derived lifecycle before pagination. In particular, `status=pending` excludes
+expired pending rows using the database clock, and terminal or unknown rows cannot
+produce empty intermediate pages. Omitting `status` retains all lifecycle states.
+Ordering is invitation ID
 ascending, with an exclusive keyset boundary: deleting a previous row or inserting before
 the boundary does not shift later pages. Later inserts can appear. A cursor from another
 team returns `400 invalid_cursor`; malformed query parameters return `400 invalid_request`.
@@ -360,10 +422,11 @@ response objects remain extensible for additive v1 changes.
 | Field | Meaning |
 |---|---|
 | `id` | Invitation UUID. |
+| `email` | Invited recipient address, visible only to verified owners/admins of this team. |
 | `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
 | `createdAt` | Stored invitation creation time in UTC. |
 | `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
-| `delivery.state` | Current generation's `queued`, `sending`, `smtp_accepted`, `failed` or `skipped`; `unknown` if no delivery row remains. Queued includes waiting for retry; SMTP acceptance does not imply inbox delivery, reading or joining. |
+| `delivery.state` | Current generation's `queued` (waiting to send, including retry), `sending` (submitting to the mail server), `smtp_accepted` (accepted by the mail server), `failed` or `skipped`; `unknown` if no delivery row remains. Mail server acceptance does not imply inbox delivery, reading or joining. |
 | `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
 | `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
 | `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |
@@ -376,7 +439,9 @@ classifications, distinct from the endpoint's HTTP errors. Expired, accepted, ca
 rejected or unknown invitations cannot be resent; elevated/custom historical roles are ineligible.
 An exhausted current generation can be explicitly resent if the new-generation rules allow it.
 
-No recipient address, inviter identity, role, message body, invitation link/token, credential,
+Recipient addresses are returned only to the current team's verified owners/admins.
+Members, other teams and API-key/OAuth callers cannot read them through this endpoint.
+No inviter identity, role, message body, invitation link/token, credential,
 job ID, lease identity, resend request ID or raw third-party error is returned. The endpoint
 does not send mail or change the invitation or delivery records.
 
@@ -416,9 +481,10 @@ owner." and `handling.nextStep: add_another_owner_first`.
 Missing or invalid sessions and any Authorization header, even with a valid session
 cookie, receive that same denial without a `WWW-Authenticate` challenge. Authorization
 headers are refused before credentials are resolved. Cookie writes require a same-origin
-Origin or Referer. The header and body `teamId` must match the current session team;
-missing or stale context returns `409 organization_context_changed` without writing.
-Reload the page before submitting again.
+Origin or Referer. The header and body `teamId` must match the current session team.
+Missing context or a stale expectation for a team the caller still owns/administers
+returns `409 organization_context_changed` without writing; malformed or inaccessible
+expectations return the uniform 403. Reload the page before submitting again.
 
 The membership revocation, affected event-type deactivation and removal operation record
 commit together. Individual and collective team types using the member are deactivated;
@@ -454,8 +520,11 @@ requests through the removal-record route.
 and `X-Expected-Organization-Id` bound to the team where the action started. Missing or
 invalid sessions and any Authorization header return `403 team_management_access_denied`
 without a `WWW-Authenticate` challenge, even alongside a valid cookie. Authorization
-headers are rejected before credential resolution. Stale context returns
-`409 organization_context_changed`; reload before retrying.
+headers are rejected before credential resolution. A stale expectation returns
+`409 organization_context_changed` when the caller is still a member of that non-personal
+team, in any role; a non-member receives the uniform 403. Reload before retrying.
+The same membership rule applies to native `/api/auth/organization/leave` and the caller's
+own departure-impact preview. Management routes retain the owner/admin rule.
 
 An owner needs another current owner before leaving. The locked refusal is
 `409 member_departure_owner_required`, with the message "The team must retain at least one
@@ -601,8 +670,10 @@ session cancel a booking of its current team before the booking starts. Send
 `X-Expected-Organization-Id` from the team where the action started and an optional strict
 `{ "reason": "…" }` body (at most 1000 characters). A same-origin `Origin`, or a same-origin
 `Referer` when Origin is absent, is required; missing sources, `Origin: null` and other
-origins receive 403 `forbidden`. Missing or stale expected organization receives 409
-`organization_context_changed`; reload before deciding whether to submit again.
+origins receive 403 `forbidden`. A missing expected organization, or a stale expectation
+for a team the caller still owns/administers, receives 409 `organization_context_changed`;
+malformed or inaccessible expectations receive 403 `team_management_access_denied`.
+Reload before deciding whether to submit again.
 
 Success returns 200 `{ "cancelled": true }`. A cancellation already committed in this team
 returns 409 `booking_already_cancelled`, including a retry after a lost response. Reload the
