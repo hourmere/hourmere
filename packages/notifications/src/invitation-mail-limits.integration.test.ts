@@ -178,6 +178,47 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([])
   })
 
+  it('detects shared sending capacity wrongly debited during admission in a source copy', async () => {
+    const location = new URL('./invitation-mail-limits.ts', import.meta.url)
+    const source = readFileSync(location, 'utf8')
+    const anchor = "  await db\n    .insertInto('invitation_email_requests')"
+    expect(source.includes(anchor)).toBe(true)
+    const copy = async (mutated: boolean) => {
+      const text = mutated
+        ? source.replace(
+            anchor,
+            `  await db.insertInto('notification_email_sends')
+        .values({ recipient_hash: hash, sent_at: now }).execute()
+${anchor}`,
+          )
+        : source
+      const compiled = stripTypeScriptTypes(text).replace(
+        /from '([^']+)'/g,
+        (_, specifier: string) =>
+          `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+      )
+      return (
+        await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+      ).reserveInvitationEmailBudget as typeof reserveInvitationEmailBudget
+    }
+    const verify = async (reserveCopy: typeof reserveInvitationEmailBudget) => {
+      await db.deleteFrom('invitation_email_requests').execute()
+      await db.deleteFrom('notification_email_sends').execute()
+      expect(
+        await db.transaction().execute((trx) => reserveCopy(trx, actor, { secret: SECRET }, NOW)),
+      ).toBe(true)
+      expect((await counts()).mail, 'admission must leave shared sending capacity available').toBe(
+        0,
+      )
+    }
+    await verify(await copy(false))
+    await expect(verify(await copy(true))).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('admission must leave shared sending capacity'),
+    })
+    await verify(await copy(false))
+  })
+
   it.each([
     ['inviter hourly', 20, false, true],
     ['inviter daily', 100, true, true],

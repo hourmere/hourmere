@@ -43,8 +43,10 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `503 INVITATION_DELIVERY_UNAVAILABLE`; the invitation and due queued intent remain saved.
   Retrying the same request repairs its current generation; resend retries must retain
   the same `requestId` and `expectedGeneration`. A periodic repairer also recovers missing
-  live jobs. The repairer skips obsolete invitations; delivery jobs remain unconsumed
-  until the invitation sender is installed.
+  live jobs and expired claims without resetting their bounded attempt budget. The
+  worker rechecks invitation status, expiry and generation before every send, using the
+  current address. `smtp_accepted` means accepted by the mail server; it does not promise
+  inbox delivery. A failed result commit after SMTP acceptance can cause a duplicate.
   If cancellation, acceptance, expiry or deletion overtakes dispatch, the request returns
   `409 INVITATION_INELIGIBLE` with the existing no-longer-pending wording. A newer generation
   overtaking dispatch still returns 503; reload before retrying an obsolete resend.
