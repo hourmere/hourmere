@@ -13,7 +13,7 @@ by a native speaker. Corrections are welcome through a GitHub issue or pull requ
 German regional preferences such as `de-AT` and `de-CH` resolve to `de`.
 French regional preferences such as `fr-CA`, `fr-BE` and `fr-CH` resolve to `fr`, using
 French (`fr-FR`) date and time formatting.
-Changing it updates the existing page without restarting a form, discarding a chosen time,
+Changing the language updates the existing page without restarting a form, discarding a chosen time,
 reissuing a booking or replacing its private management link.
 
 An explicit interface choice takes precedence over a supported signed-in profile default,

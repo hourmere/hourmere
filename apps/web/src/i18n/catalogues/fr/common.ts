@@ -333,10 +333,10 @@ export const common = {
     'Confirmez votre adresse e-mail en vous connectant par un lien reçu par e-mail avant d’utiliser les clés API',
   'Reconnect Google Calendar': 'Reconnecter Google Agenda',
   'Make another schedule the default before deleting this one':
-    'Définissez un autre calendrier de disponibilités par défaut avant de supprimer celui-ci',
+    'Définissez un autre planning de disponibilités par défaut avant de supprimer celui-ci',
   '{0} Your booking is not confirmed yet.': '{0} Votre réservation n’est pas encore confirmée.',
   'Reconnect before enabling busy times.':
-    'Reconnectez-vous avant d’activer les périodes d’indisponibilité.',
+    'Reconnectez le calendrier avant d’activer la prise en compte des créneaux occupés.',
   '{date}, loading': '{date}, chargement',
   '{date}, available': '{date}, disponible',
   '{date}, no times available': '{date}, aucun horaire disponible',
