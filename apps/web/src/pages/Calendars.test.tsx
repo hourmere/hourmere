@@ -158,8 +158,8 @@ describe('the calendars page', () => {
             : '同步需要处理，请查看下方同步失败的日历。',
         waiting:
           locale === 'en'
-            ? 'Waiting for the first synchronization on selected calendars.'
-            : '已选日历正在等待首次同步。',
+            ? 'Synchronization is not ready for selected calendars yet.'
+            : '所选日历的同步数据尚未就绪。',
       }
       expect(
         definition(article, locale === 'en' ? 'Busy-time sync' : '忙碌时段同步').textContent,
@@ -242,7 +242,7 @@ describe('the calendars page', () => {
       failed: false,
       waiting: true,
       selected: true,
-      expected: 'Waiting for the first synchronization on selected calendars.',
+      expected: 'Synchronization is not ready for selected calendars yet.',
     },
     {
       name: 'successful selections beside an unused failed calendar',
@@ -312,7 +312,7 @@ describe('the calendars page', () => {
     if (state.waiting)
       expect(
         within(article).getByText(
-          'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+          'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
         ),
       ).toBeDefined()
   })
@@ -1610,7 +1610,7 @@ describe('the calendars page', () => {
     )
     expect(
       await screen.findByText(
-        'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+        'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
       ),
     ).toBeDefined()
     expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)[0]?.body).toEqual({
