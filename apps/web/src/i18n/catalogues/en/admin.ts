@@ -1134,8 +1134,8 @@ export const admin = {
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
   'Accept invitation': 'Accept invitation',
   'Checking invitation…': 'Checking invitation…',
-  'This invitation is unavailable. It may have expired, been canceled or already been accepted. Ask the team owner for a new invitation.':
-    'This invitation is unavailable. It may have expired, been canceled or already been accepted. Ask the team owner for a new invitation.',
+  'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.':
+    'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     'Use the exact email address that received this invitation. Change accounts if you signed in with another address.',
   'Confirm your email address by signing in with an email link, then return to this invitation.':

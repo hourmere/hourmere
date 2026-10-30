@@ -247,7 +247,12 @@ describe('accept invitation entry', () => {
         [lookupRoute]: () => json(status, { code, message: 'private server prose' }),
       })
       renderApp(path)
-      expect((await screen.findByRole('alert')).textContent).toContain(message)
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toContain(message)
+      if (status === 400 || status === 404)
+        expect(alert.textContent).toContain(
+          'Ask the team owner to check its status and resend or replace it as appropriate.',
+        )
       expect(screen.getByRole('main').textContent).not.toContain('private server prose')
       noJoinButton()
       expect(api.to(acceptRoute)).toHaveLength(0)
@@ -266,7 +271,7 @@ describe('accept invitation entry', () => {
       const { api } = server({ [lookupRoute]: () => json(200, { ...invitation, ...change }) })
       renderApp(path)
       expect((await screen.findByRole('alert')).textContent).toContain(
-        'Ask the team owner for a new invitation.',
+        'Ask the team owner to check its status and resend or replace it as appropriate.',
       )
       noJoinButton()
       expect(screen.getByRole('link', { name: 'Go to Hourmere' }).getAttribute('href')).toBe('/app')
@@ -449,6 +454,43 @@ describe('accept invitation entry', () => {
     )
     expect(api.to(lookupRoute)).toHaveLength(2)
     expect(api.to(acceptRoute)).toHaveLength(1)
+  })
+
+  it('rechecks an invitation canceled after lookup without repeating acceptance or switching', async () => {
+    let unavailable = false
+    const { api } = server({
+      [lookupRoute]: () =>
+        unavailable
+          ? json(400, { code: 'INVITATION_NOT_FOUND', message: 'private failure details' })
+          : json(200, invitation),
+      [acceptRoute]: () => {
+        unavailable = true
+        return json(400, {
+          code: 'INVITATION_NOT_FOUND',
+          message: 'private failure details',
+        })
+      },
+    })
+    renderApp(path)
+    await screen.findByRole('button', { name: 'Join team' })
+    expect(api.to(acceptRoute)).toHaveLength(0)
+    await userEvent.click(joinButton())
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Ask the team owner to check its status and resend or replace it as appropriate.',
+    )
+    noJoinButton()
+    act(() => window.dispatchEvent(new Event('focus')))
+    expect(api.to(acceptRoute)).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
+    await waitFor(() => expect(api.to(lookupRoute)).toHaveLength(2))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Ask the team owner to check its status and resend or replace it as appropriate.',
+    )
+    noJoinButton()
+    expect(screen.getByRole('main').textContent).not.toContain('private failure details')
+    expect(api.to(acceptRoute)).toHaveLength(1)
+    expect(api.to(switchRoute)).toHaveLength(0)
+    expect(location()).toBe(path)
   })
 
   it.each([
@@ -665,6 +707,25 @@ describe('accept invitation entry', () => {
       otherMe.organization.name,
     )
   })
+
+  it.each(['lookup', 'acceptance'] as const)(
+    'localizes owner recovery after an unavailable %s',
+    async (stage) => {
+      chooseLanguage('zh-CN')
+      const { api } = server({
+        [stage === 'lookup' ? lookupRoute : acceptRoute]: () =>
+          json(400, { code: 'INVITATION_NOT_FOUND', message: 'private server prose' }),
+      })
+      renderApp(path)
+      if (stage === 'acceptance')
+        await userEvent.click(await screen.findByRole('button', { name: '加入团队' }))
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        '此邀请不可用。请团队所有者检查邀请状态，并视情况重新发送或提供新邀请。',
+      )
+      expect(api.to(acceptRoute)).toHaveLength(stage === 'acceptance' ? 1 : 0)
+      expect(api.to(switchRoute)).toHaveLength(0)
+    },
+  )
 
   it('localizes invitation guidance and errors', async () => {
     chooseLanguage('zh-CN')

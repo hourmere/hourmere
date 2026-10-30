@@ -140,7 +140,9 @@ export function createTeamRolePolicy(
     const endpoint = tryGetCurrentAuthEndpointContext()
     if (
       !endpoint ||
-      (!selfDeparturePaths.has(endpoint.path ?? '') && endpoint.path !== changeRole) ||
+      (!selfDeparturePaths.has(endpoint.path ?? '') &&
+        endpoint.path !== changeRole &&
+        endpoint.path !== accept) ||
       !endpoint.context.session?.session?.id ||
       (endpoint.path === remove && !endpoint.body?.memberIdOrEmail) ||
       (endpoint.path === changeRole && !endpoint.body?.memberId)
