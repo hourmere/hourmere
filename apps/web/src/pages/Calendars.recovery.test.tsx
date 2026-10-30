@@ -449,7 +449,7 @@ describe('calendar recovery actions', () => {
   )
 
   it.each([null, '2020-01-01T12:00:00Z'])(
-    'uses only the returned first-sync or success fact when lastSyncedAt is %s',
+    'uses only the returned not-ready or success fact when lastSyncedAt is %s',
     async (lastSyncedAt) => {
       fakeApi({
         ...signedIn,
