@@ -110,8 +110,11 @@ Every email goes to each host first (they most need to know), then the invitee, 
 guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
 booking's `booking_hosts` whose address is verified: accounts start verified, and one that
 is not (it should not exist; see [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md)) is neither emailed nor named in the
-invitation, so a booking without a verified host sends nothing (the job logs one WARN line
-naming the booking and the kind, since the invitee hears nothing either). Guests are
+invitation. Without a verified host, confirmations, reschedules and reminders send nothing
+(the job logs one WARN line naming the booking and kind). Cancellations and conference-failure
+notices still reach the invitee and guests. A removed team host receives no host notice;
+cancellation uses the saved organizer for its calendar attachment, or sends text only when
+that historical snapshot is unavailable. Guests are
 addresses an anonymous booker typed (up to 10 per booking); invitee/guest emails share
 per-recipient and instance-wide [abuse limits](#email-abuse-controls). Times are shown in the recipient's zone with its IANA display name
 (spaces instead of underscores) and the GMT offset for the meeting date: the attendee's
@@ -539,8 +542,8 @@ purpose-separated recipient HMAC, the inviter/team identifiers and the request t
 
 Explicit resends require the invitation ID, expected generation and UUID request ID;
 they wait 60 seconds from the later of the generation start and latest delivery update,
-including worker attempts, stop at 32 generations and extend expiry by the original validity
-length. The invitation sender updates `updated_at` on every delivery attempt
+including worker attempts, stop at 32 generations and preserve the invitation's expiry.
+The invitation sender updates `updated_at` on every delivery attempt
 so this post-delivery cooldown holds. Each delivery generation retains its existing
 maximum of four SMTP attempts.
 Expired or business-terminal invitations need a new invitation. Invitation admission

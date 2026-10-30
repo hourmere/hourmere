@@ -3,7 +3,12 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import { ensurePersonalOrganization, isMember, isUuid } from './organizations.ts'
-import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
+import {
+  checkTeamManagementAccess,
+  TeamManagementError,
+  teamSession,
+  teamSessionUser,
+} from './team-management.ts'
 
 const covered = new Set([
   '/organization/invite-member',
@@ -84,22 +89,107 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
     })
   }
   if (!ctx.request) return
+  // Creating or switching teams is target-bound, but still requires a proven identity.
+  if (ctx.path === '/organization/create' || ctx.path === '/organization/set-active') {
+    const session = await getSessionFromCtx(ctx)
+    if (session) {
+      const actor = {
+        kind: 'session' as const,
+        sessionId: session.session.id,
+        user: session.user,
+        organization: { id: '', name: '', slug: '', personal: false },
+      }
+      try {
+        await teamSessionUser(db, actor, false)
+        await teamSession(db, actor, false)
+      } catch (error) {
+        if (!(error instanceof TeamManagementError)) throw error
+        throw new APIError('FORBIDDEN', {
+          code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+          message: 'team_management_access_denied',
+        })
+      }
+    }
+  }
   const expected = ctx.request.headers.get('x-expected-organization-id')
   // Automatic follow-ups bind the source context; deliberate switching without an
   // expectation keeps its existing explicit-target contract.
   const boundSwitch = ctx.path === '/organization/set-active' && expected !== null
   if (!covered.has(ctx.path) && !boundSwitch) return
   const session = await getSessionFromCtx(ctx)
-  // Leave unauthenticated requests to the endpoint's existing authentication response.
-  if (!session) return
-  if (expected === null) throw changed()
-  if (!isUuid(expected)) {
+  if (!session) {
+    if (boundSwitch) return
+    throw new APIError('FORBIDDEN', {
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      message: 'team_management_access_denied',
+    })
+  }
+  if (expected !== null && !isUuid(expected)) {
     if (boundSwitch) throw changed()
     throw new APIError('FORBIDDEN', {
       code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
       message: 'team_management_access_denied',
     })
   }
+  const body = ctx.body as Record<string, unknown> | undefined
+  // Authorize before revealing context recovery, including legacy unverified sessions.
+  if (!boundSwitch) {
+    const targetId =
+      expected && isUuid(expected)
+        ? expected
+        : typeof body?.organizationId === 'string'
+          ? body.organizationId
+          : session.session.activeOrganizationId
+    if (typeof targetId !== 'string' || !isUuid(targetId)) {
+      throw new APIError('FORBIDDEN', {
+        code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+        message: 'team_management_access_denied',
+      })
+    }
+    let selfRemoval = false
+    if (ctx.path === '/organization/remove-member' && typeof body?.memberIdOrEmail === 'string') {
+      selfRemoval = body.memberIdOrEmail.toLowerCase() === session.user.email.toLowerCase()
+      if (!selfRemoval && isUuid(body.memberIdOrEmail)) {
+        const self = await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('organizationId', '=', targetId)
+          .where('userId', '=', session.user.id)
+          .where('id', '=', body.memberIdOrEmail)
+          .executeTakeFirst()
+        selfRemoval = Boolean(self)
+      }
+    }
+    try {
+      await checkTeamManagementAccess(
+        db,
+        {
+          kind: 'session',
+          sessionId: session.session.id,
+          user: session.user,
+          organization: { id: targetId, name: '', slug: '', personal: false },
+        },
+        targetId,
+        false,
+        {
+          expectedOrganizationId: targetId,
+          allowPersonal:
+            ctx.path === '/organization/update' ||
+            ctx.path === '/organization/leave' ||
+            selfRemoval,
+        },
+        ctx.path === '/organization/leave' || selfRemoval,
+      )
+    } catch (error) {
+      if (!(error instanceof TeamManagementError)) throw error
+      if (error.code === 'organization_context_changed') throw changed()
+      throw new APIError('FORBIDDEN', {
+        code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+        message: 'team_management_access_denied',
+      })
+    }
+  }
+  if (expected === null) throw changed()
   const expectedId = expected.toLowerCase()
   // Read the live session, rather than trusting the organization cached while resolving
   // authentication. Removed members have the same personal fallback as REST callers.
@@ -145,7 +235,6 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
   }
   if (boundSwitch) return
 
-  const body = ctx.body as Record<string, unknown> | undefined
   if (!body || typeof body !== 'object' || Array.isArray(body)) return
   const requested = body.organizationId
   if (typeof requested === 'string' && requested.toLowerCase() !== expectedId) throw changed()

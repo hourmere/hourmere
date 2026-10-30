@@ -232,7 +232,10 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   })
 
   it('detects using management-only authority for native stale member leave', async () => {
-    const copy = await sourceCopy(undefined, ["ctx.path === '/organization/leave',", 'false,'])
+    const copy = await sourceCopy(undefined, [
+      "ctx.path === '/organization/leave' || selfRemoval,",
+      'false,',
+    ])
     await expect(assertStaleMemberContext(copy)).rejects.toMatchObject({
       name: 'AssertionError',
       actual: 403,
@@ -400,10 +403,8 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   })
 
   it('detects dropping native removal protection with a real assertion failure', async () => {
-    const copy = await sourceCopy([
-      'new Set([changeRole, accept, remove])',
-      'new Set([changeRole, accept])',
-    ])
+    // Both entry checks now reject ordinary members before native target lookup.
+    const copy = await sourceCopy(['  remove,\n', ''], ['if (!boundSwitch) {', 'if (false) {'])
     await expect(assertProtectedRemoval(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 

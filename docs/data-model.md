@@ -361,14 +361,14 @@ Existing pending, unexpired invitations are backfilled as
 and the sign-in mail tables are preserved. This prevents later repair from silently
 resending historic invitations with unknown mail outcomes. Restart every role with the
 new version. The migration itself installs storage and queries; management and queue
-integration are application code. Explicit resend extends expiry under the approved
-protocol, independently of these storage queries.
+integration are application code. Explicit resend preserves the invitation's stored
+expiry; expired invitations require a new invitation ID.
 
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
 and `updated_at`. The sender updates `updated_at` on every delivery attempt
-so attempts restart the post-delivery wait. `expiry_duration_ms` retains the original
-validity length across successive renewals. The migration retains delivery creation time as the cooldown anchor
+so attempts restart the post-delivery wait. `expiry_duration_ms` retains legacy validity
+metadata without changing business expiry. The migration retains delivery creation time as the cooldown anchor
 and seeds the known legacy 48-hour validity policy. Historic native resends changed expiry
 without changing invitation creation time, so their difference cannot recover original
 validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.

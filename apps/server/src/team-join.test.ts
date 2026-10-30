@@ -337,10 +337,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       })
       expect(canceled.status).toBe(403)
       expect(await canceled.json()).toMatchObject({
-        code:
-          actor === member
-            ? 'YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION'
-            : 'TEAM_MANAGEMENT_ACCESS_DENIED',
+        code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
       })
       expect(await state(org.id)).toEqual([{ status: 'pending', members: 3 }])
     }
