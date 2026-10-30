@@ -295,7 +295,7 @@ and linked operating guides before deploying:
 - Rate limiting uses in-process memory; multiple web replicas multiply the limits. Run a
   single web process; a separate worker is supported.
 - [Public booking pages and emails](https://hourmere.com/docs/interface-languages) support English,
-  Simplified Chinese, German and French. Account and sign-in interfaces support English and
+  Simplified Chinese, German, French and Spanish. Account and sign-in interfaces support English and
   Simplified Chinese. Missing translations fall back to English; dates follow the active locale.
 - No automatic schema downgrade; some migrations require stopping all old app and worker
   processes. Review the [migration notes](docs/data-model.md#changing-the-schema).

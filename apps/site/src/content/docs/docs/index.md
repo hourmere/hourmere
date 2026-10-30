@@ -47,7 +47,7 @@ The website at hourmere.com is separate from your Hourmere instance.
   uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
   a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
 - [Public booking pages and emails](/docs/interface-languages) support English,
-  Simplified Chinese, German and French. Account and sign-in interfaces support English and
+  Simplified Chinese, German, French and Spanish. Account and sign-in interfaces support English and
   Simplified Chinese. Missing translations fall back to English;
   dates use the active language with the existing time-zone rules.
 - [Schema downgrade is not automatic](/docs/self-hosting#upgrade-and-roll-back). Some
