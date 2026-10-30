@@ -6,6 +6,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import {
   cancelHostBooking,
@@ -17,7 +18,10 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { createEventType } from './event-types.ts'
 import { isUuid } from './internal.ts'
-import { TeamAdminBookingPageSchema, toTeamAdminBooking } from './team-admin-booking.ts'
+import {
+  TeamAdminBookingListPageSchema as TeamAdminBookingPageSchema,
+  toTeamAdminBooking,
+} from './team-admin-booking.ts'
 import { listTeamAdminBookings } from './team-bookings.ts'
 import {
   createFixtures,
@@ -62,6 +66,8 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     'DomainError',
     'isUuid',
     'toTeamAdminBooking',
+    'findPublicEventType',
+    'findPublicTeamEventType',
     `${compile('packages/scheduling/src/team-bookings.ts', replacement)}; return listTeamAdminBookings`,
   )(
     sql,
@@ -70,6 +76,8 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     DomainError,
     isUuid,
     toTeamAdminBooking,
+    findPublicEventType,
+    findPublicTeamEventType,
   ) as List
 }
 
@@ -248,8 +256,10 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
         start: '2026-11-02T09:00:00.000Z',
         end: '2026-11-02T09:30:00.000Z',
         cancelledAt: null,
-        eventType: { id: f.eventId, title: 'Team consultation' },
-        hosts: [{ userId: f.member.id, name: f.member.name }],
+        eventType: { id: f.eventId, title: 'Team consultation', publicBookingPath: null },
+        hosts: [
+          { userId: f.member.id, name: f.member.name, timeZone: null, isCurrentMember: true },
+        ],
         attendees: [
           { name: 'Booker', email: 'booker@example.com', timeZone: 'UTC', isBooker: true },
           { name: 'Guest', email: 'guest@example.com', timeZone: 'UTC', isBooker: false },
@@ -413,7 +423,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     })
     const result = await list(f.ownerCtx)
     expect(result.data.map(({ id, eventType }) => ({ id, eventType }))).toEqual([
-      { id: deleted, eventType: { id: f.eventId, title: null } },
+      { id: deleted, eventType: { id: f.eventId, title: null, publicBookingPath: null } },
       { id: missing, eventType: null },
     ])
   }
@@ -672,7 +682,10 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     ],
     [
       'explicit mapper boundary',
-      ['toTeamAdminBooking({\n        id: row.id,', '({\n        ...row,\n        id: row.id,'],
+      [
+        'toTeamAdminBooking({\n        id: row.id,',
+        '((record) => ({ ...row, ...toTeamAdminBooking(record) }))({\n        id: row.id,',
+      ],
       verifyWhitelist,
     ],
   ])('detects broken %s with a real assertion failure', async (_, replacement, verify) => {

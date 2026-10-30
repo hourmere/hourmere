@@ -173,6 +173,9 @@ export {
 } from './schedules.ts'
 export {
   type TeamAdminBooking,
+  TeamAdminBookingListItemSchema,
+  type TeamAdminBookingListPage,
+  TeamAdminBookingListPageSchema,
   type TeamAdminBookingPage,
   TeamAdminBookingPageSchema,
   type TeamAdminBookingRecord,

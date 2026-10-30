@@ -1,5 +1,32 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'This host’s time zone is unavailable.': 'This host’s time zone is unavailable.',
+  'Host time zone: {zone}': 'Host time zone: {zone}',
+  'Book again with another host': 'Book again with another host',
+  'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.':
+    'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.',
+  'An admin cancels this booking here before it starts.':
+    'An admin cancels this booking here before it starts.',
+  'This booking is already cancelled. Continue with the next step.':
+    'This booking is already cancelled. Continue with the next step.',
+  'This booking has already started. Wait until it ends or coordinate with the hosts offline.':
+    'This booking has already started. Wait until it ends or coordinate with the hosts offline.',
+  'Then ask the guest to book again from the event’s public booking page.':
+    'Then ask the guest to book again from the event’s public booking page.',
+  'Open public booking page': 'Open public booking page',
+  'The event is no longer bookable.': 'The event is no longer bookable.',
+  'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.':
+    'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.',
+  'Cancellation notifications are queued. Email delivery is not confirmed.':
+    'Cancellation notifications are queued. Email delivery is not confirmed.',
+  'Your time zone: {zone}': 'Your time zone: {zone}',
+  'Cancellation notifications': 'Cancellation notifications',
+  'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.':
+    'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.',
+  'Email delivery is not guaranteed. Contact the invitee directly if needed.':
+    'Email delivery is not guaranteed. Contact the invitee directly if needed.',
+  'Hourmere does not automatically assign another host. A replacement requires a new booking.':
+    'Hourmere does not automatically assign another host. A replacement requires a new booking.',
   'Join team': 'Join team',
   'Go to team': 'Go to team',
   'Invited email': 'Invited email',

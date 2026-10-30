@@ -3,8 +3,8 @@ import {
   type BookingNotifier,
   cancelTeamAdminBooking,
   listTeamAdminBookings,
-  TeamAdminBookingPageSchema,
-  TeamAdminBookingSchema,
+  TeamAdminBookingListItemSchema,
+  TeamAdminBookingListPageSchema,
 } from '@hourmere/scheduling'
 import {
   ErrorBody,
@@ -25,15 +25,15 @@ import { CancelBody, ListBookingsQuery } from './bookings.ts'
 // their strict privacy whitelist, including nested objects.
 const TeamAdminBooking = z
   .object({
-    ...TeamAdminBookingSchema.shape,
-    eventType: z.object(TeamAdminBookingSchema.shape.eventType.unwrap().shape).nullable(),
-    hosts: z.array(z.object(TeamAdminBookingSchema.shape.hosts.element.shape)),
-    attendees: z.array(z.object(TeamAdminBookingSchema.shape.attendees.element.shape)),
+    ...TeamAdminBookingListItemSchema.shape,
+    eventType: z.object(TeamAdminBookingListItemSchema.shape.eventType.unwrap().shape).nullable(),
+    hosts: z.array(z.object(TeamAdminBookingListItemSchema.shape.hosts.element.shape)),
+    attendees: z.array(z.object(TeamAdminBookingListItemSchema.shape.attendees.element.shape)),
   })
   .openapi('TeamAdminBooking')
 const TeamAdminBookingPage = z
   .object({
-    ...TeamAdminBookingPageSchema.shape,
+    ...TeamAdminBookingListPageSchema.shape,
     data: z.array(TeamAdminBooking),
   })
   .openapi('TeamAdminBookingPage')
