@@ -260,7 +260,9 @@ pre,
 
 .account {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
   min-width: 0;
 }
@@ -385,6 +387,10 @@ main {
 
 /* Keeping 481–639px static avoids an extra breakpoint just for sticky positioning. */
 @media (min-width: 640px) {
+  .account {
+    flex-wrap: nowrap;
+  }
+
   .topbar {
     position: sticky;
   }

@@ -39,6 +39,10 @@ export function fakeApi(routes: Routes) {
         hostedSignupUrl: 'https://hourmere.com',
         signIn: { email: true, google: false, microsoft: false },
       }),
+    // The shared admin frame discovers team choices and the active membership. Tests
+    // with no team fixtures start with no listed teams and an unavailable role.
+    'GET /api/auth/organization/list': () => json(200, []),
+    'GET /api/auth/organization/get-active-member': () => json(404, { code: 'MEMBER_NOT_FOUND' }),
     ...routes,
   }
   const calls: Call[] = []

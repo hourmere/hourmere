@@ -9,6 +9,7 @@ import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { InstanceLegalLinks } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 import { PageSkeleton } from './PageSkeleton.tsx'
+import { SpaceSwitcher } from './SpaceSwitcher.tsx'
 
 export const NAV_ITEMS = [
   { to: PATHS.eventTypes, label: 'Event types' },
@@ -45,6 +46,7 @@ export function AppShell() {
   const me = useMe()
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<UiText | null>(null)
+  const [spaceError, setSpaceError] = useState<UiText | null>(null)
   const [navEdges, setNavEdges] = useState({ start: true, end: true })
   const main = useRef<HTMLElement>(null)
   const nav = useRef<HTMLElement>(null)
@@ -100,9 +102,10 @@ export function AppShell() {
   // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
   // after they left. (Not on the page starting over in place, which is what it explains.)
   useEffect(() => {
-    if (notice && notice.path !== pathname) setNotice(null)
+    if (notice && notice.path !== null && notice.path !== pathname) setNotice(null)
   }, [notice, pathname, setNotice])
-  const shownNotice = notice?.path === pathname ? notice.message : null
+  const shownNotice =
+    notice && (notice.path === null || notice.path === pathname) ? notice.message : null
 
   // A link that leaves a page with unsaved changes asks first (see unsaved-changes.tsx).
   // Capturing: this runs before the link's own handler, which then sees the click cancelled.
@@ -143,12 +146,18 @@ export function AppShell() {
             <button type="button" className="button button-small" onClick={handleSignOut}>
               {t('Sign out')}
             </button>
+            <SpaceSwitcher onError={setSpaceError} />
           </div>
         </div>
       </header>
       {signOutError && (
         <p className="alert alert-error shell-alert" role="alert">
           {ui(signOutError)}
+        </p>
+      )}
+      {spaceError && (
+        <p className="alert alert-error shell-alert" role="alert">
+          {ui(spaceError)}
         </p>
       )}
       <div className="layout">
@@ -175,7 +184,7 @@ export function AppShell() {
         >
           {shownNotice && (
             <div className="alert alert-info notice">
-              <p role="alert">{ui(shownNotice)}</p>
+              <p role={notice?.path === null ? 'status' : 'alert'}>{ui(shownNotice)}</p>
               <button type="button" className="button button-small" onClick={() => setNotice(null)}>
                 {t('Dismiss')}
               </button>

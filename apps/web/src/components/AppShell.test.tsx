@@ -1,15 +1,51 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { lazy, Suspense } from 'react'
+import userEvent from '@testing-library/user-event'
+import { lazy, type ReactNode, Suspense } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { admin } from '../i18n/admin.ts'
+import { InterfaceScope } from '../i18n/runtime.tsx'
 import { chooseLanguage } from '../i18n/store.ts'
+import { registerCatalog } from '../i18n/translate.ts'
+import { fakeApi, json } from '../test/fake-api.tsx'
 import { UnsavedChangesProvider } from '../unsaved-changes.tsx'
 import { AppShell } from './AppShell.tsx'
 
-vi.mock('../session.tsx', () => ({
-  useMe: () => ({ user: { email: 'shell@example.com' } }),
-  useSession: () => ({ signOut: vi.fn(), notice: null, setNotice: vi.fn() }),
+registerCatalog(admin)
+
+const session = vi.hoisted(() => ({
+  me: {
+    user: { id: 'shell-user', name: 'Ada', email: 'shell@example.com' },
+    organization: { id: 'personal-space', name: 'Ada', slug: 'ada', personal: true },
+    principal: { kind: 'session', apiKeyId: null },
+  },
+  accept: vi.fn(),
 }))
+
+vi.mock('../session.tsx', () => ({
+  useMe: () => session.me,
+  useSession: () => ({
+    accept: session.accept,
+    beginContextSwitch: () => vi.fn(),
+    signOut: vi.fn(),
+    notice: null,
+    setNotice: vi.fn(),
+  }),
+}))
+
+beforeEach(() => {
+  session.me.organization = { id: 'personal-space', name: 'Ada', slug: 'ada', personal: true }
+  session.accept.mockClear()
+  fakeApi({})
+})
+
+function ShellProviders({ children }: { children: ReactNode }) {
+  return (
+    <InterfaceScope surface="admin">
+      <UnsavedChangesProvider>{children}</UnsavedChangesProvider>
+    </InterfaceScope>
+  )
+}
 
 function shell(path = '/app/event-types') {
   return render(
@@ -20,7 +56,7 @@ function shell(path = '/app/event-types') {
         </Route>
       </Routes>
     </MemoryRouter>,
-    { wrapper: UnsavedChangesProvider },
+    { wrapper: ShellProviders },
   )
 }
 
@@ -37,7 +73,7 @@ describe('admin shell layout', () => {
           </Routes>
         </Suspense>
       </MemoryRouter>,
-      { wrapper: UnsavedChangesProvider },
+      { wrapper: ShellProviders },
     )
     expect(screen.queryByRole('banner')).not.toBeNull()
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeNull()
@@ -59,7 +95,11 @@ describe('admin shell layout', () => {
     expect(select.getAttribute('aria-label')).toBe(
       language === 'en' ? 'Interface language' : '界面语言',
     )
-    expect(within(header).getByRole('button').classList.contains('button-small')).toBe(true)
+    expect(
+      within(header)
+        .getByRole('button', { name: language === 'en' ? 'Sign out' : '退出登录' })
+        .classList.contains('button-small'),
+    ).toBe(true)
   })
 
   it.each([
@@ -178,5 +218,131 @@ describe('admin shell layout', () => {
     list.style.scrollPaddingInlineEnd = '24px'
     fireEvent(window, new Event('resize'))
     expect(list.scrollLeft).toBe(44)
+  })
+})
+
+describe('the space selector in the admin frame', () => {
+  const TEAM = {
+    id: 'team-space',
+    name: 'A very long team name that must remain available to every reader',
+    slug: 'long-team',
+    logo: null,
+    createdAt: '2026-10-01T09:00:00.000Z',
+  }
+
+  it.each([
+    ['owner', 'Owner'],
+    ['admin', 'Admin'],
+    ['member', 'Member'],
+  ])('shows the current team and its %s role in words', async (role, label) => {
+    session.me.organization = { ...TEAM, personal: false }
+    fakeApi({
+      'GET /api/auth/organization/list': () => json(200, [TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, {
+          organizationId: TEAM.id,
+          userId: session.me.user.id,
+          role,
+        }),
+    })
+    shell()
+    const trigger = screen.getByRole('button', { name: /^Switch space/ })
+    expect(trigger.textContent).toContain(TEAM.name)
+    expect(await within(trigger).findByText(label)).toBeDefined()
+    await userEvent.click(trigger)
+    const selected = screen.getByRole('menuitemradio', { name: new RegExp(TEAM.name) })
+    expect(selected.getAttribute('aria-checked')).toBe('true')
+    expect(selected.querySelector(`[title="${TEAM.name}"]`)).not.toBeNull()
+  })
+
+  it.each([
+    ['another organization', 'another-team', 'shell-user'],
+    ['another user', TEAM.id, 'another-user'],
+  ])('does not borrow the owner role from %s', async (_, organizationId, userId) => {
+    session.me.organization = { ...TEAM, personal: false }
+    fakeApi({
+      'GET /api/auth/organization/list': () => json(200, [TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId, userId, role: 'owner' }),
+    })
+    shell()
+    const trigger = screen.getByRole('button', { name: /^Switch space/ })
+    expect(await within(trigger).findByText('Role unavailable')).toBeDefined()
+    expect(within(trigger).queryByText('Owner')).toBeNull()
+  })
+
+  it.each([
+    ['superowner', 'Role unavailable'],
+    ['ownerish,member', 'Role unavailable'],
+    ['member,admin', 'Member, Admin'],
+    ['admin,owner', 'Admin, Owner'],
+  ])('interprets %s as exact role words', async (role, label) => {
+    session.me.organization = { ...TEAM, personal: false }
+    fakeApi({
+      'GET /api/auth/organization/list': () => json(200, [TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM.id, userId: session.me.user.id, role }),
+    })
+    shell()
+    const trigger = screen.getByRole('button', { name: /^Switch space/ })
+    expect(await within(trigger).findByText(label)).toBeDefined()
+  })
+
+  it('refreshes a changed role when the space menu reopens', async () => {
+    session.me.organization = { ...TEAM, personal: false }
+    let role = 'admin'
+    fakeApi({
+      'GET /api/auth/organization/list': () => json(200, [TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM.id, userId: session.me.user.id, role }),
+    })
+    shell()
+    const trigger = screen.getByRole('button', { name: /^Switch space/ })
+    expect(await within(trigger).findByText('Admin')).toBeDefined()
+    role = 'member'
+    await userEvent.click(trigger)
+    expect(await within(trigger).findByText('Member')).toBeDefined()
+    expect(within(trigger).queryByText('Admin')).toBeNull()
+  })
+
+  it('supports keyboard opening, menu navigation and Escape returning focus to the trigger', async () => {
+    fakeApi({ 'GET /api/auth/organization/list': () => json(200, [TEAM]) })
+    shell()
+    const trigger = screen.getByRole('button', { name: /^Switch space/ })
+    trigger.focus()
+    await userEvent.keyboard('{Enter}')
+    const menu = screen.getByRole('menu', { name: 'Spaces' })
+    const options = within(menu).getAllByRole('menuitemradio')
+    expect(options).toHaveLength(2)
+    expect(options[0]?.getAttribute('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(options[0])
+    await userEvent.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(options[1])
+    await userEvent.keyboard('{Home}')
+    expect(document.activeElement).toBe(options[0])
+    await userEvent.keyboard('{End}')
+    expect(document.activeElement).toBe(options[1])
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it.each([
+    ['en', 'Switch space', 'Spaces', 'Personal', 'Owner'],
+    ['zh-CN', '切换空间', '空间', '个人空间', '所有者'],
+  ] as const)('translates the selector in %s', async (language, label, menu, personal, owner) => {
+    chooseLanguage(language)
+    shell()
+    const trigger = screen.getByRole('button', { name: new RegExp(`^${label}`) })
+    expect(trigger.textContent).toContain(personal)
+    expect(await within(trigger).findByText(owner)).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: new RegExp(`^${label}.*${personal}.*${owner}`) }),
+    ).toBe(trigger)
+    await userEvent.click(trigger)
+    const choices = within(screen.getByRole('menu', { name: menu })).getAllByRole('menuitemradio')
+    expect(choices[0]?.textContent).toContain(personal)
+    expect(choices[0]?.getAttribute('aria-checked')).toBe('true')
   })
 })

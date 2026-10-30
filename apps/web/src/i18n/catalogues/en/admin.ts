@@ -983,4 +983,17 @@ export const admin = {
   'Check invitation status': 'Check invitation status',
   'Could not confirm acceptance. Check the invitation status before trying again.':
     'Could not confirm acceptance. Check the invitation status before trying again.',
+  'Switch space': 'Switch space',
+  Spaces: 'Spaces',
+  Personal: 'Personal',
+  'Current space': 'Current space',
+  'Switching space…': 'Switching space…',
+  'Checking role…': 'Checking role…',
+  'Role unavailable': 'Role unavailable',
+  'Loading spaces…': 'Loading spaces…',
+  'Could not load teams. Please try again.': 'Could not load teams. Please try again.',
+  'Could not switch spaces. You are still in {space}. Please try again.':
+    'Could not switch spaces. You are still in {space}. Please try again.',
+  'You are now in your personal space. Your team access or active space changed.':
+    'You are now in your personal space. Your team access or active space changed.',
 } as const

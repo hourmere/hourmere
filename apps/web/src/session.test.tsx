@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from './api/client.ts'
+import { chooseLanguage } from './i18n/store.ts'
 import { SessionProvider, useSession } from './session.tsx'
 import {
   emptyAccount,
@@ -552,6 +553,44 @@ describe('when the account or organization changes elsewhere', () => {
   }
 
   const TEAM = { id: TEAM_ID, name: 'Acme', slug: 'acme', personal: false }
+  const TEAM_ME = { ...ME, organization: TEAM }
+
+  async function chooseSpace(name: string) {
+    await userEvent.click(screen.getByRole('button', { name: /^Switch space/ }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: new RegExp(name) }))
+  }
+
+  function switchableKeys({
+    start = ME,
+    switchResponse,
+    confirmedMe,
+  }: {
+    start?: Schemas['Me']
+    switchResponse?: () => Response | Promise<Response>
+    confirmedMe?: Schemas['Me']
+  } = {}) {
+    const active = { current: start }
+    const api = fakeApi({
+      ...profile(),
+      'GET /api/v1/me': () => json(200, active.current),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, {
+          organizationId: active.current.organization.id,
+          userId: active.current.user.id,
+          role: 'member',
+        }),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/organization/set-active': ({ body }) => {
+        if (switchResponse) return switchResponse()
+        active.current =
+          confirmedMe ??
+          ((body as { organizationId: string | null }).organizationId === null ? ME : TEAM_ME)
+        return json(200, active.current.organization.personal ? null : TEAM)
+      },
+    })
+    return { api, active }
+  }
 
   const nothingOf = (text: string) => {
     expect(document.body.innerHTML).not.toContain(text)
@@ -595,4 +634,295 @@ describe('when the account or organization changes elsewhere', () => {
       expect(api.to('GET /api/auth/api-key/list').length).toBeGreaterThan(lists),
     )
   })
+
+  it('remounts the page when deliberately switching personal → team → personal', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { api } = switchableKeys()
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const personalInput = screen.getByLabelText('Name')
+    await userEvent.type(personalInput, 'Personal draft')
+
+    await chooseSpace('Acme')
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+        'The key will act in Acme.',
+      ),
+    )
+    expect(personalInput.isConnected).toBe(false)
+    const teamInput = screen.getByLabelText<HTMLInputElement>('Name')
+    expect(teamInput.value).toBe('')
+    await userEvent.type(teamInput, 'Team draft')
+
+    await chooseSpace('Personal')
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+        'The key will act in Ada, your personal organization.',
+      ),
+    )
+    expect(teamInput.isConnected).toBe(false)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('')
+    expect(api.to('POST /api/auth/organization/set-active').map((call) => call.body)).toEqual([
+      { organizationId: TEAM_ID },
+      { organizationId: null },
+    ])
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(3)
+    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('sends no switch request when the unsaved-changes confirmation is cancelled', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { api } = switchableKeys()
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await userEvent.type(screen.getByLabelText('Name'), 'Keep my draft')
+    await chooseSpace('Acme')
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Keep my draft')
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
+    expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+      'The key will act in Ada, your personal organization.',
+    )
+  })
+
+  it('switches by keyboard and returns focus to the remounted trigger', async () => {
+    const { api } = switchableKeys()
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const trigger = screen.getByRole('button', { name: /^Switch space/ })
+    trigger.focus()
+    await userEvent.keyboard('{Enter}{ArrowDown}{Enter}')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Acme'),
+    )
+    expect(trigger.isConnected).toBe(false)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Switch space/ }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(api.to('POST /api/auth/organization/set-active').map((call) => call.body)).toEqual([
+      { organizationId: TEAM_ID },
+    ])
+  })
+
+  it.each([
+    ['network', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['a rejected request', () => json(400, { code: 'BAD_REQUEST' })],
+    ['a removed membership', () => json(403, { code: 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' })],
+  ])('keeps the original space and usable draft after %s', async (_, switchResponse) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { api } = switchableKeys({ switchResponse })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const input = screen.getByLabelText<HTMLInputElement>('Name')
+    await userEvent.type(input, 'Draft')
+    await chooseSpace('Acme')
+    expect(input.isConnected).toBe(true)
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not switch spaces. You are still in Personal. Please try again.',
+    )
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
+    expect(input.isConnected).toBe(true)
+    await userEvent.type(input, ' still usable')
+    expect(input.value).toBe('Draft still usable')
+    expect(screen.getByRole('button', { name: 'Create key' }).hasAttribute('disabled')).toBe(false)
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+    expect(api.to('GET /api/v1/me')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: /^Switch space/ }))
+    expect(
+      screen.getByRole('menuitemradio', { name: /Personal/ }).getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(screen.getByRole('menuitemradio', { name: /Acme/ }).getAttribute('aria-checked')).toBe(
+      'false',
+    )
+  })
+
+  it('translates a failed switch while keeping the original space in Chinese', async () => {
+    chooseLanguage('zh-CN')
+    switchableKeys({ switchResponse: () => json(403, { code: 'FORBIDDEN' }) })
+    renderApp('/app/api-keys')
+    await userEvent.click(await screen.findByRole('button', { name: /^切换空间/ }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Acme/ }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      '无法切换空间。你仍位于个人空间。请重试。',
+    )
+    expect(screen.getByRole('button', { name: /^切换空间/ }).textContent).toContain('个人空间')
+  })
+
+  it('discards old session and page reads after a deliberate space switch', async () => {
+    const oldMe = later()
+    const oldKeys = later()
+    let active = ME
+    let meReads = 0
+    let keyReads = 0
+    const api = fakeApi({
+      ...profile(),
+      'GET /api/v1/me': () => (++meReads === 2 ? oldMe.response : json(200, active)),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'admin' }),
+      'GET /api/auth/api-key/list': () =>
+        ++keyReads === 1 ? oldKeys.response : json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/organization/set-active': () => {
+        active = TEAM_ME
+        return json(200, TEAM)
+      },
+    })
+    renderApp('/app/api-keys')
+    await screen.findByRole('region', { name: 'Create a key' })
+    act(() => window.dispatchEvent(new Event('focus')))
+    await waitFor(() => expect(meReads).toBe(2))
+    await chooseSpace('Acme')
+    await screen.findByText('You have no API keys yet.')
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+        'The key will act in Acme.',
+      ),
+    )
+    await oldMe.answer(json(200, ME))
+    await oldKeys.answer(
+      json(200, { apiKeys: [{ ...ADA_KEY, name: 'Old personal key' }], total: 1 }),
+    )
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Acme')
+    expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+      'The key will act in Acme.',
+    )
+    expect(screen.queryByText('Old personal key')).toBeNull()
+    expect(screen.queryByRole('cell', { name: 'hm_Ada…' })).toBeNull()
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(2)
+  })
+
+  it.each([
+    ['another target', ME],
+    ['another caller', { ...TEAM_ME, user: GRACE.user }],
+  ])('retains the original page if switch confirmation identifies %s', async (_, confirmedMe) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { api } = switchableKeys({ confirmedMe })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const input = screen.getByLabelText<HTMLInputElement>('Name')
+    await userEvent.type(input, 'Original draft')
+    await chooseSpace('Acme')
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not switch spaces. You are still in Personal. Please try again.',
+    )
+    expect(input.isConnected).toBe(true)
+    expect(input.value).toBe('Original draft')
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
+    expect(api.to('GET /api/v1/me')).toHaveLength(2)
+  })
+
+  it('defers background refresh while a deliberate switch is awaiting confirmation', async () => {
+    const confirmation = later()
+    let meReads = 0
+    fakeApi({
+      ...profile(),
+      'GET /api/v1/me': () => (++meReads === 1 ? json(200, ME) : confirmation.response),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM.id, userId: ME.user.id, role: 'member' }),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/organization/set-active': () => json(200, TEAM),
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await chooseSpace('Acme')
+    await waitFor(() => expect(meReads).toBe(2))
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(meReads).toBe(2)
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
+    await confirmation.answer(json(200, TEAM_ME))
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Acme')
+    expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+      'The key will act in Acme.',
+    )
+  })
+
+  it('keeps the original draft when confirmation fails after the server committed the switch', async () => {
+    const confirmation = later()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let active = ME
+    let meReads = 0
+    fakeApi({
+      ...profile(),
+      'GET /api/v1/me': () => (++meReads === 2 ? confirmation.response : json(200, active)),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/organization/set-active': () => {
+        active = TEAM_ME
+        return json(200, TEAM)
+      },
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const input = screen.getByLabelText<HTMLInputElement>('Name')
+    await userEvent.type(input, 'Keep this draft')
+    await chooseSpace('Acme')
+    await waitFor(() => expect(meReads).toBe(2))
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(meReads).toBe(2)
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(input.isConnected).toBe(true)
+    expect(input.value).toBe('Keep this draft')
+    await confirmation.answer(json(503, { error: 'unavailable' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not switch spaces. You are still in Personal. Please try again.',
+    )
+    expect(input.isConnected).toBe(true)
+    expect(input.value).toBe('Keep this draft')
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
+    confirm.mockReturnValue(false)
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(meReads).toBe(3)
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(input.isConnected).toBe(true)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'explains a team-to-personal fallback in %s and clears it on a deliberate team switch',
+    async (language) => {
+      chooseLanguage(language)
+      const { active } = switchableKeys({ start: TEAM_ME })
+      renderApp('/app/api-keys')
+      const triggerName = language === 'en' ? 'Switch space' : '切换空间'
+      const notice =
+        language === 'en'
+          ? 'You are now in your personal space. Your team access or active space changed.'
+          : '你现在位于个人空间。你的团队访问权限或当前空间已更改。'
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: new RegExp(`^${triggerName}`) }).textContent,
+        ).toContain('Acme'),
+      )
+      active.current = ME
+      act(() => window.dispatchEvent(new Event('focus')))
+      expect((await screen.findByText(notice)).getAttribute('role')).toBe('status')
+      expect(
+        screen.getByRole('button', { name: new RegExp(`^${triggerName}`) }).textContent,
+      ).toContain(language === 'en' ? 'Personal' : '个人空间')
+      act(() => window.dispatchEvent(new Event('focus')))
+      await screen.findByText(notice)
+      await userEvent.click(
+        screen.getByRole('link', { name: language === 'en' ? 'Settings' : '设置' }),
+      )
+      await screen.findByRole('heading', {
+        name: language === 'en' ? 'Settings' : '设置',
+        level: 1,
+      })
+      expect(screen.getByText(notice)).toBeDefined()
+      await userEvent.click(screen.getByRole('button', { name: new RegExp(`^${triggerName}`) }))
+      await userEvent.click(await screen.findByRole('menuitemradio', { name: /Acme/ }))
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: new RegExp(`^${triggerName}`) }).textContent,
+        ).toContain('Acme'),
+      )
+      expect(screen.queryByText(notice)).toBeNull()
+    },
+  )
 })
