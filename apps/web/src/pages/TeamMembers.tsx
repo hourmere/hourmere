@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { listOrganizationMembers } from '../api/auth.ts'
+import { type ListedOrganizationMember, listOrganizationMembers } from '../api/auth.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
+import {
+  RemoveMemberButton,
+  TeamMemberActions,
+} from '../components/team-members/TeamMemberActions.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
@@ -77,12 +81,21 @@ function PageFeedback<T>({
 export function TeamMembers({
   organizationId,
   role,
+  currentUserId,
+  onLeft = () => {},
+  onReload = () => {},
 }: {
   organizationId: string
   role: string | null
+  currentUserId?: string
+  onLeft?: () => void
+  onReload?: () => void
 }) {
   const { t } = useI18n()
   const [offset, setOffset] = useState(0)
+  const [selectedMember, setSelectedMember] = useState<ListedOrganizationMember | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const removalOpener = useRef<HTMLButtonElement | null>(null)
   const load = useCallback(
     (signal: AbortSignal) => listOrganizationMembers(organizationId, offset, PAGE_SIZE, signal),
     [organizationId, offset],
@@ -141,6 +154,16 @@ export function TeamMembers({
                         .join(', ')}
                     </BreakableText>
                   </span>
+                  <RemoveMemberButton
+                    member={member}
+                    role={role}
+                    currentUserId={currentUserId}
+                    disabled={reviewOpen || selectedMember !== null}
+                    onSelect={(target, opener) => {
+                      removalOpener.current = opener
+                      setSelectedMember(target)
+                    }}
+                  />
                 </li>
               ))}
             </ul>
@@ -167,6 +190,22 @@ export function TeamMembers({
             </button>
           )}
         </div>
+        <TeamMemberActions
+          key={organizationId}
+          organizationId={organizationId}
+          currentUserId={currentUserId}
+          role={role}
+          selectedMember={selectedMember?.organizationId === organizationId ? selectedMember : null}
+          onClose={() => {
+            setSelectedMember(null)
+            setReviewOpen(false)
+          }}
+          onRemoved={retry}
+          onLeft={onLeft}
+          onReload={onReload}
+          onReviewChange={setReviewOpen}
+          removalOpener={removalOpener.current}
+        />
       </section>
       {canManage && <TeamInvitations organizationId={organizationId} />}
     </>

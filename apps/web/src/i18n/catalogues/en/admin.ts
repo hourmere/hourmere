@@ -1172,6 +1172,79 @@ export const admin = {
     'Could not confirm the switch. Checking your current space…',
   'You are now in your personal space. Your team access or active space changed.':
     'You are now in your personal space. Your team access or active space changed.',
+  'Leave team': 'Leave team',
+  'You left the team. Reload to open your personal space.':
+    'You left the team. Reload to open your personal space.',
+  'Review leaving this team': 'Review leaving this team',
+  'Remove member': 'Remove member',
+  'Remove member: {0}': 'Remove member: {0}',
+  'Remove team member': 'Remove team member',
+  'Loading departure impact…': 'Loading departure impact…',
+  'Leave this team': 'Leave this team',
+  'Leaving team…': 'Leaving team…',
+  'Removing member…': 'Removing member…',
+  'Member removed. Access was revoked immediately.':
+    'Member removed. Access was revoked immediately.',
+  'Access is revoked immediately after confirmation.':
+    'Access is revoked immediately after confirmation.',
+  'Future bookings are kept and still need handling.':
+    'Future bookings are kept and still need handling.',
+  '{0} affected event types': '{0} affected event types',
+  '{0} future or in-progress bookings': '{0} future or in-progress bookings',
+  'No affected event types or bookings.': 'No affected event types or bookings.',
+  'Ask a team owner or admin to replace or remove you as a host.':
+    'Ask a team owner or admin to replace or remove you as a host.',
+  'Replace or remove yourself as a host before leaving.':
+    'Replace or remove yourself as a host before leaving.',
+  'Replace or remove this member as a host where needed.':
+    'Replace or remove this member as a host where needed.',
+  'Only team owners and admins can change team event types.':
+    'Only team owners and admins can change team event types.',
+  'You are the sole host for this event type.': 'You are the sole host for this event type.',
+  'This member is the sole host for this event type.':
+    'This member is the sole host for this event type.',
+  'You are in the round-robin host pool.': 'You are in the round-robin host pool.',
+  'This member is in the round-robin host pool.': 'This member is in the round-robin host pool.',
+  'You are a required host for this collective event type.':
+    'You are a required host for this collective event type.',
+  'This member is a required host for this collective event type.':
+    'This member is a required host for this collective event type.',
+  '{0} other current verified team hosts remain.': '{0} other current verified team hosts remain.',
+  'Disabled event types still need their host assignments repaired before you can leave.':
+    'Disabled event types still need their host assignments repaired before you can leave.',
+  'Manage event type': 'Manage event type',
+  'Review team bookings': 'Review team bookings',
+  'Coordinate cancellation with the hosts and attendees.':
+    'Coordinate cancellation with the hosts and attendees.',
+  'Wait until the meeting ends or coordinate offline.':
+    'Wait until the meeting ends or coordinate offline.',
+  'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.':
+    'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.',
+  'Review your hosted booking': 'Review your hosted booking',
+  'More event types': 'More event types',
+  'More bookings': 'More bookings',
+  'You cannot leave while team events or bookings still need handling.':
+    'You cannot leave while team events or bookings still need handling.',
+  'The team must retain at least one owner. Ownership transfer is not available here.':
+    'The team must retain at least one owner. Ownership transfer is not available here.',
+  'Your permission or this member’s team membership changed. Reload to check before trying again.':
+    'Your permission or this member’s team membership changed. Reload to check before trying again.',
+  'Your permission or team membership changed. Reload to check before trying again.':
+    'Your permission or team membership changed. Reload to check before trying again.',
+  'Reload team': 'Reload team',
+  'Loading handling list…': 'Loading handling list…',
+  'Could not load the handling list. The member is still removed.':
+    'Could not load the handling list. The member is still removed.',
+  'Retry handling list': 'Retry handling list',
+  '{0} event types deactivated.': '{0} event types deactivated.',
+  'Handling list': 'Handling list',
+  'Affected event types': 'Affected event types',
+  'Deactivated event types': 'Deactivated event types',
+  'Repair the host assignments, then review and reactivate these event types when ready.':
+    'Repair the host assignments, then review and reactivate these event types when ready.',
+  'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.':
+    'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.',
+  'Bookings needing handling': 'Bookings needing handling',
   'Saved version readiness': 'Saved version readiness',
   'These unsaved changes have not been checked yet. Save to check the saved version.':
     'These unsaved changes have not been checked yet. Save to check the saved version.',
