@@ -13,6 +13,7 @@ export class RequestError extends Error {
   readonly code: string | undefined
   /** A recognized additive alias; `code` retains the original API error. */
   readonly codeAlias: string | undefined
+  readonly retryAfterSeconds: number | undefined
 
   constructor(
     status: number,
@@ -20,6 +21,7 @@ export class RequestError extends Error {
     message: string,
     displayMessage?: UiText,
     codeAlias?: string,
+    retryAfterSeconds?: number,
   ) {
     super(message)
     this.name = 'RequestError'
@@ -27,6 +29,7 @@ export class RequestError extends Error {
     this.status = status
     this.code = code
     this.codeAlias = codeAlias
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -57,7 +60,11 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * human-readable messages meant to be shown (https://hourmere.com/docs/api-conventions); without one, the
  * status decides.
  */
-export function requestError(status: number, body: unknown): RequestError {
+export function requestError(
+  status: number,
+  body: unknown,
+  retryAfter?: string | null,
+): RequestError {
   const record = isRecord(body) ? body : {}
   const code =
     typeof record.error === 'string'
@@ -89,12 +96,26 @@ export function requestError(status: number, body: unknown): RequestError {
     code === 'invalid_request' && typeof record.message === 'string' && record.message.trim()
       ? literal(record.message)
       : undefined
-  return new RequestError(status, code, message, displayMessage, codeAlias)
+  const bodyRetry = record.retryAfterSeconds
+  const headerRetry = retryAfter?.trim()
+  const seconds =
+    typeof bodyRetry === 'number' && Number.isFinite(bodyRetry) && bodyRetry >= 0
+      ? bodyRetry
+      : headerRetry && /^\d+$/.test(headerRetry)
+        ? Number(headerRetry)
+        : headerRetry
+          ? (Date.parse(headerRetry) - Date.now()) / 1000
+          : undefined
+  const retryAfterSeconds =
+    seconds !== undefined && Number.isFinite(seconds) && seconds >= 0
+      ? Math.ceil(seconds)
+      : undefined
+  return new RequestError(status, code, message, displayMessage, codeAlias, retryAfterSeconds)
 }
 
 export async function errorFromResponse(response: Response): Promise<RequestError> {
   const body: unknown = await response.json().catch(() => undefined)
-  return requestError(response.status, body)
+  return requestError(response.status, body, response.headers.get('Retry-After'))
 }
 
 /** What to tell people about a failed request (or any other error). */

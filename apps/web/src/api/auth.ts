@@ -155,6 +155,27 @@ export interface Invitation {
   createdAt: string
 }
 
+export interface QueuedInvitation extends Invitation {
+  delivery: {
+    generation: number
+    state: Schemas['TeamInvitationSummary']['delivery']['state']
+    attempts: number
+  }
+}
+
+/** Admission confirms durable queueing, while retaining an existing invitation on retry. */
+export function inviteMember(
+  email: string,
+  organizationId: string,
+  signal?: AbortSignal,
+): Promise<QueuedInvitation> {
+  return authRequest('/organization/invite-member', {
+    body: { email, organizationId, role: 'member' },
+    headers: { 'X-Expected-Organization-Id': organizationId },
+    ...(signal && { signal }),
+  })
+}
+
 /** Only the signed-in, verified recipient can read these invitation details. */
 export interface InvitationDetails extends Invitation {
   organizationName: string

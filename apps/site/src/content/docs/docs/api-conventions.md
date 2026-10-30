@@ -341,13 +341,21 @@ before reading invitations. It is session-only REST; MCP and CLI credentials gra
 team invitation management authority.
 
 Browsers may send optional `X-Expected-Organization-Id` to bind every page and retry to
-the team where the invitation section opened. A mismatched, invalid or inaccessible
-expected team receives the same `403 team_management_access_denied` before summaries
-are read, including the first page without a cursor. The header grants no authority and
-must match the session's current team. Omitting it preserves existing current-team reads.
+the team where the invitation section opened. Switching between teams the reader still
+manages returns `409 organization_context_changed`, with guidance to reload, before any
+summaries are read. Invalid, personal or inaccessible expected teams retain the same
+`403 team_management_access_denied`; a reader without current management authority is
+also denied. These checks cover the first page without a cursor. The header grants no
+authority and must match the session's current team. Omitting it preserves existing
+current-team reads.
 
 The envelope is `{data,nextCursor}`. `limit` accepts 1–100 (default 50); pass the opaque
-`nextCursor` as `cursor` in the same team until it is null. Ordering is invitation ID
+`nextCursor` as `cursor` in the same team with the same filters until it is null. Optional
+`status` accepts `pending`, `accepted`, `canceled`, `rejected`, `expired` or `unknown` and
+filters the derived lifecycle before pagination. In particular, `status=pending` excludes
+expired pending rows using the database clock, and terminal or unknown rows cannot
+produce empty intermediate pages. Omitting `status` retains all lifecycle states.
+Ordering is invitation ID
 ascending, with an exclusive keyset boundary: deleting a previous row or inserting before
 the boundary does not shift later pages. Later inserts can appear. A cursor from another
 team returns `400 invalid_cursor`; malformed query parameters return `400 invalid_request`.
@@ -361,7 +369,7 @@ response objects remain extensible for additive v1 changes.
 | `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
 | `createdAt` | Stored invitation creation time in UTC. |
 | `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
-| `delivery.state` | Current generation's `queued`, `sending`, `smtp_accepted`, `failed` or `skipped`; `unknown` if no delivery row remains. Queued includes waiting for retry; SMTP acceptance does not imply inbox delivery, reading or joining. |
+| `delivery.state` | Current generation's `queued` (waiting to send, including retry), `sending` (submitting to the mail server), `smtp_accepted` (accepted by the mail server), `failed` or `skipped`; `unknown` if no delivery row remains. Mail server acceptance does not imply inbox delivery, reading or joining. |
 | `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
 | `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
 | `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |

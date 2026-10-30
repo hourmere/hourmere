@@ -10,6 +10,7 @@ import {
   createMcpOAuthResolver,
   invitationRecipientIsMember,
   invitationResendDenial,
+  teamRoles,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -26,6 +27,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createApp } from '../app.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
+import { listTeamInvitationSummaries } from '../team-invitations.ts'
 import { teamInvitationRoutes } from './team-invitations.ts'
 import { openApiDocument, resolve, responseAndRequestStrictness } from './test-app.ts'
 
@@ -73,6 +75,29 @@ function sourceCopy<T>(source: string, bindings: Record<string, unknown>, return
   return new Function(...Object.keys(bindings), `${javascript}; return ${returned}`)(
     ...Object.values(bindings),
   ) as T
+}
+
+function summarySourceCopy(replacement?: { before: string; after: string }) {
+  const source = readFileSync(new URL('../team-invitations.ts', import.meta.url), 'utf8')
+  if (replacement)
+    expect(source.includes(replacement.before), 'summary mutation matches source').toBe(true)
+  return sourceCopy<
+    Pick<
+      typeof import('../team-invitations.ts'),
+      'listTeamInvitationSummaries' | 'TeamInvitationSummarySchema'
+    >
+  >(
+    replacement ? source.replace(replacement.before, replacement.after) : source,
+    {
+      invitationRecipientIsMember,
+      invitationResendDenial,
+      invitationEmailBudgetAvailable,
+      DomainError,
+      sql,
+      z,
+    },
+    '{ listTeamInvitationSummaries, TeamInvitationSummarySchema }',
+  )
 }
 
 describe.skipIf(!serverUrl)(
@@ -324,6 +349,28 @@ describe.skipIf(!serverUrl)(
     it('lets current verified owners and admins read summaries and uniformly denies members', () =>
       verifyRoles())
 
+    it('refuses a crafted member invitation write before creating invitation or delivery state', async () => {
+      const response = await app.request('/api/auth/organization/invite-member', {
+        method: 'POST',
+        headers: {
+          origin,
+          cookie: seeded.memberSession.cookie,
+          'content-type': 'application/json',
+          'x-expected-organization-id': seeded.team.id,
+        },
+        body: JSON.stringify({
+          organizationId: seeded.team.id,
+          email: 'recipient@private-summary.example',
+          role: 'member',
+        }),
+      })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
+      expect(await db.selectFrom('auth.invitation').selectAll().execute()).toEqual([])
+      expect(await db.selectFrom('invitation_deliveries').selectAll().execute()).toEqual([])
+      expect(await db.selectFrom('invitation_email_requests').selectAll().execute()).toEqual([])
+    })
+
     async function verifyExpectedOrganization(target = app) {
       const own = await invitation()
       const other = await invitation({ organizationId: seeded.other.id })
@@ -341,8 +388,18 @@ describe.skipIf(!serverUrl)(
         .where('id', '=', stale.sessionId)
         .execute()
       // First page and explicit retry both have no cursor to provide a team boundary.
-      for (const _attempt of [1, 2])
-        await expectDenied(await get(stale.cookie, '', expected, target))
+      for (const _attempt of [1, 2]) {
+        const response = await get(stale.cookie, '', expected, target)
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({
+          error: 'organization_context_changed',
+          message: 'Your team context changed. Reload the page before trying again.',
+        })
+        expect(response.headers.has('www-authenticate')).toBe(false)
+      }
+      await expectDenied(
+        await get(stale.cookie, '', { 'X-Expected-Organization-Id': 'invalid' }, target),
+      )
 
       const compatible = await page(await get(stale.cookie, '', {}, target))
       expect(compatible.data.map((row) => row.id)).toEqual([other.id])
@@ -354,6 +411,35 @@ describe.skipIf(!serverUrl)(
 
     it('binds first-page reads and retries to an optional expected team after a tab switches', () =>
       verifyExpectedOrganization())
+
+    async function verifyInaccessibleExpectedOrganization(target = app) {
+      const switched = await session(seeded.owner, seeded.other.id)
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('userId', '=', seeded.owner.id)
+        .where('organizationId', '=', seeded.team.id)
+        .execute()
+      for (const expectedId of [
+        seeded.team.id,
+        seeded.owner.principal.organization.id,
+        randomUUID(),
+      ])
+        await expectDenied(
+          await get(switched.cookie, '', { 'X-Expected-Organization-Id': expectedId }, target),
+        )
+      await expectDenied(
+        await get(
+          seeded.memberSession.cookie,
+          '',
+          { 'X-Expected-Organization-Id': seeded.other.id },
+          target,
+        ),
+      )
+    }
+
+    it('retains access denial for revoked, personal and missing expected teams and unprivileged readers', () =>
+      verifyInaccessibleExpectedOrganization())
 
     it.each(['invalid', '00000000-0000-4000-8000-000000000001'])(
       'uniformly denies invalid or inaccessible expected organizations (%s)',
@@ -758,6 +844,109 @@ describe.skipIf(!serverUrl)(
     it('normalizes unknown stored statuses without blocking pages or treating them as pending', () =>
       verifyUnknownStatuses())
 
+    async function verifyStatusFiltering(target = app) {
+      const lifecycle = [
+        'accepted',
+        'canceled',
+        'rejected',
+        'archived',
+        'expired',
+        'pending',
+        'accepted',
+        'expired',
+        'retired',
+        'pending',
+        'canceled',
+        'expired',
+      ]
+      const stored: Awaited<ReturnType<typeof invitation>>[] = []
+      for (const [index, status] of lifecycle.entries())
+        stored.push(
+          await invitation({
+            id: `30000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+            status: status === 'expired' ? 'pending' : status,
+            expired: status !== 'pending',
+          }),
+        )
+      await invitation({ organizationId: seeded.other.id })
+      const before = await db.selectFrom('auth.invitation').selectAll().orderBy('id').execute()
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2000-01-01T00:00:00Z'))
+      try {
+        for (const status of [
+          'pending',
+          'expired',
+          'accepted',
+          'canceled',
+          'rejected',
+          'unknown',
+        ] as const) {
+          const expected = stored.filter((_row, index) => {
+            const lifecycleStatus = lifecycle[index]
+            return (
+              (lifecycleStatus === 'archived' || lifecycleStatus === 'retired'
+                ? 'unknown'
+                : lifecycleStatus) === status
+            )
+          })
+          const observed: Summary[] = []
+          let cursor: string | null = null
+          for (let index = 0; index <= stored.length; index++) {
+            const query = new URLSearchParams({ status, limit: '1' })
+            if (cursor) query.set('cursor', cursor)
+            const result = await page(
+              await get(seeded.ownerSession.cookie, `?${query}`, {}, target),
+            )
+            expect(result.data.length).toBeGreaterThan(0)
+            expect(result.data.every((row) => row.status === status)).toBe(true)
+            observed.push(...result.data)
+            cursor = result.nextCursor
+            if (cursor === null) break
+          }
+          expect(cursor).toBeNull()
+          expect(observed.map((row) => row.id)).toEqual(expected.map((row) => row.id))
+        }
+        expect(await db.selectFrom('auth.invitation').selectAll().orderBy('id').execute()).toEqual(
+          before,
+        )
+        expect(await db.selectFrom('invitation_email_requests').selectAll().execute()).toEqual([])
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+
+    it('filters derived lifecycle before keyset pagination without empty pages or stored status changes', () =>
+      verifyStatusFiltering())
+
+    async function verifyStatusValidation(list = listTeamInvitationSummaries) {
+      await expect(
+        list(
+          db,
+          { userId: seeded.owner.id, organizationId: seeded.team.id, role: 'owner' },
+          { status: 'unrecognized' as InvitationStatus },
+          { ...limits, secret },
+        ),
+      ).rejects.toMatchObject({ code: 'invalid_status' })
+    }
+
+    it('validates lifecycle filters for internal callers as well as HTTP queries', () =>
+      verifyStatusValidation())
+
+    it('checks lifecycle validation in the unmodified source copy', () =>
+      verifyStatusValidation(summarySourceCopy().listTeamInvitationSummaries))
+
+    it('detects removed service lifecycle validation through a real assertion failure', async () => {
+      const mutant = summarySourceCopy({
+        before: '!TeamInvitationSummarySchema.shape.status.safeParse(input.status).success',
+        after: 'false',
+      })
+      await expect(
+        verifyStatusValidation(mutant.listTeamInvitationSummaries),
+      ).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    })
+
     it('uses stable invitation ID keysets, including ties and inserts before a page boundary', async () => {
       const ids = [1, 2, 3].map(
         (number) => `10000000-0000-4000-8000-${String(number).padStart(12, '0')}`,
@@ -791,16 +980,21 @@ describe.skipIf(!serverUrl)(
       expect(await wrongTeam.json()).toMatchObject({ error: 'invalid_cursor' })
     })
 
-    it.each(['?limit=0', '?limit=101', '?limit=1.5', '?limit=invalid', '?cursor=invalid'])(
-      'rejects invalid pagination %s',
-      async (query) => {
-        const response = await get(seeded.ownerSession.cookie, query)
-        expect(response.status).toBe(400)
-        expect(await response.json()).toMatchObject({
-          error: query.includes('cursor') ? 'invalid_cursor' : 'invalid_request',
-        })
-      },
-    )
+    it.each([
+      '?limit=0',
+      '?limit=101',
+      '?limit=1.5',
+      '?limit=invalid',
+      '?cursor=invalid',
+      '?status=invalid',
+      '?status=',
+    ])('rejects invalid pagination %s', async (query) => {
+      const response = await get(seeded.ownerSession.cookie, query)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({
+        error: query.includes('cursor') ? 'invalid_cursor' : 'invalid_request',
+      })
+    })
 
     it('registers the production route as Hourmere session-only protocol with additive OpenAPI responses', async () => {
       await invitation()
@@ -815,12 +1009,21 @@ describe.skipIf(!serverUrl)(
       expect(operation?.security).toEqual([{ session: [] }])
       expect(operation?.responses['401']).toBeUndefined()
       expect(operation?.responses['403']).toBeDefined()
+      expect(operation?.responses['409']).toBeDefined()
       expect(operation?.parameters).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             in: 'header',
             name: 'x-expected-organization-id',
             required: false,
+          }),
+          expect.objectContaining({
+            in: 'query',
+            name: 'status',
+            required: false,
+            schema: expect.objectContaining({
+              enum: ['pending', 'accepted', 'canceled', 'rejected', 'expired', 'unknown'],
+            }),
           }),
         ]),
       )
@@ -868,25 +1071,7 @@ describe.skipIf(!serverUrl)(
         { DomainError, createMiddleware, sql, ...role },
         '{ teamManagementAccess }',
       )
-      const summarySource = readFileSync(new URL('../team-invitations.ts', import.meta.url), 'utf8')
-      if (replacement?.file === 'summary')
-        expect(summarySource.includes(replacement.before), 'summary mutation matches source').toBe(
-          true,
-        )
-      const summary = sourceCopy<Record<string, unknown>>(
-        replacement?.file === 'summary'
-          ? summarySource.replace(replacement.before, replacement.after)
-          : summarySource,
-        {
-          invitationRecipientIsMember,
-          invitationResendDenial,
-          invitationEmailBudgetAvailable,
-          DomainError,
-          sql,
-          z,
-        },
-        '{ listTeamInvitationSummaries, TeamInvitationSummarySchema }',
-      )
+      const summary = summarySourceCopy(replacement?.file === 'summary' ? replacement : undefined)
       const routeSource = readFileSync(new URL('./team-invitations.ts', import.meta.url), 'utf8')
       if (replacement?.file === 'route')
         expect(routeSource.includes(replacement.before), 'route mutation matches source').toBe(true)
@@ -894,7 +1079,7 @@ describe.skipIf(!serverUrl)(
         replacement?.file === 'route'
           ? routeSource.replace(replacement.before, replacement.after)
           : routeSource,
-        { createRoute, z, ErrorBody, json, ...management, ...summary },
+        { createRoute, z, teamRoles, DomainError, ErrorBody, json, ...management, ...summary },
         'teamInvitationRoutes',
       )
     }
@@ -912,7 +1097,11 @@ describe.skipIf(!serverUrl)(
       await db.deleteFrom('auth.invitation').execute()
       await verifyUnknownStatuses(target)
       await db.deleteFrom('auth.invitation').execute()
+      await verifyStatusFiltering(target)
+      await db.deleteFrom('auth.invitation').execute()
       await verifyExpectedOrganization(target)
+      await db.deleteFrom('auth.invitation').execute()
+      await verifyInaccessibleExpectedOrganization(target)
     })
 
     it.each<
@@ -930,6 +1119,44 @@ describe.skipIf(!serverUrl)(
           after: 'c.var.principal.organization.id,',
         },
         verifyExpectedOrganization,
+      ],
+      [
+        'team-switch reload guidance',
+        {
+          file: 'route',
+          before:
+            "if (teamRoles(membership?.role).some((role) => role === 'owner' || role === 'admin'))",
+          after: 'if (false)',
+        },
+        verifyExpectedOrganization,
+      ],
+      [
+        'expected-team management authority',
+        {
+          file: 'route',
+          before:
+            "teamRoles(membership?.role).some((role) => role === 'owner' || role === 'admin')",
+          after: 'true',
+        },
+        verifyInaccessibleExpectedOrganization,
+      ],
+      [
+        'expected personal-team exclusion',
+        {
+          file: 'route',
+          before: ".where('personal_organizations.organization_id', 'is', null)",
+          after: '',
+        },
+        verifyInaccessibleExpectedOrganization,
+      ],
+      [
+        'lifecycle filtering before pagination',
+        {
+          file: 'summary',
+          before: `WHERE (\${status}::text IS NULL OR status = \${status}::text)`,
+          after: 'WHERE TRUE',
+        },
+        verifyStatusFiltering,
       ],
       [
         'owner/admin role check',

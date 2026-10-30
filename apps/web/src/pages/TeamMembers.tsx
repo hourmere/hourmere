@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { listOrganizationMembers } from '../api/auth.ts'
-import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
-import { browserTimeZone, zoned } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
+import { TeamInvitations } from './TeamInvitations.tsx'
 
 const PAGE_SIZE = 20
 
@@ -169,95 +168,7 @@ export function TeamMembers({
           )}
         </div>
       </section>
-      {canManage && <PendingInvitations organizationId={organizationId} />}
+      {canManage && <TeamInvitations organizationId={organizationId} />}
     </>
-  )
-}
-
-const deliveryLabels: Record<Schemas['TeamInvitationSummary']['delivery']['state'], MessageKey> = {
-  queued: 'Submitted',
-  sending: 'Submitting to the mail server',
-  smtp_accepted: 'Accepted by the mail server',
-  failed: 'Submission failed',
-  skipped: 'Submission skipped',
-  unknown: 'Submission status unknown',
-}
-
-function PendingInvitations({ organizationId }: { organizationId: string }) {
-  const { t, locale } = useI18n()
-  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined])
-  const cursor = cursors[cursors.length - 1]
-  const load = useCallback(
-    (signal: AbortSignal) =>
-      unwrap(
-        api.GET('/api/v1/team/invitations', {
-          headers: { 'X-Expected-Organization-Id': organizationId },
-          params: { query: { limit: PAGE_SIZE, ...(cursor && { cursor }) } },
-          signal,
-        }),
-      ),
-    [cursor, organizationId],
-  )
-  const [state, retry] = useTeamPage(load)
-  const invitations =
-    state.status === 'ready' ? state.data.data.filter((item) => item.status === 'pending') : []
-  const fmt = zoned(browserTimeZone(), locale)
-  return (
-    <section className="panel" aria-labelledby="pending-invitations-heading">
-      <h2 id="pending-invitations-heading">{t('Pending invitations')}</h2>
-      <p className="hint">{t('Mail server acceptance does not confirm receipt in the inbox.')}</p>
-      <PageFeedback
-        state={state}
-        retry={retry}
-        loading="Loading pending invitations…"
-        failed="Could not load pending invitations."
-        denied="You do not have permission to view pending invitations."
-      />
-      {state.status === 'ready' && (
-        <>
-          {invitations.length === 0 && <p>{t('No pending invitations on this page.')}</p>}
-          <ul className="stack">
-            {invitations.map((invitation, index) => (
-              <li key={invitation.id}>
-                <h3>{t('Invitation {0}', { '0': index + 1 })}</h3>
-                <dl className="details">
-                  <dt>{t('Status')}</dt>
-                  <dd>{t('Pending')}</dd>
-                  <dt>{t('Mail submission')}</dt>
-                  <dd>{t(deliveryLabels[invitation.delivery.state])}</dd>
-                  <dt>{t('Expires')}</dt>
-                  <dd>
-                    <time dateTime={invitation.expiresAt}>
-                      {fmt.dateTime(invitation.expiresAt)}
-                    </time>
-                  </dd>
-                </dl>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      <div className="form-actions">
-        {cursors.length > 1 && (
-          <button
-            type="button"
-            className="button button-small"
-            disabled={state.status === 'loading'}
-            onClick={() => setCursors((value) => value.slice(0, -1))}
-          >
-            {t('Previous invitations page')}
-          </button>
-        )}
-        {state.status === 'ready' && state.data.nextCursor && (
-          <button
-            type="button"
-            className="button button-small"
-            onClick={() => setCursors((value) => [...value, state.data.nextCursor ?? undefined])}
-          >
-            {t('Next invitations page')}
-          </button>
-        )}
-      </div>
-    </section>
   )
 }
