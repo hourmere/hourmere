@@ -3,7 +3,15 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
 import type { Me } from '../../session.tsx'
-import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
+import {
+  emptyTeamLists,
+  fakeApi,
+  json,
+  ME,
+  profile,
+  renderApp,
+  signedInAs,
+} from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
 
@@ -79,6 +87,7 @@ describe.each(translations)(
       let active = original
       let item = eventType({ organizationId: original.organization.id, ownerUserId: null })
       const calls = fakeApi({
+        ...emptyTeamLists,
         ...signedInAs(original),
         ...profile(),
         'GET /api/v1/me': () => json(200, active),
