@@ -191,7 +191,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
     },
   )
 
-  it.each(['demoted', 'deleted'] as const)(
+  it.each(['demoted', 'deleted', 'unverified'] as const)(
     'refuses a generation after its authorizing actor is %s',
     async (state) => {
       const row = await invitation()
@@ -199,6 +199,12 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       const renewed = await resend(row)
       if (state === 'deleted')
         await db.deleteFrom('auth.user').where('id', '=', replacement.userId).execute()
+      else if (state === 'unverified')
+        await db
+          .updateTable('auth.user')
+          .set({ emailVerified: false })
+          .where('id', '=', replacement.userId)
+          .execute()
       else
         await db
           .updateTable('auth.member')
@@ -215,6 +221,152 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       })
     },
   )
+
+  it('delivers a verified generation after its authorizing browser session has ended', async () => {
+    const row = await invitation()
+    await age(row.id)
+    const renewed = await resend(row)
+    await db.deleteFrom('auth.session').where('userId', '=', replacement.userId).execute()
+    await send(renewed)
+    expect(sent).toHaveLength(1)
+    expect(await delivery(row.id)).toMatchObject({
+      authorized_by_user_id: replacement.userId,
+      generation: 2,
+      state: 'smtp_accepted',
+      attempts: 1,
+    })
+  })
+
+  async function verifyGenerationActorProof(
+    phase: 'before claim' | 'after claim',
+    deliver = deliverInvitationEmail,
+  ) {
+    const row = await invitation()
+    await age(row.id)
+    const renewed = await resend(row)
+    const ledgerBefore = await db.selectFrom('notification_email_sends').select('sent_at').execute()
+    const revoke = async () => {
+      await db
+        .updateTable('auth.user')
+        .set({ emailVerified: false })
+        .where('id', '=', replacement.userId)
+        .execute()
+    }
+    let commits = 0
+    const interleaved = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== 'transaction') return Reflect.get(target, property, receiver)
+        return () => {
+          const builder = target.transaction()
+          return new Proxy(builder, {
+            get(transaction, key, transactionReceiver) {
+              if (key !== 'execute') return Reflect.get(transaction, key, transactionReceiver)
+              return async (callback: Parameters<typeof builder.execute>[0]) => {
+                const result = await transaction.execute(callback)
+                if (++commits === 1 && phase === 'after claim') {
+                  expect(await delivery(renewed.id)).toMatchObject({
+                    state: 'sending',
+                    attempts: 1,
+                  })
+                  await revoke()
+                }
+                return result
+              }
+            },
+          })
+        }
+      },
+    })
+    if (phase === 'before claim') await revoke()
+    await deliver(
+      {
+        db: interleaved,
+        publicUrl: 'https://recovery.example.test',
+        secret: 'synthetic-recovery-secret',
+        smtpConfigured: true,
+        mailer: { send: async (message) => void sent.push(message) },
+        log: () => {},
+      },
+      { invitationId: renewed.id, generation: renewed.delivery.generation },
+    )
+    expect(sent, 'unverified generation authority must never start SMTP').toHaveLength(0)
+    expect(await delivery(renewed.id)).toMatchObject({
+      authorized_by_user_id: replacement.userId,
+      generation: 2,
+      state: 'skipped',
+      attempts: phase === 'before claim' ? 0 : 1,
+      last_error_code: 'invitation_ineligible',
+      lease_id: null,
+      lease_until: null,
+    })
+    expect(
+      (await db.selectFrom('notification_email_sends').select('sent_at').execute()).length -
+        ledgerBefore.length,
+    ).toBe(phase === 'before claim' ? 0 : 1)
+    expect(
+      (
+        await db
+          .selectFrom('auth.user')
+          .select('emailVerified')
+          .where('id', '=', original.userId)
+          .executeTakeFirstOrThrow()
+      ).emailVerified,
+      'the verified original inviter cannot replace current generation authority',
+    ).toBe(true)
+  }
+
+  it.each(['before claim', 'after claim'] as const)(
+    'rechecks the generation actor email proof %s using unchanged source copies',
+    async (phase) => {
+      const source = ".where('emailVerified', '=', true)"
+      const copy = await sourceCopy(
+        new URL('./invitation-sender.ts', import.meta.url),
+        source,
+        source,
+      )
+      await verifyGenerationActorProof(phase, copy.deliverInvitationEmail)
+    },
+  )
+
+  it.each(['before claim', 'after claim'] as const)(
+    'detects removed generation actor email proof %s in a source copy',
+    async (phase) => {
+      const copy = await sourceCopy(
+        new URL('./invitation-sender.ts', import.meta.url),
+        ".where('emailVerified', '=', true)",
+        '',
+      )
+      await expect(
+        verifyGenerationActorProof(phase, copy.deliverInvitationEmail),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
+  it('detects a removed preclaim authority check through real attempt and budget assertions', async () => {
+    const copy = await sourceCopy(
+      new URL('./invitation-sender.ts', import.meta.url),
+      `const authorized = await invitationAuthorizationIsCurrent(
+      trx,
+      invitation,
+      delivery.authorized_by_user_id ?? invitation.inviterId,
+    )`,
+      'const authorized = true',
+    )
+    await expect(
+      verifyGenerationActorProof('before claim', copy.deliverInvitationEmail),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('detects a removed pre-SMTP authority check through a real mailer assertion', async () => {
+    const copy = await sourceCopy(
+      new URL('./invitation-sender.ts', import.meta.url),
+      'if (!(await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId))) {',
+      'if (false) {',
+    )
+    await expect(
+      verifyGenerationActorProof('after claim', copy.deliverInvitationEmail),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
   async function expire(id: string) {
     await db

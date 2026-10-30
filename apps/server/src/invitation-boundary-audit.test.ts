@@ -650,12 +650,12 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
   })
 
   it('runs an unchanged source copy through the trusted member-role recheck', async () => {
-    const guard = 'endpoint.path !== accept'
+    const guard = '  accept,\n'
     await verifyTrustedRoleRecheck(await sourceCopy(guard, guard))
   })
 
   it('detects removal of trusted acceptance context independently of delivery state', async () => {
-    const factory = await sourceCopy(' &&\n        endpoint.path !== accept', '')
+    const factory = await sourceCopy('  accept,\n', '')
     await expect(verifyTrustedRoleRecheck(factory)).rejects.toMatchObject({
       name: 'AssertionError',
       message: expect.stringContaining(

@@ -249,6 +249,7 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
   const authorizationChanges = [
     'inviter demoted',
     'inviter removed',
+    'inviter unverified',
     'recipient joined',
     'invitation role disallowed',
     'team became personal',
@@ -270,6 +271,12 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
         .deleteFrom('auth.member')
         .where('userId', '=', inviterId)
         .where('organizationId', '=', organizationId)
+        .execute()
+    } else if (change === 'inviter unverified') {
+      await db
+        .updateTable('auth.user')
+        .set({ emailVerified: false })
+        .where('id', '=', inviterId)
         .execute()
     } else if (change === 'recipient joined') {
       const recipient = await db
