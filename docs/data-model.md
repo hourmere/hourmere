@@ -486,6 +486,48 @@ table without rewriting existing booking fields, timestamps or physical rows, an
 guesses historical actors. Older binaries remain schema-compatible but do not create
 these records; upgrade every writer to obtain complete attribution from that point on.
 
+## Team membership and host lock order
+
+Every team departure, administrative removal and native Better Auth role change locks
+the organization `FOR UPDATE` before locking a member row. Team booking and event-type
+writers hold the organization `FOR SHARE` before their host-eligibility member locks.
+Acquire the required organization mode directly; do not upgrade competing organization
+share locks to update locks. Keep all locks through the write transaction's commit or
+rollback, using that transaction's connection for the protected reads and writes.
+
+The phases within that organization boundary are:
+
+- Membership management takes the actor's verified `auth.user` share lock, the organization
+  update lock, the actor's member share lock, then the session share lock. Removal and role
+  change next take the target member update lock. Removal then locks affected event types
+  in ID order before deactivation. The organization update lock excludes booking and
+  event-type writers throughout these member and event changes.
+- A new team booking takes the organization share lock, then `booking-host:<userId>`
+  advisory locks for the complete pre-read host set in sorted user-ID order. It next
+  share-locks and rereads the event type, share-locks host `auth.user` rows in sorted ID
+  order, then share-locks their member rows in sorted user-ID order. Round-robin bookings
+  next lock their assignment state. A changed host set is refused; do not append newly
+  discovered advisory locks out of order.
+- Event-type configuration takes the organization lock before the event-type lock and
+  host eligibility checks. Browser configuration also takes the shared management actor
+  locks first. Host eligibility locks verified users before their member rows, both in
+  sorted user-ID order.
+
+Actor identity checks can therefore take an `auth.user` share lock before the organization,
+while public booking host eligibility takes user share locks after it. These user locks
+are compatible `SHARE` locks; membership management does not acquire a user update lock.
+The common ordering invariant is organization before member, including target members;
+never move a target member lock ahead of the organization. The session context advisory
+lock, where used, precedes these row locks. Native HTTP context serialization holds only
+that advisory lock on its separate connection, allowing Better Auth's own session writes.
+
+Departure impact previews reserve nothing. After waiting for the organization update lock,
+leave rereads current owner tokens, event assignments and unfinished bookings in its
+`READ COMMITTED` transaction. It refuses current blockers with their handling list and
+commits no membership, operation or session change. Administrative removal may deactivate
+current affected event types, but neither removal nor leave rewrites existing bookings'
+`required_host_user_ids` snapshots.
+
 ## Required booking hosts
 
 Migration 0019 adds `bookings.required_host_user_ids`, an immutable UUID-array snapshot.
