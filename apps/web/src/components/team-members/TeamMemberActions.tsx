@@ -13,7 +13,7 @@ import {
 } from '../../api/member-actions.ts'
 import { browserTimeZone, zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import { eventTypePath, PATHS } from '../../paths.ts'
+import { bookingPath, eventTypePath, PATHS } from '../../paths.ts'
 import { BreakableText } from '../BreakableText.tsx'
 import './TeamMemberActions.css'
 
@@ -99,8 +99,10 @@ export function TeamMemberActions({
 }) {
   const { t } = useI18n()
   const [leavingOrganization, setLeavingOrganization] = useState<string | null>(null)
+  const [leftOrganization, setLeftOrganization] = useState<string | null>(null)
   const previousOrganization = useRef(organizationId)
   const leaveButton = useRef<HTMLButtonElement>(null)
+  const leftFeedback = useRef<HTMLDivElement>(null)
   const opener = useRef<HTMLElement | null>(null)
   const mode = selectedMember ? 'remove' : leavingOrganization === organizationId ? 'leave' : null
   const memberUserId = selectedMember?.userId ?? currentUserId
@@ -109,6 +111,7 @@ export function TeamMemberActions({
     if (previousOrganization.current !== organizationId) {
       previousOrganization.current = organizationId
       setLeavingOrganization(null)
+      setLeftOrganization(null)
     }
   }, [organizationId])
 
@@ -122,13 +125,14 @@ export function TeamMemberActions({
     onClose()
     queueMicrotask(() => {
       if (opener.current?.isConnected) opener.current.focus()
+      else if (leftFeedback.current) leftFeedback.current.focus()
       else leaveButton.current?.focus()
     })
   }
 
   return (
     <div className="team-member-actions">
-      {currentUserId && (
+      {currentUserId && leftOrganization !== organizationId && (
         <button
           ref={leaveButton}
           type="button"
@@ -142,11 +146,17 @@ export function TeamMemberActions({
           {t('Leave team')}
         </button>
       )}
+      {leftOrganization === organizationId && mode === null && (
+        <div ref={leftFeedback} tabIndex={-1}>
+          <LeftTeamNotice onReload={onReload} />
+        </div>
+      )}
       {mode && memberUserId && (
         <DepartureReview
           key={`${organizationId}:${memberUserId}:${mode}:${role}`}
           organizationId={organizationId}
           memberUserId={memberUserId}
+          viewerUserId={currentUserId}
           memberName={selectedMember?.user.name}
           mode={mode}
           canManage={mayManage(role)}
@@ -163,7 +173,10 @@ export function TeamMemberActions({
           }}
           onClose={close}
           onRemoved={onRemoved}
-          onLeft={onLeft}
+          onLeft={() => {
+            setLeftOrganization(organizationId)
+            onLeft()
+          }}
           onReload={onReload}
         />
       )}
@@ -171,7 +184,27 @@ export function TeamMemberActions({
   )
 }
 
-function ActionError({ error, onReload }: { error: unknown; onReload: () => void }) {
+function LeftTeamNotice({ onReload }: { onReload: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="alert alert-success" role="status">
+      <p>{t('You left the team. Reload to open your personal space.')}</p>
+      <button type="button" className="button button-small" onClick={onReload}>
+        {t('Reload team')}
+      </button>
+    </div>
+  )
+}
+
+function ActionError({
+  error,
+  mode,
+  onReload,
+}: {
+  error: unknown
+  mode: 'leave' | 'remove'
+  onReload: () => void
+}) {
   const { t, ui } = useI18n()
   const request = error instanceof RequestError ? error : undefined
   let message = ui(errorMessage(error))
@@ -183,12 +216,11 @@ function ActionError({ error, onReload }: { error: unknown; onReload: () => void
     message = t('You cannot leave while team events or bookings still need handling.')
   else if (request?.status === 403)
     message = t(
-      'Your permission or this member’s team membership changed. Reload to check before trying again.',
+      mode === 'leave'
+        ? 'Your permission or team membership changed. Reload to check before trying again.'
+        : 'Your permission or this member’s team membership changed. Reload to check before trying again.',
     )
-  else if (request?.status === 404)
-    message = t('This member is no longer in the team. Reload the member list.')
-  const reload =
-    isOrganizationContextChanged(error) || request?.status === 403 || request?.status === 404
+  const reload = isOrganizationContextChanged(error) || request?.status === 403
   return (
     <div role="alert" className="alert alert-error">
       <p>{message}</p>
@@ -207,7 +239,6 @@ function cannotRetryWrite(error: unknown) {
     (error instanceof RequestError &&
       (error.status === 401 ||
         error.status === 403 ||
-        error.status === 404 ||
         error.code === 'member_departure_owner_required'))
   )
 }
@@ -215,6 +246,7 @@ function cannotRetryWrite(error: unknown) {
 function DepartureReview({
   organizationId,
   memberUserId,
+  viewerUserId,
   memberName,
   mode,
   canManage,
@@ -226,6 +258,7 @@ function DepartureReview({
 }: {
   organizationId: string
   memberUserId: string
+  viewerUserId: string | undefined
   memberName?: string
   mode: 'leave' | 'remove'
   canManage: boolean
@@ -245,6 +278,7 @@ function DepartureReview({
     'preview',
   )
   const [error, setError] = useState<unknown>(null)
+  const [impactError, setImpactError] = useState<unknown>(null)
   const [handlingError, setHandlingError] = useState<unknown>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const feedback = useRef<HTMLDivElement>(null)
@@ -265,6 +299,7 @@ function DepartureReview({
     const controller = begin()
     setPending('preview')
     setError(null)
+    setImpactError(null)
     try {
       const result = await getDepartureImpact(organizationId, memberUserId, {}, controller.signal)
       if (!current(controller)) return
@@ -287,15 +322,22 @@ function DepartureReview({
     heading.current?.focus()
   }, [])
   useEffect(() => {
-    if (error || left || removal || handlingError) feedback.current?.focus()
-  }, [error, left, removal, handlingError])
+    if (error || impactError || left || removal || handlingError) feedback.current?.focus()
+  }, [error, impactError, left, removal, handlingError])
 
   async function moreImpact(kind: 'eventTypes' | 'bookings') {
     const cursor = impact?.[kind].nextCursor
-    if (!impact || !cursor || pending !== null || cannotRetryWrite(error)) return
+    if (
+      !impact ||
+      !cursor ||
+      pending !== null ||
+      cannotRetryWrite(error) ||
+      cannotRetryWrite(impactError)
+    )
+      return
     const controller = begin()
     setPending('more')
-    setError(null)
+    setImpactError(null)
     heading.current?.focus()
     try {
       const result = await getDepartureImpact(
@@ -324,7 +366,7 @@ function DepartureReview({
       )
     } catch (err) {
       if (!current(controller)) return
-      setError(err)
+      setImpactError(err)
     }
     if (current(controller)) setPending(null)
   }
@@ -365,10 +407,19 @@ function DepartureReview({
   }
 
   async function confirm() {
-    if (pending !== null || left || removal || !impact || cannotRetryWrite(error)) return
+    if (
+      pending !== null ||
+      left ||
+      removal ||
+      !impact ||
+      cannotRetryWrite(error) ||
+      cannotRetryWrite(impactError)
+    )
+      return
     const controller = begin()
     setPending('write')
     setError(null)
+    setImpactError(null)
     setDepartureHandling(undefined)
     heading.current?.focus()
     try {
@@ -445,14 +496,7 @@ function DepartureReview({
       )}
       {pending === 'preview' && <p role="status">{t('Loading departure impact…')}</p>}
       <div ref={feedback} tabIndex={-1}>
-        {left && (
-          <div className="alert alert-success" role="status">
-            <p>{t('You left the team. Reload to open your personal space.')}</p>
-            <button type="button" className="button button-small" onClick={onReload}>
-              {t('Reload team')}
-            </button>
-          </div>
-        )}
+        {left && <LeftTeamNotice onReload={onReload} />}
         {removal && (
           <div className="alert alert-success" role="status">
             <p>{t('Member removed. Access was revoked immediately.')}</p>
@@ -461,11 +505,12 @@ function DepartureReview({
             </p>
           </div>
         )}
-        {error != null && <ActionError error={error} onReload={onReload} />}
+        {error != null && <ActionError error={error} mode={mode} onReload={onReload} />}
+        {impactError != null && <ActionError error={impactError} mode={mode} onReload={onReload} />}
         {handlingError != null && (
           <div role="alert" className="alert alert-error">
             <p>{t('Could not load the handling list. The member is still removed.')}</p>
-            <ActionError error={handlingError} onReload={onReload} />
+            <ActionError error={handlingError} mode={mode} onReload={onReload} />
             <button
               type="button"
               className="button button-small"
@@ -488,16 +533,20 @@ function DepartureReview({
         <>
           <ImpactList
             impact={impact}
+            mode={mode}
+            viewerUserId={viewerUserId}
             canManage={canManage}
             blocked={departureHandling !== undefined}
-            busy={pending !== null || cannotRetryWrite(error)}
+            busy={pending !== null || cannotRetryWrite(error) || cannotRetryWrite(impactError)}
             more={(kind) => void moreImpact(kind)}
           />
           <div className="form-actions">
             <button
               type="button"
               className="button button-small button-danger"
-              disabled={pending !== null || cannotRetryWrite(error)}
+              disabled={
+                pending !== null || cannotRetryWrite(error) || cannotRetryWrite(impactError)
+              }
               onClick={() => void confirm()}
             >
               {t(
@@ -549,7 +598,11 @@ function DepartureReview({
               <p>
                 {t('{0} future or in-progress bookings', { '0': handling.bookings.totalCount })}
               </p>
-              <BookingList bookings={handling.bookings.data} canManage={canManage} />
+              <BookingList
+                bookings={handling.bookings.data}
+                canManage={canManage}
+                viewerUserId={viewerUserId}
+              />
               {handling.bookings.nextCursor && (
                 <button
                   type="button"
@@ -575,12 +628,16 @@ function DepartureReview({
 
 function ImpactList({
   impact,
+  mode,
+  viewerUserId,
   canManage,
   blocked,
   busy,
   more,
 }: {
   impact: Impact
+  mode: 'leave' | 'remove'
+  viewerUserId: string | undefined
   canManage: boolean
   blocked: boolean
   busy: boolean
@@ -599,11 +656,14 @@ function ImpactList({
           <h4>{t('Affected event types')}</h4>
           <p>
             {t(
-              canManage
-                ? 'Replace or remove this member as a host. Disable the event type to stop new bookings.'
-                : 'Ask a team owner or admin to replace or remove you as a host.',
+              mode === 'leave'
+                ? canManage
+                  ? 'Replace or remove yourself as a host before leaving.'
+                  : 'Ask a team owner or admin to replace or remove you as a host.'
+                : 'Replace or remove this member as a host where needed.',
             )}
           </p>
+          {!canManage && <p>{t('Only team owners and admins can change team event types.')}</p>}
           {blocked && (
             <p>
               {t(
@@ -622,6 +682,26 @@ function ImpactList({
                 </p>
                 <p className="hint">
                   {t('Event type ID')}: <BreakableText>{eventType.id}</BreakableText>
+                </p>
+                <p>
+                  {t(
+                    eventType.reason === 'sole_host'
+                      ? mode === 'leave'
+                        ? 'You are the sole host for this event type.'
+                        : 'This member is the sole host for this event type.'
+                      : eventType.reason === 'round_robin_pool_member'
+                        ? mode === 'leave'
+                          ? 'You are in the round-robin host pool.'
+                          : 'This member is in the round-robin host pool.'
+                        : mode === 'leave'
+                          ? 'You are a required host for this collective event type.'
+                          : 'This member is a required host for this collective event type.',
+                  )}
+                </p>
+                <p>
+                  {t('{0} other current verified team hosts remain.', {
+                    '0': eventType.remainingHostCount,
+                  })}
                 </p>
                 {canManage && (
                   <Link to={eventTypePath(eventType.id)}>{t('Manage event type')}</Link>
@@ -644,7 +724,11 @@ function ImpactList({
       {impact.bookings.totalCount > 0 && (
         <>
           <h4>{t('Bookings needing handling')}</h4>
-          <BookingList bookings={impact.bookings.data} canManage={canManage} />
+          <BookingList
+            bookings={impact.bookings.data}
+            canManage={canManage}
+            viewerUserId={viewerUserId}
+          />
           {impact.bookings.nextCursor && (
             <button
               type="button"
@@ -661,7 +745,15 @@ function ImpactList({
   )
 }
 
-function BookingList({ bookings, canManage }: { bookings: Booking[]; canManage: boolean }) {
+function BookingList({
+  bookings,
+  canManage,
+  viewerUserId,
+}: {
+  bookings: Booking[]
+  canManage: boolean
+  viewerUserId: string | undefined
+}) {
   const { t, locale } = useI18n()
   const format = zoned(browserTimeZone(), locale)
   return (
@@ -671,7 +763,9 @@ function BookingList({ bookings, canManage }: { bookings: Booking[]; canManage: 
           {canManage ? (
             <Link to={PATHS.teamBookings}>{t('Review team bookings')}</Link>
           ) : (
-            t('Team owners and admins can handle team bookings.')
+            t(
+              'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.',
+            )
           )}
         </p>
       )}
@@ -698,6 +792,11 @@ function BookingList({ bookings, canManage }: { bookings: Booking[]; canManage: 
                   : 'Coordinate cancellation with the hosts and attendees.',
               )}
             </p>
+            {booking.handling === 'coordinate_cancellation' &&
+              viewerUserId &&
+              booking.hosts.some(
+                (host) => host.userId.toLowerCase() === viewerUserId.toLowerCase(),
+              ) && <Link to={bookingPath(booking.id)}>{t('Review your hosted booking')}</Link>}
             <dl className="team-member-booking-people">
               <dt>{t('Hosts')}</dt>
               <dd>

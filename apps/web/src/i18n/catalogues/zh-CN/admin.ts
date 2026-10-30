@@ -1074,17 +1074,29 @@ export const admin = {
   'No affected event types or bookings.': '没有受影响的活动类型或预约。',
   'Ask a team owner or admin to replace or remove you as a host.':
     '请团队所有者或管理员更换主持人，或将你从主持人名单中移除。',
-  'Replace or remove this member as a host. Disable the event type to stop new bookings.':
-    '请更换主持人或将此成员从主持人名单中移除。停用活动类型可以阻止新预约。',
-  'This member is no longer in the team. Reload the member list.':
-    '此成员已不在团队中，请重新加载成员列表。',
+  'Replace or remove yourself as a host before leaving.':
+    '退出团队前，请更换主持人或将你自己从主持人名单中移除。',
+  'Replace or remove this member as a host where needed.':
+    '请根据需要更换主持人或将此成员从主持人名单中移除。',
+  'Only team owners and admins can change team event types.':
+    '只有团队所有者和管理员可以修改团队活动类型。',
+  'You are the sole host for this event type.': '你是此活动类型的唯一主持人。',
+  'This member is the sole host for this event type.': '此成员是此活动类型的唯一主持人。',
+  'You are in the round-robin host pool.': '你在轮询主持人池中。',
+  'This member is in the round-robin host pool.': '此成员在轮询主持人池中。',
+  'You are a required host for this collective event type.': '你是此集体活动类型的必选主持人。',
+  'This member is a required host for this collective event type.':
+    '此成员是此集体活动类型的必选主持人。',
+  '{0} other current verified team hosts remain.': '另有{0}位已验证的当前团队主持人。',
   'Disabled event types still need their host assignments repaired before you can leave.':
     '已停用的活动类型也需要调整主持人配置，之后你才能退出团队。',
   'Manage event type': '管理活动类型',
   'Review team bookings': '查看团队预约',
   'Coordinate cancellation with the hosts and attendees.': '请与主持人及参与者协调取消预约。',
   'Wait until the meeting ends or coordinate offline.': '请等待会议结束，或在线下协调处理。',
-  'Team owners and admins can handle team bookings.': '团队所有者和管理员可以处理团队预约。',
+  'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.':
+    '你可以在会议开始前取消自己主持的预约。其他团队预约可请团队所有者或管理员协助处理。',
+  'Review your hosted booking': '查看你主持的预约',
   'More event types': '更多活动类型',
   'More bookings': '更多预约',
   'You cannot leave while team events or bookings still need handling.':
@@ -1093,6 +1105,8 @@ export const admin = {
     '团队必须保留至少一位所有者。此处暂不支持转移所有权。',
   'Your permission or this member’s team membership changed. Reload to check before trying again.':
     '你的权限或此成员的团队成员关系已变更。请重新加载并核实后再试。',
+  'Your permission or team membership changed. Reload to check before trying again.':
+    '你的权限或团队成员关系已变更。请重新加载并核实后再试。',
   'Reload team': '重新加载团队',
   'Loading handling list…': '正在加载处理清单…',
   'Could not load the handling list. The member is still removed.':

@@ -1134,10 +1134,22 @@ export const admin = {
   'No affected event types or bookings.': 'No affected event types or bookings.',
   'Ask a team owner or admin to replace or remove you as a host.':
     'Ask a team owner or admin to replace or remove you as a host.',
-  'Replace or remove this member as a host. Disable the event type to stop new bookings.':
-    'Replace or remove this member as a host. Disable the event type to stop new bookings.',
-  'This member is no longer in the team. Reload the member list.':
-    'This member is no longer in the team. Reload the member list.',
+  'Replace or remove yourself as a host before leaving.':
+    'Replace or remove yourself as a host before leaving.',
+  'Replace or remove this member as a host where needed.':
+    'Replace or remove this member as a host where needed.',
+  'Only team owners and admins can change team event types.':
+    'Only team owners and admins can change team event types.',
+  'You are the sole host for this event type.': 'You are the sole host for this event type.',
+  'This member is the sole host for this event type.':
+    'This member is the sole host for this event type.',
+  'You are in the round-robin host pool.': 'You are in the round-robin host pool.',
+  'This member is in the round-robin host pool.': 'This member is in the round-robin host pool.',
+  'You are a required host for this collective event type.':
+    'You are a required host for this collective event type.',
+  'This member is a required host for this collective event type.':
+    'This member is a required host for this collective event type.',
+  '{0} other current verified team hosts remain.': '{0} other current verified team hosts remain.',
   'Disabled event types still need their host assignments repaired before you can leave.':
     'Disabled event types still need their host assignments repaired before you can leave.',
   'Manage event type': 'Manage event type',
@@ -1146,8 +1158,9 @@ export const admin = {
     'Coordinate cancellation with the hosts and attendees.',
   'Wait until the meeting ends or coordinate offline.':
     'Wait until the meeting ends or coordinate offline.',
-  'Team owners and admins can handle team bookings.':
-    'Team owners and admins can handle team bookings.',
+  'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.':
+    'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.',
+  'Review your hosted booking': 'Review your hosted booking',
   'More event types': 'More event types',
   'More bookings': 'More bookings',
   'You cannot leave while team events or bookings still need handling.':
@@ -1156,6 +1169,8 @@ export const admin = {
     'The team must retain at least one owner. Ownership transfer is not available here.',
   'Your permission or this member’s team membership changed. Reload to check before trying again.':
     'Your permission or this member’s team membership changed. Reload to check before trying again.',
+  'Your permission or team membership changed. Reload to check before trying again.':
+    'Your permission or team membership changed. Reload to check before trying again.',
   'Reload team': 'Reload team',
   'Loading handling list…': 'Loading handling list…',
   'Could not load the handling list. The member is still removed.':

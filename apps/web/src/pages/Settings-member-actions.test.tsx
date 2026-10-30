@@ -6,7 +6,7 @@ import type { ListedOrganizationMember } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { TeamMemberActions } from '../components/team-members/TeamMemberActions.tsx'
 import { InterfaceScope } from '../i18n/runtime.tsx'
-import { eventTypePath, PATHS } from '../paths.ts'
+import { bookingPath, eventTypePath, PATHS } from '../paths.ts'
 import {
   fakeApi,
   json,
@@ -147,6 +147,23 @@ function eventManagementLink(title: string) {
   return within(item).getByRole('link', { name: 'Manage event type' })
 }
 
+function impactItem(title: string) {
+  const item = screen.getByText(title).closest('li')
+  if (!item) throw new Error('Expected impact list item')
+  return within(item)
+}
+
+function hostedBooking(number = 1, inProgress = false) {
+  return { ...booking(number, inProgress), hosts: [{ userId: ME.user.id, name: 'Ada' }] }
+}
+
+function expectBookingLink(number: number, offered: boolean) {
+  const links = impactItem(`Saved meeting ${number}`).queryAllByRole('link')
+  expect(links.some((link) => link.getAttribute('href') === bookingPath(booking(number).id))).toBe(
+    offered,
+  )
+}
+
 function expectNoRemovalSuccess() {
   expect(screen.queryByText('Member removed. Access was revoked immediately.')).toBeNull()
 }
@@ -198,26 +215,52 @@ describe('team member leave actions', () => {
     expect(api.to('GET /api/v1/me')).toHaveLength(2)
   })
 
-  it('keeps confirmed leave distinct from a failed personal-space refresh', async () => {
-    const user = userEvent.setup()
-    let left = false
-    const api = teamServer('member', {
-      [LEAVE_ROUTE]: () => {
-        left = true
-        return json(200, { organizationId: ME.personalOrganizationId })
-      },
-      'GET /api/v1/me': () => (left ? json(503, { error: 'internal_error' }) : json(200, TEAM_ME)),
-    })
-    renderApp(PATHS.settings)
-    await openLeave(user)
-    await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
-    await screen.findByText('You left the team. Reload to open your personal space.')
-    expect(screen.queryByRole('button', { name: 'Leave this team' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Reload team' })).toBeDefined()
-    expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
-    expect(api.to('GET /api/v1/me')).toHaveLength(2)
-    expect(screen.queryByText(/You are now in your personal space/)).toBeNull()
-  })
+  it.each(['Close details', 'Escape'])(
+    'keeps confirmed leave and reload available after %s closes a failed personal-space refresh',
+    async (method) => {
+      const user = userEvent.setup()
+      let left = false
+      let failRefresh = true
+      const api = teamServer('member', {
+        [LEAVE_ROUTE]: () => {
+          left = true
+          return json(200, { organizationId: ME.personalOrganizationId })
+        },
+        'GET /api/v1/me': () =>
+          !left
+            ? json(200, TEAM_ME)
+            : failRefresh
+              ? json(503, { error: 'internal_error' })
+              : json(200, ME),
+      })
+      renderApp(PATHS.settings)
+      await openLeave(user)
+      await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
+      await screen.findByText('You left the team. Reload to open your personal space.')
+      expect(screen.queryByRole('button', { name: 'Leave this team' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Reload team' })).toBeDefined()
+      expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
+      expect(api.to('GET /api/v1/me')).toHaveLength(2)
+      expect(screen.queryByText(/You are now in your personal space/)).toBeNull()
+      if (method === 'Escape') await user.keyboard('{Escape}')
+      else await user.click(screen.getByRole('button', { name: 'Close details' }))
+      expect(screen.queryByRole('heading', { name: 'Review leaving this team' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Leave team' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Leave this team' })).toBeNull()
+      expect(
+        screen.getByText('You left the team. Reload to open your personal space.'),
+      ).toBeDefined()
+      expect(screen.getByRole('button', { name: 'Reload team' })).toBeDefined()
+      expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
+      failRefresh = false
+      await user.click(screen.getByRole('button', { name: 'Reload team' }))
+      await screen.findByText(
+        'You are now in your personal space. Your team access or active space changed.',
+      )
+      expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
+      expect(api.to('GET /api/v1/me')).toHaveLength(3)
+    },
+  )
 
   it('uses the write refusal impact, showing each event, future booking and in-progress handling path', async () => {
     const user = userEvent.setup()
@@ -238,12 +281,8 @@ describe('team member leave actions', () => {
     expect(await screen.findByText(eventType().title)).toBeDefined()
     expect(screen.getByText('Saved meeting 1')).toBeDefined()
     expect(screen.getByText('Saved meeting 2')).toBeDefined()
-    expect(screen.getByText(/reassign|replace/i)).toBeDefined()
-    expect(
-      screen.getByText(
-        'Replace or remove this member as a host. Disable the event type to stop new bookings.',
-      ),
-    ).toBeDefined()
+    expect(screen.getByText('Replace or remove yourself as a host before leaving.')).toBeDefined()
+    expect(screen.queryByText(/replace or remove this member/i)).toBeNull()
     expect(screen.getByText(/coordinate.*cancellation/i)).toBeDefined()
     expect(screen.getByText(/wait.*end.*offline/i)).toBeDefined()
     expect(eventManagementLink(eventType().title).getAttribute('href')).toBe(
@@ -264,9 +303,121 @@ describe('team member leave actions', () => {
     renderApp(PATHS.settings)
     await openLeave(user)
     await screen.findByText(eventType().title)
-    expect(screen.getByText(/ask.*admin|administrator/i)).toBeDefined()
+    expect(
+      screen.getByText('Ask a team owner or admin to replace or remove you as a host.'),
+    ).toBeDefined()
+    expect(
+      screen.getByText('Only team owners and admins can change team event types.'),
+    ).toBeDefined()
     expect(screen.queryByRole('link', { name: 'Manage event type' })).toBeNull()
-    expect(screen.queryByRole('link', { name: /handle bookings/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Review team bookings' })).toBeNull()
+  })
+
+  it.each(['preview', 'blocked'])(
+    'links an ordinary member to their own future hosted booking in the %s impact',
+    async (response) => {
+      const user = userEvent.setup()
+      const dependencies = impact([], [hostedBooking(), hostedBooking(2, true)])
+      teamServer('member', {
+        [impactRoute(ME.user.id)]: () =>
+          json(200, response === 'preview' ? dependencies : impact()),
+        [LEAVE_ROUTE]: () =>
+          json(409, {
+            error: 'member_departure_blocked',
+            impact: dependencies,
+            handling: blockedHandling,
+          }),
+      })
+      renderApp(PATHS.settings)
+      await openLeave(user)
+      if (response === 'blocked')
+        await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
+      await screen.findByText('Saved meeting 1')
+      expectBookingLink(1, true)
+      expectBookingLink(2, false)
+      expect(screen.queryByRole('link', { name: 'Review team bookings' })).toBeNull()
+      expect(
+        screen.getByText(
+          'You can cancel your own hosted bookings before they start. Ask a team owner or admin for help with other team bookings.',
+        ),
+      ).toBeDefined()
+      expect(screen.queryByText('Team owners and admins can handle team bookings.')).toBeNull()
+    },
+  )
+
+  it.each(['owner', 'admin', 'member'])(
+    'explains every event dependency in the second person when a %s leaves',
+    async (role) => {
+      const user = userEvent.setup()
+      const sole = eventType()
+      const pool = {
+        ...eventType(2),
+        schedulingType: 'round_robin' as const,
+        reason: 'round_robin_pool_member' as const,
+        remainingHostCount: 2,
+      }
+      const collective = {
+        ...eventType(3),
+        schedulingType: 'collective' as const,
+        reason: 'collective_required_host' as const,
+        remainingHostCount: 1,
+      }
+      teamServer(role, {
+        [impactRoute(ME.user.id)]: () => json(200, impact([sole, pool, collective])),
+      })
+      renderApp(PATHS.settings)
+      await openLeave(user)
+      await screen.findByText(collective.title)
+      expect(
+        impactItem(sole.title).getByText('You are the sole host for this event type.'),
+      ).toBeDefined()
+      expect(
+        impactItem(pool.title).getByText('You are in the round-robin host pool.'),
+      ).toBeDefined()
+      expect(
+        impactItem(pool.title).getByText('2 other current verified team hosts remain.'),
+      ).toBeDefined()
+      expect(
+        impactItem(collective.title).getByText(
+          'You are a required host for this collective event type.',
+        ),
+      ).toBeDefined()
+      expect(screen.queryByText(/replace or remove this member/i)).toBeNull()
+      if (role === 'member') {
+        expect(screen.queryByRole('link', { name: 'Manage event type' })).toBeNull()
+        expect(
+          screen.getByText('Only team owners and admins can change team event types.'),
+        ).toBeDefined()
+      } else {
+        expect(
+          screen.getByText('Replace or remove yourself as a host before leaving.'),
+        ).toBeDefined()
+        for (const event of [sole, pool, collective])
+          expect(eventManagementLink(event.title).getAttribute('href')).toBe(
+            eventTypePath(event.id),
+          )
+      }
+    },
+  )
+
+  it('uses self-leave permission wording and reload guidance for a forbidden departure', async () => {
+    const user = userEvent.setup()
+    const api = teamServer('member', {
+      [LEAVE_ROUTE]: () => json(403, { error: 'team_management_access_denied' }),
+    })
+    renderApp(PATHS.settings)
+    await openLeave(user)
+    await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(
+      'Your permission or team membership changed. Reload to check before trying again.',
+    )
+    expect(alert.textContent).not.toMatch(/this member/i)
+    expect(within(alert).getByRole('button', { name: 'Reload team' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Leave this team' }).hasAttribute('disabled')).toBe(
+      true,
+    )
+    expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
   })
 
   it('shows the last-owner refusal and never reports departure', async () => {
@@ -310,6 +461,34 @@ describe('team member leave actions', () => {
 })
 
 describe('team member removal actions', () => {
+  it('offers managers their own future host links alongside team booking handling, before and after removal', async () => {
+    const user = userEvent.setup()
+    const bookings = [hostedBooking(), booking(2), hostedBooking(3, true)]
+    teamServer('owner', {
+      [impactRoute(MEMBER_ID)]: () => json(200, impact([], bookings)),
+      [removalRoute(MEMBER_ID)]: () => json(200, removed()),
+      [handlingRoute]: () => json(200, handling(bookings)),
+    })
+    renderApp(PATHS.settings)
+    await openRemoval(user)
+    await screen.findByText('Saved meeting 1')
+    expectBookingLink(1, true)
+    expectBookingLink(2, false)
+    expectBookingLink(3, false)
+    expect(screen.getByRole('link', { name: 'Review team bookings' }).getAttribute('href')).toBe(
+      PATHS.teamBookings,
+    )
+    await user.click(screen.getByRole('button', { name: 'Remove member' }))
+    await screen.findByRole('heading', { name: 'Handling list' })
+    await screen.findByText('Saved meeting 1')
+    expectBookingLink(1, true)
+    expectBookingLink(2, false)
+    expectBookingLink(3, false)
+    expect(screen.getByRole('link', { name: 'Review team bookings' }).getAttribute('href')).toBe(
+      PATHS.teamBookings,
+    )
+  })
+
   it.each([
     ['owner', 'member', MEMBER_ID, 'Team member'],
     ['owner', 'admin', ADMIN_ID, 'Team admin'],
@@ -516,6 +695,111 @@ describe('team member removal actions', () => {
 })
 
 describe('member action recovery and accessibility', () => {
+  it.each(['eventTypes', 'bookings'] as const)(
+    'keeps the leave block alongside a failed %s page and only retries the read',
+    async (kind) => {
+      const user = userEvent.setup()
+      let failPage = true
+      const blocked = impact([eventType()], [hostedBooking()])
+      blocked[kind].nextCursor = 'impact-next'
+      blocked[kind].totalCount = 2
+      const api = teamServer('owner', {
+        [impactRoute(ME.user.id)]: ({ path }) => {
+          if (!new URL(path, window.location.origin).searchParams.has(`${kind}Cursor`))
+            return json(200, impact())
+          return failPage
+            ? json(503, { error: 'internal_error' })
+            : json(200, impact([eventType(2)], [hostedBooking(2)]))
+        },
+        [LEAVE_ROUTE]: () =>
+          json(409, {
+            error: 'member_departure_blocked',
+            impact: blocked,
+            handling: blockedHandling,
+          }),
+      })
+      renderApp(PATHS.settings)
+      await openLeave(user)
+      await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
+      const reason = 'You cannot leave while team events or bookings still need handling.'
+      await screen.findByText(reason)
+      const pageButton = () =>
+        screen.getByRole('button', {
+          name: kind === 'eventTypes' ? 'More event types' : 'More bookings',
+        })
+      await user.click(pageButton())
+      const readError = 'Something went wrong on our side. Try again in a moment.'
+      await screen.findByText(readError)
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts).toHaveLength(2)
+      expect(alerts.some((alert) => alert.textContent?.includes(reason))).toBe(true)
+      expect(alerts.some((alert) => alert.textContent?.includes(readError))).toBe(true)
+      expect(screen.getByText(eventType().title)).toBeDefined()
+      expect(screen.getByText('Saved meeting 1')).toBeDefined()
+      failPage = false
+      await user.click(pageButton())
+      await screen.findByText(kind === 'eventTypes' ? eventType(2).title : 'Saved meeting 2')
+      expect(screen.queryByText(readError)).toBeNull()
+      expect(screen.getByRole('alert').textContent).toContain(reason)
+      expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
+      const reads = api.to(impactRoute(ME.user.id))
+      expect(reads).toHaveLength(3)
+      expect(
+        reads
+          .slice(1)
+          .map(({ path }) =>
+            new URL(path, window.location.origin).searchParams.get(`${kind}Cursor`),
+          ),
+      ).toEqual(['impact-next', 'impact-next'])
+    },
+  )
+
+  it.each(['eventTypes', 'bookings'] as const)(
+    'preserves the server leave block while paging %s and after the page arrives',
+    async (kind) => {
+      const user = userEvent.setup()
+      const page = later()
+      const blocked = impact([eventType()], [hostedBooking()])
+      blocked[kind].nextCursor = 'impact-next'
+      blocked[kind].totalCount = 2
+      const api = teamServer('owner', {
+        [impactRoute(ME.user.id)]: ({ path }) =>
+          new URL(path, window.location.origin).searchParams.has(`${kind}Cursor`)
+            ? page.response
+            : json(200, impact()),
+        [LEAVE_ROUTE]: () =>
+          json(409, {
+            error: 'member_departure_blocked',
+            impact: blocked,
+            handling: blockedHandling,
+          }),
+      })
+      renderApp(PATHS.settings)
+      await openLeave(user)
+      await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
+      const reason = 'You cannot leave while team events or bookings still need handling.'
+      await screen.findByText(reason)
+      await user.click(
+        screen.getByRole('button', {
+          name: kind === 'eventTypes' ? 'More event types' : 'More bookings',
+        }),
+      )
+      expect(screen.getByRole('alert').textContent).toContain(reason)
+      expect(
+        screen.getByText(
+          'Disabled event types still need their host assignments repaired before you can leave.',
+        ),
+      ).toBeDefined()
+      await page.answer(json(200, impact([eventType(2)], [hostedBooking(2)])))
+      await screen.findByText(kind === 'eventTypes' ? eventType(2).title : 'Saved meeting 2')
+      expect(screen.getByRole('alert').textContent).toContain(reason)
+      expect(screen.getByText(eventType().title)).toBeDefined()
+      expect(screen.getByText('Saved meeting 1')).toBeDefined()
+      expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
+      expect(api.to(impactRoute(ME.user.id))).toHaveLength(2)
+    },
+  )
+
   it.each(['leave', 'remove'])(
     'requires a team reload after a 409 %s context conflict',
     async (action) => {
