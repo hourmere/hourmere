@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import pgBossPackage from 'pg-boss/package.json' with { type: 'json' }
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { createJobs, defineJob, type JobDefinition, JobPayloadError } from './index.ts'
+import { type AnyJobDefinition, createJobs, defineJob, JobPayloadError } from './index.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -46,7 +47,7 @@ describe.skipIf(!serverUrl)('createJobs', () => {
   })
 
   // Every test gets its own queues, so instances in one database do not see each other's jobs.
-  async function start<const Defs extends readonly JobDefinition<string, z.ZodType>[]>(
+  async function start<const Defs extends readonly AnyJobDefinition[]>(
     definitions: Defs,
     options: { work?: boolean; shutdownTimeoutMs?: number; lines?: string[] } = {},
   ) {
@@ -142,6 +143,28 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     const jobs = await start([echo])
     expect(await jobs.enqueue(name, { to: 'ada@example.com' })).toMatch(/^[0-9a-f-]{36}$/)
     expect(await received.promise).toEqual({ to: 'ada@example.com', count: 1 })
+  })
+
+  it('leaves a queue without a consumer created while other workers poll and complete jobs', async () => {
+    const name = queueName('unconsumed')
+    const sentinelName = queueName('polling-sentinel')
+    let sentinelRuns = 0
+    const jobs = await start([
+      defineJob({ name, payload: z.strictObject({ generation: z.number().int() }) }),
+      defineJob({
+        name: sentinelName,
+        payload: z.object({}),
+        async handler() {
+          sentinelRuns++
+        },
+      }),
+    ])
+    const id = await jobs.enqueue(name, { generation: 1 })
+    for (let poll = 1; poll <= 3; poll++) {
+      await jobs.enqueue(sentinelName, {})
+      await until(() => sentinelRuns === poll, 'another polling sentinel to run')
+      expect(await jobRows(name)).toEqual([expect.objectContaining({ id, state: 'created' })])
+    }
   })
 
   it('refuses an invalid payload without echoing it', async () => {
@@ -264,21 +287,55 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
   })
 
-  it('refuses invitation inspection when the pinned pg-boss version changes', async () => {
-    const jobs = await start([], { work: false })
+  it('refuses startup when the pinned pg-boss version changes, even without invitation queues', async () => {
+    const jobs = createJobs({
+      connectionString: testDb.url,
+      definitions: [],
+      work: true,
+      migrate: true,
+      maxConnections: 2,
+      log: () => {},
+    })
+    started.push(jobs)
     const version = pgBossPackage.version
     try {
       pgBossPackage.version = 'unsupported-test-version'
-      await expect(
-        jobs.hasLiveInvitationEmailJob({
-          id: randomUUID(),
-          invitationId: randomUUID(),
-          generation: 1,
-        }),
-      ).rejects.toThrow('invitation job lookup requires pg-boss 12.38.0')
+      await expect(jobs.start()).rejects.toThrow(
+        'background jobs require pg-boss 12.38.0; found unsupported-test-version. Review the invitation job lookup before upgrading',
+      )
+      expect(jobs.running).toBe(false)
     } finally {
       pgBossPackage.version = version
     }
+  })
+
+  it("uses pg-boss's transaction clock for queued and active invitation expiry", async () => {
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+    })
+    const jobs = await start([definition], { work: false })
+    const payload = { invitationId: randomUUID(), generation: 1 }
+    const db = createDb(testDb.pool)
+    await db.transaction().execute(async (trx) => {
+      const id = (await jobs.enqueue(definition.name, payload, {
+        singletonKey: `invitation-email:v1:${payload.invitationId}:1`,
+        transaction: trx,
+      })) as string
+      // pg-boss's job_now() stays at this transaction's start while wall time advances.
+      await sql`UPDATE pgboss.job
+        SET keep_until=pgboss.job_now() + INTERVAL '1 second',
+            started_on=pgboss.job_now() - INTERVAL '179 seconds', expire_seconds=180
+        WHERE id=${id}`.execute(trx)
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      for (const state of ['created', 'retry', 'active']) {
+        await sql`UPDATE pgboss.job SET state=${state}::pgboss.job_state WHERE id=${id}`.execute(
+          trx,
+        )
+        expect(await jobs.hasLiveInvitationEmailJob({ id, ...payload }, trx), state).toBe(true)
+      }
+    })
   })
 
   it('reads an invitation job through the caller transaction without requiring another connection', async () => {

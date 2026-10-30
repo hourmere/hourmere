@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createJobs, type JobRun } from '@hourmere/jobs'
+import { createJobs, defineJob } from '@hourmere/jobs'
 import { sql } from 'kysely'
+import { PgBoss } from 'pg-boss'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import {
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
@@ -16,12 +20,35 @@ import {
 } from './invitation-email.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const run: JobRun = { id: randomUUID(), attempt: 1, signal: new AbortController().signal }
+const pollingProbe = defineJob({
+  name: 'invitation-queue-polling-probe',
+  payload: z.strictObject({}),
+  async handler() {},
+})
+
+// Each mutation imports a source copy, leaving production files and other workers alone.
+async function sourceCopy(replace?: { before: string; after: string }) {
+  const location = new URL('./invitation-email.ts', import.meta.url)
+  let source = readFileSync(location, 'utf8')
+  if (replace) {
+    expect(source.includes(replace.before), 'mutation matches the intended protection').toBe(true)
+    source = source.replace(replace.before, replace.after)
+  }
+  const javascript = stripTypeScriptTypes(source).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) => `from '${import.meta.resolve(specifier)}'`,
+  )
+  return (await import(
+    `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+  )) as typeof import('./invitation-email.ts')
+}
 
 describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
   let owned: TestDatabase
   let db: Db
-  let jobs: ReturnType<typeof createJobs<readonly [ReturnType<typeof invitationEmailJob>]>>
+  let jobs: ReturnType<
+    typeof createJobs<readonly [ReturnType<typeof invitationEmailJob>, typeof pollingProbe]>
+  >
   let organizationId: string
   let inviterId: string
 
@@ -30,8 +57,9 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
     db = createDb(owned.pool)
     jobs = createJobs({
       connectionString: owned.url,
-      definitions: [invitationEmailJob({ db })] as const,
-      work: false,
+      definitions: [invitationEmailJob(), pollingProbe] as const,
+      work: true,
+      pollingIntervalSeconds: 0.5,
       migrate: true,
       maxConnections: 2,
       log: () => {},
@@ -92,7 +120,11 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
       .where('invitation_id', '=', invitationId)
       .executeTakeFirstOrThrow()
   const jobRows = async () =>
-    (await owned.pool.query('SELECT * FROM pgboss.job ORDER BY created_on, id')).rows
+    (
+      await owned.pool.query('SELECT * FROM pgboss.job WHERE name=$1 ORDER BY created_on, id', [
+        INVITATION_EMAIL_JOB,
+      ])
+    ).rows
 
   it('queues only the exact identity and exclusive key with application-owned retries', async () => {
     const payload = await invitation()
@@ -124,6 +156,95 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
     await repair()
     expect(enqueue).not.toHaveBeenCalled()
     expect(await jobRows()).toHaveLength(1)
+  })
+
+  async function verifyUnconsumedGeneration(definition: ReturnType<typeof invitationEmailJob>) {
+    const pollingJobs = createJobs({
+      connectionString: owned.url,
+      definitions: [definition, pollingProbe] as const,
+      work: true,
+      migrate: false,
+      maxConnections: 2,
+      pollingIntervalSeconds: 0.5,
+      log: () => {},
+    })
+    try {
+      await pollingJobs.start()
+      const payload = await invitation()
+      await createInvitationEmailDispatcher({ db, queue: pollingJobs })(payload)
+      const before = await delivery(payload.invitationId)
+      const repair = createInvitationEmailRepairer({ db, queue: pollingJobs })
+      for (let pass = 0; pass < 3; pass += 1) {
+        const probeId = await pollingJobs.enqueue(pollingProbe.name, {})
+        await expect
+          .poll(async () => {
+            const result = await owned.pool.query<{ state: string }>(
+              'SELECT state FROM pgboss.job WHERE id=$1',
+              [probeId],
+            )
+            return result.rows[0]?.state
+          })
+          .toBe('completed')
+        // Give each real invitation worker an entire additional polling interval.
+        await new Promise((resolve) => setTimeout(resolve, 550))
+        await repair()
+        expect(
+          (await jobRows()).map((row) => ({ id: row.id, state: row.state })),
+          'one generation keeps exactly one created job across real worker polls and repairs',
+        ).toEqual([{ id: before.last_job_id, state: 'created' }])
+      }
+      expect(await delivery(payload.invitationId)).toEqual(before)
+    } finally {
+      await pollingJobs.stop()
+    }
+  }
+
+  it('keeps one unconsumed job per generation with real workers polling through three repairs', async () => {
+    await verifyUnconsumedGeneration((await sourceCopy()).invitationEmailJob())
+  }, 15_000)
+
+  it('detects a completing placeholder consumer through the one-job-per-generation assertion', async () => {
+    const copy = await sourceCopy({
+      before: '    deleteAfterSeconds: 604800,\n  })',
+      after: '    deleteAfterSeconds: 604800,\n    async handler() {},\n  })',
+    })
+    await expect(verifyUnconsumedGeneration(copy.invitationEmailJob())).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('one generation keeps exactly one created job'),
+    })
+  }, 15_000)
+
+  it('creates exactly one replacement after pg-boss removes a created job at retention expiry', async () => {
+    const payload = await invitation()
+    await createInvitationEmailDispatcher({ db, queue: jobs })(payload)
+    const expiredId = (await delivery(payload.invitationId)).last_job_id as string
+    await owned.pool.query(
+      "UPDATE pgboss.job SET keep_until=pgboss.job_now() - INTERVAL '1 second' WHERE id=$1",
+      [expiredId],
+    )
+    expect(await jobs.hasLiveInvitationEmailJob({ id: expiredId, ...payload })).toBe(false)
+    const maintenance = new PgBoss({
+      connectionString: owned.url,
+      max: 1,
+      migrate: false,
+      supervise: false,
+      schedule: false,
+    })
+    try {
+      await maintenance.start()
+      await maintenance.supervise(INVITATION_EMAIL_JOB)
+    } finally {
+      await maintenance.stop()
+    }
+    expect(await jobRows()).toEqual([])
+    const repair = createInvitationEmailRepairer({ db, queue: jobs })
+    await repair()
+    await repair()
+    const rows = await jobRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ data: payload, state: 'created' })
+    expect(rows[0].id).not.toBe(expiredId)
+    expect((await delivery(payload.invitationId)).last_job_id).toBe(rows[0].id)
   })
 
   it('preserves the committed due row on queue failure, then repairs it once', async () => {
@@ -182,7 +303,7 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
     }
   })
 
-  it('repairs a missing or finished job without resetting attempt, due or error metadata', async () => {
+  it('repairs a missing job without resetting attempt, due or error metadata', async () => {
     const payload = await invitation()
     await db
       .updateTable('invitation_deliveries')
@@ -191,13 +312,7 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
       .execute()
     const before = await delivery(payload.invitationId)
     await createInvitationEmailRepairer({ db, queue: jobs })()
-    const first = (await jobRows())[0]
-    await owned.pool.query(
-      "UPDATE pgboss.job SET state='completed', completed_on=clock_timestamp() WHERE id=$1",
-      [first.id],
-    )
-    await createInvitationEmailRepairer({ db, queue: jobs })()
-    expect(await jobRows()).toHaveLength(2)
+    expect(await jobRows()).toHaveLength(1)
     expect(await delivery(payload.invitationId)).toMatchObject({
       attempts: before.attempts,
       due_at: before.due_at,
@@ -222,7 +337,8 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
     const repair = createInvitationEmailRepairer({ db, queue: jobs })
     await repair()
     const rows = await owned.pool.query<{ id: string; retained: boolean }>(
-      'SELECT id, keep_until > clock_timestamp() AS retained FROM pgboss.job',
+      'SELECT id, keep_until > clock_timestamp() AS retained FROM pgboss.job WHERE name=$1',
+      [INVITATION_EMAIL_JOB],
     )
     expect(rows.rows).toEqual([{ id: expect.any(String), retained: true }])
     const id = rows.rows[0]?.id as string
@@ -324,63 +440,128 @@ describe.skipIf(!serverUrl)('invitation email queue and repair', () => {
     }
   })
 
-  it.each(['canceled', 'accepted', 'rejected'])(
-    'worker rereads %s status after enqueue and marks the current row skipped',
+  it.each(['canceled', 'accepted', 'rejected', 'expired'])(
+    'repairer rereads %s invitations before considering their retained jobs',
     async (status) => {
       const payload = await invitation()
       await createInvitationEmailDispatcher({ db, queue: jobs })(payload)
+      const before = await jobRows()
       await db
         .updateTable('auth.invitation')
-        .set({ status })
+        .set(
+          status === 'expired'
+            ? { expiresAt: sql`clock_timestamp() - INTERVAL '1 second'` }
+            : { status },
+        )
         .where('id', '=', payload.invitationId)
         .execute()
-      await invitationEmailJob({ db }).handler(payload, run)
+      const repair = createInvitationEmailRepairer({ db, queue: jobs })
+      await repair()
+      await repair()
       expect(await delivery(payload.invitationId)).toMatchObject({
         state: 'skipped',
         last_error_code: 'invitation_ineligible',
         attempts: 0,
       })
+      expect(await jobRows()).toEqual(before)
     },
   )
 
-  it('worker rereads expiry and does not alter a current pending row', async () => {
-    const pending = await invitation()
-    const before = await delivery(pending.invitationId)
-    await invitationEmailJob({ db }).handler(pending, run)
-    expect(await delivery(pending.invitationId)).toEqual(before)
-    const expired = await invitation()
-    await db
-      .updateTable('auth.invitation')
-      .set({ expiresAt: sql`clock_timestamp() - INTERVAL '1 second'` })
-      .where('id', '=', expired.invitationId)
-      .execute()
-    await invitationEmailJob({ db }).handler(expired, run)
-    expect((await delivery(expired.invitationId)).state).toBe('skipped')
+  it.each(['canceled', 'accepted', 'rejected', 'expired'])(
+    'repairer skips an unqueued %s invitation without creating a job',
+    async (status) => {
+      const payload = await invitation({
+        status: status === 'expired' ? 'pending' : status,
+        expired: status === 'expired',
+      })
+      await createInvitationEmailRepairer({ db, queue: jobs })()
+      expect((await delivery(payload.invitationId)).state).toBe('skipped')
+      expect(await jobRows()).toEqual([])
+    },
+  )
+
+  async function verifyStaleScan(factory = createInvitationEmailRepairer) {
+    const payload = await invitation()
+    const writer = await owned.pool.connect()
+    let repairing: Promise<void> | undefined
+    try {
+      await writer.query('BEGIN')
+      const blocker = await writer.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await writer.query('SELECT id FROM auth.invitation WHERE id=$1 FOR UPDATE', [
+        payload.invitationId,
+      ])
+      repairing = factory({ db, queue: jobs })()
+      await expect
+        .poll(async () => {
+          const blocked = await owned.pool.query<{ blocked: boolean }>(
+            'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked',
+            [blocker.rows[0]?.pid],
+          )
+          return blocked.rows[0]?.blocked
+        })
+        .toBe(true)
+      await writer.query('UPDATE invitation_deliveries SET generation=2 WHERE invitation_id=$1', [
+        payload.invitationId,
+      ])
+      await writer.query('COMMIT')
+      const before = await delivery(payload.invitationId)
+      await repairing
+      expect(
+        await jobRows(),
+        'a stale repair candidate cannot queue an obsolete generation',
+      ).toEqual([])
+      expect(await delivery(payload.invitationId)).toEqual(before)
+    } finally {
+      await writer.query('ROLLBACK')
+      writer.release()
+      await repairing
+    }
+  }
+
+  it('ignores a stale repair candidate without queuing it or changing its successor', async () => {
+    await verifyStaleScan()
   })
 
-  it('stale jobs cannot overwrite the only current generation row, including canceled successors', async () => {
-    const stale = await invitation()
-    await db
-      .updateTable('invitation_deliveries')
-      .set({ generation: 2 })
-      .where('invitation_id', '=', stale.invitationId)
-      .execute()
-    await db
-      .updateTable('auth.invitation')
-      .set({ status: 'canceled' })
-      .where('id', '=', stale.invitationId)
-      .execute()
-    const before = await delivery(stale.invitationId)
-    await invitationEmailJob({ db }).handler(stale, run)
-    expect(await delivery(stale.invitationId)).toEqual(before)
-    await invitationEmailJob({ db }).handler({ ...stale, generation: 2 }, run)
-    expect((await delivery(stale.invitationId)).state).toBe('skipped')
+  it('detects a repairer that trusts the scanned generation after waiting for its locks', async () => {
+    const copy = await sourceCopy({
+      before: 'if (!current || current.delivery.generation !== payload.generation) return false',
+      after: 'if (!current) return false',
+    })
+    await expect(verifyStaleScan(copy.createInvitationEmailRepairer)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('a stale repair candidate cannot queue'),
+    })
   })
 
-  it('deletion makes retained jobs harmless', async () => {
+  async function verifyIneligibleRepair(factory = createInvitationEmailRepairer) {
+    const payload = await invitation({ status: 'canceled' })
+    await factory({ db, queue: jobs })()
+    expect(
+      (await delivery(payload.invitationId)).state,
+      'repairer marks an ineligible generation skipped before queuing',
+    ).toBe('skipped')
+    expect(await jobRows()).toEqual([])
+  }
+
+  it('runs the unchanged source copy through the repairer eligibility assertion', async () => {
+    await verifyIneligibleRepair((await sourceCopy()).createInvitationEmailRepairer)
+  })
+
+  it('detects repairer eligibility checks removed before queuing', async () => {
+    const copy = await sourceCopy({
+      before: "if (invitation.status !== 'pending' || !invitation.unexpired) {",
+      after: 'if (false) {',
+    })
+    await expect(verifyIneligibleRepair(copy.createInvitationEmailRepairer)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('repairer marks an ineligible generation skipped'),
+    })
+  })
+
+  it('deletion makes retained jobs harmless to the repairer', async () => {
     const payload = await invitation()
     await db.deleteFrom('auth.invitation').where('id', '=', payload.invitationId).execute()
-    await invitationEmailJob({ db }).handler(payload, run)
+    await createInvitationEmailRepairer({ db, queue: jobs })()
     await expect(createInvitationEmailDispatcher({ db, queue: jobs })(payload)).rejects.toThrow(
       'invitation_email_queue_unavailable',
     )

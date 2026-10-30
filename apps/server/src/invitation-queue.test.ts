@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createJobs, type Jobs } from '@hourmere/jobs'
+import { createJobs, defineJob, type Jobs } from '@hourmere/jobs'
 import {
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
@@ -15,6 +15,7 @@ import {
 } from '@hourmere/notifications'
 import type pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { createApp } from './app.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -23,7 +24,12 @@ const secret = randomBytes(32).toString('base64')
 const queueName = 'invitation-email-v1'
 type Payload = { invitationId: string; generation: number }
 type Enqueue = (payload: Payload) => Promise<void>
-type InvitationJobs = Jobs<readonly [ReturnType<typeof invitationEmailJob>]>
+const pollingProbe = defineJob({
+  name: 'invitation-http-polling-probe',
+  payload: z.strictObject({}),
+  async handler() {},
+})
+type InvitationJobs = Jobs<readonly [ReturnType<typeof invitationEmailJob>, typeof pollingProbe]>
 
 interface Actor {
   userId: string
@@ -105,18 +111,17 @@ describe.skipIf(!serverUrl)(
     let authPool: pg.Pool
     let jobs: InvitationJobs
     let dispatch: Enqueue
-    let worker: ReturnType<typeof invitationEmailJob>
     let repair: ReturnType<typeof invitationEmailRepairJob>
 
     beforeAll(async () => {
       owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'invite_queue' })
       db = createDb(owned.pool)
       authPool = createAuthPool(owned.url, { mode: 'open', allowedDomains: [] })
-      worker = invitationEmailJob({ db })
       jobs = createJobs({
         connectionString: owned.url,
-        definitions: [worker] as const,
-        work: false,
+        definitions: [invitationEmailJob(), pollingProbe] as const,
+        work: true,
+        pollingIntervalSeconds: 0.5,
         migrate: true,
         maxConnections: 2,
         log: () => {},
@@ -277,6 +282,20 @@ describe.skipIf(!serverUrl)(
     const runRepair = () =>
       repair.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
 
+    async function pollWorkers() {
+      const probeId = await jobs.enqueue(pollingProbe.name, {})
+      await expect
+        .poll(async () => {
+          const result = await owned.pool.query<{ state: string }>(
+            'SELECT state FROM pgboss.job WHERE id=$1',
+            [probeId],
+          )
+          return result.rows[0]?.state
+        })
+        .toBe('completed')
+      await new Promise((resolve) => setTimeout(resolve, 550))
+    }
+
     async function expectJobs(invitationId: string, generations: number[]) {
       expect(await queued()).toEqual(
         generations.map((generation) => ({
@@ -294,6 +313,11 @@ describe.skipIf(!serverUrl)(
       const admin = await actor()
       const invitation = await create(app, admin)
       await expectJobs(invitation.id, [1])
+      for (let pass = 0; pass < 3; pass += 1) {
+        await pollWorkers()
+        await runRepair()
+        await expectJobs(invitation.id, [1])
+      }
       const queue = await owned.pool.query<{ policy: string; retry_limit: number }>(
         'SELECT policy, retry_limit FROM pgboss.queue WHERE name = $1',
         [queueName],
@@ -331,6 +355,12 @@ describe.skipIf(!serverUrl)(
       })
       expect((await invite(app, admin, body)).status).toBe(200)
       await expectJobs(invitation.id, [1, 2])
+      const before = await queued()
+      for (let pass = 0; pass < 3; pass += 1) {
+        await pollWorkers()
+        await runRepair()
+        expect(await queued()).toEqual(before)
+      }
       expect((await current(invitation.id)).last_job_id).toBe((await queued())[1]?.id)
     })
 
@@ -418,9 +448,12 @@ describe.skipIf(!serverUrl)(
           response = await request
         }
         expect(response.status, 'a retired generation cannot report durable queue success').toBe(
-          503,
+          409,
         )
-        expect(await response.json()).toMatchObject({ code: 'INVITATION_DELIVERY_UNAVAILABLE' })
+        expect(await response.json()).toMatchObject({
+          code: 'INVITATION_INELIGIBLE',
+          message: 'This invitation is no longer pending. Create a new invitation if needed.',
+        })
         expect(await current(payload.invitationId)).toMatchObject({
           generation: 1,
           state: 'skipped',
@@ -641,13 +674,11 @@ describe.skipIf(!serverUrl)(
           .set(status === 'expired' ? { expiresAt: new Date(Date.now() - 1000) } : { status })
           .where('id', '=', invitation.id)
           .execute()
-        const job = (await queued())[0]
-        expect(job).toBeDefined()
-        await worker.handler(job?.data as Payload, {
-          id: job?.id as string,
-          attempt: 1,
-          signal: new AbortController().signal,
-        })
+        const before = await queued()
+        await pollWorkers()
+        await runRepair()
+        await runRepair()
+        expect(await queued()).toEqual(before)
         expect(await current(invitation.id)).toMatchObject({
           generation: 1,
           state: 'skipped',
@@ -660,21 +691,17 @@ describe.skipIf(!serverUrl)(
     it('leaves a current pending generation unchanged for the future sender', async () => {
       const invitation = await create(instance(), await actor())
       const before = await current(invitation.id)
-      const job = (await queued())[0]
-      await worker.handler(job?.data as Payload, {
-        id: job?.id as string,
-        attempt: 1,
-        signal: new AbortController().signal,
-      })
+      await pollWorkers()
+      await runRepair()
       expect(await current(invitation.id)).toEqual(before)
       expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([])
     })
 
-    it('completes a stale-generation job without skipping or overwriting its successor', async () => {
+    it('retains the old job while repair leaves its queued successor unchanged', async () => {
       const app = instance()
       const admin = await actor()
       const invitation = await create(app, admin)
-      const stale = (await queued())[0]
+      const oldJob = (await queued())[0]
       await cool(invitation.id)
       const response = await invite(app, admin, {
         email: invitation.email,
@@ -685,13 +712,11 @@ describe.skipIf(!serverUrl)(
       })
       expect(response.status).toBe(200)
       const before = await current(invitation.id)
-      // Only the current delivery row exists; an obsolete payload must not mark its
-      // successor skipped merely because that payload's own generation is stale.
-      await worker.handler(stale?.data as Payload, {
-        id: stale?.id as string,
-        attempt: 1,
-        signal: new AbortController().signal,
-      })
+      await pollWorkers()
+      await runRepair()
+      await runRepair()
+      await expectJobs(invitation.id, [1, 2])
+      expect((await queued())[0]).toEqual(oldJob)
       expect(await current(invitation.id)).toEqual(before)
       expect(before).toMatchObject({ generation: 2, state: 'queued', attempts: 0 })
     })

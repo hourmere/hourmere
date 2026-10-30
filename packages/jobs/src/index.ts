@@ -69,12 +69,24 @@ export interface JobDefinition<Name extends string = string, Schema extends z.Zo
   handler(payload: z.output<Schema>, run: JobRun): Promise<void>
 }
 
-export type AnyJobDefinition = JobDefinition<string, z.ZodType>
+/** A queue whose jobs remain available until a consumer is implemented and registered. */
+export interface QueueDefinition<Name extends string = string, Schema extends z.ZodType = z.ZodType>
+  extends Omit<JobDefinition<Name, Schema>, 'handler'> {
+  handler?: undefined
+}
+
+export type AnyJobDefinition = JobDefinition<string, z.ZodType> | QueueDefinition<string, z.ZodType>
 
 /** Declares a job; the name stays a literal type so `enqueue` can check payloads by name. */
 export function defineJob<const Name extends string, Schema extends z.ZodType>(
   definition: JobDefinition<Name, Schema>,
-): JobDefinition<Name, Schema> {
+): JobDefinition<Name, Schema>
+export function defineJob<const Name extends string, Schema extends z.ZodType>(
+  definition: QueueDefinition<Name, Schema>,
+): QueueDefinition<Name, Schema>
+export function defineJob<const Name extends string, Schema extends z.ZodType>(
+  definition: JobDefinition<Name, Schema> | QueueDefinition<Name, Schema>,
+): JobDefinition<Name, Schema> | QueueDefinition<Name, Schema> {
   return definition
 }
 
@@ -256,6 +268,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
 
   async function run(
     definition: AnyJobDefinition,
+    handler: JobDefinition['handler'],
     job: { id: string; data: unknown; retryCount: number; signal: AbortSignal },
   ) {
     const limit = { ...DEFAULT_RETRY, ...definition.retry }.limit
@@ -274,7 +287,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       throw err
     }
     try {
-      await definition.handler(parsed.data, { id: job.id, attempt, signal: job.signal })
+      await handler(parsed.data, { id: job.id, attempt, signal: job.signal })
     } catch (err) {
       if (job.signal.aborted) {
         // A shutdown, not a failure worth a stack trace.
@@ -302,11 +315,8 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
 
     async hasLiveInvitationEmailJob(identity, transaction) {
       if (state !== 'running') throw new Error(`jobs are not running (${state})`)
-      // This intentionally reads pg-boss internals. Review the columns and expiry rules
-      // whenever its exact dependency version changes; never add an application FK.
-      if (pgBossPackage.version !== '12.38.0') {
-        throw new Error('invitation job lookup requires pg-boss 12.38.0')
-      }
+      // This intentionally reads pg-boss internals. Startup pins their version; never add
+      // an application FK. Use its clock so expiry agrees with pg-boss in transactions too.
       const connection = transaction ? fromKysely(transaction) : boss.getDb()
       const result = await connection.executeSql(
         `SELECT 1 FROM pgboss.job
@@ -314,9 +324,9 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
            AND singleton_key = $2
            AND data = $3::jsonb
            AND (
-             (state IN ('created', 'retry') AND keep_until > clock_timestamp())
+             (state IN ('created', 'retry') AND keep_until > pgboss.job_now())
              OR (state = 'active' AND started_on IS NOT NULL
-               AND started_on + expire_seconds * INTERVAL '1 second' > clock_timestamp())
+               AND started_on + expire_seconds * INTERVAL '1 second' > pgboss.job_now())
            )
          LIMIT 1`,
         [
@@ -351,6 +361,13 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       if (state !== 'created') throw new Error(`jobs cannot start (${state})`)
       state = 'starting'
       try {
+        // The invitation liveness query depends on these exact internal columns and expiry
+        // rules. Reject an upgrade before starting any pool or workers until it is reviewed.
+        if (pgBossPackage.version !== '12.38.0') {
+          throw new Error(
+            `background jobs require pg-boss 12.38.0; found ${pgBossPackage.version}. Review the invitation job lookup before upgrading`,
+          )
+        }
         await boss.start()
         for (const definition of definitions.values()) await syncQueue(definition)
         if (options.work) {
@@ -367,6 +384,8 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
                 scheduled.data as object,
               )
             }
+            const handler = definition.handler
+            if (!handler) continue
             await boss.work(
               definition.name,
               {
@@ -375,7 +394,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
                 pollingIntervalSeconds,
               },
               async ([job]) => {
-                if (job) await run(definition, job)
+                if (job) await run(definition, handler, job)
               },
             )
           }

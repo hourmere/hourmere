@@ -314,6 +314,21 @@ export async function manageInvitation(
         generation: admitted.delivery.generation,
       })
     } catch {
+      // Cancellation or acceptance can win after admission commits. A fresh read
+      // distinguishes that unavailable invitation from a retryable queue outage.
+      let retired = false
+      try {
+        const current = await db
+          .selectFrom('auth.invitation')
+          .select(['status', 'expiresAt'])
+          .select(sql<Date>`clock_timestamp()`.as('now'))
+          .where('id', '=', admitted.id)
+          .executeTakeFirst()
+        retired = current?.status !== 'pending' || current.expiresAt <= current.now
+      } catch {
+        // A failed recheck cannot establish eligibility; preserve the safe queue error.
+      }
+      if (retired) throw ineligible()
       throw new APIError('SERVICE_UNAVAILABLE', {
         code: 'INVITATION_DELIVERY_UNAVAILABLE',
         message: 'The invitation was saved, but delivery could not be queued. Try again later.',

@@ -103,10 +103,13 @@ function invitationEmailDispatcher({ db, queue }: InvitationEmailDeps, dueOnly: 
       const payload = InvitationEmailPayload.parse(request)
       const confirmed = await db.transaction().execute(async (trx) => {
         const current = await currentDelivery(trx, payload.invitationId)
+        // The scan can become stale while waiting for these locks. There is only one
+        // current-generation row; an obsolete candidate must not retire its successor.
         if (!current || current.delivery.generation !== payload.generation) return false
         const { invitation, delivery } = current
         if (delivery.state !== 'queued') return false
         if (dueOnly && !delivery.due) return false
+        // Repair runs this eligibility check before trusting or replacing a queued job.
         if (invitation.status !== 'pending' || !invitation.unexpired) {
           await skipIneligible(trx, payload.invitationId, payload.generation)
           return false
@@ -141,8 +144,12 @@ function invitationEmailDispatcher({ db, queue }: InvitationEmailDeps, dueOnly: 
   }
 }
 
-/** The sender is added separately. This handler only retires ineligible generations. */
-export function invitationEmailJob({ db }: { db: Db }) {
+/**
+ * There is deliberately no consumer until the sender exists: pending jobs stay created.
+ * The future sender must re-read the delivery row's state and generation before sending;
+ * a retained created job may belong to a generation the repairer has since skipped.
+ */
+export function invitationEmailJob() {
   return defineJob({
     name: INVITATION_EMAIL_JOB,
     payload: InvitationEmailPayload,
@@ -151,26 +158,14 @@ export function invitationEmailJob({ db }: { db: Db }) {
     expireInSeconds: 180,
     retentionSeconds: 86400,
     deleteAfterSeconds: 604800,
-    async handler(payload) {
-      try {
-        await db.transaction().execute(async (trx) => {
-          const current = await currentDelivery(trx, payload.invitationId)
-          // Only one current-generation row exists. An old job must not retire its successor.
-          if (!current || current.delivery.generation !== payload.generation) return
-          if (current.invitation.status !== 'pending' || !current.invitation.unexpired) {
-            await skipIneligible(trx, payload.invitationId, payload.generation)
-          }
-        })
-      } catch {
-        throw new Error('invitation_email_worker_unavailable')
-      }
-    },
   })
 }
 
 /**
  * One bounded batch per run. Advancing past every candidate, including failures, keeps
  * an unhealthy low ID from starving later invitations; the next run wraps at the end.
+ * pg-boss expires an unconsumed created job at its retention deadline. After it stops
+ * being live, a still-eligible generation gets one replacement with fresh retention.
  */
 export function createInvitationEmailRepairer(deps: InvitationEmailDeps) {
   const dispatch = invitationEmailDispatcher(deps, true)

@@ -368,7 +368,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       bookingNotificationJob(notificationDeps),
       conferenceNotificationDispatchJob(notificationDeps),
       notificationEmailCleanupJob(notificationDeps),
-      invitationEmailJob({ db }),
+      invitationEmailJob(),
       invitationEmailRepairJob(repairInvitations),
       bookingConferenceJob(calendarDeps),
       conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
@@ -408,7 +408,6 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     jobs.enqueue('booking-conference', { rootBookingId: id }, { singletonKey: id })
   try {
     await jobs.start()
-    if (role !== 'web') await repairInvitations()
   } catch (err) {
     try {
       await jobs.stop()
@@ -416,6 +415,14 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       await Promise.all([db.destroy(), authPool?.end()])
     }
     throw err
+  }
+  if (role !== 'web') {
+    try {
+      await repairInvitations()
+    } catch {
+      // The every-minute job retries reconciliation without blocking the other workers.
+      console.error('invitation email startup repair failed; scheduled repair will retry')
+    }
   }
   const checkDb = async () => {
     await sql`SELECT 1`.execute(db)

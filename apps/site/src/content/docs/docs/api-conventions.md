@@ -43,11 +43,11 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `503 INVITATION_DELIVERY_UNAVAILABLE`; the invitation and due queued intent remain saved.
   Retrying the same request repairs its current generation; resend retries must retain
   the same `requestId` and `expectedGeneration`. A periodic repairer also recovers missing
-  live jobs. The worker currently skips obsolete invitations and leaves pending records
-  for the future sender; invitation email sending is not installed yet.
-  If cancellation, acceptance or a newer generation overtakes dispatch, the request also
-  receives this 503 instead of claiming the old queued snapshot succeeded; reload the
-  invitation before retrying an obsolete resend.
+  live jobs. The repairer skips obsolete invitations; delivery jobs remain unconsumed
+  until the invitation sender is installed.
+  If cancellation, acceptance, expiry or deletion overtakes dispatch, the request returns
+  `409 INVITATION_INELIGIBLE` with the existing no-longer-pending wording. A newer generation
+  overtaking dispatch still returns 503; reload before retrying an obsolete resend.
 - `/api/calendar/google/callback` is the separate calendar OAuth protocol callback. The
   owner-side connection API is versioned under `/api/v1/calendar-connections`; see
   [Google Calendar connections](/docs/google-calendar).

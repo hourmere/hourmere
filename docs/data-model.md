@@ -363,9 +363,16 @@ commits the exclusive pg-boss job together with `last_job_id`. A queue exception
 enqueue rolls back only that dispatch; the admitted queued record and its due time remain
 available for request retry or periodic repair. A narrow adapter pinned to pg-boss 12.38.0
 checks job identity, exact payload, singleton key, live state and expiry without a foreign
-key into pg-boss. Startup and minute repair scans use bounded, fair cursor batches.
-The registered worker only skips obsolete business states; it leaves a current pending
-generation untouched and sends no mail. An obsolete job cannot modify a successor's row.
+key into pg-boss, using pg-boss's own clock for job expiry. An unsupported pg-boss version
+fails job startup with a compatibility message. Startup and minute repair scans use bounded,
+fair cursor batches. A failed startup scan is logged and the minute schedule retries it.
+The repairer skips obsolete business states before enqueueing. No delivery consumer is
+registered yet, so current pending jobs remain `created`. After the 24-hour waiting
+retention expires and pg-boss removes the job, repair can create one replacement for a
+still-eligible generation; later scans reuse that live replacement. A queued job may remain
+after its generation is skipped or superseded. The future sender must reread the current
+delivery state and generation, invitation status and expiry before sending. An obsolete
+job cannot modify a successor's row.
 
 ## Guest recipients
 

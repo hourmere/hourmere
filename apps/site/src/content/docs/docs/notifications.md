@@ -556,10 +556,15 @@ cursor even after an individual failure, and repairs missing live jobs transacti
 It checks the pinned pg-boss job identity, payload, state and expiry before enqueueing.
 Terminal delivery records are never automatically requeued.
 
-The invitation worker currently only rechecks lifecycle and generation: canceled,
-accepted, rejected, unknown-status or expired invitations become `skipped`; stale jobs
-leave the newer generation untouched. Current pending records remain queued for the
-future sender. No invitation mail is sent yet. A future sender must check and debit
+The repairer rechecks lifecycle and generation before enqueueing: canceled, accepted,
+rejected, unknown-status or expired invitations become `skipped`; stale candidates leave
+the newer generation untouched. No delivery consumer is registered yet, so pending jobs
+remain `created` and live across repair passes. If a waiting job reaches its 24-hour
+retention expiry, pg-boss removes it and repair may create one replacement for a still-valid
+generation. Later passes reuse that replacement until its own retention expiry.
+A previously queued job may remain after its delivery generation is skipped or superseded;
+the future sender must reread the current row, generation, invitation status and expiry
+before sending. No invitation mail is sent yet. A future sender must check and debit
 shared non-reserved mail capacity at send time, integrate attempts, leases and backoff,
 and recheck authorization before SMTP. Admission accounting is separate from that debit.
 
