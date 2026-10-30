@@ -8,6 +8,15 @@
   margin-block: 0 1.5rem;
 }
 
+.team-bookings-focus-target:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.team-bookings-page .tab {
+  padding-inline: var(--space-2);
+}
+
 .team-bookings-filters summary {
   cursor: pointer;
   font-weight: 600;
@@ -43,6 +52,12 @@
 
 .team-booking-detail {
   margin-top: 1.5rem;
+}
+
+.team-booking-detail .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .team-booking-detail-header {

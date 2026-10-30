@@ -1,5 +1,33 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Check public booking page again': '重新确认公开预约页面',
+  'Host time zones are not available in this view.': '此页面无法获取主持人的时区。',
+  'Book again with another host': '重新预约其他主持人',
+  'If a host has left the team, this booking cannot be rescheduled. Hourmere does not automatically assign another host.':
+    '如果主持人已离开团队，此预约将无法改期。Hourmere 不会自动指派其他主持人。',
+  'An admin cancels this booking here before it starts.': '管理员在预约开始前，在此页面取消预约。',
+  'This booking is already cancelled. Continue with the next step.': '此预约已取消，请继续下一步。',
+  'This booking has already started. Wait until it ends or coordinate with the hosts offline.':
+    '此预约已开始，请等待结束或与主持人线下协调。',
+  'Then ask the guest to book again from the event’s public booking page.':
+    '然后请访客从活动的公开预约页面重新预约。',
+  'Find public booking page': '查找公开预约页面',
+  'Checking public booking page…': '正在确认公开预约页面…',
+  'Open public booking page': '打开公开预约页面',
+  'The public booking page is unavailable. Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.':
+    '公开预约页面已不可用。请管理员修复并重新启用此活动，或创建新活动，再请访客重新预约。',
+  'Could not confirm whether the public booking page is available. Try again.':
+    '无法确认公开预约页面是否可用，请重试。',
+  'Cancellation notifications are queued. Email delivery is not confirmed.':
+    '取消通知已加入发送队列，邮件是否送达尚未确认。',
+  'Your time zone: {zone}': '你的时区：{zone}',
+  'Cancellation notifications': '取消通知',
+  'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.':
+    '取消邮件将发给下列预约访客和来宾，以及仍是本团队成员且邮箱已验证的原主持人。已离队的主持人不会收到通知。',
+  'Email delivery is not guaranteed. Contact the invitee directly if needed.':
+    '无法保证邮件送达，请按需直接联系预约访客。',
+  'Hourmere does not automatically assign another host. A replacement requires a new booking.':
+    'Hourmere 不会自动指派其他主持人。如需替代安排，必须重新预约。',
   'Loading team bookings…': '正在加载团队预约…',
   'Team bookings': '团队预约',
   'Owners and admins can view this team’s bookings and cancel bookings before they start.':
