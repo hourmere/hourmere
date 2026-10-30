@@ -9,7 +9,7 @@ import { Field } from '../../components/forms.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
-import { browserTimeZone, zoned } from '../../format.ts'
+import { browserTimeZone, isKnownTimeZone, zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
@@ -19,6 +19,7 @@ import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { ManualRebooking } from './ManualRebooking.tsx'
 
 type Booking = Schemas['TeamAdminBooking']
 type BookingPage = Schemas['TeamAdminBookingPage']
@@ -481,7 +482,12 @@ function BookingList({
 
   return (
     <section className="team-bookings-list" aria-labelledby="team-bookings-list-heading">
-      <h2 id="team-bookings-list-heading" className="visually-hidden" ref={heading} tabIndex={-1}>
+      <h2
+        id="team-bookings-list-heading"
+        className="team-bookings-focus-target"
+        ref={heading}
+        tabIndex={-1}
+      >
         {t('Team bookings')}
       </h2>
       <p className="muted zone-note">
@@ -492,6 +498,14 @@ function BookingList({
       </p>
       <p className="flash" role="status">
         {ui(status)}
+        {status === 'The booking is cancelled.' && (
+          <>
+            {' '}
+            <span>
+              {t('Cancellation notifications are queued. Email delivery is not confirmed.')}
+            </span>
+          </>
+        )}
       </p>
       {conflict !== null && <OrganizationContextConflict error={conflict} />}
       {refreshError && (
@@ -773,6 +787,7 @@ function BookingDetail({
             )}
           </p>
         ))}
+      <ManualRebooking booking={booking} expectedOrganizationId={expectedOrganizationId} />
     </section>
   )
 }
@@ -803,6 +818,7 @@ function CancelBooking({
   const [reasonError, setReasonError] = useState<UiText | undefined>()
   const [error, setError] = useState<UiText | null>(null)
   const [busy, setBusy] = useState(false)
+  const submitting = useRef(false)
   const [alreadyCancelled, setAlreadyCancelled] = useState(false)
   const [started, setStarted] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
@@ -816,7 +832,7 @@ function CancelBooking({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (busy || conflict || alreadyCancelled || started) return
+    if (submitting.current || conflict || alreadyCancelled || started) return
     setError(null)
     if (new Date(booking.start).getTime() <= Date.now()) {
       setError('This booking has already started, so it can no longer be cancelled.')
@@ -839,6 +855,7 @@ function CancelBooking({
       return
     }
     setReasonError(undefined)
+    submitting.current = true
     setBusy(true)
     controller.current = new AbortController()
     try {
@@ -875,10 +892,6 @@ function CancelBooking({
           if (!mounted.current || controller.current.signal.aborted) return
           setError(msg('Could not cancel the booking. {0}', { '0': errorMessage(error) }))
         }
-      } else if (failure instanceof RequestError && failure.code === 'booking_in_past') {
-        setStarted(true)
-        setError('This booking has already started, so it can no longer be cancelled.')
-        onRefresh()
       } else if (failure instanceof RequestError && failure.code === 'invalid_reason') {
         setReasonError(
           'Use at most 1000 characters, without control characters other than tabs and line breaks.',
@@ -889,7 +902,10 @@ function CancelBooking({
         setError('This booking was already cancelled. Reload to see the details.')
       } else setError(msg('Could not cancel the booking. {0}', { '0': errorMessage(failure) }))
     }
-    if (mounted.current) setBusy(false)
+    if (mounted.current) {
+      submitting.current = false
+      setBusy(false)
+    }
   }
 
   return (
@@ -919,6 +935,7 @@ function CancelBooking({
         </>
       ) : (
         <form id={formId} onSubmit={submit} noValidate className="stack">
+          <CancellationSummary booking={booking} />
           <Field
             id={reasonId}
             label={t('Reason')}
@@ -974,5 +991,81 @@ function CancelBooking({
         </form>
       )}
     </section>
+  )
+}
+
+function CancellationSummary({ booking }: { booking: Booking }) {
+  const { t, formatLocale } = useI18n()
+  const format = zoned(browserTimeZone(), formatLocale)
+  return (
+    <div className="team-booking-confirmation">
+      <dl className="details">
+        <dt>{t('When')}</dt>
+        <dd>
+          <time dateTime={booking.start}>{format.dateTimeRange(booking.start, booking.end)}</time>
+          <br />
+          {t('Your time zone: {zone}', { zone: format.timeZone.replaceAll('_', ' ') })}
+        </dd>
+        <dt>{t('Hosts')}</dt>
+        <dd>
+          {booking.hosts.length ? (
+            <ul className="plain-list">
+              {booking.hosts.map((host) => (
+                <li key={host.userId}>
+                  {host.name}
+                  {host.timeZone && isKnownTimeZone(host.timeZone) ? (
+                    host.timeZone !== format.timeZone && (
+                      <>
+                        <br />
+                        <time dateTime={booking.start}>
+                          {zoned(host.timeZone, formatLocale).dateTimeRange(
+                            booking.start,
+                            booking.end,
+                          )}
+                        </time>
+                        <br />
+                        {t('Host time zone: {zone}', {
+                          zone: host.timeZone.replaceAll('_', ' '),
+                        })}
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <br />
+                      <span className="hint">{t('This host’s time zone is unavailable.')}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            t('None')
+          )}
+        </dd>
+        <dt>{t('Cancellation notifications')}</dt>
+        <dd>
+          <p>
+            {t(
+              'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.',
+            )}
+          </p>
+          <ul className="plain-list">
+            {booking.attendees.map((person) => (
+              <li key={person.email}>
+                {person.name} <BreakableText>{person.email}</BreakableText>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">
+            {t('Email delivery is not guaranteed. Contact the invitee directly if needed.')}
+          </p>
+        </dd>
+      </dl>
+      <p>
+        {t(
+          'Hourmere does not automatically assign another host. A replacement requires a new booking.',
+        )}
+      </p>
+    </div>
   )
 }

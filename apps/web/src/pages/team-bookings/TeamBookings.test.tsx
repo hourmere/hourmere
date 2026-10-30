@@ -46,8 +46,19 @@ function teamBooking(overrides: Partial<TeamBooking> = {}): TeamBooking {
     start: '2030-03-04T09:00:00.000Z',
     end: '2030-03-04T09:30:00.000Z',
     cancelledAt: null,
-    eventType: { id: 'e0000000-0000-7000-8000-000000000001', title: 'Team discovery call' },
-    hosts: [{ userId: 'a0000000-0000-7000-8000-000000000001', name: 'Historical host' }],
+    eventType: {
+      id: 'e0000000-0000-7000-8000-000000000001',
+      title: 'Team discovery call',
+      publicBookingPath: null,
+    },
+    hosts: [
+      {
+        userId: 'a0000000-0000-7000-8000-000000000001',
+        name: 'Historical host',
+        timeZone: 'Europe/London',
+        isCurrentMember: true,
+      },
+    ],
     attendees: [
       {
         name: 'Grace Hopper',
@@ -223,6 +234,7 @@ describe('team bookings access and context', () => {
               eventType: {
                 id: 'e0000000-0000-7000-8000-000000000001',
                 title: active === TEAM ? 'Team discovery call' : 'New team meeting',
+                publicBookingPath: null,
               },
             }),
           ],
@@ -265,6 +277,7 @@ describe('team bookings access and context', () => {
               eventType: {
                 id: 'e0000000-0000-7000-8000-000000000001',
                 title: active === TEAM ? 'Team discovery call' : 'New team meeting',
+                publicBookingPath: null,
               },
             }),
           ],
@@ -286,6 +299,7 @@ describe('team bookings access and context', () => {
             eventType: {
               id: 'e0000000-0000-7000-8000-000000000002',
               title: 'Late old team meeting',
+              publicBookingPath: null,
             },
           }),
         ],
@@ -363,6 +377,7 @@ describe('team bookings list and DTO details', () => {
               eventType: {
                 id: 'e0000000-0000-7000-8000-000000000001',
                 title: query(path).cursor ? 'Second server row' : 'First server row',
+                publicBookingPath: null,
               },
             }),
           ],
@@ -626,6 +641,7 @@ describe('team booking cancellation', () => {
               eventType: {
                 id: 'e0000000-0000-7000-8000-000000000001',
                 title: actualTeam === TEAM ? 'Team discovery call' : 'Another team private meeting',
+                publicBookingPath: null,
               },
             }),
           ],
@@ -687,7 +703,11 @@ describe('team booking cancellation', () => {
         data: [
           teamBooking({
             id: 'b0000000-0000-7000-8000-000000000002',
-            eventType: { id: 'e0000000-0000-7000-8000-000000000002', title: 'Stale next page row' },
+            eventType: {
+              id: 'e0000000-0000-7000-8000-000000000002',
+              title: 'Stale next page row',
+              publicBookingPath: null,
+            },
           }),
         ],
         nextCursor: null,
