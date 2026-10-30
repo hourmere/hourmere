@@ -994,24 +994,12 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       [invitation.id],
     )
     await ageGeneration(invitation)
-    const beforeResend = await db
-      .selectFrom('auth.invitation')
-      .selectAll()
-      .where('id', '=', invitation.id)
-      .executeTakeFirstOrThrow()
     const requestId = randomUUID()
     const first = await resend(i, a, invitation, { requestId })
     expect(first.status).toBe(200)
     invitation = (await first.json()) as Invitation
     expect(invitation.delivery).toMatchObject({ generation: 2, attempts: 0, state: 'queued' })
-    expect(invitation.expiresAt).toBe(beforeResend.expiresAt.toISOString())
-    expect(
-      await db
-        .selectFrom('auth.invitation')
-        .selectAll()
-        .where('id', '=', invitation.id)
-        .executeTakeFirstOrThrow(),
-    ).toEqual(beforeResend)
+    expect(Date.parse(invitation.expiresAt) - Date.now()).toBeGreaterThan(lifetime - 10_000)
     const after = await snapshot()
     const replay = await resend(i, a, invitation, { expectedGeneration: 1, requestId })
     expect(replay.status).toBe(200)
@@ -1035,7 +1023,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     const updated = (await second.json()) as Invitation
     expect(updated.id).toBe(invitation.id)
     expect(updated.delivery.generation).toBe(3)
-    expect(updated.expiresAt).toBe(beforeResend.expiresAt.toISOString())
+    expect(Date.parse(updated.expiresAt) - Date.now()).toBeGreaterThan(lifetime - 10_000)
     const advanced = await snapshot()
     await error(
       await resend(i, a, updated, { expectedGeneration: 1, requestId }),
@@ -1085,16 +1073,11 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     }
     const response = await resend(i, a, invitation)
     expect(response.status).toBe(200)
-    const resent = (await response.json()) as Invitation
-    expect(resent.expiresAt).toBe(row.expiresAt.toISOString())
-    expect(
-      await db
-        .selectFrom('auth.invitation')
-        .selectAll()
-        .where('id', '=', row.id)
-        .executeTakeFirstOrThrow(),
-    ).toEqual(row)
-    expect(resent).toMatchObject({
+    const renewed = (await response.json()) as Invitation
+    const duration = Date.parse(renewed.expiresAt) - Date.now()
+    expect(duration).toBeGreaterThan(lifetime - 10_000)
+    expect(duration).toBeLessThanOrEqual(lifetime + 1_000)
+    expect(renewed).toMatchObject({
       id: row.id,
       delivery: { generation: 2, attempts: 0, state: 'queued' },
     })
@@ -1107,7 +1090,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
   }
 
   it.each([false, true])(
-    'preserves legacy invitation expiry when resending (delivery record %s)',
+    'uses the known 48-hour lifetime for previously resent legacy invitations (delivery record %s)',
     async (storedDelivery) => {
       await verifyLegacyDuration(createAuth, storedDelivery)
     },
@@ -1126,21 +1109,17 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await ageGeneration(invitation)
     const response = await resend(i, a, invitation)
     expect(response.status).toBe(200)
-    const resent = (await response.json()) as Invitation
-    expect(resent.expiresAt).toBe(invitation.expiresAt)
-    const stored = await db
-      .selectFrom('invitation_deliveries')
-      .select('expiry_duration_ms')
-      .where('invitation_id', '=', invitation.id)
-      .executeTakeFirstOrThrow()
-    expect(Number(stored.expiry_duration_ms)).toBe(pinnedDuration)
+    const renewed = (await response.json()) as Invitation
+    const duration = Date.parse(renewed.expiresAt) - Date.now()
+    expect(duration).toBeGreaterThan(pinnedDuration - 10_000)
+    expect(duration).toBeLessThanOrEqual(pinnedDuration + 1_000)
   }
 
-  it('retains legacy duration metadata without using it to change expiry', async () => {
+  it('preserves an explicitly persisted validity duration when resending', async () => {
     await verifyPinnedDuration()
   })
 
-  it('preserves business expiry across generations and replays one request unchanged', async () => {
+  it('extends the original expiry duration on every new generation and replays one request unchanged', async () => {
     await verifyResendProtocol()
   })
 
@@ -1621,14 +1600,9 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       'invitation-resend.ts',
     ],
     [
-      'resend expiry preservation',
-      'const duration = Number(delivery?.expiry_duration_ms ?? lifetime)',
-      `const duration = Number(delivery?.expiry_duration_ms ?? lifetime)
-      if (resend) {
-        invitation = await trx.updateTable('auth.invitation')
-          .set({ expiresAt: new Date(now.getTime() + duration) })
-          .where('id', '=', invitation.id).returningAll().executeTakeFirstOrThrow()
-      }`,
+      'expiry extension',
+      '.set({ expiresAt: new Date(now.getTime() + duration) })',
+      '.set({ expiresAt: invitation.expiresAt })',
       verifyResendProtocol,
     ],
     [

@@ -28,7 +28,7 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `expectedGeneration` (1–32) and a fresh UUID `requestId`. An identical request replays
   its current result; stale generations or ambiguous matches return 409
   `INVITATION_CONFLICT`. Resending an unexpired invitation retains its ID, email, role and inviter,
-  and preserves its existing expiry. For an expired invitation,
+  and extends expiry from now by its original validity length. For an expired invitation,
   this same explicit action atomically cancels the old invitation and creates a new ID,
   with generation 1 and the acting administrator as inviter. The old link remains unusable;
   signup eligibility uses the new inviter. Creation applies the usual request budgets,

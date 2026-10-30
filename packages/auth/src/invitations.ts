@@ -360,9 +360,17 @@ export async function manageInvitation(
           .returningAll()
           .executeTakeFirstOrThrow()
       }
-      // Retain legacy delivery metadata without using it to renew the invitation.
-      // Resending grants delivery attempts only; the business expiry stays unchanged.
+      // Legacy native resends changed expiresAt without changing createdAt. Missing
+      // metadata uses the known 48-hour creator policy, never their inflated difference.
       const duration = Number(delivery?.expiry_duration_ms ?? lifetime)
+      if (resend && !replacingExpired) {
+        invitation = await trx
+          .updateTable('auth.invitation')
+          .set({ expiresAt: new Date(now.getTime() + duration) })
+          .where('id', '=', invitation.id)
+          .returningAll()
+          .executeTakeFirstOrThrow()
+      }
       const values = {
         authorized_by_user_id: actor.userId,
         generation: (delivery?.generation ?? (resend && !replacingExpired ? 1 : 0)) + 1,

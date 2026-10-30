@@ -542,8 +542,8 @@ purpose-separated recipient HMAC, the inviter/team identifiers and the request t
 
 Explicit resends require the invitation ID, expected generation and UUID request ID;
 they wait 60 seconds from the later of the generation start and latest delivery update,
-including worker attempts, stop at 32 generations and preserve the invitation's expiry.
-The invitation sender updates `updated_at` on every delivery attempt
+including worker attempts, stop at 32 generations and extend expiry by the original validity
+length. The invitation sender updates `updated_at` on every delivery attempt
 so this post-delivery cooldown holds. Each delivery generation retains its existing
 maximum of four SMTP attempts.
 Expired or business-terminal invitations need a new invitation. The expired-row action

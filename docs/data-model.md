@@ -366,8 +366,8 @@ timestamp. Existing writers that increment attempts need no change. See the
 See the [API contract](https://hourmere.com/docs/api-conventions#team-invitation-delivery-summaries).
 
 Every delivery row remains while its invitation is pending and unexpired, including terminal
-delivery outcomes, so unexpired resends retain their generation cap and stored expiry.
-Cleanup takes bounded batches, locks invitations before delivery records, and skips
+delivery outcomes, so unexpired resends retain their generation cap and original validity
+length. Cleanup takes bounded batches, locks invitations before delivery records, and skips
 locked rows. It deletes expired pending invitations' records and accepted, canceled or
 rejected invitations' records once both `expiresAt` and delivery `updated_at` are at least
 seven days old and no live lease remains. Unknown invitation statuses are retained. Invitation rows themselves are preserved.
@@ -378,14 +378,14 @@ Existing pending, unexpired invitations are backfilled as
 and the sign-in mail tables are preserved. This prevents later repair from silently
 resending historic invitations with unknown mail outcomes. Restart every role with the
 new version. The migration itself installs storage and queries; management and queue
-integration are application code. Explicit resend preserves the invitation's stored
-expiry; expired invitations require a new invitation ID.
+integration are application code. Explicit resend extends expiry under the approved
+protocol, independently of these storage queries.
 
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
 and `updated_at`. The sender updates `updated_at` on every delivery attempt
-so attempts restart the post-delivery wait. `expiry_duration_ms` retains legacy validity
-metadata without changing business expiry. The migration retains delivery creation time as the cooldown anchor
+so attempts restart the post-delivery wait. `expiry_duration_ms` retains the original
+validity length across successive renewals. The migration retains delivery creation time as the cooldown anchor
 and seeds the known legacy 48-hour validity policy. Historic native resends changed expiry
 without changing invitation creation time, so their difference cannot recover original
 validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.

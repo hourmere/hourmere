@@ -230,14 +230,16 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     },
   )
 
-  it.each(['update', 'cancel-invitation'] as const)(
-    '%s refuses an unverified legacy owner with matching context',
+  it.each(paths)(
+    '%s uniformly denies authenticated callers without authority with matching context',
     async (path) => {
-      const f = await fixture('unverified')
-      const response = await request(f, path, f.team.id)
-      expect(response.status).toBe(403)
-      expect(await response.json()).toEqual(denied)
-      await unchanged(f)
+      for (const role of ['removed', 'unverified'] as const) {
+        const f = await fixture(role)
+        const response = await request(f, path, f.team.id)
+        expect(response.status, `${path}: ${role}`).toBe(403)
+        expect(await response.json()).toEqual(denied)
+        await unchanged(f)
+      }
     },
   )
 
@@ -263,21 +265,48 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     await unchanged(f)
   })
 
-  it.each(paths)('%s uses the same denial without a session', async (path) => {
+  async function verifyUnauthenticated(path: Path, selectedAuth = auth) {
     const f = await fixture()
-    const response = await app.request(`/api/auth/organization/${path}`, {
-      method: 'POST',
-      headers: {
-        origin,
-        'content-type': 'application/json',
-        'x-expected-organization-id': f.team.id,
-      },
-      body: JSON.stringify(body(f, path)),
-    })
-    expect(response.status).toBe(403)
-    expect(await response.json()).toEqual(denied)
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where('id', '=', f.sessionId)
+      .execute()
+    for (const cookie of [undefined, f.cookie]) {
+      for (const expected of [undefined, f.team.id, 'malformed']) {
+        const response = await application(selectedAuth).request(`/api/auth/organization/${path}`, {
+          method: 'POST',
+          headers: {
+            origin,
+            'content-type': 'application/json',
+            ...(cookie === undefined ? {} : { cookie }),
+            ...(expected === undefined ? {} : { 'x-expected-organization-id': expected }),
+          },
+          body: JSON.stringify(body(f, path)),
+        })
+        // The existing cancellation hook owns its uniform denial; other native endpoints
+        // retain Better Auth's authentication response when there is no session.
+        expect(response.status, `${path}: ${cookie ? 'expired' : 'absent'} session`).toBe(
+          path === 'cancel-invitation' ? 403 : 401,
+        )
+        expect(await response.json()).toEqual(
+          path === 'cancel-invitation'
+            ? denied
+            : path === 'update'
+              ? { message: 'User not found' }
+              : { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+        )
+      }
+    }
     await unchanged(f)
-  })
+  }
+
+  it.each(paths)(
+    '%s preserves its native authentication response for absent and expired sessions',
+    async (path) => {
+      await verifyUnauthenticated(path)
+    },
+  )
 
   it.each([
     '',
@@ -795,7 +824,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
-  function sourceCopy(mutation?: 'authority' | 'identity' | 'session'): typeof organizationContext {
+  function sourceCopy(mutation?: 'authority' | 'identity'): typeof organizationContext {
     let source = readFileSync('packages/auth/src/organization-context.ts', 'utf8')
     const start =
       '  // Authorize before revealing context recovery, including legacy unverified sessions.\n'
@@ -808,15 +837,6 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         "if (ctx.path === '/organization/create' || ctx.path === '/organization/set-active') {"
       expect(source.includes(before), 'identity mutation anchor').toBe(true)
       source = source.replace(before, 'if (false) {')
-    }
-    if (mutation === 'session') {
-      const start = '  if (!session) {\n    if (boundSwitch) return\n'
-      const end = '  const body = ctx.body as Record<string, unknown> | undefined\n'
-      expect(source.includes(start), 'session mutation anchor').toBe(true)
-      source =
-        source.slice(0, source.indexOf(start)) +
-        '  if (!session) return\n' +
-        source.slice(source.indexOf(end))
     }
     const javascript = stripTypeScriptTypes(
       source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
@@ -839,19 +859,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
 
   async function verifyAuthority(
     check: typeof organizationContext,
-    kind:
-      | 'authority'
-      | 'missing context'
-      | 'identity'
-      | 'switch identity'
-      | 'session' = 'authority',
+    kind: 'authority' | 'missing context' | 'identity' | 'switch identity' = 'authority',
   ) {
     const f = await fixture('unverified')
-    const session =
-      kind === 'session'
-        ? null
-        : await auth.api.getSession({ headers: new Headers({ cookie: f.cookie }) })
-    if (kind !== 'session') expect(session).not.toBeNull()
+    const session = await auth.api.getSession({ headers: new Headers({ cookie: f.cookie }) })
+    expect(session).not.toBeNull()
     const ctx = {
       path:
         kind === 'identity'
@@ -869,17 +881,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
   }
 
   it('passes the real database authority assertions with the original source copy', async () => {
-    for (const kind of [
-      'authority',
-      'missing context',
-      'identity',
-      'switch identity',
-      'session',
-    ] as const)
+    for (const kind of ['authority', 'missing context', 'identity', 'switch identity'] as const)
       await verifyAuthority(sourceCopy(), kind)
   })
 
-  it.each(['authority', 'missing context', 'identity', 'switch identity', 'session'] as const)(
+  it.each(['authority', 'missing context', 'identity', 'switch identity'] as const)(
     'detects removal of the native %s check through a real assertion failure',
     async (kind) => {
       const mutation =
@@ -910,6 +916,55 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     )
     return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
   }
+
+  async function contextCopy(mutate = false) {
+    const location = new URL('../../../packages/auth/src/organization-context.ts', import.meta.url)
+    let source = readFileSync(location, 'utf8')
+    if (mutate) {
+      const guard = '  if (!session) return\n'
+      expect(source.includes(guard), 'native unauthenticated response mutation anchor').toBe(true)
+      source = source.replace(
+        guard,
+        `  if (!session) {
+    if (boundSwitch) return
+    throw new APIError('FORBIDDEN', {
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      message: 'team_management_access_denied',
+    })
+  }
+`,
+      )
+    }
+    const hooksLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
+    const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
+    const hooks = moduleUrl(readFileSync(hooksLocation, 'utf8'), hooksLocation, {
+      './organization-context.ts': moduleUrl(source, location),
+    })
+    const { createAuth: factory } = (await import(
+      moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, {
+        './hooks.ts': hooks,
+      })
+    )) as { createAuth: typeof createAuth }
+    return factory({
+      pool,
+      db,
+      baseURL: origin,
+      secret,
+      signup: { mode: 'open', allowedDomains: [] },
+      mailer: { send: async () => {} },
+    })
+  }
+
+  it('passes native unauthenticated HTTP assertions with the original context source copy', async () => {
+    const copy = await contextCopy()
+    for (const path of paths) await verifyUnauthenticated(path, copy)
+  })
+
+  it('detects replacing native 401 with 403 through a real HTTP assertion', async () => {
+    await expect(
+      verifyUnauthenticated('update-member-role', await contextCopy(true)),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 403, expected: 401 })
+  })
 
   async function policyCopy(before?: string, after = '') {
     const location = new URL('../../../packages/auth/src/team-role-policy.ts', import.meta.url)

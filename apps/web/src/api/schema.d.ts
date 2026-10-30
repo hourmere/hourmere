@@ -5251,7 +5251,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel a pending team invitation
-         * @description Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required.
+         * @description Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required for a successful write. Omitting it returns 409 organization_context_changed for an authorized manager; unauthorized callers retain 403 team_management_access_denied.
          */
         post: {
             parameters: {

@@ -117,13 +117,8 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
   const boundSwitch = ctx.path === '/organization/set-active' && expected !== null
   if (!covered.has(ctx.path) && !boundSwitch) return
   const session = await getSessionFromCtx(ctx)
-  if (!session) {
-    if (boundSwitch) return
-    throw new APIError('FORBIDDEN', {
-      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
-      message: 'team_management_access_denied',
-    })
-  }
+  // Leave unauthenticated requests to the endpoint's existing authentication response.
+  if (!session) return
   if (expected !== null && !isUuid(expected)) {
     if (boundSwitch) throw changed()
     throw new APIError('FORBIDDEN', {
