@@ -27,6 +27,7 @@ import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
 
 const location = () => screen.getByTestId('location').textContent
 const field = (name: string | RegExp) => screen.getByLabelText<HTMLInputElement>(name)
+const CREATED_ID = 'e0000000-0000-7000-8000-000000000002'
 
 /** The event type endpoints over an in-memory list, plus profile and schedules. */
 function eventTypeServer(
@@ -48,10 +49,14 @@ function eventTypeServer(
       const found = list.find((e) => e.id === EVENT_TYPE_ID)
       return found ? json(200, found) : json(404, { error: 'event_type_not_found' })
     },
+    [`GET /api/v1/event-types/${CREATED_ID}`]: () => {
+      const found = list.find((e) => e.id === CREATED_ID)
+      return found ? json(200, found) : json(404, { error: 'event_type_not_found' })
+    },
     'POST /api/v1/event-types': ({ body }) => {
       const created = eventType({
         ...(body as Partial<EventType>),
-        id: 'e0000000-0000-7000-8000-000000000002',
+        id: CREATED_ID,
       })
       list = [...list, created]
       return json(201, created)
@@ -330,7 +335,7 @@ describe('creating an event type', () => {
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
 
     expect(await screen.findByText('Created “Intro call”.')).toBeDefined()
-    expect(location()).toBe('/app/event-types')
+    expect(location()).toBe(`/app/event-types/${CREATED_ID}`)
     expect(api.to('POST /api/v1/event-types').map((c) => c.body)).toEqual([
       {
         title: 'Intro call',

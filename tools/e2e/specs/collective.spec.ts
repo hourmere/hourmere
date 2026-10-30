@@ -10,6 +10,14 @@ test('a team owner creates a collective type and a public invitee books every re
   await page.getByLabel('Scheduling', { exact: true }).selectOption('collective')
   await page.getByLabel('Second Required Host', { exact: true }).check()
   await page.getByRole('button', { name: 'Create event type', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Edit “Panel interview”', exact: true }),
+  ).toBeVisible()
+  expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
+  await expect(
+    page.getByRole('region', { name: 'Saved version readiness', exact: true }),
+  ).toBeVisible()
+  await page.getByRole('link', { name: 'Back to event types', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Event types', exact: true })).toBeVisible()
   await page.goto(`${app.url}/team/FixtureTeam/panel-interview`)
   await expect(page.getByRole('heading', { name: 'Panel interview', exact: true })).toBeVisible()

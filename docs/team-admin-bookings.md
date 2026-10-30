@@ -10,10 +10,12 @@ Any Authorization header selects the agent credential boundary and is denied, ev
 a valid owner/admin session cookie. The response does not reveal team existence or key validity.
 The route preserves the shared caller middleware's Origin/Referer handling.
 
-The scheduling service exports `listTeamAdminBookings`, `TeamAdminBookingSchema`,
-`TeamAdminBookingPageSchema`, their inferred types and `toTeamAdminBooking`.
+The scheduling service exports `listTeamAdminBookings`, `TeamAdminBookingListItemSchema`
+and `TeamAdminBookingListPageSchema` for this list. The base `TeamAdminBookingSchema`,
+`TeamAdminBookingPageSchema` and `toTeamAdminBooking` retain the original projection used
+by member departure and removal responses.
 
-List items and details use the same explicit whitelist:
+List items use this explicit whitelist:
 
 | Field | Purpose |
 |---|---|
@@ -21,11 +23,21 @@ List items and details use the same explicit whitelist:
 | `status` | `confirmed` or `cancelled`, including cancelled reschedule predecessors. |
 | `start`, `end` | Stored booking instants in UTC. |
 | `cancelledAt` | Cancellation instant, or null. |
-| `eventType` | `{ id, title }` for the team activity; title is null for a deleted activity, and the object is null when no association remains. |
-| `hosts` | Saved booking hosts as `{ userId, name }`, preserving the actual assignment rather than exposing the current event host pool. |
+| `eventType` | `{ id, title, publicBookingPath }` for the activity; title is null for a deleted activity, and the object is null when no association remains. The additive, nullable path is present only while the activity exists, is enabled and resolves through its public booking endpoint. |
+| `hosts` | Saved booking hosts as `{ userId, name, timeZone, isCurrentMember }`, preserving the actual assignment rather than exposing the current event host pool. The two additive fields are nullable. The zone comes only from the host's public profile; membership refers to this booking's team. |
 | `attendees` | `{ name, email, timeZone, isBooker }` for the invitee and guests: contact, scheduling and booker identification needed for coordination. |
 
 The list envelope contains only `data` and opaque `nextCursor` (null on the last page).
+The additional fields are read-only and limited to this list. A missing public profile
+produces a null host zone; private schedule and calendar data are never a fallback.
+An enabled event can retain its public path after its host configuration is repaired,
+while the original booking host still has `isCurrentMember: false`.
+
+The web cancellation confirmation shows the appointment in the viewer's zone and in each
+known host zone that differs. Manual rebooking steps appear only when a saved host's
+membership is explicitly false. They link to `publicBookingPath` when available and
+explain that the event is no longer bookable when it is null.
+
 It accepts the existing booking filters: start `from` inclusive and `to` exclusive,
 `endAfter` exclusive and `endTo` inclusive, and `status` (`confirmed` or `cancelled`).
 `order` is `asc` by default or `desc`; `limit` is 1–100, default 50. Follow `nextCursor` as

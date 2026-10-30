@@ -1,5 +1,30 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'This host’s time zone is unavailable.': '无法获取此主持人的时区。',
+  'Host time zone: {zone}': '主持人时区：{zone}',
+  'Book again with another host': '重新预约其他主持人',
+  'A host has left the team, so this booking cannot be rescheduled. Hourmere does not automatically assign another host.':
+    '一位主持人已离开团队，因此此预约无法改期。Hourmere 不会自动指派其他主持人。',
+  'An admin cancels this booking here before it starts.': '管理员在预约开始前，在此页面取消预约。',
+  'This booking is already cancelled. Continue with the next step.': '此预约已取消，请继续下一步。',
+  'This booking has already started. Wait until it ends or coordinate with the hosts offline.':
+    '此预约已开始，请等待结束或与主持人线下协调。',
+  'Then ask the guest to book again from the event’s public booking page.':
+    '然后请访客从活动的公开预约页面重新预约。',
+  'Open public booking page': '打开公开预约页面',
+  'The event is no longer bookable.': '此活动已无法预约。',
+  'Ask an admin to repair and reactivate the event, or create a new event, before the guest books again.':
+    '请管理员修复并重新启用此活动，或创建新活动，再请访客重新预约。',
+  'Cancellation notifications are queued. Email delivery is not confirmed.':
+    '取消通知已加入发送队列，邮件是否送达尚未确认。',
+  'Your time zone: {zone}': '你的时区：{zone}',
+  'Cancellation notifications': '取消通知',
+  'Cancellation emails go to the invitee and guests below, and saved hosts who are still verified members of this team. Departed hosts are not notified.':
+    '取消邮件将发给下列预约访客和来宾，以及仍是本团队成员且邮箱已验证的原主持人。已离队的主持人不会收到通知。',
+  'Email delivery is not guaranteed. Contact the invitee directly if needed.':
+    '无法保证邮件送达，请按需直接联系预约访客。',
+  'Hourmere does not automatically assign another host. A replacement requires a new booking.':
+    'Hourmere 不会自动指派其他主持人。如需替代安排，必须重新预约。',
   'Join team': '加入团队',
   'Go to team': '前往团队',
   'Invited email': '受邀邮箱',
@@ -1121,4 +1146,13 @@ export const admin = {
   'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.':
     '单人及集体活动类型会被停用；轮询活动类型仅在没有其他已验证的当前团队主持人时停用。',
   'Bookings needing handling': '待处理预约',
+  'Saved version readiness': '已保存版本的就绪检查',
+  'These unsaved changes have not been checked yet. Save to check the saved version.':
+    '尚未检查这些未保存的更改。保存后可检查已保存版本。',
+  'These checks describe the saved version. Availability is confirmed when someone books.':
+    '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+  'Readiness checks are unavailable for this account.': '此账号无法使用就绪检查。',
+  'Review enablement': '查看启用设置',
+  'Review meeting settings': '查看会议设置',
+  'Review round-robin activation': '查看轮询激活设置',
 } as const
