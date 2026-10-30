@@ -15,7 +15,7 @@ function expectCardMarkup(table: HTMLElement, variant: string, labels: string[])
   for (const value of values) {
     // Anonymous text or multiple children would become extra grid items after the label.
     expect(value.children).toHaveLength(1)
-    expect(value.firstElementChild?.className).toBe('table-value')
+    expect(value.firstElementChild?.classList.contains('table-value')).toBe(true)
     expect(value.childNodes).toHaveLength(1)
   }
 }
@@ -105,10 +105,12 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
     expectCardMarkup(
       table,
       'event-types',
-      zh ? ['时长', '预约链接', '状态'] : ['Duration', 'Booking link', 'Status'],
+      zh
+        ? ['时长', '预约链接', '状态', '配置检查']
+        : ['Duration', 'Booking link', 'Status', 'Configuration checks'],
     )
     // Duration, status and the edit button shrink; the title and link may break anywhere.
-    expectCellKinds(table, { userContent: [0, 2], nowrap: [1], fit: [1, 3, 4] })
+    expectCellKinds(table, { userContent: [0, 2], nowrap: [1], fit: [1, 3, 5] })
     expect(table.querySelector('td[data-label]')?.classList.contains('nowrap')).toBe(true)
     expect(table.querySelector('td[data-label]')?.textContent).toBe(
       zh ? '23 小时 59 分钟' : '23 h 59 min',
