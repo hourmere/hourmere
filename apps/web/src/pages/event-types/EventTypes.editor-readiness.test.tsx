@@ -237,6 +237,13 @@ describe('saved event type readiness in the editor', () => {
       })
       const passed = language === 'en' ? 'Configuration checks passed' : '配置检查通过'
       await within(region).findByText(passed)
+      expect(
+        within(region).getByText(
+          language === 'en'
+            ? 'These checks describe the saved version. Availability is confirmed when someone books.'
+            : '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+        ),
+      ).toBeDefined()
       const input = screen.getByLabelText<HTMLInputElement>(language === 'en' ? 'Title' : '标题', {
         exact: true,
       })
