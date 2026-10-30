@@ -24,7 +24,7 @@ export const common = {
   'Something went wrong': 'Se ha producido un error',
   Reload: 'Volver a cargar',
   'Scheduling page powered by Hourmere — pick a time that works.':
-    'Página de reservas de Hourmere: elija un horario que le convenga.',
+    'Página de reservas con tecnología de Hourmere: elija un horario que le convenga.',
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
     '¿No ha recibido el correo electrónico? Revise la carpeta de correo no deseado y añada al remitente a sus contactos.',
   'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.':
@@ -332,7 +332,7 @@ export const common = {
     'Confirme su dirección de correo electrónico iniciando sesión con un enlace enviado por correo electrónico antes de utilizar claves de API',
   'Reconnect Google Calendar': 'Volver a conectar Google Calendar',
   'Make another schedule the default before deleting this one':
-    'Establezca otro horario de disponibilidad como predeterminado antes de eliminar este',
+    'Establezca otra configuración de disponibilidad como predeterminada antes de eliminar esta',
   '{0} Your booking is not confirmed yet.': '{0} Su reserva aún no está confirmada.',
   'Reconnect before enabling busy times.':
     'Vuelva a conectar el calendario antes de activar la consulta de horarios ocupados.',

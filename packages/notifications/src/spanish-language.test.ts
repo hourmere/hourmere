@@ -141,7 +141,7 @@ describe.skipIf(!serverUrl)('Spanish booking notification language', () => {
     },
   )
 
-  it('delivers a negotiated Accept-Language choice through booking storage to email', async () => {
+  it('delivers a negotiated language choice through booking storage to email', async () => {
     const locale = acceptLanguage('qaa,es-MX;q=0.9,en;q=0.5', 'public')
     expect(locale).toBe('es')
     const booked = await book(locale)

@@ -120,7 +120,7 @@ describe('Spanish public booking language', () => {
     expect(translateMessage('es', 'Calendar')).toBe('Calendario')
     expect(
       translateMessage('es', 'Make another schedule the default before deleting this one'),
-    ).toBe('Establezca otro horario de disponibilidad como predeterminado antes de eliminar este')
+    ).toBe('Establezca otra configuración de disponibilidad como predeterminada antes de eliminar esta')
   })
 
   it('preserves uncertainty about why an event link is missing', async () => {
