@@ -324,6 +324,48 @@ describe.skipIf(!serverUrl)(
     it('lets current verified owners and admins read summaries and uniformly denies members', () =>
       verifyRoles())
 
+    async function verifyExpectedOrganization(target = app) {
+      const own = await invitation()
+      const other = await invitation({ organizationId: seeded.other.id })
+      const expected = { 'X-Expected-Organization-Id': seeded.team.id }
+      for (const cookie of [seeded.ownerSession.cookie, seeded.adminSession.cookie]) {
+        const matching = await page(await get(cookie, '', expected, target))
+        expect(matching.data.map((row) => row.id)).toEqual([own.id])
+      }
+
+      // Another tab switches this shared session before its first invitation request.
+      const stale = await session(seeded.owner, seeded.team.id)
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: seeded.other.id })
+        .where('id', '=', stale.sessionId)
+        .execute()
+      // First page and explicit retry both have no cursor to provide a team boundary.
+      for (const _attempt of [1, 2])
+        await expectDenied(await get(stale.cookie, '', expected, target))
+
+      const compatible = await page(await get(stale.cookie, '', {}, target))
+      expect(compatible.data.map((row) => row.id)).toEqual([other.id])
+      const matchingOther = await page(
+        await get(stale.cookie, '', { 'X-Expected-Organization-Id': seeded.other.id }, target),
+      )
+      expect(matchingOther.data.map((row) => row.id)).toEqual([other.id])
+    }
+
+    it('binds first-page reads and retries to an optional expected team after a tab switches', () =>
+      verifyExpectedOrganization())
+
+    it.each(['invalid', '00000000-0000-4000-8000-000000000001'])(
+      'uniformly denies invalid or inaccessible expected organizations (%s)',
+      async (organizationId) => {
+        await expectDenied(
+          await get(seeded.ownerSession.cookie, '', {
+            'X-Expected-Organization-Id': organizationId,
+          }),
+        )
+      },
+    )
+
     it('uniformly denies missing, invalid, personal and inaccessible current sessions', async () => {
       const outsider = await createTestUser(db, 'Unrelated user')
       const outsiderSession = await session(outsider, seeded.team.id)
@@ -773,6 +815,15 @@ describe.skipIf(!serverUrl)(
       expect(operation?.security).toEqual([{ session: [] }])
       expect(operation?.responses['401']).toBeUndefined()
       expect(operation?.responses['403']).toBeDefined()
+      expect(operation?.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            in: 'header',
+            name: 'x-expected-organization-id',
+            required: false,
+          }),
+        ]),
+      )
       expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
       const schema = operation?.responses['200']?.content?.['application/json']?.schema
       const envelope = resolve(document, schema as Record<string, unknown>)
@@ -795,7 +846,7 @@ describe.skipIf(!serverUrl)(
       )
     })
     function routeSourceCopy(replacement?: {
-      file: 'access' | 'summary'
+      file: 'access' | 'summary' | 'route'
       before: string
       after: string
     }): typeof teamInvitationRoutes {
@@ -836,8 +887,13 @@ describe.skipIf(!serverUrl)(
         },
         '{ listTeamInvitationSummaries, TeamInvitationSummarySchema }',
       )
+      const routeSource = readFileSync(new URL('./team-invitations.ts', import.meta.url), 'utf8')
+      if (replacement?.file === 'route')
+        expect(routeSource.includes(replacement.before), 'route mutation matches source').toBe(true)
       return sourceCopy<typeof teamInvitationRoutes>(
-        readFileSync(new URL('./team-invitations.ts', import.meta.url), 'utf8'),
+        replacement?.file === 'route'
+          ? routeSource.replace(replacement.before, replacement.after)
+          : routeSource,
         { createRoute, z, ErrorBody, json, ...management, ...summary },
         'teamInvitationRoutes',
       )
@@ -855,15 +911,26 @@ describe.skipIf(!serverUrl)(
       await verifyAttemptTimestamp(target)
       await db.deleteFrom('auth.invitation').execute()
       await verifyUnknownStatuses(target)
+      await db.deleteFrom('auth.invitation').execute()
+      await verifyExpectedOrganization(target)
     })
 
     it.each<
       [
         string,
-        { file: 'access' | 'summary'; before: string; after: string },
+        { file: 'access' | 'summary' | 'route'; before: string; after: string },
         (target: ReturnType<typeof createApp>) => Promise<void>,
       ]
     >([
+      [
+        'expected-organization read target',
+        {
+          file: 'route',
+          before: 'expectedOrganizationId ?? c.var.principal.organization.id,',
+          after: 'c.var.principal.organization.id,',
+        },
+        verifyExpectedOrganization,
+      ],
       [
         'owner/admin role check',
         { file: 'access', before: 'if (!role) throw denied()', after: 'if (false) throw denied()' },

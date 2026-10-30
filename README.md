@@ -240,6 +240,11 @@ and starts the page over in the selected space. A failed switch keeps the curren
 returning to personal after team access or active context changes shows a notice. Switching
 the web app does not change an API key's organization or an existing MCP OAuth grant.
 
+In a team space, Settings lists joined members by name and role with pagination.
+Owners and admins also see a separate paged section of pending invitations and their
+mail submission status. Mail server acceptance does not confirm inbox receipt;
+pending invitations never count as members or hosts.
+
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
 committed isolation (Postgres's default) or serializable. Connect the app to Postgres

@@ -5,7 +5,16 @@ import { describe, expect, it } from 'vitest'
 import { App } from '../App.tsx'
 import { chooseLanguage } from '../i18n/store.ts'
 import { signInPath } from '../next-path.ts'
-import { fakeApi, json, later, ME, renderApp, signedIn, signedOut } from '../test/fake-api.tsx'
+import {
+  emptyTeamLists,
+  fakeApi,
+  json,
+  later,
+  ME,
+  renderApp,
+  signedIn,
+  signedOut,
+} from '../test/fake-api.tsx'
 
 const id = '00000000-0000-7000-8000-000000000010'
 const path = `/app/join?invitationId=${id}`
@@ -278,6 +287,7 @@ describe('accept invitation entry', () => {
       },
     }
     const api = fakeApi({
+      ...emptyTeamLists,
       ...signedIn,
       'GET /api/v1/me': () =>
         ++reads === 1 ? json(200, ME) : reads === 2 ? background.response : json(200, teamMe),

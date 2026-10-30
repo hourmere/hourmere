@@ -116,6 +116,11 @@ export const signedInAs = (me: Schemas['Me']): Routes => ({
   'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
 })
 export const signedIn = signedInAs(ME)
+/** Opt in when a scenario opens team settings but makes no claims about either list. */
+export const emptyTeamLists: Routes = {
+  'GET /api/auth/organization/list-members': () => json(200, { members: [], total: 0 }),
+  'GET /api/v1/team/invitations': () => json(200, { data: [], nextCursor: null }),
+}
 /** Better Auth's list of the signed-in user's organizations. */
 export const organizations = (
   list: { id: string; name: string }[] = [ME.organization],
