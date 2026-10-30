@@ -56,7 +56,7 @@
   "signIn.instruction": "Para entrar no Hourmere, abra este link e depois pressione o botão de entrada na página que abrir:",
   "signIn.htmlInstruction": "Para entrar no Hourmere, pressione o botão abaixo e depois o botão de entrada na página que abrir.",
   "signIn.button": "Entrar",
-  "signIn.expiry": "Validade do link em minutos: {minutes}. Ele só pode ser usado uma vez. Se você não solicitou a entrada, pode ignorar este e-mail.",
+  "signIn.expiry": "O link expira em {minutes} min e só pode ser usado uma vez. Se você não solicitou a entrada, pode ignorar este e-mail.",
   "signIn.fallback": "Se o botão não funcionar, copie este link e cole no seu navegador:",
   "signIn.footer": "Você recebeu este e-mail porque foi solicitado um link de entrada para sua conta do Hourmere.",
   "teamInvitation.defaultTeam": "Sua equipe",

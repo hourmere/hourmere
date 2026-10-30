@@ -57,15 +57,15 @@ describe('Brazilian Portuguese public booking language', () => {
     expect(document.documentElement.dir).toBe('ltr')
   })
 
-  it('keeps the powered by wording in the Brazilian Portuguese attribution', async () => {
+  it('translates the powered by attribution in Brazilian Portuguese', async () => {
     chooseLanguage('pt-BR')
     fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
     renderApp('/ada/intro')
     await screen.findByRole('heading', { name: 'Escolha um horário' })
-    expect(screen.getByRole('link', { name: 'Powered by Hourmere' })).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Com tecnologia de Hourmere' })).toBeDefined()
   })
 
-  it('keeps the powered by wording in Brazilian Portuguese search and sharing descriptions', async () => {
+  it('translates the powered by wording in Brazilian Portuguese search and sharing descriptions', async () => {
     const metas = ['description', 'og:description'].map((name) => {
       const meta = document.createElement('meta')
       meta.setAttribute(name.startsWith('og:') ? 'property' : 'name', name)
@@ -79,7 +79,7 @@ describe('Brazilian Portuguese public booking language', () => {
       await screen.findByRole('heading', { name: 'Escolha um horário' })
       for (const meta of metas)
         expect(meta.getAttribute('content')).toBe(
-          'Página de agendamento powered by Hourmere — escolha um horário que funcione para você.',
+          'Página de agendamento com tecnologia Hourmere — escolha um horário que funcione para você.',
         )
     } finally {
       for (const meta of metas) meta.remove()

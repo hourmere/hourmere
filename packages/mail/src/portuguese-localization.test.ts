@@ -244,8 +244,7 @@ describe('Brazilian Portuguese mail catalogue', () => {
       expect(message.subject).toBe('Entrar no Hourmere')
       expect(message.html).toContain('<html lang="pt-BR">')
       for (const content of [message.text, message.html ?? '']) {
-        expect(content).toContain(`Validade do link em minutos: ${minutes}.`)
-        expect(content).toContain('Ele só pode ser usado uma vez.')
+        expect(content).toContain(`O link expira em ${minutes} min e só pode ser usado uma vez.`)
         expect(content).toContain('Se você não solicitou a entrada, pode ignorar este e-mail.')
         expect(content).toContain('o botão de entrada na página que abrir')
       }
