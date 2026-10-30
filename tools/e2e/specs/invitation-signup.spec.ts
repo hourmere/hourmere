@@ -7,6 +7,7 @@ const copy = {
     email: 'Email',
     send: 'Email me a sign-in link',
     sent: 'Check your email',
+    eventTypes: 'Event types',
     space: /^Switch space/,
     invite: 'Invite member',
     queued: 'Invitation queued for delivery.',
@@ -26,6 +27,7 @@ const copy = {
     email: '邮箱',
     send: '通过邮件发送登录链接',
     sent: '查看邮件',
+    eventTypes: '活动类型',
     space: /^切换空间/,
     invite: '邀请成员',
     queued: '邀请已加入投递队列。',
@@ -67,6 +69,9 @@ async function prepareInvitation(
   await page.goto(ownerLink)
   await page.getByRole('button', { name: labels.signIn, exact: true }).click()
   await expect.poll(() => localPath(page, app.url, '/app/event-types')).toBe(true)
+  // The /app redirect focuses main after navigation; finish it before opening a menu.
+  await expect(page.locator('main#main')).toBeFocused()
+  await expect(page.getByRole('heading', { name: labels.eventTypes, exact: true })).toBeVisible()
   await page.getByRole('button', { name: labels.space }).click()
   await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
   await expect(page.getByRole('button', { name: labels.space })).toContainText(app.teamName)
