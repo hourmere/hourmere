@@ -526,17 +526,19 @@ describe.skipIf(!bootstrap)(
           new URL('../../../packages/auth/src/team-management.ts', import.meta.url),
           'utf8',
         )
-        const start = source.indexOf('  let memberQuery = db')
-        const end = source.indexOf('  // Better Auth can store multiple roles.', start)
+        // Take the membership snapshot without locks before the authorization locks are held.
+        const start = source.indexOf('  const membership = await checkTeamManagementMembership(')
+        const end = source.indexOf('  const { personal, role } = membership', start)
         expect(start).toBeGreaterThan(0)
         expect(end).toBeGreaterThan(start)
         const read = source.slice(start, end)
-        const unlocked = read.replace('  if (lock) memberQuery = memberQuery.forShare()\n', '')
+        const unlocked = read.replace('    lock,\n', '    false,\n')
+        expect(unlocked).not.toBe(read)
         const copy = await copiedRoutes([
           [read, ''],
           [
             '  await teamSessionUser(db, principal, lock)',
-            `${unlocked}\n  await teamSessionUser(db, principal, lock)`,
+            `${unlocked}  await teamSessionUser(db, principal, lock)`,
           ],
         ])
         await expect(verifyRevocationWins(kind, copy)).rejects.toMatchObject({
