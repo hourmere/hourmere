@@ -3,6 +3,7 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import type { AuthMiddlewareContext } from './api-keys.ts'
+import { invitationResendDeliveryDenial } from './invitation-resend.ts'
 import { isUuid } from './organizations.ts'
 import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
 import { fixedTeamRole, recipientAlreadyMember, teamRoleDenied } from './team-role-policy.ts'
@@ -187,25 +188,18 @@ export async function manageInvitation(
           return result(invitation, delivery)
         if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
           throw conflict()
-        if (generation >= 32)
+        const resendDenial = invitationResendDeliveryDenial(invitation, delivery, now)
+        if (resendDenial === 'INVITATION_GENERATION_LIMIT')
           throw new APIError('CONFLICT', {
             code: 'INVITATION_GENERATION_LIMIT',
             message: 'This invitation has reached its resend limit.',
           })
-        if (delivery?.state === 'sending' && delivery.lease_until && delivery.lease_until > now)
+        if (resendDenial === 'INVITATION_DELIVERY_BUSY')
           throw new APIError('CONFLICT', {
             code: 'INVITATION_DELIVERY_BUSY',
             message: 'Invitation delivery is in progress. Try again shortly.',
           })
-        // The future sender must update updated_at on every delivery attempt so
-        // the post-delivery cooldown starts again even within the same generation.
-        const started = new Date(
-          Math.max(
-            (delivery?.generation_started_at ?? invitation.createdAt).getTime(),
-            (delivery?.updated_at ?? invitation.createdAt).getTime(),
-          ),
-        )
-        if (now.getTime() - started.getTime() < 60_000)
+        if (resendDenial === 'INVITATION_RESEND_COOLDOWN')
           throw new APIError(
             'TOO_MANY_REQUESTS',
             {

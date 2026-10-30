@@ -96,12 +96,21 @@ async function authSourceCopy(
     roleLocation,
     { './team-management.ts': managerUrl },
   )
+  const resendLocation = new URL('../../../packages/auth/src/invitation-resend.ts', import.meta.url)
+  const resendUrl =
+    sourceFile === 'invitation-resend.ts'
+      ? mutationUrl
+      : moduleUrl(readFileSync(resendLocation, 'utf8'), resendLocation)
   const serviceLocation = new URL('../../../packages/auth/src/invitations.ts', import.meta.url)
   const serviceSource = readFileSync(serviceLocation, 'utf8')
   const serviceUrl = moduleUrl(
     sourceFile === 'invitations.ts' ? serviceSource.replace(before, after) : serviceSource,
     serviceLocation,
-    { './team-management.ts': managerUrl, './team-role-policy.ts': roleUrl },
+    {
+      './team-management.ts': managerUrl,
+      './team-role-policy.ts': roleUrl,
+      './invitation-resend.ts': resendUrl,
+    },
   )
   const hookLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
   const hookUrl = moduleUrl(readFileSync(hookLocation, 'utf8'), hookLocation, {
@@ -1283,18 +1292,21 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       '(delivery?.updated_at ?? invitation.createdAt).getTime(),',
       '0,',
       verifyWorkerCooldown,
+      'invitation-resend.ts',
     ],
     [
       'explicit generation cooldown anchor',
       '(delivery?.generation_started_at ?? invitation.createdAt).getTime(),',
       '0,',
       verifyExplicitCooldown,
+      'invitation-resend.ts',
     ],
     [
       'resend cooldown',
       'now.getTime() - started.getTime() < 60_000',
       'now.getTime() - started.getTime() < 0',
       verifyCooldown,
+      'invitation-resend.ts',
     ],
     [
       'expected generation comparison',
@@ -1308,7 +1320,13 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       'generation === (input.expectedGeneration as number) + 2',
       verifyResendProtocol,
     ],
-    ['generation cap', 'if (generation >= 32)', 'if (false)', verifyGenerationCap],
+    [
+      'generation cap',
+      'if (generation >= 32)',
+      'if (false)',
+      verifyGenerationCap,
+      'invitation-resend.ts',
+    ],
     [
       'expiry extension',
       '.set({ expiresAt: new Date(now.getTime() + duration) })',
@@ -1338,6 +1356,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       "delivery?.state === 'sending' && delivery.lease_until && delivery.lease_until > now",
       'false',
       verifyBusy,
+      'invitation-resend.ts',
     ],
     [
       'expiry recheck after the global mail fence',

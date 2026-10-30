@@ -37,6 +37,7 @@ import {
 
 export {
   type InvitationMailLimits,
+  invitationEmailBudgetAvailable,
   reserveInvitationEmailBudget,
 } from './invitation-mail-limits.ts'
 export { notificationEmailCleanupJob } from './mail-limits.ts'

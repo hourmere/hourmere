@@ -324,6 +324,19 @@ organization with their delivery summaries. A missing delivery row reads as `unk
 which provides no evidence of sending. Callers must authorize access to the organization
 before using this internal query; no HTTP endpoint is installed by the storage layer.
 
+The server's session-only `GET /api/v1/team/invitations` separately lists all invitation
+lifecycle states for the current team's verified owners/admins. It returns a strict safe
+delivery summary and shares resend eligibility and request-budget checks with the write
+path. Pending expiry uses a materialized database-clock value, with terminal statuses
+preserved. Missing delivery rows read as unknown. Migration 0044 adds nullable
+`last_attempt_at` without rewriting or guessing legacy rows. A database trigger records
+the database clock when the attempt count increases, preserves that time through outcome
+or metadata updates, and clears it when a new generation has no attempt. No worker change
+is required. `lastAttemptAt` is null before any attempt or when the historical time is
+unknown; `updated_at` is not treated as an attempt timestamp. The additive column and
+trigger remain compatible with existing writers that increment attempts.
+See the [API contract](https://hourmere.com/docs/api-conventions#team-invitation-delivery-summaries).
+
 Every delivery row remains while its invitation is pending and unexpired, including
 terminal delivery outcomes. Cleanup takes bounded batches, locks invitations before
 delivery records, and skips locked rows. It deletes only accepted, canceled, rejected or

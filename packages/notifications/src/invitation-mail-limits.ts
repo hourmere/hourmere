@@ -13,25 +13,17 @@ export interface InvitationMailLimits extends NotificationMailLimits {
   invitationTeamMaxPerDay?: number | undefined
 }
 
-/**
- * Admit one creation/resend in the transaction that writes its delivery intent.
- * Admission counts requests, independently of SMTP sends. A future invitation sender
- * must check and debit the shared non-reserved notification_email_sends capacity at
- * send time; admitting an invitation must not consume guest booking mail capacity.
- * Retries of the same generation do not spend another admission slot.
- */
-export async function reserveInvitationEmailBudget(
+/** Read current admission capacity without locking or consuming a request slot. */
+export async function invitationEmailBudgetAvailable(
   db: Db,
   invitation: { userId: string; organizationId: string; email: string },
   deps: InvitationMailLimits & { secret: string },
-  /** Optional deterministic clock for tests; production reads after the budget lock. */
+  /** The summary passes the same database time used for invitation expiry. */
   at?: Date,
 ): Promise<boolean> {
-  if (!db.isTransaction) throw new Error('Invitation mail reservation needs a transaction')
-  await lockNotificationEmailBudget(db)
   const now =
     at ?? (await sql<{ now: Date }>`SELECT clock_timestamp() AS now`.execute(db)).rows[0]?.now
-  if (!now) throw new Error('Invitation mail reservation needs the database clock')
+  if (!now) throw new Error('Invitation mail eligibility needs the database clock')
   const hour = new Date(now.getTime() - 3_600_000)
   const day = new Date(now.getTime() - 86_400_000)
   const hash = invitationRecipientHash(invitation.email, deps.secret)
@@ -78,6 +70,28 @@ export async function reserveInvitationEmailBudget(
     Number(counts.recipientDay) >= (deps.mailRecipientMaxPerDay ?? 20)
   )
     return false
+  return true
+}
+
+/**
+ * Admit one creation/resend in the transaction that writes its delivery intent.
+ * Admission counts requests, independently of SMTP sends, and never consumes guest-mail
+ * capacity. Retries of the same generation do not spend another admission slot.
+ */
+export async function reserveInvitationEmailBudget(
+  db: Db,
+  invitation: { userId: string; organizationId: string; email: string },
+  deps: InvitationMailLimits & { secret: string },
+  /** Optional deterministic clock for tests; production reads after the budget lock. */
+  at?: Date,
+): Promise<boolean> {
+  if (!db.isTransaction) throw new Error('Invitation mail reservation needs a transaction')
+  await lockNotificationEmailBudget(db)
+  const now =
+    at ?? (await sql<{ now: Date }>`SELECT clock_timestamp() AS now`.execute(db)).rows[0]?.now
+  if (!now) throw new Error('Invitation mail reservation needs the database clock')
+  if (!(await invitationEmailBudgetAvailable(db, invitation, deps, now))) return false
+  const hash = invitationRecipientHash(invitation.email, deps.secret)
   await db
     .insertInto('invitation_email_requests')
     .values({

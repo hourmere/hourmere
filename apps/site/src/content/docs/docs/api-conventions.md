@@ -284,6 +284,49 @@ inaccessible role targets receive the same denial. Browser context mismatches re
 409 response above. The server-only Better Auth add-member operation is not an HTTP
 onboarding path; joining a team requires accepting a member invitation.
 
+### Team invitation delivery summaries
+
+`GET /api/v1/team/invitations` is Hourmere's own versioned read protocol, independent
+of Better Auth's invitation response schemas. It lists only the browser session's current
+team and requires a current verified owner/admin. Missing or invalid sessions, personal
+organizations, ordinary or removed members and any Authorization header receive the same
+`403 team_management_access_denied`, without `WWW-Authenticate`. Authorization headers
+are rejected before resolving API-key/OAuth credentials, even alongside a valid cookie.
+The route uses the shared team-management access middleware and rechecks current authority
+before reading invitations. It is session-only REST; MCP and CLI credentials grant no
+team invitation management authority.
+
+The envelope is `{data,nextCursor}`. `limit` accepts 1–100 (default 50); pass the opaque
+`nextCursor` as `cursor` in the same team until it is null. Ordering is invitation ID
+ascending, with an exclusive keyset boundary: deleting a previous row or inserting before
+the boundary does not shift later pages. Later inserts can appear. A cursor from another
+team returns `400 invalid_cursor`; malformed query parameters return `400 invalid_request`.
+
+Each item contains exactly these fields in the current implementation. Published OpenAPI
+response objects remain extensible for additive v1 changes.
+
+| Field | Meaning |
+|---|---|
+| `id` | Invitation UUID. |
+| `status` | `pending`, `accepted`, `canceled`, `rejected` or derived `expired`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. |
+| `createdAt`, `expiresAt` | Stored invitation timestamps in UTC. Reading does not renew expiry or change status. |
+| `delivery.state` | Current generation's `queued`, `sending`, `smtp_accepted`, `failed` or `skipped`; `unknown` if no delivery row remains. Queued includes waiting for retry; SMTP acceptance does not imply inbox delivery, reading or joining. |
+| `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
+| `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
+| `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |
+| `resendAllowed` | Current member-invitation eligibility, 60-second cooldown, generation cap, live sending lease, recipient membership and inviter/team/recipient request budgets, using the same rules as actual resend. This read spends no budget and reserves no permission; resend checks again. |
+
+Delivery error codes are `transport_error`, `smtp_auth`, `smtp_temporary`, `smtp_permanent`,
+`smtp_not_configured`, `mail_rate_limited`, `interrupted`, `attempts_exhausted`,
+`invitation_ineligible` and `legacy_delivery_unknown`. These are stored diagnostic
+classifications, distinct from the endpoint's HTTP errors. Expired, accepted, canceled or
+rejected invitations cannot be resent; elevated/custom historical roles are ineligible.
+An exhausted current generation can be explicitly resent if the new-generation rules allow it.
+
+No recipient address, inviter identity, role, message body, invitation link/token, credential,
+job ID, lease identity, resend request ID or raw third-party error is returned. The endpoint
+does not send mail or change the invitation or delivery records.
+
 ### Member departure preview
 
 `GET /api/v1/team/members/{memberUserId}/departure-impact?teamId={teamId}` lists the
