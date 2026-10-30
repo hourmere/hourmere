@@ -46,7 +46,9 @@ for (const language of ['en', 'zh-CN'] as const) {
     const width = testInfo.project.name === 'mobile' ? 320 : 1280
     await page.setViewportSize({ width, height: 1000 })
     await page.goto(`${app.url}/app/settings`)
-    const remove = page.getByRole('button', { name: /Second Required Host/ })
+    const remove = page.getByRole('button', {
+      name: /^(Remove member: |移除成员：)Second Required Host$/,
+    })
     await expect(remove).toBeVisible()
     await remove.focus()
     await page.keyboard.press('Enter')

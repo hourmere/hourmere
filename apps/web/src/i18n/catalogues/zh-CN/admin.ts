@@ -1,5 +1,33 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Only owners can manage admins. Ownership transfer is not available yet.':
+    '只有所有者可以管理管理员。暂不支持转移所有权。',
+  'Owner roles cannot be changed here. The team must retain at least one owner.':
+    '此处不能更改所有者角色。团队必须保留至少一位所有者。',
+  'Make admin': '设为管理员',
+  'Make member': '设为成员',
+  'Make admin: {0}': '设为管理员：{0}',
+  'Make member: {0}': '设为成员：{0}',
+  'Change team role': '更改团队角色',
+  'Change {name} from {oldRole} to {newRole}?': '将{name}从{oldRole}改为{newRole}？',
+  'They will gain admin permissions.': '此人将获得管理员权限。',
+  'They will lose admin permissions and keep member access.':
+    '此人将失去管理员权限，保留成员访问权限。',
+  'Admins can invite and remove ordinary members, manage team events, and view team bookings and cancel them before they start.':
+    '管理员可以邀请和移除普通成员、管理团队活动、查看团队预约，以及在会议开始前取消预约。',
+  'Members can view team members and manage their own availability, calendars and hosted bookings.':
+    '成员可以查看团队成员，管理自己的可预约时间、日历及本人主持的预约。',
+  'Confirm role change': '确认更改角色',
+  'Changing role…': '正在更改角色…',
+  '{name} is now {role}.': '已将{name}设为{role}。',
+  'This role change was denied. Your permission or this member’s team membership may have changed. Reload to check.':
+    '此次角色更改被拒绝。你的权限或此人的团队成员关系可能已变更，请重新加载并核实。',
+  'This person is no longer a member of this team. Reload the member list.':
+    '此人已不再是此团队的成员。请重新加载成员列表。',
+  'This role change conflicts with the current team state. Reload before trying again.':
+    '此次角色更改与当前团队状态冲突。请重新加载后再试。',
+  'Could not confirm the role change. Reload to check this person’s current role before trying again.':
+    '无法确认角色更改结果。请重新加载并核实此人的当前角色后再试。',
   'The invitation request could not be queued. Try again later.':
     '无法将邀请请求加入队列。请稍后再试。',
   'Invite member': '邀请成员',

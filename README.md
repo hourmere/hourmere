@@ -247,6 +247,9 @@ In a team space, Settings lists joined members by name and role with pagination.
 Owners and admins also see a separate paged section of pending invitations and their
 mail submission status. Mail server acceptance does not confirm inbox receipt;
 pending invitations never count as members or hosts.
+Owners can promote members to admins or return admins to member access after reviewing
+the permission change. Only owners manage admins; owner roles cannot be changed, and
+ownership transfer is not available yet. A team must always retain at least one owner.
 
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
