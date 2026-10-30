@@ -184,6 +184,7 @@ describe('MCP transport', () => {
       expect(whoami.isError).toBeFalsy()
       expect(whoami.structuredContent).toEqual({
         user: principal.user,
+        personalOrganizationId: null,
         organization: principal.organization,
         principal: { kind: 'api_key', apiKeyId: principal.apiKeyId },
       })

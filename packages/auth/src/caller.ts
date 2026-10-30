@@ -24,7 +24,12 @@ export interface CallerOrganization {
  * Who is making a request and in which organization they act. `kind` and `apiKeyId` are
  * what bookings record as their source and `api_key_id`.
  */
-export type Principal = { user: CallerUser; organization: CallerOrganization } & (
+export type Principal = {
+  user: CallerUser
+  organization: CallerOrganization
+  /** The caller's own marker, independent of the organization they currently act in. */
+  personalOrganizationId?: string | null
+} & (
   | { kind: 'session'; sessionId: string }
   | { kind: 'api_key'; apiKeyId: string }
   | { kind: 'oauth'; oauthConsentId: string; clientId: string; scopes: readonly string[] }
@@ -73,6 +78,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
       .innerJoin('auth.user as u', 'u.id', 'm.userId')
       .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
+      .leftJoin('personal_organizations as own', 'own.user_id', 'u.id')
       .$if(apiKeyId !== undefined, (qb) =>
         qb.where((eb) =>
           eb.exists(
@@ -94,6 +100,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
         'o.name as organizationName',
         'o.slug',
         'p.user_id as personalOwnerId',
+        'own.organization_id as personalOrganizationId',
       ])
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
@@ -102,6 +109,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     return {
       emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
+      personalOrganizationId: row.personalOrganizationId,
       organization: {
         id: row.organizationId,
         name: row.organizationName,

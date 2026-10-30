@@ -34,6 +34,7 @@ const cleanSignUpName = `Ada Lovelace ${'😀'.repeat(93)}`
 
 interface Me {
   user: { id: string; name: string; email: string }
+  personalOrganizationId: string | null
   organization: { id: string; name: string; slug: string; personal: boolean }
   principal: { kind: 'session' | 'api_key'; apiKeyId: string | null }
 }
@@ -339,6 +340,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(meRes.status).toBe(200)
       expect(body).toEqual({
         user: { id: expect.any(String), name: '', email: 'ada@example.com' },
+        personalOrganizationId: body.organization.id,
         organization: { id: expect.any(String), name: 'ada', slug: 'ada', personal: true },
         principal: { kind: 'session', apiKeyId: null },
       })
@@ -833,6 +835,83 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   })
 
   describe('personal organization', () => {
+    it("identifies only the caller's personal marker while either team is active", async () => {
+      const otherCookie = await signIn('other-personal-marker@example.com')
+      const otherPersonal = (await me({ cookie: otherCookie })).body.organization
+      const cookie = await signIn('own-personal-marker@example.com')
+      const personal = (await me({ cookie })).body.organization
+      await db
+        .updateTable('auth.organization')
+        .set({ name: 'Stored personal space name' })
+        .where('id', '=', personal.id)
+        .execute()
+      const teams = [
+        await createTeam(cookie, 'personal-marker-first-team'),
+        await createTeam(cookie, 'personal-marker-second-team'),
+      ]
+
+      for (const teamId of teams) {
+        const switched = await post('/api/auth/organization/set-active', cookie, {
+          organizationId: teamId,
+        })
+        expect(switched.status).toBe(200)
+        const { res, body } = await me({ cookie })
+        expect(res.status).toBe(200)
+        expect(body.organization).toMatchObject({ id: teamId, personal: false })
+        expect(body.personalOrganizationId).toBe(personal.id)
+        expect(body.personalOrganizationId).not.toBe(otherPersonal.id)
+      }
+
+      const key = (await (
+        await createKey(cookie, { metadata: { organizationId: teams[0] } })
+      ).json()) as {
+        key: string
+      }
+      const apiCaller = await me({ authorization: `Bearer ${key.key}` })
+      expect(apiCaller.res.status).toBe(200)
+      expect(apiCaller.body.organization.id).toBe(teams[0])
+      expect(apiCaller.body.personalOrganizationId).toBe(personal.id)
+
+      expect(
+        (await post('/api/auth/organization/set-active', cookie, { organizationId: personal.id }))
+          .status,
+      ).toBe(200)
+      const returned = await me({ cookie })
+      expect(returned.body.organization.personal).toBe(true)
+      expect(returned.body.personalOrganizationId).toBe(personal.id)
+      expect((await me({ cookie: otherCookie })).body.personalOrganizationId).toBe(otherPersonal.id)
+    })
+
+    it("returns null without a personal marker instead of another user's marker or a name match", async () => {
+      const otherCookie = await signIn('other-unmarked-personal@example.com')
+      const otherPersonal = (await me({ cookie: otherCookie })).body.organization
+      const cookie = await signIn('unmarked-personal@example.com')
+      const initial = (await me({ cookie })).body
+      const teamId = await createTeam(cookie, 'unmarked-personal-team')
+      await db
+        .updateTable('auth.organization')
+        .set({ name: initial.organization.name })
+        .where('id', '=', teamId)
+        .execute()
+      expect(
+        (await post('/api/auth/organization/set-active', cookie, { organizationId: teamId }))
+          .status,
+      ).toBe(200)
+      await db.deleteFrom('personal_organizations').where('user_id', '=', initial.user.id).execute()
+      try {
+        const { res, body } = await me({ cookie })
+        expect(res.status).toBe(200)
+        expect(body.organization).toMatchObject({ id: teamId, personal: false })
+        expect(body.personalOrganizationId).toBeNull()
+        expect(body.personalOrganizationId).not.toBe(otherPersonal.id)
+      } finally {
+        await db
+          .insertInto('personal_organizations')
+          .values({ user_id: initial.user.id, organization_id: initial.organization.id })
+          .execute()
+      }
+    })
+
     it('is created exactly once per user, with an owner membership and the marker', async () => {
       await signIn('grace@example.com')
       await signIn('grace@example.com')

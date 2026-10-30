@@ -75,11 +75,9 @@ describe('interface catalogue scope', () => {
           ({ value }) => value,
         ),
       ).toEqual(['en', 'zh-CN'])
-      expect(
-        [...screen.getByLabelText<HTMLSelectElement>('Notification language').options].map(
-          ({ value }) => value,
-        ),
-      ).toContain('de')
+      const notificationLanguage =
+        await screen.findByLabelText<HTMLSelectElement>('Notification language')
+      expect([...notificationLanguage.options].map(({ value }) => value)).toContain('de')
       expect(localStorage.getItem('hourmere-language')).toBe('de')
     },
   )

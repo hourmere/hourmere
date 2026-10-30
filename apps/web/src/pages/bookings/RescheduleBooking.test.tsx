@@ -192,7 +192,13 @@ describe('host rescheduling in the booking detail', () => {
     expect(api.to(`POST ${movePath}`)).toHaveLength(1)
     expect(api.to(`POST ${movePath}`)[0]?.body).toEqual({ start: successor.start })
     expect(api.to(`GET ${slotsPath}`).length).toBeGreaterThan(0)
-    expect(api.calls.every((call) => call.path.startsWith('/api/v1/'))).toBe(true)
+    expect(
+      api.calls.every(
+        (call) =>
+          call.path.startsWith('/api/v1/') ||
+          (call.method === 'GET' && call.path === '/api/auth/organization/list'),
+      ),
+    ).toBe(true)
     expect(api.calls.every((call) => !call.headers.has('x-manage-token'))).toBe(true)
     expect(screen.queryByRole('link', { name: /manage|private link/i })).toBeNull()
   })

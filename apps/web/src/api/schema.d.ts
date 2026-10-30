@@ -6175,6 +6175,11 @@ export interface components {
                 personal: boolean;
                 slug: string;
             };
+            /**
+             * Format: uuid
+             * @description The caller's own personal organization, independent of the active organization; null when unavailable
+             */
+            personalOrganizationId: string | null;
             principal: {
                 /**
                  * Format: uuid

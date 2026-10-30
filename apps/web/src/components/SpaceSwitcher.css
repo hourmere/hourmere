@@ -1,0 +1,113 @@
+.space-switcher {
+  position: relative;
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.button.space-trigger {
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-3);
+  text-align: left;
+}
+
+.space-context {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.space-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-role {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-popup {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  width: min(22rem, calc(100vw - var(--space-6)));
+  max-height: min(28rem, 60vh);
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.space-menu {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.space-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.space-menu button[aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+.space-menu button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
+.space-current {
+  font-size: var(--text-xs);
+}
+
+.space-popup p {
+  margin: var(--space-2) var(--space-3);
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+
+.space-load-error > .button {
+  margin: 0 var(--space-3) var(--space-2);
+}
+
+@media (hover: hover) {
+  .space-menu button:hover {
+    background: var(--surface-muted);
+  }
+}
+
+@media (min-width: 640px) {
+  .space-switcher {
+    order: -1;
+    flex: 0 1 16rem;
+    width: 16rem;
+  }
+}

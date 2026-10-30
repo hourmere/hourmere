@@ -960,4 +960,19 @@ export const admin = {
   'Check invitation status': '检查邀请状态',
   'Could not confirm acceptance. Check the invitation status before trying again.':
     '无法确认是否已接受。请先检查邀请状态，再决定是否重试。',
+  'Switch space': '切换空间',
+  Spaces: '空间',
+  Personal: '个人空间',
+  'Current space': '当前空间',
+  'Switching space…': '正在切换空间…',
+  'Checking role…': '正在检查角色…',
+  'Role unavailable': '角色暂不可用',
+  'Loading spaces…': '正在加载空间…',
+  'Could not load teams. Please try again.': '无法加载团队，请重试。',
+  'Could not switch spaces. You are still in {space}. Please try again.':
+    '无法切换空间。你仍位于{space}。请重试。',
+  'Could not confirm the switch. Checking your current space…':
+    '无法确认切换结果。正在检查你当前所在的空间…',
+  'You are now in your personal space. Your team access or active space changed.':
+    '你现在位于个人空间。你的团队访问权限或当前空间已更改。',
 } as const

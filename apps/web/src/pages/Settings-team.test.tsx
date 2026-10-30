@@ -110,25 +110,29 @@ describe('team context in account settings', () => {
   it('shows loading and a retryable failure without claiming an owner role', async () => {
     const user = userEvent.setup()
     const member = later()
-    let reads = 0
+    let recovered = false
     const api = fakeApi({
       ...signedInAs(TEAM_ME),
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () =>
-        ++reads === 1 ? member.response : json(200, MEMBER),
+        recovered ? json(200, MEMBER) : member.response.then((response) => response.clone()),
     })
     renderApp(PATHS.settings)
     const account = await screen.findByRole('region', { name: 'Account' })
     expect(within(account).getByText('Loading your team role…').getAttribute('role')).toBe('status')
     expect(within(account).getByText(TEAM_ME.organization.name)).toBeDefined()
     await member.answer(json(503, { code: 'INTERNAL_SERVER_ERROR' }))
-    expect(within(account).getByRole('alert').textContent).toBe('Could not load your team role.')
+    expect((await within(account).findByRole('alert')).textContent).toBe(
+      'Could not load your team role.',
+    )
     expect(within(account).queryByText('Owner')).toBeNull()
     const retry = within(account).getByRole('button', { name: 'Try again' })
+    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(2)
+    recovered = true
     retry.focus()
     await user.keyboard('{Enter}')
     expect(await within(account).findByText('Admin')).toBeDefined()
-    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(2)
+    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(3)
   })
 
   it.each([{ organizationId: 'another-organization' }, { userId: 'another-user' }, { role: '' }])(
@@ -156,7 +160,8 @@ describe('team context in account settings', () => {
     fakeApi({
       ...signedInAs(TEAM_ME),
       ...profile(PROFILE),
-      'GET /api/auth/organization/get-active-member': () => member.response,
+      'GET /api/auth/organization/get-active-member': () =>
+        member.response.then((response) => response.clone()),
     })
     const view = renderSettingsWithState(
       { createdMember: { ...MEMBER, role: 'owner' }, returnTo: 'account' },
@@ -183,13 +188,14 @@ describe('team context in account settings', () => {
     fakeApi({
       ...signedInAs(TEAM_ME),
       ...profile(PROFILE),
-      'GET /api/auth/organization/get-active-member': () => member.response,
+      'GET /api/auth/organization/get-active-member': () =>
+        member.response.then((response) => response.clone()),
     })
     renderSettingsWithState({ createdMember: { ...MEMBER, role: 'owner' } })
     const account = await screen.findByRole('region', { name: 'Account' })
     expect(within(account).getByText('Owner')).toBeDefined()
     await member.answer(json(200, MEMBER))
-    expect(within(account).getByText('Admin')).toBeDefined()
+    expect(await within(account).findByText('Admin')).toBeDefined()
     expect(within(account).queryByText('Owner')).toBeNull()
     expect(within(account).queryByText('Last confirmed role')).toBeNull()
   })
@@ -212,7 +218,8 @@ describe('team context in account settings', () => {
     await within(reloadedAccount).findByRole('alert')
     expect(within(reloadedAccount).queryByText('Owner')).toBeNull()
     expect(within(reloadedAccount).queryByText('Last confirmed role')).toBeNull()
-    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(2)
+    // The frame and account section independently read current membership on each mount.
+    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(4)
   })
 
   it('consumes route state by replacing the creation destination in history', async () => {
