@@ -46,13 +46,14 @@ export async function teamSessionUser(db: Db, principal: TeamSession, lock: bool
 }
 
 /** Last actor lock: verify expiry after waiting, using wall time rather than BEGIN time. */
-export async function teamSession(db: Db, principal: TeamSession, lock: boolean) {
+export async function teamSession(db: Db, principal: TeamSession, lock: boolean | 'no-key-update') {
   let query = db
     .selectFrom('auth.session')
     .select(['expiresAt', 'activeOrganizationId'])
     .where('id', '=', principal.sessionId)
     .where('userId', '=', principal.user.id)
-  if (lock) query = query.forShare()
+  if (lock === 'no-key-update') query = query.forNoKeyUpdate()
+  else if (lock) query = query.forShare()
   const session = await query.executeTakeFirst()
   if (!session) throw denied()
   const validity = await db

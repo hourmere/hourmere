@@ -446,8 +446,9 @@ header; cancellation also requires same-origin CSRF checks. Missing and other-te
 uniform `403 team_management_access_denied`. Context drift returns `409 organization_context_changed`.
 Cancellation serializes with resend and acceptance. It only voids a still-pending invitation;
 if joining won, the result remains `accepted` and the member remains joined. Native acceptance
-can commit the accepted status before inserting its membership, so the membership may appear
-shortly after that result. Repeating cancel is safe. Native Better Auth `cancel-invitation` uses the same locked policy. A submission
+commits the accepted status and matching membership in one transaction, including session
+activation. Native team creation likewise commits the organization and creator-owner
+membership together. Repeating cancel is safe. Native Better Auth `cancel-invitation` uses the same locked policy. A submission
 already in flight may still be accepted by SMTP, while the cancelled link cannot join.
 
 The additive `generation` is the expected generation for resend. `resendDeniedReason` is

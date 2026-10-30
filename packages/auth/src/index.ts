@@ -24,7 +24,8 @@ import { serializeOrganizationContext } from './organization-context.ts'
 import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
-import { createTeamRolePolicy } from './team-role-policy.ts'
+import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
+import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
 
 export { InvalidApiKeyError, requireActiveApiKey } from './api-key-principal.ts'
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
@@ -219,7 +220,7 @@ export function createAuth({
   const { google, microsoft } = socialProviders
   const teamRolePolicy = createTeamRolePolicy(db, leaveTeamMember)
   const auth = betterAuth({
-    database: pool,
+    database: teamTransactionAdapter(createDb(pool), teamRolePolicy.withTransaction),
     disabledPaths: [
       // Hourmere uses social providers only for sign-in. Browser sessions must not read
       // or refresh their credentials or manage linked accounts through unused endpoints.
@@ -418,11 +419,14 @@ export function createAuth({
             transaction((trx) => callback(teamRolePolicy.adapter(trx)))
         },
       },
-      organization({
-        // An invitation is accepted only by someone who proved they own the invited address.
-        requireEmailVerificationOnInvitation: true,
-        organizationHooks: organizationGuards(db),
-      }),
+      nativeTeamTransactions(
+        organization({
+          // An invitation is accepted only by someone who proved they own the invited address.
+          requireEmailVerificationOnInvitation: true,
+          membershipLimit: teamMembershipLimit,
+          organizationHooks: organizationGuards(db),
+        }),
+      ),
       memberReadPrivacy(db),
       apiKey({
         defaultPrefix: API_KEY_PREFIX,

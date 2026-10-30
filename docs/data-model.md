@@ -202,6 +202,17 @@ calendar-list access.
   Owners cannot be demoted or administratively removed; only their own safe departure
   is allowed. Team deletion and ownership transfer are unavailable at launch; rejected
   deletion requests cannot cascade into booking history.
+- **Native team creation and joining commit together.** Better Auth's organization,
+  creator-owner membership and session activation use one PostgreSQL transaction.
+  Invitation acceptance likewise commits its accepted status, membership and session
+  activation together. The policy's user → organization → session → invitation locks
+  and native writes share that connection. Acceptance takes the session row
+  `FOR NO KEY UPDATE` before the invitation so concurrent trusted API calls on the
+  same session queue without a share-to-update lock upgrade. Expiry uses database wall
+  time after lock waits, and the membership limit is rechecked under the organization lock. A lost
+  connection or process death before commit publishes none of these writes. A lost
+  response after commit can still require rereading the team or invitation; these
+  operations do not add response replay or repair historical incomplete rows.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
@@ -502,9 +513,11 @@ not prove the attendee's identity. Reschedule withdrawals retain their existing 
 attribution and do not create cancellation-operation records.
 
 Better Auth's remove-member, leave and update-member-role persistence paths record the
-actual changed membership in the same write transaction. HTTP role changes, administrative
-removal and self departure use the launch role policy's locked application transaction for
-the membership write and its attribution; other native member operations use the adapter transaction.
+actual changed membership in the same write transaction. Every native adapter transaction
+binds the launch role policy to its auth-pool connection, including `deleteMember`:
+administrative removal, dependent event deactivation and attribution join that transaction.
+Policy writes outside a native transaction, including HTTP role changes, use their own
+locked application transaction. Self departure uses the scheduling service's transaction.
 Safe departure also commits the session's personal fallback in that transaction after
 rechecking current event and booking impact. The policy wraps the native
 recorder so neither a second connection nor a second record is needed. A role no-op, rejected request
