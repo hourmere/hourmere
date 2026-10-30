@@ -768,6 +768,8 @@ export const admin = {
   'These hours overlap: {0}.': '以下时间段重叠：{0}。',
   'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.':
     '此应用可在该组织中以你的权限使用 MCP 工具：查看活动类型和可用时间，以及创建、查看、改期或取消预约。应用将收到预约详情，包括参会人信息和回答。它无法管理你的账号或 API 密钥。',
+  'This booking can no longer be cancelled. It may have started or become unavailable.':
+    '此预约已无法取消，可能已开始或已不可用。',
   'This booking does not exist, or it is not one of yours.': '此预约不存在，或不属于你。',
   'This booking has already started, so it can no longer be cancelled.': '此预约已开始，无法取消。',
   'This booking was already cancelled. Reload to see the details.':

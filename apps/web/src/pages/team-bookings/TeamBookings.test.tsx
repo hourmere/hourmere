@@ -713,7 +713,14 @@ describe('team booking cancellation', () => {
   })
 
   it('clears booking data and provides a way out when cancellation returns 403', async () => {
-    const api = server({ [CANCEL]: () => json(403, { error: 'team_management_access_denied' }) })
+    let role = 'owner'
+    const api = server({
+      'GET /api/auth/organization/get-active-member': () => json(200, member(TEAM, role)),
+      [CANCEL]: () => {
+        role = 'member'
+        return json(403, { error: 'team_management_access_denied' })
+      },
+    })
     renderApp(PAGE)
     const user = await openDetail()
     await confirmCancellation(user)

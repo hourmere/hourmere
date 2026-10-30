@@ -808,6 +808,8 @@ export const admin = {
   'These hours overlap: {0}.': 'These hours overlap: {0}.',
   'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.':
     'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.',
+  'This booking can no longer be cancelled. It may have started or become unavailable.':
+    'This booking can no longer be cancelled. It may have started or become unavailable.',
   'This booking does not exist, or it is not one of yours.':
     'This booking does not exist, or it is not one of yours.',
   'This booking has already started, so it can no longer be cancelled.':

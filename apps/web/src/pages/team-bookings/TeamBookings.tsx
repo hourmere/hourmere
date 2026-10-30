@@ -40,6 +40,14 @@ const TIME_FILTERS = [
   { name: 'endTo', label: 'Ends at or before' },
 ] as const
 
+function isAccessDenied(error: unknown): boolean {
+  return (
+    error instanceof RequestError &&
+    error.status === 403 &&
+    error.code === 'team_management_access_denied'
+  )
+}
+
 export function TeamBookingsPage() {
   const { t } = useI18n()
   const me = useMe()
@@ -48,6 +56,12 @@ export function TeamBookingsPage() {
   const [openingContextError] = useState(access.contextError)
   const [expectedOrganizationId] = useState(me.organization.id)
   const [revoked, setRevoked] = useState(false)
+  const confirmedAccess = useRef(false)
+  useEffect(() => {
+    if (access.status === 'ready' && access.role) confirmedAccess.current = true
+  }, [access])
+  const accessRevoked =
+    revoked || (confirmedAccess.current && access.status === 'ready' && !access.role)
   const revoke = access.revoke
   const onRevoked = useCallback(() => {
     setRevoked(true)
@@ -70,7 +84,7 @@ export function TeamBookingsPage() {
         </dd>
         <dt>{t('Your role')}</dt>
         <dd>
-          {revoked
+          {accessRevoked
             ? t('Access revoked')
             : access.status === 'ready'
               ? access.role === 'owner'
@@ -85,7 +99,7 @@ export function TeamBookingsPage() {
       </dl>
       {openingContextError ? (
         <OrganizationContextConflict error={openingContextError} />
-      ) : revoked ? (
+      ) : accessRevoked ? (
         <Unavailable revoked />
       ) : access.status === 'loading' ? (
         <PageSkeleton label="Loading your team role…" />
@@ -327,6 +341,10 @@ function BookingList({
   onConflict: (error: unknown) => void
 }) {
   const { t, ui, formatLocale } = useI18n()
+  const loadedPages = useRef(1)
+  const loadedSnapshot = useRef<BookingPage | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<UiText | null>(null)
   const [query] = useState<Query>(() => {
     const now = new Date().toISOString()
     const endAfter = instant(params.get('endAfter'))
@@ -351,16 +369,33 @@ function BookingList({
   const load = useCallback(
     async (signal: AbortSignal) => {
       try {
-        return await unwrap(api.GET('/api/v1/team/bookings', { params: { query }, signal }))
+        let page = await unwrap(api.GET('/api/v1/team/bookings', { params: { query }, signal }))
+        for (let depth = 1; depth < loadedPages.current && page.nextCursor; depth += 1) {
+          const next = await unwrap(
+            api.GET('/api/v1/team/bookings', {
+              params: { query: { ...query, cursor: page.nextCursor } },
+              signal,
+            }),
+          )
+          page = { data: [...page.data, ...next.data], nextCursor: next.nextCursor }
+        }
+        if (!signal.aborted) loadedSnapshot.current = page
+        return page
       } catch (error) {
-        if (!signal.aborted && error instanceof RequestError && error.status === 403) onRevoked()
+        if (!signal.aborted && isAccessDenied(error)) onRevoked()
+        else if (!signal.aborted && loadedSnapshot.current) {
+          setRefreshError(errorMessage(error))
+          return loadedSnapshot.current
+        }
         throw error
+      } finally {
+        if (!signal.aborted) setRefreshing(false)
       }
     },
     [query, onRevoked],
   )
   const [first, reload] = useLoad(load)
-  const [more, setMore] = useState<BookingPage | null>(null)
+  const [more, setMore] = useState<(BookingPage & { source: BookingPage }) | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [moreError, setMoreError] = useState<UiText | null>(null)
   const [status, setStatus] = useState<UiText>('')
@@ -368,11 +403,18 @@ function BookingList({
   const opener = useRef<HTMLButtonElement | null>(null)
   const moreController = useRef<AbortController | null>(null)
   const list = useRef<HTMLTableSectionElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const confirmLeave = useConfirmLeave()
   const format = zoned(browserTimeZone(), formatLocale)
 
   useEffect(() => () => moreController.current?.abort(), [])
+  useEffect(() => {
+    if (first.status !== 'ready') return
+    setSelected((current) =>
+      current ? (first.data.data.find((booking) => booking.id === current.id) ?? current) : null,
+    )
+  }, [first])
   useEffect(() => {
     if (!focusId) return
     list.current?.querySelector<HTMLButtonElement>(`[data-booking="${focusId}"]`)?.focus()
@@ -399,9 +441,18 @@ function BookingList({
     )
   }
 
-  const shown = more ?? first.data
+  const source = first.data
+  const shown = more?.source === source ? more : source
+  function refreshBookings() {
+    moreController.current?.abort()
+    setLoadingMore(false)
+    setMoreError(null)
+    setRefreshError(null)
+    setRefreshing(true)
+    reload()
+  }
   async function loadMore() {
-    if (!shown.nextCursor || loadingMore || conflict) return
+    if (!shown.nextCursor || loadingMore || refreshing || conflict) return
     const controller = new AbortController()
     moreController.current = controller
     setLoadingMore(true)
@@ -415,12 +466,14 @@ function BookingList({
       )
       if (controller.signal.aborted) return
       const data = [...shown.data, ...page.data]
-      setMore({ data, nextCursor: page.nextCursor })
+      loadedPages.current += 1
+      loadedSnapshot.current = { data, nextCursor: page.nextCursor }
+      setMore({ data, nextCursor: page.nextCursor, source })
       setStatus(msg('Showing {0} bookings.', { '0': data.length }))
       if (page.data[0]) setFocusId(page.data[0].id)
     } catch (error) {
       if (controller.signal.aborted) return
-      if (error instanceof RequestError && error.status === 403) onRevoked()
+      if (isAccessDenied(error)) onRevoked()
       else setMoreError(msg('Could not load more bookings. {0}', { '0': errorMessage(error) }))
     }
     if (!controller.signal.aborted) setLoadingMore(false)
@@ -428,7 +481,7 @@ function BookingList({
 
   return (
     <section className="team-bookings-list" aria-labelledby="team-bookings-list-heading">
-      <h2 id="team-bookings-list-heading" className="visually-hidden">
+      <h2 id="team-bookings-list-heading" className="visually-hidden" ref={heading} tabIndex={-1}>
         {t('Team bookings')}
       </h2>
       <p className="muted zone-note">
@@ -441,6 +494,16 @@ function BookingList({
         {ui(status)}
       </p>
       {conflict !== null && <OrganizationContextConflict error={conflict} />}
+      {refreshError && (
+        <div className="alert alert-error" role="alert">
+          <p>
+            {t('Could not load team bookings.')} {ui(refreshError)}
+          </p>
+          <button type="button" className="button button-small" onClick={refreshBookings}>
+            {t('Try again')}
+          </button>
+        </div>
+      )}
       {shown.data.length === 0 ? (
         <EmptyState title={t('No team bookings match these filters.')}>
           <p>
@@ -543,7 +606,7 @@ function BookingList({
             type="button"
             className="button"
             onClick={loadMore}
-            disabled={loadingMore || !!conflict}
+            disabled={loadingMore || refreshing || !!conflict}
           >
             {loadingMore ? t('Loading…') : t('Show more bookings')}
           </button>
@@ -561,16 +624,24 @@ function BookingList({
             onConflict(error)
           }}
           onRevoked={onRevoked}
+          onRefresh={refreshBookings}
           onClose={closeDetails}
           onCancelled={() => {
-            moreController.current?.abort()
-            setLoadingMore(false)
-            setMoreError(null)
+            const updated: BookingPage = {
+              data:
+                query.status === 'confirmed'
+                  ? shown.data.filter((booking) => booking.id !== selected.id)
+                  : shown.data.map((booking) =>
+                      booking.id === selected.id ? { ...booking, status: 'cancelled' } : booking,
+                    ),
+              nextCursor: shown.nextCursor,
+            }
+            loadedSnapshot.current = updated
+            setMore({ ...updated, source })
             setSelected(null)
-            setMore(null)
             setStatus('The booking is cancelled.')
-            reload()
-            setTimeout(() => opener.current?.focus())
+            refreshBookings()
+            setTimeout(() => heading.current?.focus())
           }}
         />
       )}
@@ -584,6 +655,7 @@ function BookingDetail({
   conflict,
   onConflict,
   onRevoked,
+  onRefresh,
   onClose,
   onCancelled,
 }: {
@@ -592,6 +664,7 @@ function BookingDetail({
   conflict: unknown
   onConflict: (error: unknown) => void
   onRevoked: () => void
+  onRefresh: () => void
   onClose: () => void
   onCancelled: () => void
 }) {
@@ -690,6 +763,7 @@ function BookingDetail({
             conflict={conflict}
             onConflict={onConflict}
             onRevoked={onRevoked}
+            onRefresh={onRefresh}
             onCancelled={onCancelled}
           />
         ) : (
@@ -709,6 +783,7 @@ function CancelBooking({
   conflict,
   onConflict,
   onRevoked,
+  onRefresh,
   onCancelled,
 }: {
   booking: Booking
@@ -716,10 +791,12 @@ function CancelBooking({
   conflict: unknown
   onConflict: (error: unknown) => void
   onRevoked: () => void
+  onRefresh: () => void
   onCancelled: () => void
 }) {
   const { t, ui } = useI18n()
   const { confirmReload } = useSession()
+  const { recheck } = useTeamManagementAccess()
   const mounted = useMounted()
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
@@ -727,6 +804,7 @@ function CancelBooking({
   const [error, setError] = useState<UiText | null>(null)
   const [busy, setBusy] = useState(false)
   const [alreadyCancelled, setAlreadyCancelled] = useState(false)
+  const [started, setStarted] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
   const reasonInput = useRef<HTMLTextAreaElement>(null)
   const controller = useRef<AbortController | null>(null)
@@ -738,7 +816,7 @@ function CancelBooking({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (busy || conflict || alreadyCancelled) return
+    if (busy || conflict || alreadyCancelled || started) return
     setError(null)
     if (new Date(booking.start).getTime() <= Date.now()) {
       setError('This booking has already started, so it can no longer be cancelled.')
@@ -781,8 +859,27 @@ function CancelBooking({
     } catch (failure) {
       if (!mounted.current) return
       if (isOrganizationContextChanged(failure)) onConflict(failure)
-      else if (failure instanceof RequestError && failure.status === 403) onRevoked()
-      else if (failure instanceof RequestError && failure.code === 'invalid_reason') {
+      else if (isAccessDenied(failure)) {
+        try {
+          const allowed = await recheck(controller.current.signal)
+          if (!mounted.current || controller.current.signal.aborted) return
+          if (!allowed) onRevoked()
+          else {
+            setStarted(true)
+            setError(
+              'This booking can no longer be cancelled. It may have started or become unavailable.',
+            )
+            onRefresh()
+          }
+        } catch (error) {
+          if (!mounted.current || controller.current.signal.aborted) return
+          setError(msg('Could not cancel the booking. {0}', { '0': errorMessage(error) }))
+        }
+      } else if (failure instanceof RequestError && failure.code === 'booking_in_past') {
+        setStarted(true)
+        setError('This booking has already started, so it can no longer be cancelled.')
+        onRefresh()
+      } else if (failure instanceof RequestError && failure.code === 'invalid_reason') {
         setReasonError(
           'Use at most 1000 characters, without control characters other than tabs and line breaks.',
         )
@@ -855,7 +952,7 @@ function CancelBooking({
             <button
               type="submit"
               className="button button-danger"
-              disabled={busy || !!conflict || alreadyCancelled}
+              disabled={busy || !!conflict || alreadyCancelled || started}
             >
               {busy ? t('Cancelling…') : t('Cancel booking')}
             </button>
