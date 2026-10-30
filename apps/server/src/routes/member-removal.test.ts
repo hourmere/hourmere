@@ -1316,7 +1316,9 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
   })
 
   it('registers all production routes with open responses and a strict removal request', async () => {
-    const app = application(productRoutes({ db, socialProviders: {} }))
+    const app = application(
+      productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+    )
     const document = await openApiDocument(app)
     expect(document.paths[removalPath]?.post?.security).toEqual([{ session: [] }])
     expect(document.paths[handlingPath]?.get?.security).toEqual([{ session: [] }])

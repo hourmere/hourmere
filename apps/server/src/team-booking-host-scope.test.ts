@@ -169,7 +169,7 @@ describe.skipIf(!bootstrap)('team reads preserve host listing scope over HTTP', 
       publicUrl,
       routes: copies
         ? [copies.routes({ db }), teamBookingRoutes({ db })]
-        : productRoutes({ db, socialProviders: {} }),
+        : productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
       mcp: mcpEndpoint({ tools: copies ? copies.tools({ db }) : productTools({ db }) }),
     })
     const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 })

@@ -321,7 +321,12 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
         authHandler: async () => new Response(null, { status: 404 }),
         resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
         publicUrl: 'https://hourmere.invalid',
-        routes: productRoutes({ db, socialProviders: {}, zoomWebhookSecretToken }),
+        routes: productRoutes({
+          db,
+          socialProviders: {},
+          invitationMailLimits: { secret: SECRET },
+          zoomWebhookSecretToken,
+        }),
       })
       expect((await post()).status).toBe(404)
     }
@@ -333,7 +338,12 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
       publicUrl: 'https://hourmere.invalid',
-      routes: productRoutes({ db, socialProviders: {}, zoomWebhookSecretToken: SECRET }),
+      routes: productRoutes({
+        db,
+        socialProviders: {},
+        invitationMailLimits: { secret: SECRET },
+        zoomWebhookSecretToken: SECRET,
+      }),
     })
     const body = JSON.stringify(deauthorized)
     expect(

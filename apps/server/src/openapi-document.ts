@@ -16,7 +16,11 @@ export async function openApiDocument(): Promise<unknown> {
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
       publicUrl: 'http://localhost',
-      routes: productRoutes({ db, socialProviders: {} }),
+      routes: productRoutes({
+        db,
+        socialProviders: {},
+        invitationMailLimits: { secret: 'openapi-document-only' },
+      }),
     })
     const res = await app.request('/api/v1/openapi.json')
     if (!res.ok) throw new Error(`GET /api/v1/openapi.json answered ${res.status}`)

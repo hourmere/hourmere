@@ -533,7 +533,9 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
   })
 
   it('registers the production route as session-only with an extensible whitelist in OpenAPI', async () => {
-    const production = application(productRoutes({ db, socialProviders: {} }))
+    const production = application(
+      productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+    )
     expect(
       (await page(await get(seeded.ownerSession.cookie, '', {}, production))).data.map(
         (booking) => booking.id,

@@ -633,6 +633,27 @@ never sent later. Existing sessions are unaffected. Operators can raise `MAIL_MA
 while keeping the cap, reserve and other mail within their provider's limit; raising it does
 not resend messages that were already suppressed.
 
+## Team invitation delivery design notes
+
+Team invitations keep their current delivery generation in `invitation_deliveries`,
+separate from the invitation's acceptance and expiry state. The delivery record contains
+the generation, bounded attempt count, due time, claim lease, job and resend request IDs,
+safe outcome/error code, SMTP acceptance time, creation/update times and nullable
+`last_attempt_at`. An SMTP acceptance does not mean that the recipient received, read or
+accepted the invitation. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
+and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
+
+Migration 0044 makes `last_attempt_at` exclusively owned by the
+`invitation_delivery_attempt_time` database trigger. The future invitation sender must
+not write this column; it records an attempt by incrementing `attempts`. The trigger
+overwrites any explicit INSERT or UPDATE value. Inserts with positive attempts,
+increased attempts and a changed generation with positive attempts receive the database's
+`clock_timestamp()`. Zero attempts clear the timestamp, including a new generation's
+reset; all other updates preserve the prior value. Outcome and metadata changes cannot
+fabricate an attempt time. Legacy rows remain null because their historical attempt
+times are unknown, even if their counters are positive. Senders must still update
+`updated_at` for the resend cooldown; it is separate from this attempt timestamp.
+
 ## Outbound booking webhooks
 
 The composition root also invokes the optional webhook notifier in the same booking
