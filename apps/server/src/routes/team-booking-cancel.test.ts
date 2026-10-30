@@ -477,7 +477,9 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
     async (expectedOrganizationId) => {
       const f = await fixture()
       const before = await stored(f.booking)
-      await expectContextChanged(await cancel(f, { expectedOrganizationId }))
+      const response = await cancel(f, { expectedOrganizationId })
+      if (!expectedOrganizationId) await expectContextChanged(response)
+      else await expectDenied(response)
       await expectUnchanged(f.booking, before)
     },
   )
@@ -933,7 +935,11 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
     await verifyOpenResponse(teamBookingRoutes)
   })
 
-  function routeCopy(replacement?: [string, string], accessObserved = () => {}) {
+  function routeCopy(
+    replacement?: [string, string],
+    accessObserved = () => {},
+    afterAccess?: () => Promise<void>,
+  ) {
     let source = readFileSync('apps/server/src/routes/team-bookings.ts', 'utf8')
     if (replacement) {
       expect(source.includes(replacement[0]), 'mutation must match real source').toBe(true)
@@ -960,7 +966,10 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
         const check = access.middleware[1]
         access.middleware[1] = async (c, next) => {
           accessObserved()
-          return check(c, next)
+          return check(c, async () => {
+            await afterAccess?.()
+            return next()
+          })
         }
         return access
       },
@@ -990,17 +999,20 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
     expect(await response.json()).toMatchObject({ error: 'forbidden' })
   }
 
-  async function verifyLiveSessionContext(factory: RouteFactory) {
+  async function verifyLiveSessionContext(replacement?: [string, string]) {
     const f = await fixture()
     const guarded = application({
-      factory,
-      afterResolve: async () => {
-        await db
-          .updateTable('auth.session')
-          .set({ activeOrganizationId: f.other.id })
-          .where('id', '=', f.sessionId)
-          .execute()
-      },
+      factory: routeCopy(
+        replacement,
+        () => {},
+        async () => {
+          await db
+            .updateTable('auth.session')
+            .set({ activeOrganizationId: f.other.id })
+            .where('id', '=', f.sessionId)
+            .execute()
+        },
+      ),
     })
     await expectContextChanged(await cancel(f, { app: guarded }))
   }
@@ -1008,7 +1020,7 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
   it('passes context, notifier and open-response assertions with an unmodified route source copy', async () => {
     const copy = routeCopy()
     await verifyExpectedContext(copy)
-    await verifyLiveSessionContext(copy)
+    await verifyLiveSessionContext()
     await verifySameOrigin(copy)
     await verifyNotifications(copy)
     await verifyOpenResponse(copy)
@@ -1025,10 +1037,9 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
   })
 
   it('detects dropping the live expected-organization write binding with a real assertion failure', async () => {
-    const copy = routeCopy(['          { expectedOrganizationId },', '          undefined,'])
-    await expect(verifyLiveSessionContext(copy)).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expect(
+      verifyLiveSessionContext(['          { expectedOrganizationId },', '          undefined,']),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
 
   it('detects bypassing the shared caller origin check with a real assertion failure', async () => {

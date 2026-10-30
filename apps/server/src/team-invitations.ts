@@ -13,6 +13,7 @@ export type InvitationSummaryMailLimits = InvitationMailLimits & { secret: strin
 
 export const TeamInvitationSummarySchema = z.strictObject({
   id: z.uuid(),
+  email: z.string(),
   status: z.enum(['pending', 'accepted', 'canceled', 'rejected', 'expired', 'unknown']),
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
@@ -56,12 +57,26 @@ function afterId(cursor: string | undefined, organizationId: string): string | n
 export async function listTeamInvitationSummaries(
   db: Db,
   actor: TeamManager,
-  input: { limit?: number | undefined; cursor?: string | undefined },
+  input: {
+    limit?: number | undefined
+    cursor?: string | undefined
+    status?: TeamInvitationSummary['status'] | undefined
+  },
   mailLimits: InvitationSummaryMailLimits,
 ) {
   const limit = input.limit ?? 50
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
     throw new DomainError('invalid', 'invalid_limit', 'limit must be from 1 to 100')
+  if (
+    input.status !== undefined &&
+    !TeamInvitationSummarySchema.shape.status.safeParse(input.status).success
+  )
+    throw new DomainError(
+      'invalid',
+      'invalid_status',
+      'status must be a known invitation lifecycle',
+    )
+  const status = input.status ?? null
   const after = afterId(input.cursor, actor.organizationId)
   const { rows } = await sql<{
     id: string
@@ -81,7 +96,8 @@ export async function listTeamInvitationSummaries(
     generation_started_at: Date | null
     updated_at: Date | null
   }>`
-    WITH invitation_clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
+    WITH invitation_clock AS MATERIALIZED (SELECT clock_timestamp() AS now),
+    summaries AS (
     SELECT i.id, i.email, i.role, i.status AS "storedStatus", i."createdAt", i."expiresAt",
       CASE WHEN i.status = 'pending' AND i."expiresAt" <= invitation_clock.now
         THEN 'expired'
@@ -96,7 +112,10 @@ export async function listTeamInvitationSummaries(
     LEFT JOIN public.invitation_deliveries AS d ON d.invitation_id = i.id
     WHERE i."organizationId" = ${actor.organizationId}::uuid
       AND (${after}::uuid IS NULL OR i.id > ${after}::uuid)
-    ORDER BY i.id ASC
+    )
+    SELECT * FROM summaries
+    WHERE (${status}::text IS NULL OR status = ${status}::text)
+    ORDER BY id ASC
     LIMIT ${limit + 1}
   `.execute(db)
 
@@ -130,6 +149,7 @@ export async function listTeamInvitationSummaries(
     data.push(
       TeamInvitationSummarySchema.parse({
         id: row.id,
+        email: row.email,
         status: row.status,
         createdAt: row.createdAt.toISOString(),
         expiresAt: row.expiresAt.toISOString(),

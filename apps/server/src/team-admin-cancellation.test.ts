@@ -601,8 +601,8 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
   it('detects personal-organization admission in the shared writer source copy', async () => {
     const copy = await sourceCopy<{ teamManagementAccess: Access }>(
       './team-management.ts',
-      'allowPersonal: false',
-      'allowPersonal: true',
+      'expectedOrganizationId: options.expectedOrganizationId,\n              allowPersonal: false',
+      'expectedOrganizationId: options.expectedOrganizationId,\n              allowPersonal: true',
     )
     await expect(verifyPersonalContext(copy.teamManagementAccess)).rejects.toMatchObject({
       name: 'AssertionError',

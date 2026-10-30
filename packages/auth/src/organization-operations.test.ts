@@ -324,16 +324,18 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         ...(path === 'update-member-role' ? { memberId: f.memberId, role: 'admin' } : {}),
       }
       const before = await membership(f.memberId)
-      async function refused(expectedOrganizationId?: string) {
+      async function refused(expectedOrganizationId?: string, status = 409) {
         const response = await post(path, caller.cookie, body, expectedOrganizationId)
-        expect(response.status).toBe(409)
-        expect(await response.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+        expect(response.status).toBe(status)
+        expect(await response.json()).toMatchObject({
+          code: status === 409 ? 'ORGANIZATION_CONTEXT_CHANGED' : 'TEAM_MANAGEMENT_ACCESS_DENIED',
+        })
         expect(await membership(f.memberId)).toEqual(before)
         expect(await operations(f.organizationId)).toEqual([])
       }
 
       await refused()
-      await refused('not-a-uuid')
+      await refused('not-a-uuid', 403)
       const personalId = await ensurePersonalOrganization(db, caller.id)
       expect((await post('set-active', caller.cookie, { organizationId: personalId })).status).toBe(
         200,

@@ -185,6 +185,8 @@ export function teamManagementSessionCaller(caller: CallerMiddleware) {
  * `middleware: access.middleware`. Authorization-bearing requests are denied before session
  * resolution. Cookie callers retain requireCaller's Origin/Referer checks, followed by fresh
  * verified team owner/admin facts; missing or invalid sessions get the same access denial.
+ * A supplied expected team is checked before current-team eligibility: only its current
+ * owner/admin may receive a context-change conflict after switching to another space.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
  * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
@@ -205,13 +207,35 @@ export function teamManagementSessionCaller(caller: CallerMiddleware) {
  */
 export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
   const sessionCaller = teamManagementSessionCaller(caller)
+  async function expectedContext(
+    principal: Principal,
+    expectedOrganizationId?: string,
+    allowMemberRead = false,
+  ) {
+    if (expectedOrganizationId === undefined) return
+    if (!uuid(expectedOrganizationId)) throw denied()
+    await check(
+      db,
+      principal,
+      expectedOrganizationId,
+      false,
+      { expectedOrganizationId, allowPersonal: false },
+      allowMemberRead,
+    )
+  }
   const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
+    await expectedContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
   })
   // Entry to self-impact reads only. The service must still scope the target to the
   // caller for ordinary members and recheck the current session organization.
   const memberRead = createMiddleware<CallerEnv>(async (c, next) => {
+    await expectedContext(
+      c.var.principal,
+      c.req.header(EXPECTED_ORGANIZATION_HEADER),
+      c.req.param('memberUserId')?.toLowerCase() === c.var.principal.user.id.toLowerCase(),
+    )
     await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)
     await next()
   })

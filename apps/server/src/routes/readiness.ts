@@ -94,7 +94,7 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/teams/{teamId}/readiness',
         summary: 'Read a minimal booking readiness summary for the acting team',
         description:
-          'Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.',
+          'Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.',
         tags: ['Readiness'],
         security: sessionSecurity,
         middleware: [...access.middleware, currentTeamSession] as [
@@ -104,6 +104,12 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
         ],
         request: {
           params: z.object({ teamId: z.uuid() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
+            }),
+          }),
           query: teamPageQuery,
         },
         responses: {
@@ -124,6 +130,12 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
               'team_management_access_denied: requires the current team owner/admin web session without Authorization',
             content: json(ErrorBody),
           },
+          409: {
+            description:
+              'organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying',
+            content: json(ErrorBody),
+          },
+
           500: internalError,
         },
       }),

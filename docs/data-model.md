@@ -331,8 +331,10 @@ which provides no evidence of sending. Callers must authorize access to the orga
 before using this internal query; no HTTP endpoint is installed by the storage layer.
 
 The server's session-only `GET /api/v1/team/invitations` separately lists all invitation
-lifecycle states for the current team's verified owners/admins. It returns a strict safe
-delivery summary and shares resend eligibility and request-budget checks with the write
+lifecycle states for the current team's verified owners/admins. It returns the invited
+recipient address only to those managers, alongside a strict safe delivery summary; ordinary
+members, other teams and agent credentials cannot read it. No links, tokens, message bodies
+or raw provider errors are exposed. It shares resend eligibility and request-budget checks with the write
 path. Pending expiry uses a materialized database-clock value, with terminal statuses
 preserved. Missing delivery rows read as unknown. Migration 0044 adds nullable
 `last_attempt_at` without rewriting or guessing legacy rows. The

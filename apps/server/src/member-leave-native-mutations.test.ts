@@ -47,7 +47,7 @@ function moduleUrl(source: string, location: URL, replacements: Record<string, s
 }
 
 /** Native requests run a copied auth factory and policy without modifying any working file. */
-async function sourceCopy(mutation?: Mutation): Promise<NativeCopy> {
+async function sourceCopy(mutation?: Mutation, contextMutation?: Mutation): Promise<NativeCopy> {
   const policyLocation = new URL('../../../packages/auth/src/team-role-policy.ts', import.meta.url)
   let source = readFileSync(policyLocation, 'utf8')
   if (mutation) {
@@ -56,10 +56,27 @@ async function sourceCopy(mutation?: Mutation): Promise<NativeCopy> {
     )
     source = source.replaceAll(...mutation)
   }
+  const contextLocation = new URL(
+    '../../../packages/auth/src/organization-context.ts',
+    import.meta.url,
+  )
+  let contextSource = readFileSync(contextLocation, 'utf8')
+  if (contextMutation) {
+    expect(contextSource.includes(contextMutation[0]), 'mutation must match native context').toBe(
+      true,
+    )
+    contextSource = contextSource.replace(...contextMutation)
+  }
+  const contextUrl = moduleUrl(contextSource, contextLocation)
+  const hooksLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
   const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
   const copied = await import(
     moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, {
       './team-role-policy.ts': moduleUrl(source, policyLocation),
+      './organization-context.ts': contextUrl,
+      './hooks.ts': moduleUrl(readFileSync(hooksLocation, 'utf8'), hooksLocation, {
+        './organization-context.ts': contextUrl,
+      }),
     })
   )
   const serviceLocation = new URL(
@@ -191,6 +208,37 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   async function currentMembership(f: Fixture) {
     return db.selectFrom('auth.member').select('id').where('id', '=', f.memberId).executeTakeFirst()
   }
+
+  async function assertStaleMemberContext(copy: NativeCopy) {
+    const f = await fixture(false)
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('id', '=', f.memberId)
+      .execute()
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: f.member.principal.organization.id })
+      .where('id', '=', f.sessionId)
+      .execute()
+    const response = await post(app(copy), f)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+    expect(await currentMembership(f)).toEqual({ id: f.memberId })
+  }
+
+  it('keeps native stale member leave recoverable with an unchanged context source copy', async () => {
+    await assertStaleMemberContext(await sourceCopy())
+  })
+
+  it('detects using management-only authority for native stale member leave', async () => {
+    const copy = await sourceCopy(undefined, ["ctx.path === '/organization/leave',", 'false,'])
+    await expect(assertStaleMemberContext(copy)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: 403,
+      expected: 409,
+    })
+  })
 
   async function assertBlocked(factory: NativeCopy, path = 'leave') {
     const f = await fixture()

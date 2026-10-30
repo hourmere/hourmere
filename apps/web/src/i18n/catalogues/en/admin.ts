@@ -1,5 +1,33 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'The invitation request could not be queued. Try again later.':
+    'The invitation request could not be queued. Try again later.',
+  'Invite member': 'Invite member',
+  'Invitations always use the member role.': 'Invitations always use the member role.',
+  'Invitation queued for delivery.': 'Invitation queued for delivery.',
+  'Queueing invitation…': 'Queueing invitation…',
+  'Waiting to send': 'Waiting to send',
+  'An invitation already exists. Review its mail submission status below.':
+    'An invitation already exists. Review its mail submission status below.',
+  'An invitation is already pending for this address. Review the pending invitations.':
+    'An invitation is already pending for this address. Review the pending invitations.',
+  'This address already belongs to a team member.':
+    'This address already belongs to a team member.',
+  'This team has reached its pending invitation limit. Resolve pending invitations before inviting more people.':
+    'This team has reached its pending invitation limit. Resolve pending invitations before inviting more people.',
+  'Enter a valid email address.': 'Enter a valid email address.',
+  'The invitation was saved, but delivery could not be queued. Retry with the same email address.':
+    'The invitation was saved, but delivery could not be queued. Retry with the same email address.',
+  'The invitation changed. Reload before trying again.':
+    'The invitation changed. Reload before trying again.',
+  'This invitation is no longer pending. Reload before trying again.':
+    'This invitation is no longer pending. Reload before trying again.',
+  'You do not have permission to invite members.': 'You do not have permission to invite members.',
+  'Invitation requests are temporarily limited. Try again later.':
+    'Invitation requests are temporarily limited. Try again later.',
+  'Try again in {0} seconds.': 'Try again in {0} seconds.',
+  'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.':
+    'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.',
   'This host’s time zone is unavailable.': 'This host’s time zone is unavailable.',
   'Host time zone: {zone}': 'Host time zone: {zone}',
   'Book again with another host': 'Book again with another host',
@@ -52,7 +80,12 @@ export const admin = {
   'You do not have permission to view pending invitations.':
     'You do not have permission to view pending invitations.',
   'No pending invitations on this page.': 'No pending invitations on this page.',
-  'Invitation {0}': 'Invitation {0}',
+  'Invitation to {email}': 'Invitation to {email}',
+  'Invited {time}': 'Invited {time}',
+  'Resend invitation': 'Resend invitation',
+  'Invitation delivery is in progress. Try again shortly.':
+    'Invitation delivery is in progress. Try again shortly.',
+  'This invitation has reached its resend limit.': 'This invitation has reached its resend limit.',
   'Mail submission': 'Mail submission',
   Submitted: 'Submitted',
   'Submitting to the mail server': 'Submitting to the mail server',

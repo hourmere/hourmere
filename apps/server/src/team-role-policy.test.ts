@@ -697,8 +697,10 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         { organizationId: f.teamId, memberId: f.targetMemberId, role: 'admin' },
         { expected },
       )
-      expect(response.status).toBe(409)
-      expect(await response.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+      expect(response.status).toBe(expected === null ? 409 : 403)
+      expect(await response.json()).toMatchObject({
+        code: expected === null ? 'ORGANIZATION_CONTEXT_CHANGED' : 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      })
     }
     expect(
       (

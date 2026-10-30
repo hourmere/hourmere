@@ -394,7 +394,12 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     expect(response.status).toBe(200)
     const document = await openApiDocument(app)
     expect(document.paths[path]?.get?.security).toEqual([{ session: [] }])
-    expect(Object.keys(document.paths[path]?.get?.responses ?? {})).toEqual(['200', '400', '403'])
+    expect(Object.keys(document.paths[path]?.get?.responses ?? {})).toEqual([
+      '200',
+      '400',
+      '403',
+      '409',
+    ])
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
     expect(document.components?.schemas?.MemberDepartureImpact).toMatchObject({
       properties: {
@@ -554,6 +559,40 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
       sql,
     ) as typeof teamManagementAccess
   }
+
+  async function verifyStalePreview(managementFactory: typeof teamManagementAccess) {
+    const f = await fixture('member')
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: f.actor.principal.organization.id })
+      .where('id', '=', f.login.id)
+      .execute()
+    const factory = sourceCopy(undefined, () => {}, managementFactory)
+    const app = application([factory({ db, now })])
+    const headers = { cookie: f.login.cookie, 'X-Expected-Organization-Id': f.team.id }
+    const own = await get(f, f.actor.id, {}, app, headers)
+    expect(own.status).toBe(409)
+    expect(await own.json()).toMatchObject({ error: 'organization_context_changed' })
+    await expectDenied(await get(f, f.target.id, {}, app, headers))
+  }
+
+  it('retains stale member recovery only for their own preview in an unchanged source copy', () =>
+    verifyStalePreview(managementSourceCopy()))
+
+  it.each([
+    ['requiring management for self preview', 'false', 403, 409],
+    ['allowing member recovery for another member preview', 'true', 409, 403],
+  ] as const)('detects %s with a real HTTP assertion', async (_, replacement, actual, expected) => {
+    const copy = managementSourceCopy([
+      "c.req.param('memberUserId')?.toLowerCase() === c.var.principal.user.id.toLowerCase()",
+      replacement,
+    ])
+    await expect(verifyStalePreview(copy)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual,
+      expected,
+    })
+  })
 
   it.each(['missing session', 'invalid Authorization'])(
     'detects removal of the member-read session boundary for %s with a real HTTP assertion',
