@@ -37,6 +37,21 @@ export const TeamInvitationSummarySchema = z.strictObject({
       .nullable(),
   }),
   resendAllowed: z.boolean(),
+  generation: z.number().int().min(1).max(32),
+  resendDeniedReason: z
+    .enum([
+      'TEAM_MANAGEMENT_ACCESS_DENIED',
+      'INVITATION_INELIGIBLE',
+      'INVITATION_RECIPIENT_ALREADY_MEMBER',
+      'INVITATION_GENERATION_LIMIT',
+      'INVITATION_DELIVERY_BUSY',
+      'INVITATION_RESEND_COOLDOWN',
+      'INVITATION_RATE_LIMITED',
+      'INVITATION_CONFLICT',
+      'INVITATION_PENDING_LIMIT',
+    ])
+    .nullable(),
+  resendRetryAfterSeconds: z.number().int().min(1).max(60).nullable(),
 })
 
 export type TeamInvitationSummary = z.infer<typeof TeamInvitationSummarySchema>
@@ -61,6 +76,7 @@ export async function listTeamInvitationSummaries(
     limit?: number | undefined
     cursor?: string | undefined
     status?: TeamInvitationSummary['status'] | undefined
+    invitationId?: string | undefined
   },
   mailLimits: InvitationSummaryMailLimits,
 ) {
@@ -111,6 +127,7 @@ export async function listTeamInvitationSummaries(
     CROSS JOIN invitation_clock
     LEFT JOIN public.invitation_deliveries AS d ON d.invitation_id = i.id
     WHERE i."organizationId" = ${actor.organizationId}::uuid
+      AND (${input.invitationId ?? null}::uuid IS NULL OR i.id = ${input.invitationId ?? null}::uuid)
       AND (${after}::uuid IS NULL OR i.id > ${after}::uuid)
     )
     SELECT * FROM summaries
@@ -132,10 +149,35 @@ export async function listTeamInvitationSummaries(
             updated_at: row.updated_at as Date,
           }
     const invitation = { ...row, status: row.storedStatus }
-    const resendAllowed =
-      invitationResendDenial(invitation, delivery, row.databaseNow) === null &&
-      !(await invitationRecipientIsMember(db, actor.organizationId, row.email)) &&
-      (await invitationEmailBudgetAvailable(
+    let resendDeniedReason: TeamInvitationSummary['resendDeniedReason'] = invitationResendDenial(
+      invitation,
+      delivery,
+      row.databaseNow,
+      await invitationRecipientIsMember(db, actor.organizationId, row.email),
+    )
+    if (resendDeniedReason === null && row.status === 'expired') {
+      const duplicate = await db
+        .selectFrom('auth.invitation')
+        .select('id')
+        .where('organizationId', '=', actor.organizationId)
+        .where(sql<string>`lower(btrim(email))`, '=', row.email.trim().toLowerCase())
+        .where('id', '!=', row.id)
+        .where('status', '=', 'pending')
+        .where('expiresAt', '>', row.databaseNow)
+        .executeTakeFirst()
+      const pending = await db
+        .selectFrom('auth.invitation')
+        .select(({ fn }) => fn.countAll<string>().as('count'))
+        .where('organizationId', '=', actor.organizationId)
+        .where('status', '=', 'pending')
+        .where('expiresAt', '>', row.databaseNow)
+        .executeTakeFirstOrThrow()
+      if (duplicate) resendDeniedReason = 'INVITATION_CONFLICT'
+      else if (Number(pending.count) >= 100) resendDeniedReason = 'INVITATION_PENDING_LIMIT'
+    }
+    if (
+      resendDeniedReason === null &&
+      !(await invitationEmailBudgetAvailable(
         db,
         {
           userId: actor.userId,
@@ -145,6 +187,26 @@ export async function listTeamInvitationSummaries(
         mailLimits,
         row.databaseNow,
       ))
+    )
+      resendDeniedReason = 'INVITATION_RATE_LIMITED'
+    const resendRetryAfterSeconds =
+      resendDeniedReason === 'INVITATION_RESEND_COOLDOWN'
+        ? Math.max(
+            1,
+            Math.min(
+              60,
+              Math.ceil(
+                (60_000 -
+                  (row.databaseNow.getTime() -
+                    Math.max(
+                      (row.generation_started_at ?? row.createdAt).getTime(),
+                      (row.updated_at ?? row.createdAt).getTime(),
+                    ))) /
+                  1000,
+              ),
+            ),
+          )
+        : null
     // Construct and validate the whitelist; never spread native invitation or delivery rows.
     data.push(
       TeamInvitationSummarySchema.parse({
@@ -159,7 +221,10 @@ export async function listTeamInvitationSummaries(
           lastAttemptAt: row.lastAttemptAt?.toISOString() ?? null,
           lastErrorCode: row.lastErrorCode,
         },
-        resendAllowed,
+        resendAllowed: resendDeniedReason === null,
+        generation: row.generation ?? 1,
+        resendDeniedReason,
+        resendRetryAfterSeconds,
       }),
     )
   }

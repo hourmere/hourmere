@@ -28,8 +28,12 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `expectedGeneration` (1–32) and a fresh UUID `requestId`. An identical request replays
   its current result; stale generations or ambiguous matches return 409
   `INVITATION_CONFLICT`. Resending retains the invitation's ID, email, role and inviter,
-  and extends expiry from now by its original validity length. Expired, accepted,
-  canceled or rejected invitations cannot be resent.
+  and extends expiry from now by its original validity length. Expired pending invitations
+  may be renewed through this same explicit resend protocol, retaining one row and the
+  existing generation cap. Renewal refuses a duplicate active invitation or a full team
+  pending limit. Accepted, canceled or rejected invitations cannot be resent.
+  Each new generation records its authorizing administrator for sender authority checks
+  and the mail's “invited by” name. The original inviter remains unchanged for signup policy.
 
   Resends wait 60 seconds after the later of the last explicit resend or worker update (`429 INVITATION_RESEND_COOLDOWN`,
   `retryAfterSeconds: 60`, `Retry-After: 60`); live sending leases return 409
@@ -385,6 +389,28 @@ onboarding path; joining a team requires accepting a member invitation.
 
 ### Team invitation delivery summaries
 
+Owners and admins manage invitations in Settings → Members. Each pending row offers
+**Resend invitation** and a confirmed **Cancel invitation** action. Select **Expired** for
+**Send a new invitation**, which renews the same pending row. The page rereads server state
+after actions and displays joined, cancelled or queued outcomes independently of the filter.
+
+`GET /api/v1/team/invitations/{invitationId}` returns one current `TeamInvitationSummary`
+without list pagination or lifecycle filtering. `POST /api/v1/team/invitations/{invitationId}/cancel`
+requires JSON `{}` and returns that summary after locking the invitation. Both require
+`X-Expected-Organization-Id`, a verified current team owner/admin session and no Authorization
+header; cancellation also requires same-origin CSRF checks. Missing and other-team IDs return
+uniform `403 team_management_access_denied`. Context drift returns `409 organization_context_changed`.
+Cancellation serializes with resend and acceptance. It only voids a still-pending invitation;
+if joining won, the result remains `accepted` and the member remains joined. Repeating cancel
+is safe. Native Better Auth `cancel-invitation` uses the same locked policy. A submission
+already in flight may still be accepted by SMTP, while the cancelled link cannot join.
+
+The additive `generation` is the expected generation for resend. `resendDeniedReason` is
+null when eligible, otherwise a fixed admission code (role/lifecycle, already a member,
+generation cap, live delivery, cooldown, duplicate active invitation, pending limit or request
+budget). `resendRetryAfterSeconds` gives the remaining 1–60 seconds for cooldown, otherwise
+null. Eligibility is an observation and reserves no capacity; the write always rechecks it.
+
 `GET /api/v1/team/invitations` is Hourmere's own versioned read protocol, independent
 of Better Auth's invitation response schemas. It lists only the browser session's current
 team and requires a current verified owner/admin. Missing or invalid sessions, personal
@@ -430,13 +456,17 @@ response objects remain extensible for additive v1 changes.
 | `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
 | `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
 | `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |
-| `resendAllowed` | Current member-invitation eligibility, 60-second cooldown, generation cap, live sending lease, recipient membership and inviter/team/recipient request budgets, using the same rules as actual resend. This read spends no budget and reserves no permission; resend checks again. |
+| `resendAllowed` | Current member-invitation renewal eligibility, 60-second cooldown, generation cap, live sending lease, recipient membership, duplicate/pending limits and actor/team/recipient request budgets. This read spends no budget and reserves no permission; resend checks again. |
+| `generation` | Current generation (1–32), or 1 for legacy invitations without retained delivery metadata. |
+| `resendDeniedReason` | Null when allowed, otherwise the fixed admission code describing why resend or renewal is unavailable. |
+| `resendRetryAfterSeconds` | Remaining cooldown seconds (1–60), otherwise null. |
 
 Delivery error codes are `transport_error`, `smtp_auth`, `smtp_temporary`, `smtp_permanent`,
 `smtp_not_configured`, `mail_rate_limited`, `interrupted`, `attempts_exhausted`,
 `invitation_ineligible` and `legacy_delivery_unknown`. These are stored diagnostic
-classifications, distinct from the endpoint's HTTP errors. Expired, accepted, canceled,
+classifications, distinct from the endpoint's HTTP errors. Accepted, canceled,
 rejected or unknown invitations cannot be resent; elevated/custom historical roles are ineligible.
+Expired pending invitations can renew in place if admission permits.
 An exhausted current generation can be explicitly resent if the new-generation rules allow it.
 
 Recipient addresses are returned only to the current team's verified owners/admins.

@@ -39,10 +39,15 @@ export {
 } from './caller.ts'
 export { DISPLAY_NAME_MAX_LENGTH } from './display-name.ts'
 export {
+  cancelTeamInvitation,
+  invitationCancellationRules,
+} from './invitation-cancellation.ts'
+export {
   type InvitationEligibilityDenial,
   type InvitationResendDenial,
   invitationEligibilityDenial,
   invitationRecipientIsMember,
+  invitationRenewalEligibilityDenial,
   invitationResendDenial,
   invitationRoleAllowed,
   type ResendInvitation,

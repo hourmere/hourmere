@@ -28,13 +28,22 @@ export type InvitationResendDenial =
 /** Launch policy permits only member invitation generations. */
 export const invitationRoleAllowed = (role: string | null) => role === 'member'
 
-/** Only member invitations that remain pending on the database clock can be resent. */
+/** Sending requires an unexpired invitation; renewal has a separate admission rule. */
 export function invitationEligibilityDenial(
   invitation: ResendInvitation,
   now: Date,
 ): InvitationEligibilityDenial | null {
   if (!invitationRoleAllowed(invitation.role)) return 'TEAM_MANAGEMENT_ACCESS_DENIED'
   if (invitation.status !== 'pending' || invitation.expiresAt <= now) return 'INVITATION_INELIGIBLE'
+  return null
+}
+
+/** Explicit renewal retains the same pending row, including after its link expires. */
+export function invitationRenewalEligibilityDenial(
+  invitation: Pick<ResendInvitation, 'role' | 'status'>,
+): InvitationEligibilityDenial | null {
+  if (!invitationRoleAllowed(invitation.role)) return 'TEAM_MANAGEMENT_ACCESS_DENIED'
+  if (invitation.status !== 'pending') return 'INVITATION_INELIGIBLE'
   return null
 }
 
@@ -45,7 +54,7 @@ export function invitationResendDenial(
   now: Date,
   recipientIsMember = false,
 ): InvitationResendDenial | null {
-  const ineligible = invitationEligibilityDenial(invitation, now)
+  const ineligible = invitationRenewalEligibilityDenial(invitation)
   if (ineligible) return ineligible
   if (recipientIsMember) return 'INVITATION_RECIPIENT_ALREADY_MEMBER'
   return invitationResendDeliveryDenial(invitation, delivery, now)

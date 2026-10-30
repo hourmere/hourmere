@@ -5170,6 +5170,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/invitations/{invitationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current state of one team invitation
+         * @description Verified current team owner/admin session only. Reads the final invitation lifecycle and current mail generation independently of list filters. Missing and other-team IDs receive the same access denial. X-Expected-Organization-Id binds the page to its team.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-expected-organization-id": string;
+                };
+                path: {
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current invitation summary */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+                /** @description invalid_request: invalid identifier */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload before trying again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/invitations/{invitationId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a pending team invitation
+         * @description Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-expected-organization-id": string;
+                };
+                path: {
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Final invitation summary; accepted if joining won the race */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+                /** @description invalid_request: malformed request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload before trying again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/member-removals/{operationId}": {
         parameters: {
             query?: never;
@@ -6843,9 +6987,13 @@ export interface components {
             email: string;
             /** Format: date-time */
             expiresAt: string;
+            generation: number;
             /** Format: uuid */
             id: string;
             resendAllowed: boolean;
+            /** @enum {string|null} */
+            resendDeniedReason: "TEAM_MANAGEMENT_ACCESS_DENIED" | "INVITATION_INELIGIBLE" | "INVITATION_RECIPIENT_ALREADY_MEMBER" | "INVITATION_GENERATION_LIMIT" | "INVITATION_DELIVERY_BUSY" | "INVITATION_RESEND_COOLDOWN" | "INVITATION_RATE_LIMITED" | "INVITATION_CONFLICT" | "INVITATION_PENDING_LIMIT" | null;
+            resendRetryAfterSeconds: number | null;
             /**
              * @description Known stored invitation lifecycle, with expired derived only for pending invitations using the database clock. Unrecognized stored statuses map to unknown, remain in pagination and are never pending or resendable.
              * @enum {string}

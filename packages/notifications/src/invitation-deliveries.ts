@@ -94,11 +94,11 @@ export async function listPendingInvitationDeliveries(
 }
 
 // Both ages are conservative because Better Auth has no business-terminal timestamp.
-// Unknown business statuses are retained. A delivery terminal state alone cannot allow
-// deletion: its tombstone prevents a pending invitation from being automatically resent.
+// Pending invitations remain renewable after expiry. Retain their generation cap,
+// original validity and replay identity until the invitation itself becomes terminal.
+// Unknown business statuses are retained too; delivery outcomes never permit deletion.
 const cleanupEligible = sql<boolean>`
-  (i.status IN ('accepted', 'canceled', 'rejected')
-    OR (i.status = 'pending' AND i."expiresAt" <= clock_timestamp()))
+  i.status IN ('accepted', 'canceled', 'rejected')
   AND i."expiresAt" <= clock_timestamp() - INTERVAL '7 days'
   AND d.updated_at <= clock_timestamp() - INTERVAL '7 days'
   AND (d.lease_until IS NULL OR d.lease_until <= clock_timestamp())

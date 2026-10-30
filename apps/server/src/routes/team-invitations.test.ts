@@ -61,6 +61,9 @@ interface Summary {
     lastErrorCode: string | null
   }
   resendAllowed: boolean
+  generation: number
+  resendDeniedReason: string | null
+  resendRetryAfterSeconds: number | null
 }
 interface Page {
   data: Summary[]
@@ -295,8 +298,11 @@ describe.skipIf(!serverUrl)(
           'delivery',
           'email',
           'expiresAt',
+          'generation',
           'id',
           'resendAllowed',
+          'resendDeniedReason',
+          'resendRetryAfterSeconds',
           'status',
         ])
         expect(Object.keys(row.delivery).sort()).toEqual([
@@ -676,7 +682,8 @@ describe.skipIf(!serverUrl)(
             lastErrorCode: delivery?.last_error_code ?? null,
           },
         })
-        if (summary?.status !== 'pending') expect(summary?.resendAllowed).toBe(false)
+        if (!['pending', 'expired'].includes(summary?.status ?? ''))
+          expect(summary?.resendAllowed).toBe(false)
         if (delivery?.resend_request_id)
           expect(JSON.stringify(result)).not.toContain(delivery.resend_request_id)
         if (delivery?.last_job_id)
@@ -722,7 +729,7 @@ describe.skipIf(!serverUrl)(
         const result = await page(await get(seeded.ownerSession.cookie, '', {}, target))
         expect(result.data.find((row) => row.id === expired.id)).toMatchObject({
           status: 'expired',
-          resendAllowed: false,
+          resendAllowed: true,
         })
         expect(result.data.find((row) => row.id === pending.id)?.status).toBe('pending')
       } finally {
@@ -748,12 +755,23 @@ describe.skipIf(!serverUrl)(
       ).toEqual(before)
       expect(await db.selectFrom('invitation_email_requests').selectAll().execute()).toEqual([])
       for (const row of [waiting, attempted]) {
-        expect(result.data.find((entry) => entry.id === row.id)?.resendAllowed).toBe(false)
+        const current = result.data.find((entry) => entry.id === row.id)
+        expect(current).toMatchObject({
+          resendAllowed: false,
+          generation: 1,
+          resendDeniedReason: 'INVITATION_RESEND_COOLDOWN',
+        })
+        expect(current?.resendRetryAfterSeconds).toBeGreaterThan(0)
+        expect(current?.resendRetryAfterSeconds).toBeLessThanOrEqual(60)
         const response = await resend(row)
         expect(response.status).toBe(429)
         expect(await response.json()).toMatchObject({ code: 'INVITATION_RESEND_COOLDOWN' })
       }
       expect(result.data.find((entry) => entry.id === ready.id)?.resendAllowed).toBe(true)
+      expect(result.data.find((entry) => entry.id === ready.id)).toMatchObject({
+        resendDeniedReason: null,
+        resendRetryAfterSeconds: null,
+      })
       expect((await resend(ready)).status).toBe(200)
       const updated = await page(await get(seeded.ownerSession.cookie))
       expect(updated.data.find((entry) => entry.id === ready.id)).toMatchObject({
@@ -761,6 +779,52 @@ describe.skipIf(!serverUrl)(
         delivery: { state: 'queued', attempts: 0, lastAttemptAt: null, lastErrorCode: null },
       })
     })
+
+    async function verifyRenewalDenial(
+      code: 'INVITATION_CONFLICT' | 'INVITATION_PENDING_LIMIT',
+      target = app,
+    ) {
+      const expired = await invitation({ expired: true })
+      if (code === 'INVITATION_CONFLICT') {
+        const active = await invitation()
+        await db
+          .updateTable('auth.invitation')
+          .set({ email: expired.email })
+          .where('id', '=', active.id)
+          .execute()
+      } else {
+        await db
+          .insertInto('auth.invitation')
+          .values(
+            Array.from({ length: 100 }, () => ({
+              organizationId: seeded.team.id,
+              inviterId: seeded.owner.id,
+              email: `${randomUUID()}@private-summary.example`,
+              role: 'member',
+              status: 'pending',
+              expiresAt: new Date(Date.now() + 3_600_000),
+            })),
+          )
+          .execute()
+      }
+      const result = await page(
+        await get(seeded.ownerSession.cookie, '?status=expired', {}, target),
+      )
+      expect(result.data.find((row) => row.id === expired.id)).toMatchObject({
+        status: 'expired',
+        generation: 1,
+        resendAllowed: false,
+        resendDeniedReason: code,
+        resendRetryAfterSeconds: null,
+      })
+      const refused = await resend(expired)
+      expect(refused.status).toBe(409)
+      expect(await refused.json()).toMatchObject({ code })
+    }
+    it.each(['INVITATION_CONFLICT', 'INVITATION_PENDING_LIMIT'] as const)(
+      'explains expired renewal refusal consistently with the locked write: %s',
+      (code) => verifyRenewalDenial(code),
+    )
 
     it('matches the real generation cap, live sending lease and unsupported historical role refusals', async () => {
       const capped = await invitation({ generation: 32 })
@@ -1091,8 +1155,11 @@ describe.skipIf(!serverUrl)(
         'delivery',
         'email',
         'expiresAt',
+        'generation',
         'id',
         'resendAllowed',
+        'resendDeniedReason',
+        'resendRetryAfterSeconds',
         'status',
       ])
       expect((item.properties as Record<string, { enum: string[] }>).status?.enum).toContain(
@@ -1173,6 +1240,20 @@ describe.skipIf(!serverUrl)(
         (target: ReturnType<typeof createApp>) => Promise<void>,
       ]
     >([
+      [
+        'renewal duplicate refusal in summary',
+        {
+          file: 'summary',
+          before: 'if (duplicate) resendDeniedReason',
+          after: 'if (false) resendDeniedReason',
+        },
+        (target) => verifyRenewalDenial('INVITATION_CONFLICT', target),
+      ],
+      [
+        'renewal pending limit refusal in summary',
+        { file: 'summary', before: 'Number(pending.count) >= 100', after: 'false' },
+        (target) => verifyRenewalDenial('INVITATION_PENDING_LIMIT', target),
+      ],
       [
         'expected-team check before current-team rejection',
         {

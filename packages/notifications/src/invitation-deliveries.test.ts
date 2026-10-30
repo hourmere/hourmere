@@ -208,15 +208,16 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
     await expect(cleanupInvitationDeliveries(db, limit)).rejects.toThrow(RangeError)
   })
 
-  it('retains all pending unexpired tombstones and deletes only old terminal or expired records', async () => {
+  it('retains all pending tombstones even after expiry and deletes only old terminal records', async () => {
     const retained: string[] = []
-    for (const state of states) {
-      const row = await invitation()
-      await delivery(row.id, { state, updatedDays: -10, leaseDays: -9 })
-      retained.push(row.id)
-    }
+    for (const expiresDays of [1, -10])
+      for (const state of states) {
+        const row = await invitation({ expiresDays })
+        await delivery(row.id, { state, updatedDays: -10, leaseDays: -9 })
+        retained.push(row.id)
+      }
     const removed: string[] = []
-    for (const status of ['pending', 'accepted', 'canceled', 'rejected']) {
+    for (const status of ['accepted', 'canceled', 'rejected']) {
       const row = await invitation({ status, expiresDays: -10 })
       await delivery(row.id, { updatedDays: -10 })
       removed.push(row.id)
@@ -239,8 +240,8 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
   })
 
   it('retains a live lease and can remove an expired lease after both seven-day ages', async () => {
-    const live = await invitation({ expiresDays: -10 })
-    const expired = await invitation({ expiresDays: -10 })
+    const live = await invitation({ status: 'canceled', expiresDays: -10 })
+    const expired = await invitation({ status: 'canceled', expiresDays: -10 })
     await delivery(live.id, { state: 'sending', updatedDays: -10 })
     await delivery(expired.id, { state: 'sending', updatedDays: -10, leaseDays: -1 })
     expect(await cleanupInvitationDeliveries(db)).toBe(1)
@@ -281,7 +282,7 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
 
   it('rolls back the entire cleanup batch if its transaction cannot commit', async () => {
     const rows = await Promise.all([
-      invitation({ expiresDays: -10 }),
+      invitation({ status: 'canceled', expiresDays: -10 }),
       invitation({ status: 'accepted', expiresDays: -10 }),
     ])
     for (const row of rows) await delivery(row.id, { updatedDays: -10 })
@@ -334,7 +335,7 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
   })
 
   it('skips a delivery being updated and retains its freshly updated tombstone', async () => {
-    const row = await invitation({ expiresDays: -10 })
+    const row = await invitation({ status: 'canceled', expiresDays: -10 })
     await delivery(row.id, { updatedDays: -10 })
     const writer = await owned.pool.connect()
     let cleanup: Promise<number> | undefined
@@ -361,7 +362,7 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
   })
 
   it('rechecks delivery age after candidate selection and taking both locks', async () => {
-    const row = await invitation({ expiresDays: -10 })
+    const row = await invitation({ status: 'accepted', expiresDays: -10 })
     await delivery(row.id, { updatedDays: -10 })
     let changed = false
     const interleaved = db.withPlugin({
@@ -384,7 +385,7 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
   })
 
   it('holds the invitation lock until the cleanup transaction commits', async () => {
-    const row = await invitation({ expiresDays: -10 })
+    const row = await invitation({ status: 'rejected', expiresDays: -10 })
     await delivery(row.id, { updatedDays: -10 })
     let writing: Promise<unknown> | undefined
     let checked = false

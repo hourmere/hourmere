@@ -106,12 +106,13 @@ async function terminal(
 async function invitationAuthorizationIsCurrent(
   db: Db,
   invitation: NonNullable<Awaited<ReturnType<typeof lockedDelivery>>>['invitation'],
+  authorizedByUserId: string,
 ) {
   if (!invitationRoleAllowed(invitation.role)) return false
   try {
-    // A durable invitation carries the inviter identity, rather than a browser session.
+    // Each generation carries its authorizing administrator, rather than a browser session.
     // Read current team authority without reversing management's parent-first lock order.
-    await checkTeamManagementMembership(db, invitation.inviterId, invitation.organizationId)
+    await checkTeamManagementMembership(db, authorizedByUserId, invitation.organizationId)
   } catch (error) {
     if (error instanceof TeamManagementError) return false
     throw error
@@ -144,7 +145,11 @@ async function claimAttempt(deps: InvitationEmailSenderDeps, request: Invitation
     }
 
     await lockNotificationEmailBudget(trx)
-    const authorized = await invitationAuthorizationIsCurrent(trx, invitation)
+    const authorized = await invitationAuthorizationIsCurrent(
+      trx,
+      invitation,
+      delivery.authorized_by_user_id ?? invitation.inviterId,
+    )
     // Budget and authorization reads can wait; only a fresh clock can grant an attempt.
     const now = await databaseTime(trx)
     if (invitation.status !== 'pending' || invitation.expiresAt <= now) {
@@ -214,12 +219,13 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
     const current = await lockedDelivery(trx, claim.invitationId)
     const now = await databaseTime(trx)
     if (!ownsClaim(current, claim, now) || !current) return
-    const { invitation } = current
+    const { invitation, delivery } = current
+    const authorizedByUserId = delivery.authorized_by_user_id ?? invitation.inviterId
     if (invitation.status !== 'pending' || invitation.expiresAt <= now) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
       return
     }
-    if (!(await invitationAuthorizationIsCurrent(trx, invitation))) {
+    if (!(await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId))) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
       return
     }
@@ -232,7 +238,7 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
       .selectFrom('auth.user as u')
       .leftJoin('profiles as p', 'p.user_id', 'u.id')
       .select(['u.name', 'p.locale'])
-      .where('u.id', '=', invitation.inviterId)
+      .where('u.id', '=', authorizedByUserId)
       .executeTakeFirst()
     if (!organization || !inviter) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)

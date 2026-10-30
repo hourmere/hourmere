@@ -6,6 +6,7 @@ import type { AuthMiddlewareContext } from './api-keys.ts'
 import {
   invitationEligibilityDenial,
   invitationRecipientIsMember,
+  invitationRenewalEligibilityDenial,
   invitationResendDeliveryDenial,
 } from './invitation-resend.ts'
 import { isUuid } from './organizations.ts'
@@ -111,6 +112,13 @@ export async function manageInvitation(
   )
     throw invalid()
   const resend = input.resend === true
+  const eligibilityDenial = (
+    invitation: Parameters<typeof invitationEligibilityDenial>[0],
+    now: Date,
+  ) =>
+    resend
+      ? invitationRenewalEligibilityDenial(invitation)
+      : invitationEligibilityDenial(invitation, now)
   if (
     resend &&
     (typeof input.invitationId !== 'string' ||
@@ -189,10 +197,7 @@ export async function manageInvitation(
       let invitation = candidates[0]
       const existing = Boolean(invitation)
       // Preserve the role refusal before waiting for a delivery lock.
-      if (
-        invitation &&
-        invitationEligibilityDenial(invitation, now) === 'TEAM_MANAGEMENT_ACCESS_DENIED'
-      )
+      if (invitation && eligibilityDenial(invitation, now) === 'TEAM_MANAGEMENT_ACCESS_DENIED')
         throw denied()
       if (!invitation && (resend || input.invitationId !== undefined)) throw ineligible()
       let delivery = invitation
@@ -206,7 +211,7 @@ export async function manageInvitation(
       // Row locks can wait beyond the invitation or session's remaining lifetime.
       now = await wallClock(trx)
       if (session.expiresAt <= now) throw denied()
-      if (invitation && invitationEligibilityDenial(invitation, now) === 'INVITATION_INELIGIBLE')
+      if (invitation && eligibilityDenial(invitation, now) === 'INVITATION_INELIGIBLE')
         throw ineligible()
 
       if (resend) {
@@ -249,7 +254,19 @@ export async function manageInvitation(
           message: 'An invitation is already pending. Reload before trying again.',
         })
       if (invitation && delivery && !resend) return result(invitation, delivery, existing)
-      if (!invitation) {
+      if (!invitation || (resend && invitation.expiresAt <= now)) {
+        if (invitation) {
+          const otherPending = await trx
+            .selectFrom('auth.invitation')
+            .select('id')
+            .where('organizationId', '=', organizationId)
+            .where(sql<string>`lower(btrim(email))`, '=', email)
+            .where('status', '=', 'pending')
+            .where('expiresAt', '>', now)
+            .where('id', '!=', invitation.id)
+            .executeTakeFirst()
+          if (otherPending) throw conflict()
+        }
         const pending = await trx
           .selectFrom('auth.invitation')
           .select(({ fn }) => fn.countAll<string>().as('count'))
@@ -274,7 +291,7 @@ export async function manageInvitation(
       // A shared mail-budget lock may have waited behind another bounded send.
       now = await wallClock(trx)
       if (session.expiresAt <= now) throw denied()
-      const admissionDenial = invitation ? invitationEligibilityDenial(invitation, now) : null
+      const admissionDenial = invitation ? eligibilityDenial(invitation, now) : null
       if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()
       if (!invitation) {
         invitation = await trx
@@ -303,6 +320,7 @@ export async function manageInvitation(
           .executeTakeFirstOrThrow()
       }
       const values = {
+        authorized_by_user_id: actor.userId,
         generation: (delivery?.generation ?? (resend ? 1 : 0)) + 1,
         state: 'queued',
         attempts: 0,

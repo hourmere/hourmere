@@ -1,5 +1,36 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Filter invitations': 'Filter invitations',
+  Joined: 'Joined',
+  Rejected: 'Rejected',
+  'Invitation status unknown': 'Invitation status unknown',
+  'You do not have permission to manage invitations.':
+    'You do not have permission to manage invitations.',
+  'This invitation is no longer available for resending.':
+    'This invitation is no longer available for resending.',
+  'Wait for the resend cooldown before trying again.':
+    'Wait for the resend cooldown before trying again.',
+  'This invitation cannot be resent. Check its status again.':
+    'This invitation cannot be resent. Check its status again.',
+  'Check invitation status to see whether resending is now allowed.':
+    'Check invitation status to see whether resending is now allowed.',
+  'The recipient has joined. Their membership was not changed.':
+    'The recipient has joined. Their membership was not changed.',
+  'Invitation cancelled. Its link can no longer be used.':
+    'Invitation cancelled. Its link can no longer be used.',
+  'Invitation status refreshed.': 'Invitation status refreshed.',
+  'An email already being sent may still arrive. This invitation can no longer be used.':
+    'An email already being sent may still arrive. This invitation can no longer be used.',
+  'Could not confirm the invitation status. Check its status before trying another action.':
+    'Could not confirm the invitation status. Check its status before trying another action.',
+  'Send a new invitation': 'Send a new invitation',
+  'Cancel invitation': 'Cancel invitation',
+  'Cancel this invitation?': 'Cancel this invitation?',
+  'Cancelling only voids this invitation. It never removes a member who has already joined.':
+    'Cancelling only voids this invitation. It never removes a member who has already joined.',
+  'Confirm cancellation': 'Confirm cancellation',
+  'Keep invitation': 'Keep invitation',
+
   'The invitation request could not be queued. Try again later.':
     'The invitation request could not be queued. Try again later.',
   'Invite member': 'Invite member',
@@ -1139,8 +1170,8 @@ export const admin = {
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
   'Accept invitation': 'Accept invitation',
   'Checking invitation…': 'Checking invitation…',
-  'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.':
-    'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.',
+  'This invitation is unavailable. Ask a team owner or admin to open Settings, check Pending invitations, and resend it or send a new invitation if it expired.':
+    'This invitation is unavailable. Ask a team owner or admin to open Settings, check Pending invitations, and resend it or send a new invitation if it expired.',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     'Use the exact email address that received this invitation. Change accounts if you signed in with another address.',
   'Confirm your email address by signing in with an email link, then return to this invitation.':

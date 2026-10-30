@@ -673,8 +673,15 @@ Team invitations keep their current delivery generation in `invitation_deliverie
 separate from the invitation's acceptance and expiry state. The delivery record contains
 the generation, bounded attempt count, due time, claim lease, job and resend request IDs,
 safe outcome/error code, SMTP acceptance time, creation/update times and nullable
-`last_attempt_at`. An SMTP acceptance does not mean that the recipient received, read or
-accepted the invitation. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
+`last_attempt_at`. Migration 0045 adds nullable `authorized_by_user_id`: new generations
+record the acting administrator, whose current name appears as “invited by” and whose team
+authority is checked before sending. Legacy null rows use the original inviter. Deleting
+a recorded actor does not erase the UUID or fall back to the original inviter: sending
+stops instead. The original invitation inviter remains the signup-policy identity.
+An SMTP acceptance does not mean that the recipient received, read or
+accepted the invitation. All pending invitations retain their delivery tombstones even after
+expiry, so a later renewal cannot reset the generation cap or original validity duration.
+Only accepted, canceled or rejected invitations become eligible for seven-day delivery cleanup. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
 and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
 
 The session-only administrator summary includes the invited email address for verified
@@ -705,8 +712,8 @@ The sender rechecks invitation eligibility before each attempt: accepted, cancel
 rejected, expired or unknown-status invitations stop, and stale jobs cannot send or
 change a successor generation. An already recorded `smtp_accepted` generation is also
 terminal. Both the claim and pre-SMTP transactions use the shared team-management and
-invitation eligibility policy: the inviter must still be a current owner/admin of the
-non-personal team, the invitation role must be allowed, and the recipient must not
+invitation eligibility policy: the current generation's authorizing administrator must
+still be a current owner/admin of the non-personal team, the invitation role must be allowed, and the recipient must not
 already belong to the team. Otherwise the generation becomes terminal
 `skipped/invitation_ineligible` without SMTP or automatic retries. Template rendering
 failure is terminal `failed/transport_error`, distinct from `smtp_not_configured`.
