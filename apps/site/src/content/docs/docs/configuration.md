@@ -126,7 +126,7 @@ for configuration and delivery behavior.
 | `INVITATION_INVITER_MAX_PER_DAY` | `100` | Same per-inviter admission limit over a rolling 24 hours. Positive integer. |
 | `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. |
 | `INVITATION_TEAM_MAX_PER_DAY` | `200` | Same per-team admission limit over a rolling 24 hours. Positive integer. |
-| `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification and sign-in email limit in a rolling hour. `0` is unlimited. Invitee/guest mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends. |
+| `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification/sign-in sends and team invitation attempt reservations in a rolling hour. `0` is unlimited. Invitee/guest/team invitation mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends and reservations. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
 
@@ -144,8 +144,10 @@ for retention and diagnostics.
 Invitation admission uses the `MAIL_RECIPIENT_MAX_PER_HOUR` and
 `MAIL_RECIPIENT_MAX_PER_DAY` defaults in its own recipient accounting domain. Admitted
 requests do not consume the instance's `MAIL_MAX_PER_HOUR` sending allowance. The current
-release records invitation delivery intent without sending invitation mail; its future
-sender must check and debit ordinary, non-reserved shared capacity when sending.
+sender checks and debits ordinary, non-reserved shared capacity when it commits each
+delivery attempt before SMTP. A failed or crashed attempt retains that reservation.
+Team invitation delivery requires configured SMTP; the sensitive log transport never
+prints the invitation body or usable link and never reports SMTP acceptance.
 
 `MAIL_FROM` is the organizer for new calendar invitations. Avoid a Gmail or Google Workspace
 address, or any other address registered as a Google account: Gmail may treat it as a Google

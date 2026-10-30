@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
@@ -29,6 +31,24 @@ async function until(check: () => Promise<boolean> | boolean, what: string, time
 let seq = 0
 const queueName = (label: string) => `test-${label}-${process.pid}-${++seq}`
 
+// Mutations run isolated source copies; installed and production files remain untouched.
+async function sourceCopy(
+  replace: { before: string; after: string } | { before: string; after: string }[],
+) {
+  let source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+  for (const mutation of Array.isArray(replace) ? replace : [replace]) {
+    expect(source.includes(mutation.before), 'mutation matches its protection').toBe(true)
+    source = source.replace(mutation.before, mutation.after)
+  }
+  const javascript = stripTypeScriptTypes(source).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) => `from '${import.meta.resolve(specifier)}'`,
+  )
+  return (await import(
+    `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+  )) as typeof import('./index.ts')
+}
+
 describe.skipIf(!serverUrl)('createJobs', () => {
   let testDb: TestDatabase
   const started: { stop(): Promise<void> }[] = []
@@ -49,9 +69,14 @@ describe.skipIf(!serverUrl)('createJobs', () => {
   // Every test gets its own queues, so instances in one database do not see each other's jobs.
   async function start<const Defs extends readonly AnyJobDefinition[]>(
     definitions: Defs,
-    options: { work?: boolean; shutdownTimeoutMs?: number; lines?: string[] } = {},
+    options: {
+      work?: boolean
+      shutdownTimeoutMs?: number
+      lines?: string[]
+      factory?: typeof createJobs
+    } = {},
   ) {
-    const jobs = createJobs({
+    const jobs = (options.factory ?? createJobs)({
       connectionString: testDb.url,
       definitions,
       work: options.work ?? true,
@@ -287,12 +312,12 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
   })
 
-  it('refuses startup when the pinned pg-boss version changes, even without invitation queues', async () => {
+  it.each([true, false])('explains a pinned pg-boss mismatch with migrate=%s', async (migrate) => {
     const jobs = createJobs({
       connectionString: testDb.url,
       definitions: [],
       work: true,
-      migrate: true,
+      migrate,
       maxConnections: 2,
       log: () => {},
     })
@@ -300,13 +325,278 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     const version = pgBossPackage.version
     try {
       pgBossPackage.version = 'unsupported-test-version'
-      await expect(jobs.start()).rejects.toThrow(
+      const attempt = jobs.start()
+      await expect(attempt).rejects.toThrow(
         'background jobs require pg-boss 12.38.0; found unsupported-test-version. Review the invitation job lookup before upgrading',
       )
+      await expect(attempt).rejects.not.toThrow('npm run db:migrate')
       expect(jobs.running).toBe(false)
     } finally {
       pgBossPackage.version = version
     }
+  })
+
+  it('detects source-copy removal of the version-specific startup message', async () => {
+    const copy = await sourceCopy([
+      {
+        before: "if (pgBossPackage.version !== '12.38.0')",
+        after: "if (pgBossPackage.version !== 'intentionally-unsupported')",
+      },
+      {
+        before: 'if (options.migrate || err instanceof PgBossCompatibilityError) throw err',
+        after: 'if (options.migrate) throw err',
+      },
+    ])
+    const jobs = copy.createJobs({
+      connectionString: testDb.url,
+      definitions: [],
+      work: false,
+      migrate: false,
+      maxConnections: 2,
+      log: () => {},
+    })
+    started.push(jobs)
+    const verify = async () => {
+      const error = await jobs.start().catch((error: Error) => error)
+      expect(error).toBeInstanceOf(Error)
+      expect(
+        (error as Error).message,
+        'a package compatibility failure must not recommend schema migration',
+      ).not.toContain('npm run db:migrate')
+    }
+    await expect(verify()).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('must not recommend schema migration'),
+    })
+  })
+
+  it.each(['created', 'retry', 'active'])(
+    'retires an expired %s invitation job before replacement, retaining its history',
+    async (state) => {
+      const definition = defineJob({
+        name: 'invitation-email-v1',
+        payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+        policy: 'exclusive',
+      })
+      const jobs = await start([definition], { work: false })
+      const payload = { invitationId: randomUUID(), generation: 1 }
+      const singletonKey = `invitation-email:v1:${payload.invitationId}:1`
+      const expiredId = await jobs.enqueue(definition.name, payload, { singletonKey })
+      await testDb.pool.query(
+        `UPDATE pgboss.job SET state=$2::pgboss.job_state,
+          keep_until=pgboss.job_now() - INTERVAL '1 second',
+          started_on=pgboss.job_now() - INTERVAL '181 seconds', expire_seconds=180 WHERE id=$1`,
+        [expiredId, state],
+      )
+      // Expiry alone does not remove the exclusive-index conflict before maintenance runs.
+      expect(await jobs.enqueue(definition.name, payload, { singletonKey })).toBeNull()
+      const db = createDb(testDb.pool)
+      const replacement = await db.transaction().execute(async (trx) => {
+        await jobs.retireExpiredInvitationEmailJobs(payload, trx)
+        return jobs.enqueue(definition.name, payload, { singletonKey, transaction: trx })
+      })
+      expect(replacement).toBeTruthy()
+      expect(replacement).not.toBe(expiredId)
+      expect(
+        (await jobRows(definition.name)).filter((row) => [expiredId, replacement].includes(row.id)),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: expiredId, state: 'cancelled' }),
+          expect.objectContaining({ id: replacement, state: 'created' }),
+        ]),
+      )
+      await db.transaction().execute(async (trx) => {
+        await jobs.retireExpiredInvitationEmailJobs(payload, trx)
+      })
+      expect(await jobs.hasLiveInvitationEmailJob({ id: replacement as string, ...payload })).toBe(
+        true,
+      )
+      expect(await jobs.enqueue(definition.name, payload, { singletonKey })).toBeNull()
+    },
+  )
+
+  it('retains live and terminal job states and refuses to retire mismatched identities', async () => {
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+    })
+    const other = defineJob({ ...definition, name: queueName('retire-other') })
+    const jobs = await start([definition, other], { work: false })
+    const db = createDb(testDb.pool)
+    for (const state of ['created', 'retry', 'active', 'completed', 'cancelled', 'failed']) {
+      const terminal = ['completed', 'cancelled', 'failed'].includes(state)
+      const payload = { invitationId: randomUUID(), generation: 1 }
+      const singletonKey = `invitation-email:v1:${payload.invitationId}:1`
+      const id = await jobs.enqueue(definition.name, payload, { singletonKey })
+      await testDb.pool.query(
+        `UPDATE pgboss.job SET state=$2::pgboss.job_state,
+          keep_until=pgboss.job_now() + $3 * INTERVAL '1 second',
+          started_on=pgboss.job_now() + $4 * INTERVAL '1 second', expire_seconds=180 WHERE id=$1`,
+        [id, state, terminal ? -1 : 86400, terminal ? -181 : 0],
+      )
+      await db.transaction().execute(async (trx) => {
+        await jobs.retireExpiredInvitationEmailJobs(payload, trx)
+      })
+      expect((await jobRows(definition.name)).find((row) => row.id === id)?.state).toBe(state)
+    }
+    for (const mismatch of ['queue', 'key', 'payload', 'generation']) {
+      const payload = { invitationId: randomUUID(), generation: 1 }
+      const singletonKey = `invitation-email:v1:${payload.invitationId}:1`
+      const name = mismatch === 'queue' ? other.name : definition.name
+      const id = await jobs.enqueue(name, payload, { singletonKey })
+      await testDb.pool.query(
+        `UPDATE pgboss.job SET keep_until=pgboss.job_now() - INTERVAL '1 second',
+          singleton_key=$2, data=$3::jsonb WHERE id=$1`,
+        [
+          id,
+          mismatch === 'key' ? 'other-key' : singletonKey,
+          JSON.stringify(mismatch === 'payload' ? { ...payload, extra: true } : payload),
+        ],
+      )
+      await db.transaction().execute(async (trx) => {
+        await jobs.retireExpiredInvitationEmailJobs(
+          mismatch === 'generation' ? { ...payload, generation: 2 } : payload,
+          trx,
+        )
+      })
+      expect((await jobRows(name)).find((row) => row.id === id)?.state, mismatch).toBe('created')
+    }
+  })
+
+  it('rolls an expired retirement back with a failed replacement transaction', async () => {
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+    })
+    const jobs = await start([definition], { work: false })
+    const payload = { invitationId: randomUUID(), generation: 1 }
+    const singletonKey = `invitation-email:v1:${payload.invitationId}:1`
+    const id = await jobs.enqueue(definition.name, payload, { singletonKey })
+    await testDb.pool.query(
+      "UPDATE pgboss.job SET keep_until=pgboss.job_now() - INTERVAL '1 second' WHERE id=$1",
+      [id],
+    )
+    await expect(
+      createDb(testDb.pool)
+        .transaction()
+        .execute(async (trx) => {
+          await jobs.retireExpiredInvitationEmailJobs(payload, trx)
+          expect(
+            await jobs.enqueue(definition.name, payload, { singletonKey, transaction: trx }),
+          ).toBeTruthy()
+          throw new Error('synthetic replacement rollback')
+        }),
+    ).rejects.toThrow('synthetic replacement rollback')
+    expect((await jobRows(definition.name)).filter((row) => row.id === id)).toEqual([
+      expect.objectContaining({ id, state: 'created' }),
+    ])
+    expect(await jobs.enqueue(definition.name, payload, { singletonKey })).toBeNull()
+  })
+
+  it('rechecks a job renewed while retirement waited for its row lock', async () => {
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+    })
+    const jobs = await start([definition], { work: false })
+    const payload = { invitationId: randomUUID(), generation: 1 }
+    const singletonKey = `invitation-email:v1:${payload.invitationId}:1`
+    const id = await jobs.enqueue(definition.name, payload, { singletonKey })
+    await testDb.pool.query(
+      "UPDATE pgboss.job SET keep_until=pgboss.job_now() - INTERVAL '1 second' WHERE id=$1",
+      [id],
+    )
+    const blocker = await testDb.pool.connect()
+    let retiring: Promise<void> | undefined
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query(
+        "UPDATE pgboss.job SET keep_until=pgboss.job_now() + INTERVAL '1 day' WHERE id=$1",
+        [id],
+      )
+      retiring = createDb(testDb.pool)
+        .transaction()
+        .execute((trx) => jobs.retireExpiredInvitationEmailJobs(payload, trx))
+      await until(async () => {
+        const waiting = await testDb.pool.query(
+          'SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))',
+          [rows[0]?.pid],
+        )
+        return waiting.rows.length > 0
+      }, 'retirement to wait for the job row lock')
+      await blocker.query('COMMIT')
+      await retiring
+      expect((await jobRows(definition.name)).find((row) => row.id === id)?.state).toBe('created')
+      expect(await jobs.enqueue(definition.name, payload, { singletonKey })).toBeNull()
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+      await retiring
+    }
+  })
+
+  it.each([
+    {
+      name: 'expired job retirement',
+      before: "UPDATE pgboss.job SET state = 'cancelled', completed_on = pgboss.job_now()",
+      after: "UPDATE pgboss.job SET state = 'created', completed_on = pgboss.job_now()",
+      expired: true,
+      mismatched: false,
+    },
+    {
+      name: 'live job protection',
+      before: "(state IN ('created', 'retry') AND keep_until <= pgboss.job_now())",
+      after: "(state IN ('created', 'retry'))",
+      expired: false,
+      mismatched: false,
+    },
+    {
+      name: 'exact payload protection',
+      before: "AND singleton_key = $1 AND data = $2::jsonb AND policy = 'exclusive'",
+      after: "AND singleton_key = $1 AND $2::jsonb IS NOT NULL AND policy = 'exclusive'",
+      expired: true,
+      mismatched: true,
+    },
+  ])('detects source-copy removal of $name', async ({ before, after, expired, mismatched }) => {
+    const copy = await sourceCopy({ before, after })
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+    })
+    const jobs = await start([definition], { work: false, factory: copy.createJobs })
+    const payload = { invitationId: randomUUID(), generation: 1 }
+    const id = await jobs.enqueue(definition.name, payload, {
+      singletonKey: `invitation-email:v1:${payload.invitationId}:1`,
+    })
+    if (expired)
+      await testDb.pool.query(
+        "UPDATE pgboss.job SET keep_until=pgboss.job_now() - INTERVAL '1 second' WHERE id=$1",
+        [id],
+      )
+    if (mismatched)
+      await testDb.pool.query('UPDATE pgboss.job SET data=$2::jsonb WHERE id=$1', [
+        id,
+        JSON.stringify({ ...payload, extra: true }),
+      ])
+    const verify = async () => {
+      await createDb(testDb.pool)
+        .transaction()
+        .execute((trx) => jobs.retireExpiredInvitationEmailJobs(payload, trx))
+      const expected = expired && !mismatched ? 'cancelled' : 'created'
+      expect(
+        (await jobRows(definition.name)).find((row) => row.id === id)?.state,
+        'retirement preserves live and unrelated jobs while releasing expired identity',
+      ).toBe(expected)
+    }
+    await expect(verify()).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('retirement preserves live and unrelated jobs'),
+    })
   })
 
   it("uses pg-boss's transaction clock for queued and active invitation expiry", async () => {

@@ -336,8 +336,8 @@ delivery summary and shares resend eligibility and request-budget checks with th
 path. Pending expiry uses a materialized database-clock value, with terminal statuses
 preserved. Missing delivery rows read as unknown. Migration 0044 adds nullable
 `last_attempt_at` without rewriting or guessing legacy rows. The
-`invitation_delivery_attempt_time` trigger owns this column: senders, including the future
-invitation sender, must omit it from writes. Explicit INSERT or UPDATE values are
+`invitation_delivery_attempt_time` trigger owns this column: senders must omit it from
+writes. Explicit INSERT or UPDATE values are
 overwritten. Inserts with a consumed attempt, attempt-count increases and generation
 changes with a consumed attempt record `clock_timestamp()`; zero attempts clear the
 column, and other updates preserve its previous value. `lastAttemptAt` is null before any
@@ -364,7 +364,7 @@ protocol, independently of these storage queries.
 
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
-and `updated_at`. The future sender must update `updated_at` on every delivery attempt
+and `updated_at`. The sender updates `updated_at` on every delivery attempt
 so attempts restart the post-delivery wait. `expiry_duration_ms` retains the original
 validity length across successive renewals. The migration retains delivery creation time as the cooldown anchor
 and seeds the known legacy 48-hour validity policy. Historic native resends changed expiry
@@ -375,7 +375,7 @@ validity. Invitation status, expiry, attempts and delivery outcomes remain uncha
 and request time for rolling inviter/team/recipient limits. It has no foreign keys, so
 deleting an invitation, account or team cannot reset the budget. Admission holds the
 existing global mail-budget lock without debiting the shared sending allowance in
-`notification_email_sends`. A future sender must check and debit ordinary, non-reserved
+`notification_email_sends`. The sender checks and debits ordinary, non-reserved
 shared capacity at send time. Both ledgers retain two days. Every admission record
 requires its recipient hash; migration 0043 creates this ledger without changing earlier
 shared mail accounting.
@@ -388,13 +388,41 @@ checks job identity, exact payload, singleton key, live state and expiry without
 key into pg-boss, using pg-boss's own clock for job expiry. An unsupported pg-boss version
 fails job startup with a compatibility message. Startup and minute repair scans use bounded,
 fair cursor batches. A failed startup scan is logged and the minute schedule retries it.
-The repairer skips obsolete business states before enqueueing. No delivery consumer is
-registered yet, so current pending jobs remain `created`. After the 24-hour waiting
-retention expires and pg-boss removes the job, repair can create one replacement for a
-still-eligible generation; later scans reuse that live replacement. A queued job may remain
-after its generation is skipped or superseded. The future sender must reread the current
-delivery state and generation, invitation status and expiry before sending. An obsolete
-job cannot modify a successor's row.
+The repairer skips obsolete business states before enqueueing. If a job's 24-hour waiting
+retention or active expiry has passed, an exact-identity adapter cancels that expired job
+inside the replacement transaction, preserving its history and releasing the exclusive
+key without waiting for maintenance. Live jobs and completed, canceled or failed history
+are preserved. The delivery row lock and pg-boss exclusive index serialize replacements;
+later scans reuse the retained live job. A queued job may remain after its generation is
+skipped or superseded. The sender rereads the current delivery state and generation,
+invitation status and expiry before every attempt. An obsolete job cannot modify a
+successor's row, and completed job history is not evidence of a live job.
+
+Each generation permits at most four SMTP attempts. A short transaction locks invitation
+before delivery, rechecks current authorization and invitation eligibility, registers the attempt,
+updates `updated_at`, debits shared mail capacity and commits a random 120-second lease
+before SMTP. This reservation is conservatively consumed if a crash or cancellation
+prevents the subsequent network call. A second, pre-SMTP transaction rechecks authorization,
+the invitation and claim, and reads the current recipient and organization for the message.
+`last_attempt_at` is left to its trigger. SMTP waits at most 60 seconds, shortened to the
+remaining lease minus a one-second safety margin; less than one second of usable time
+prevents a send. Rendering and transaction completion consume that time too. The pg-boss
+job expires after 180 seconds. Transient errors persist a 60/120/240-second
+backoff; dispatch can add up to one minute repair cycle, plus queue scheduling time.
+pg-boss itself has zero retries. A crash consumes the registered attempt. The
+repairer recovers expired claims without resetting their count, and a final crashed
+attempt becomes failed rather than receiving a fifth attempt. Permanent/configuration
+errors and budget exhaustion retain a failed summary with a fixed safe code.
+
+Only a matching current claim can record `smtp_accepted` and its timestamp; future work
+observes that terminal state and skips SMTP. This means accepted by the mail server,
+without a claim of inbox delivery. If SMTP accepts but the following database commit
+fails, the durable row can still say sending and a later retry can send a duplicate.
+An SMTP timeout or shutdown abort stops waiting, but cannot recall a message already
+submitted or guarantee the underlying exchange stops: it can still be accepted in the
+background and overlap a later finite retry. Leases and job identity cannot guarantee
+exactly-once external delivery. Cancellation or authorization changes after the final
+database check can also race an SMTP call already starting.
 
 ## Guest recipients
 

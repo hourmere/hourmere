@@ -44,6 +44,7 @@ export {
   invitationEligibilityDenial,
   invitationRecipientIsMember,
   invitationResendDenial,
+  invitationRoleAllowed,
   type ResendInvitation,
   type ResendInvitationDelivery,
 } from './invitation-resend.ts'
@@ -74,6 +75,7 @@ export {
 } from './signup.ts'
 export {
   checkTeamManagementAccess,
+  checkTeamManagementMembership,
   TeamManagementError,
   type TeamManager,
   teamRoles,
