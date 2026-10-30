@@ -16,6 +16,7 @@ import {
   renderApp,
   signedInAs,
 } from '../test/fake-api.tsx'
+import { UnsavedChangesProvider } from '../unsaved-changes.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 const TEAM_ID = '00000000-0000-7000-8000-000000000010'
@@ -59,14 +60,16 @@ function contents({
 } = {}) {
   return (
     <MemoryRouter>
-      <InterfaceScope surface="admin">
-        <TeamMembers
-          organizationId={organizationId}
-          currentUserId={SELF_ID}
-          role={role}
-          onReload={onReload}
-        />
-      </InterfaceScope>
+      <UnsavedChangesProvider>
+        <InterfaceScope surface="admin">
+          <TeamMembers
+            organizationId={organizationId}
+            currentUserId={SELF_ID}
+            role={role}
+            onReload={onReload}
+          />
+        </InterfaceScope>
+      </UnsavedChangesProvider>
     </MemoryRouter>
   )
 }

@@ -120,6 +120,7 @@ describe('booking readiness OpenAPI', () => {
       '200',
       '400',
       '403',
+      '409',
       '500',
     ])
   })
@@ -527,7 +528,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
     }
     await verify(readRouteCopy())
     const mutated = readRouteCopy([
-      '    !uuid(teamId) ||\n    teamId.toLowerCase() !== principal.organization.id.toLowerCase()',
+      '    !uuid(teamId) ||\n    (!expectedTeamId && teamId.toLowerCase() !== principal.organization.id.toLowerCase())',
       '    !uuid(teamId)',
     ])
     await expect(verify(mutated)).rejects.toMatchObject({

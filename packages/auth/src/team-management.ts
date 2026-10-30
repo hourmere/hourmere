@@ -71,8 +71,17 @@ export async function checkTeamManagementAccess(
   context?: { expectedOrganizationId: string; allowPersonal: boolean },
   allowMemberRead = false,
 ): Promise<TeamReader> {
+  const expectedTeamId =
+    context &&
+    !context.allowPersonal &&
+    uuid(context.expectedOrganizationId) &&
+    context.expectedOrganizationId.toLowerCase() !== principal.organization.id.toLowerCase()
+      ? context.expectedOrganizationId
+      : undefined
+  const authorizationTeamId = expectedTeamId ?? teamId
   if (
     context &&
+    !expectedTeamId &&
     (!uuid(context.expectedOrganizationId) ||
       context.expectedOrganizationId.toLowerCase() !== teamId.toLowerCase())
   )
@@ -82,13 +91,16 @@ export async function checkTeamManagementAccess(
     !uuid(principal.user.id) ||
     !uuid(principal.sessionId) ||
     !uuid(teamId) ||
-    teamId.toLowerCase() !== principal.organization.id.toLowerCase()
+    (!expectedTeamId && teamId.toLowerCase() !== principal.organization.id.toLowerCase())
   )
     throw denied()
 
   await teamSessionUser(db, principal, lock)
 
-  let organizationQuery = db.selectFrom('auth.organization').select('id').where('id', '=', teamId)
+  let organizationQuery = db
+    .selectFrom('auth.organization')
+    .select('id')
+    .where('id', '=', authorizationTeamId)
   // Serialize team-management writes, including organization edits and self role changes,
   // without competing SHARE → UPDATE upgrades in their callbacks.
   if (lock) organizationQuery = organizationQuery.forUpdate()
@@ -97,7 +109,7 @@ export async function checkTeamManagementAccess(
   const membership = await checkTeamManagementMembership(
     db,
     principal.user.id,
-    teamId,
+    authorizationTeamId,
     lock,
     context?.allowPersonal,
     allowMemberRead,
@@ -106,6 +118,11 @@ export async function checkTeamManagementAccess(
 
   // Refuse a session invalidated since caller resolution, including email-proof rotation.
   const session = await teamSession(db, principal, lock)
+
+  // A stale browser page may now be in personal space or a member-only team. Validate
+  // its expected team's authority before distinguishing a context change. Self-service
+  // callers may retain any member role; management callers still require owner/admin.
+  if (expectedTeamId) throw contextChanged()
 
   if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase()) {
     // The caller resolver falls back to the personal organization when the active team's
@@ -119,7 +136,10 @@ export async function checkTeamManagementAccess(
             .where('userId', '=', principal.user.id)
             .executeTakeFirst()
         : undefined
-    if (activeMembership || !personal) throw contextChanged()
+    if (activeMembership || !personal) {
+      if (role === 'member' && !context.allowPersonal && !allowMemberRead) throw denied()
+      throw contextChanged()
+    }
   }
 
   return { userId: principal.user.id, organizationId: organization.id, role }

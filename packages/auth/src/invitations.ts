@@ -68,7 +68,19 @@ export async function manageInvitation(
 ) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw invalid()
   const input = body as Record<string, unknown>
-  const organizationId = input.organizationId ?? actor.activeOrganizationId
+  if (
+    options.requireContext &&
+    options.expectedOrganizationId !== undefined &&
+    options.expectedOrganizationId !== null &&
+    !isUuid(options.expectedOrganizationId)
+  )
+    throw denied()
+  const context =
+    options.requireContext && options.expectedOrganizationId
+      ? { expectedOrganizationId: options.expectedOrganizationId, allowPersonal: false }
+      : undefined
+  const organizationId =
+    input.organizationId ?? actor.activeOrganizationId ?? context?.expectedOrganizationId
   if (typeof organizationId !== 'string' || !isUuid(organizationId)) throw denied()
   if (!isUuid(actor.userId) || !isUuid(actor.sessionId)) throw denied()
   // Refuse alternate role forms and unsupported native team/subgroup parameters.
@@ -127,13 +139,22 @@ export async function manageInvitation(
             kind: 'session',
             user: { id: actor.userId, name: '', email: '' },
             sessionId: actor.sessionId,
-            organization: { id: organizationId, name: '', slug: '', personal: false },
+            organization: {
+              id: context ? (actor.activeOrganizationId ?? organizationId) : organizationId,
+              name: '',
+              slug: '',
+              personal: false,
+            },
           },
           organizationId,
           true,
+          context,
         )
       } catch (error) {
-        if (error instanceof TeamManagementError) throw denied()
+        if (error instanceof TeamManagementError) {
+          if (error.code === 'organization_context_changed') throw contextChanged()
+          throw denied()
+        }
         throw error
       }
       const session = await trx
@@ -166,6 +187,7 @@ export async function manageInvitation(
       const candidates = await query.orderBy('id').limit(2).forUpdate().execute()
       if (candidates.length > 1) throw conflict()
       let invitation = candidates[0]
+      const existing = Boolean(invitation)
       // Preserve the role refusal before waiting for a delivery lock.
       if (
         invitation &&
@@ -195,7 +217,7 @@ export async function manageInvitation(
           delivery?.resend_request_id === requestId &&
           generation === (input.expectedGeneration as number) + 1
         )
-          return result(invitation, delivery)
+          return result(invitation, delivery, existing)
         if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
           throw conflict()
         const resendDenial = invitationResendDeliveryDenial(invitation, delivery, now)
@@ -226,7 +248,7 @@ export async function manageInvitation(
           code: 'INVITATION_ALREADY_PENDING',
           message: 'An invitation is already pending. Reload before trying again.',
         })
-      if (invitation && delivery && !resend) return result(invitation, delivery)
+      if (invitation && delivery && !resend) return result(invitation, delivery, existing)
       if (!invitation) {
         const pending = await trx
           .selectFrom('auth.invitation')
@@ -301,7 +323,7 @@ export async function manageInvitation(
         .onConflict((oc) => oc.column('invitation_id').doUpdateSet(values))
         .returningAll()
         .executeTakeFirstOrThrow()
-      return result(invitation, delivery)
+      return result(invitation, delivery, existing)
     })
   // Admission is already committed: queue failure must not discard the invitation or
   // its due delivery intent. The repairer can enqueue that same generation later.
@@ -339,9 +361,11 @@ export async function manageInvitation(
 function result<T>(
   invitation: T,
   delivery: { generation: number; state: string; attempts: number },
+  existing: boolean,
 ) {
   return {
     ...invitation,
+    existing,
     delivery: {
       generation: delivery.generation,
       state: delivery.state,

@@ -19,9 +19,6 @@ export async function leaveTeamMember(
     throw new DomainError('forbidden', 'team_management_access_denied')
   }
   const principal = ctx.principal
-  if (input.expectedOrganizationId.toLowerCase() !== principal.organization.id.toLowerCase()) {
-    throw new DomainError('conflict', 'organization_context_changed')
-  }
   // Repair legacy accounts before taking team locks; this helper may create its own
   // transaction. Only this user's personal space is touched here.
   const personalId = await ensurePersonalOrganization(ctx.db, principal.user.id)

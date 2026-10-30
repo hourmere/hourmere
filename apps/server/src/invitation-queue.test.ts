@@ -70,7 +70,7 @@ async function authSourceCopy(enqueueBeforeCommit: boolean): Promise<typeof crea
   const serviceLocation = new URL('../../../packages/auth/src/invitations.ts', import.meta.url)
   let source = readFileSync(serviceLocation, 'utf8')
   const seam =
-    '      return result(invitation, delivery)\n    })\n  // Admission is already committed:'
+    '      return result(invitation, delivery, existing)\n    })\n  // Admission is already committed:'
   expect(source.includes(seam), 'mutation matches the admission commit boundary').toBe(true)
   if (enqueueBeforeCommit) {
     const postCommitStart = source.indexOf('  // Admission is already committed:')
@@ -79,7 +79,7 @@ async function authSourceCopy(enqueueBeforeCommit: boolean): Promise<typeof crea
     expect(postCommitEnd, 'mutation finds the post-commit return').toBeGreaterThan(postCommitStart)
     source = source.replace(
       seam,
-      `      const early = result(invitation, delivery)
+      `      const early = result(invitation, delivery, existing)
       if (options.enqueue && early.delivery.state === 'queued') {
         await options.enqueue({ invitationId: invitation.id, generation: delivery.generation })
       }

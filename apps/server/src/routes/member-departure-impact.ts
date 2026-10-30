@@ -49,12 +49,18 @@ export function memberDepartureImpactRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/members/{memberUserId}/departure-impact',
         summary: "Event types and unfinished bookings affected by a member's departure",
         description:
-          'Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id and include remainingHostCount, the number of other current verified team hosts; zero identifies a round-robin pool left without a host. Bookings are ordered by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.',
+          'Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id and include remainingHostCount, the number of other current verified team hosts; zero identifies a round-robin pool left without a host. Bookings are ordered by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team, or still belongs to that team when inspecting their own departure, receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.',
         tags: ['Team members'],
         security: [{ session: [] }],
         middleware: access.memberReadMiddleware,
         request: {
           params: z.strictObject({ memberUserId: z.uuid() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
+            }),
+          }),
           query: DepartureQuery,
         },
         responses: {
@@ -66,6 +72,11 @@ export function memberDepartureImpactRoutes(deps: ServiceDeps): RouteModule {
           403: {
             description:
               'team_management_access_denied: requires a current team session without Authorization and an accessible member',
+            content: json(ErrorBody),
+          },
+          409: {
+            description:
+              'organization_context_changed: the caller retains expected-team management authority or membership for their own preview, but the current space changed; reload before retrying',
             content: json(ErrorBody),
           },
         },
