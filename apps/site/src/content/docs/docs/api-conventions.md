@@ -209,6 +209,18 @@ Authorization header, including an empty or invalid value, returns `403 SESSION_
 even alongside a valid owner/admin cookie. API keys and MCP OAuth tokens cannot inherit
 the browser's organization-management privileges.
 
+`GET /api/auth/organization/list-members` retains Better Auth's offset paging and
+`{ members, total }` shape. It counts joined memberships only. Members receive each
+membership's IDs, role, creation time and public user summary (`id`, `name`); other
+members' email addresses and avatars are omitted. Verified owners and admins also receive
+the native member email/avatar fields. Sensitive fields require a current database
+membership with only known `owner`, `admin` and `member` role tokens, including an owner
+or admin token. Unknown roles and unverified identities receive the public summary.
+`get-full-organization` uses the same member projection and omits `invitations` for
+non-managers; direct `list-invitations` returns `403 TEAM_MANAGEMENT_ACCESS_DENIED` to
+them. The settings page loads the separate, cursor-paged safe invitation summaries from
+`GET /api/v1/team/invitations` only for owners and admins.
+
 Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
 where the form or action started. Do not replace that value with the active organization
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
@@ -327,6 +339,12 @@ are rejected before resolving API-key/OAuth credentials, even alongside a valid 
 The route uses the shared team-management access middleware and rechecks current authority
 before reading invitations. It is session-only REST; MCP and CLI credentials grant no
 team invitation management authority.
+
+Browsers may send optional `X-Expected-Organization-Id` to bind every page and retry to
+the team where the invitation section opened. A mismatched, invalid or inaccessible
+expected team receives the same `403 team_management_access_denied` before summaries
+are read, including the first page without a cursor. The header grants no authority and
+must match the session's current team. Omitting it preserves existing current-team reads.
 
 The envelope is `{data,nextCursor}`. `limit` accepts 1–100 (default 50); pass the opaque
 `nextCursor` as `cursor` in the same team until it is null. Ordering is invitation ID

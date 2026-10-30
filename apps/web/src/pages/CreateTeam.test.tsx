@@ -7,6 +7,7 @@ import type { CreatedOrganization } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { chooseLanguage } from '../i18n/store.ts'
 import {
+  emptyTeamLists,
   fakeApi,
   json,
   later,
@@ -57,6 +58,7 @@ const leaving = () => {
 function server(overrides: Routes = {}, role = 'owner') {
   const state = { me: ME }
   const api = fakeApi({
+    ...emptyTeamLists,
     ...profile(PROFILE),
     'GET /api/v1/me': () => json(200, state.me),
     'GET /api/auth/organization/list': () => json(200, [ME.organization, team]),
