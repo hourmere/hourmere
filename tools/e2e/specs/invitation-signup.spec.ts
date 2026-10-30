@@ -14,7 +14,7 @@ const copy = {
     heading: 'Invitation to join Invitation signup team',
     unavailable: 'This invitation is unavailable.',
     guidance:
-      'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+      'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.',
   },
   'zh-CN': {
     signIn: '登录 Hourmere',
@@ -27,7 +27,8 @@ const copy = {
     signedIn: '当前登录账号',
     heading: '加入 Invitation signup team 的邀请',
     unavailable: '此邀请不可用。',
-    guidance: '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请和此实例的注册规则。',
+    guidance:
+      '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请，或联系此实例的管理员咨询注册权限。',
   },
 } as const
 

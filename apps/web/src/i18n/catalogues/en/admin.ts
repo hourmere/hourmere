@@ -31,8 +31,8 @@ export const admin = {
   'Go to team': 'Go to team',
   'Invited email': 'Invited email',
   'You are already a member of {team}.': 'You are already a member of {team}.',
-  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
-    'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.':
+    'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.',
   Pending: 'Pending',
   'Team members': 'Team members',
   'Pending invitations are not members or hosts.': 'Pending invitations are not members or hosts.',

@@ -251,7 +251,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
           {joiningTeam && (
             <p>
               {t(
-                'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+                'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.',
               )}
             </p>
           )}
@@ -315,7 +315,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             </p>
             <p>
               {t(
-                'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+                'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.',
               )}
             </p>
           </>

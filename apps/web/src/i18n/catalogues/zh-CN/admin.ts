@@ -29,8 +29,8 @@ export const admin = {
   'Go to team': '前往团队',
   'Invited email': '受邀邮箱',
   'You are already a member of {team}.': '你已经是{team}的成员。',
-  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
-    '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请和此实例的注册规则。',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.':
+    '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请，或联系此实例的管理员咨询注册权限。',
   Pending: '待接受',
   'Team members': '团队成员',
   'Pending invitations are not members or hosts.': '待接受的邀请不计入成员或主持人。',
