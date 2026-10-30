@@ -208,6 +208,13 @@ describe('event type configuration checks', () => {
       expect(
         within(configuration('Intro call', language)).getByRole('link').getAttribute('href'),
       ).toBe('/app/availability')
+      expect(
+        screen.getByText(
+          language === 'en'
+            ? 'Configuration checks do not guarantee available times. Check the booking page for current availability.'
+            : '配置检查不保证有可约时段。当前可约时间以预约页为准。',
+        ),
+      ).toBeDefined()
     },
   )
 
