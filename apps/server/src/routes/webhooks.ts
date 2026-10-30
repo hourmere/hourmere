@@ -63,18 +63,18 @@ const Params = z.object({ id: z.string() })
 const ExpectedReadHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
     description:
-      'Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams. Omitted headers preserve current-organization reads. Ignored for API keys.',
+      'Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams and any different expected personal organization. Omitted headers preserve current-organization reads. Ignored for API keys.',
   }),
 })
 const ExpectedWriteHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
     description:
-      'Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys.',
+      'Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys.',
   }),
 })
 const errors = errorResponses({
   400: 'invalid_webhook or invalid_request',
-  403: `insufficient_role or team_management_access_denied; ${CROSS_ORIGIN_WRITE}`,
+  403: `insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; ${CROSS_ORIGIN_WRITE}`,
   404: 'webhook_not_found',
   409: 'webhooks_disabled, webhook_limit_reached or organization_context_changed',
 })

@@ -7136,7 +7136,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams and any different expected personal organization. Omitted headers preserve current-organization reads. Ignored for API keys. */
                 "x-expected-organization-id"?: string;
             };
             path?: never;
@@ -7171,7 +7171,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7213,7 +7213,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
                 "x-expected-organization-id"?: string;
             };
             path?: never;
@@ -7260,7 +7260,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7302,7 +7302,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
                 "x-expected-organization-id"?: string;
             };
             path: {
@@ -7337,7 +7337,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7379,7 +7379,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
                 "x-expected-organization-id"?: string;
             };
             path: {
@@ -7423,7 +7423,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7467,7 +7467,7 @@ export interface operations {
                 after?: string;
             };
             header?: {
-                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams and any different expected personal organization. Omitted headers preserve current-organization reads. Ignored for API keys. */
                 "x-expected-organization-id"?: string;
             };
             path: {
@@ -7507,7 +7507,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7549,7 +7549,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale authorized expected team returns 409; inaccessible expected teams receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
                 "x-expected-organization-id"?: string;
             };
             path: {
@@ -7589,7 +7589,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role or team_management_access_denied; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;

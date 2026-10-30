@@ -290,9 +290,11 @@ permission and do not affect API-key or MCP OAuth authority.
 | Team reads with the optional header: a different expected team still authorized for that read (any member for their own departure preview; owner/admin for management reads) | 403 `team_management_access_denied` | 409 `organization_context_changed` |
 | Team reads that did not previously read the header (`GET /api/v1/team/bookings`, `GET /api/v1/teams/{teamId}/readiness`, departure impact, removal records, removal handling): malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
 | The same reads: the expected team differs from the current team | 200 (header ignored) | 409 `organization_context_changed` when still authorized for the expected team, otherwise 403 `team_management_access_denied` |
-| Session webhook writes: missing or malformed expected ID | Header ignored | 409 `organization_context_changed`, matching session event-type writes |
+| Session webhook writes: missing or malformed expected ID | 2xx success (header ignored) | 409 `organization_context_changed`, matching session event-type writes |
+| Session webhook writes: ordinary member of the expected current team | 403 `insufficient_role` | 403 `team_management_access_denied` |
 | Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
-| Session webhook reads: malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
+| Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
+| Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |
 
 A still-current ordinary member's stale REST or native leave request retains 409.
 Missing required write headers retain 409, and optional-header omission retains existing
@@ -347,10 +349,15 @@ Session webhook writes require the same header, including personal-organization 
 and recheck the live session context inside the locked mutation transaction. Missing or
 malformed write expectations retain the event-type 409 reload response. Supplied read
 expectations use the optional-read rule above; omitting the header preserves existing
-reads. Matching personal-organization expectations remain supported. A different expected
-personal organization, an inaccessible team or ordinary membership in the expected team
-receives uniform 403 `team_management_access_denied`. API keys ignore this browser header
-and remain pinned to their stored organization.
+reads. Matching personal-organization expectations remain supported. On writes, the caller's
+own expected personal organization also counts as still authorized after switching to a
+team, so it receives 409 reload guidance. Another user's personal organization, an
+inaccessible team or ordinary membership in the expected team receives uniform
+403 `team_management_access_denied`. Reads with a different expected personal organization
+retain that 403, including the caller's own personal organization. Ordinary-member session
+writes and reads with the header use that same 403 code; reads without the header retain
+`insufficient_role`. API keys ignore this browser header and remain pinned to their stored
+organization.
 
 The web booking detail also binds cancellation, rescheduling, conference reconciliation
 and calendar-copy retries to its opening organization with this header. These four

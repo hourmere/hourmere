@@ -157,6 +157,14 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
     })
   }
 
+  const webhookSnapshot = (organizationIds: string[]) =>
+    db
+      .selectFrom('webhooks')
+      .select(['id', 'organization_id', 'is_active', 'events', 'secret_ciphertext', 'updated_at'])
+      .where('organization_id', 'in', organizationIds)
+      .orderBy('id')
+      .execute()
+
   async function fixture() {
     const user = await createTestUser(db, 'Webhook owner and admin')
     const owner = await createTestUser(db, 'Continuing team owner')
@@ -179,12 +187,13 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
       settings,
       input,
     )
-    const snapshot = await db
-      .selectFrom('webhooks')
-      .select(['id', 'organization_id', 'is_active', 'events', 'secret_ciphertext', 'updated_at'])
-      .where('organization_id', 'in', [first.id, second.id])
-      .orderBy('id')
-      .execute()
+    const organizationIds = [
+      first.id,
+      second.id,
+      user.principal.organization.id,
+      owner.principal.organization.id,
+    ]
+    const snapshot = await webhookSnapshot(organizationIds)
     const token = randomBytes(24).toString('base64url')
     const session = await db
       .insertInto('auth.session')
@@ -200,9 +209,11 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
     const signature = createHmac('sha256', sessionSecret).update(token).digest('base64')
     return {
       user,
+      owner,
       first,
       second,
       memberTeam,
+      organizationIds,
       firstWebhook: firstWebhook.webhook,
       secondWebhook: secondWebhook.webhook,
       snapshot,
@@ -211,6 +222,25 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
     }
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>
+  async function personalFixture() {
+    const f = await fixture()
+    const ownPersonalWebhook = await webhooks.createWebhook(
+      testContext(db, f.user.principal),
+      settings,
+      input,
+    )
+    const foreignPersonalWebhook = await webhooks.createWebhook(
+      testContext(db, f.owner.principal),
+      settings,
+      input,
+    )
+    return {
+      ...f,
+      ownPersonalWebhook: ownPersonalWebhook.webhook,
+      foreignPersonalWebhook: foreignPersonalWebhook.webhook,
+      snapshot: await webhookSnapshot(f.organizationIds),
+    }
+  }
   const switchTo = (f: Fixture, id: string) =>
     db
       .updateTable('auth.session')
@@ -253,12 +283,7 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
     })
   }
   async function unchanged(f: Fixture) {
-    const rows = await db
-      .selectFrom('webhooks')
-      .select(['id', 'organization_id', 'is_active', 'events', 'secret_ciphertext', 'updated_at'])
-      .where('organization_id', 'in', [f.first.id, f.second.id])
-      .orderBy('id')
-      .execute()
+    const rows = await webhookSnapshot(f.organizationIds)
     expect(rows.length).toBe(f.snapshot.length)
     // Do not print signing material in a failed assertion.
     expect(
@@ -304,7 +329,7 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
       )
     },
   )
-  it.each(['remove', 'member', 'missing', 'personal'] as const)(
+  it.each(['remove', 'member', 'missing', 'foreign personal'] as const)(
     'uniformly denies inaccessible expected context: %s',
     async (kind) => {
       const f = await fixture()
@@ -325,14 +350,47 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
       const expected =
         kind === 'missing'
           ? randomUUID()
-          : kind === 'personal'
-            ? f.user.principal.organization.id
+          : kind === 'foreign personal'
+            ? f.owner.principal.organization.id
             : f.first.id
       for (const operation of [...operations, 'list', 'deliveries'] as const)
         await refused(await request(f, operation, expected), 403)
       await unchanged(f)
     },
   )
+  async function verifyPersonalContext(
+    factory: typeof webhookRoutes,
+    space: 'own' | 'foreign',
+    operation: Operation | 'list' | 'deliveries',
+  ) {
+    const f = await personalFixture()
+    // Open in personal space first, then submit through the same session in a team.
+    await switchTo(f, f.user.principal.organization.id)
+    await switchTo(f, f.second.id)
+    const personal = space === 'own' ? f.ownPersonalWebhook : f.foreignPersonalWebhook
+    const write = operations.includes(operation as Operation)
+    await refused(
+      await request(
+        f,
+        operation,
+        personal.organizationId.toUpperCase(),
+        application(factory),
+        personal.id,
+      ),
+      space === 'own' && write ? 409 : 403,
+    )
+    await unchanged(f)
+  }
+  for (const space of ['own', 'foreign'] as const) {
+    it.each(operations)(
+      `%s refuses a stale ${space} personal page after switching to a team without any write`,
+      (operation) => verifyPersonalContext(webhookRoutes, space, operation),
+    )
+    it.each(['list', 'deliveries'] as const)(
+      `%s keeps denying a stale ${space} personal expectation on reads`,
+      (operation) => verifyPersonalContext(webhookRoutes, space, operation),
+    )
+  }
   it.each(['personal', 'member'] as const)(
     'retains authorized expected-team recovery after switching to %s space',
     async (space) => {
@@ -628,7 +686,48 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
     await verifyWait('create', 'switch', factory)
     await verifyWait('update', 'switch', factory)
     await verifyFence(factory)
+    for (const space of ['own', 'foreign'] as const)
+      for (const operation of [...operations, 'list', 'deliveries'] as const)
+        await verifyPersonalContext(factory, space, operation)
   })
+  it.each([
+    [
+      'own personal-space write recovery',
+      'own',
+      operations,
+      ['ownPersonal !== undefined ||\n        ', ''],
+      403,
+      409,
+    ],
+    [
+      'personal-space ownership',
+      'foreign',
+      operations,
+      [
+        ".where('organization_id', '=', expectedOrganizationId)\n          .where('user_id', '=', principal.user.id)",
+        ".where('organization_id', '=', expectedOrganizationId)",
+      ],
+      409,
+      403,
+    ],
+    [
+      'existing personal-space read policy',
+      'own',
+      ['list', 'deliveries'],
+      ['const ownPersonal = write\n', 'const ownPersonal = true\n'],
+      409,
+      403,
+    ],
+  ] as const)(
+    'detects removing %s with real HTTP assertions',
+    async (_, space, attemptedOperations, mutation, actual, expected) => {
+      const factory = routeCopy({ context: [...mutation] })
+      for (const operation of attemptedOperations)
+        await expect(verifyPersonalContext(factory, space, operation)).rejects.toThrow(
+          expect.objectContaining({ name: 'AssertionError', actual, expected }),
+        )
+    },
+  )
   it.each([
     [
       'missing write context',

@@ -27,9 +27,13 @@ Cookie-session writes require `X-Expected-Organization-Id` set to the organizati
 the action started, including personal organizations. List and delivery reads accept the
 same header optionally; omitting it preserves current-organization reads. A stale expected
 team that the caller still owns/administers returns `409 organization_context_changed`;
-reload before retrying. Inaccessible expected teams receive uniform
-`403 team_management_access_denied`. Missing or malformed write context returns the same
-409 as event-type writes; malformed read context returns 403. The service checks write
+reload before retrying. On writes, the caller's own expected personal organization also
+receives that 409 after switching to a team. Inaccessible expected teams and another user's
+personal organization receive uniform `403 team_management_access_denied`. Reads with any
+different expected personal organization retain 403. Ordinary-member session writes use
+`team_management_access_denied`, as do reads with the header; reads without the header and
+API-key requests retain `insufficient_role`. Missing or malformed write context returns the
+same 409 as event-type writes; malformed read context returns 403. The service checks write
 context again inside its locked transaction. API keys ignore this header and keep their
 stored organization. See [browser organization context](/docs/api-conventions#browser-organization-context).
 
