@@ -4,9 +4,10 @@ import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import * as bookings from '@hourmere/scheduling'
+import type { BookingNotifier } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import * as bookings from '../../../packages/scheduling/src/bookings.ts'
 import { teamManagementAccess } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -144,7 +145,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
 
   it('keeps team scope, existing cancellation time rules and transactional notification failure', async () => {
     const s = await fixture()
-    const cancel = (id: string, instant = now(), notify?: bookings.BookingNotifier) =>
+    const cancel = (id: string, instant = now(), notify?: BookingNotifier) =>
       s.access.write(s.principal, s.team.id, (trx, actor) =>
         bookings.cancelTeamBookingInTransaction(trx, actor, id, () => instant, { notify }),
       )

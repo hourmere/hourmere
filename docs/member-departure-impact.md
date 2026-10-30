@@ -26,12 +26,15 @@ The response contains `evaluatedAt` and two independently paginated collections:
 
 | Collection | Scope and fields |
 |---|---|
-| `eventTypes` | Undeleted team event types currently configured with the target as a host, including disabled types. Each item has `id`, `title`, `slug`, `schedulingType`, `isActive` and `reason`. |
+| `eventTypes` | Undeleted team event types currently configured with the target as a host, including disabled types. Each item has `id`, `title`, `slug`, `schedulingType`, `isActive`, `reason` and `remainingHostCount`. |
 | `bookings` | Confirmed bookings in that team with the target among the saved booking hosts and `end > evaluatedAt`. Each item uses the [team administration whitelist](team-admin-bookings.md), plus `inProgress` and `handling`. |
 
 Event reasons are `sole_host` for individual types, `round_robin_pool_member` for round-robin
 pools, and `collective_required_host` for collective types. Removing someone from a current
 host pool changes the event list, while bookings retain their saved host assignments.
+`remainingHostCount` counts other configured hosts who are still verified members of that
+same team. A round-robin pool with `remainingHostCount: 0` has the same no-host severity as
+`sole_host`; the reason value remains `round_robin_pool_member` for compatibility.
 Personal event types, bookings belonging to personal event types, personal organizations
 and other teams are excluded. Bookings whose team event type was deleted remain visible;
 soft-deleted event titles are null, as in the administration whitelist. Bookings with no
