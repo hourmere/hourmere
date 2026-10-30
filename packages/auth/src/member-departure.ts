@@ -25,6 +25,6 @@ export class MemberDepartureOwnerRequiredError extends Error {
   } as const
 
   constructor() {
-    super('Another owner is needed before you can leave.')
+    super('The team must retain at least one owner.')
   }
 }

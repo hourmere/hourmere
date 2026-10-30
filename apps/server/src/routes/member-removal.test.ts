@@ -342,7 +342,10 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     ['owner', 'admin', 'member'].map((targetRole) => ({
       actorRole,
       targetRole,
-      allowed: targetRole === 'member' ? actorRole !== 'member' : actorRole === 'owner',
+      allowed:
+        targetRole === 'member'
+          ? actorRole !== 'member'
+          : targetRole === 'admin' && actorRole === 'owner',
     })),
   )
 

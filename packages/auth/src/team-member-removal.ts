@@ -41,7 +41,8 @@ export async function teamMemberRemovalTarget(
   if (
     !member ||
     (!roles.includes('owner') && !roles.includes('admin') && !roles.includes('member')) ||
-    (actor.role !== 'owner' && (roles.includes('owner') || roles.includes('admin')))
+    roles.includes('owner') ||
+    (actor.role !== 'owner' && roles.includes('admin'))
   ) {
     throw teamManagementDenied()
   }

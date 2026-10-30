@@ -537,8 +537,18 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
 
   async function verifyTarget(remove: Remove, actorRole: string, targetRole: string) {
     const f = await fixture(actorRole, targetRole)
-    expect((await request(f, remove)).status).toBe(403)
+    const response = await request(f, remove)
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
     expect(await member(f)).toBeDefined()
+    expect(await active(f.eventId)).toBe(true)
+    expect(
+      await db
+        .selectFrom('organization_operations')
+        .select('id')
+        .where('organization_id', '=', f.team.id)
+        .execute(),
+    ).toEqual([])
   }
 
   async function verifyTeamBinding(remove: Remove) {
@@ -683,6 +693,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
 
   it('passes the removal assertions against an unmodified source copy', async () => {
     const remove = sourceCopy()
+    await verifyTarget(remove, 'owner', 'owner,member')
     await verifyTarget(remove, 'admin', 'owner,member')
     await verifyTarget(remove, 'admin', 'admin')
     await verifyTeamBinding(remove)
@@ -703,18 +714,12 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   }[] = [
     {
       name: 'owner target refusal',
-      replacement: [
-        "(roles.includes('owner') || roles.includes('admin'))",
-        "roles.includes('admin')",
-      ],
-      verify: (remove) => verifyTarget(remove, 'admin', 'owner,member'),
+      replacement: ["    roles.includes('owner') ||\n", ''],
+      verify: (remove) => verifyTarget(remove, 'owner', 'owner,member'),
     },
     {
       name: 'admin target refusal',
-      replacement: [
-        "(actor.role !== 'owner' && (roles.includes('owner') || roles.includes('admin')))",
-        'false',
-      ],
+      replacement: ["(actor.role !== 'owner' && roles.includes('admin'))", 'false'],
       verify: (remove) => verifyTarget(remove, 'admin', 'admin'),
     },
     {

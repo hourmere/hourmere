@@ -288,7 +288,7 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       code: 'member_departure_owner_required',
-      message: 'Another owner is needed before you can leave.',
+      message: 'The team must retain at least one owner.',
       handling: {
         owner: 'another_owner_is_needed_before_you_can_leave',
         nextStep: 'add_another_owner_first',

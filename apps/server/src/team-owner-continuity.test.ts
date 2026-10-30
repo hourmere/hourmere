@@ -30,11 +30,19 @@ const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:43873'
 const secret = 'synthetic-owner-continuity-secret-at-least-32-characters'
 const signup = { mode: 'open', allowedDomains: [] } as const
-type Action = 'leave' | 'demote' | 'remove' | 'REST leave' | 'REST remove'
+type Action = 'leave' | 'demote' | 'promote' | 'remove' | 'REST leave' | 'REST remove'
 type Replacement = readonly [string, string]
 type Copies = Partial<
   Record<
-    'policy' | 'removal' | 'owners' | 'auth' | 'leave' | 'context' | 'hooks' | 'removalRoute',
+    | 'policy'
+    | 'removal'
+    | 'owners'
+    | 'auth'
+    | 'leave'
+    | 'context'
+    | 'hooks'
+    | 'removalRoute'
+    | 'management',
     Replacement[]
   >
 >
@@ -97,8 +105,10 @@ async function sourceCopy(mutations: Copies = {}): Promise<SourceCopy> {
   const service = copy('leave', '../../../packages/scheduling/src/member-leave.ts', {
     '@hourmere/auth': auth,
   })
+  const management = copy('management', './team-management.ts', { '@hourmere/auth': auth })
   const removalRoute = copy('removalRoute', './routes/member-removal.ts', {
     '@hourmere/auth': auth,
+    '../team-management.ts': management,
   })
   const [copiedAuth, copiedService, copiedRemovalRoute] = await Promise.all([
     import(auth),
@@ -225,13 +235,20 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
         body: JSON.stringify({ teamId: f.teamId }),
       })
     const path =
-      action === 'leave' ? 'leave' : action === 'demote' ? 'update-member-role' : 'remove-member'
+      action === 'leave'
+        ? 'leave'
+        : action === 'demote' || action === 'promote'
+          ? 'update-member-role'
+          : 'remove-member'
     return server.request(`/api/auth/organization/${path}`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         organizationId: f.teamId,
-        ...(action === 'demote' && { memberId: target.memberId, role: 'member' }),
+        ...((action === 'demote' || action === 'promote') && {
+          memberId: target.memberId,
+          role: action === 'promote' ? 'admin' : 'member',
+        }),
         ...(action === 'remove' && { memberIdOrEmail: target.memberId }),
       }),
     })
@@ -250,58 +267,170 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({
       [rest ? 'error' : 'code']: 'member_departure_owner_required',
+      message: 'The team must retain at least one owner.',
       handling: { nextStep: 'add_another_owner_first' },
     })
   }
 
-  it.each(['leave', 'remove', 'demote', 'REST leave', 'REST remove'] as const)(
-    'keeps a sole team owner through %s with the stable refusal and a handling step',
+  async function accessDenied(response: Response, rest = false) {
+    expect(response.status, 'owner targets require the uniform team access denial').toBe(403)
+    expect(await response.json()).toMatchObject(
+      rest
+        ? { error: 'team_management_access_denied' }
+        : { code: 'TEAM_MANAGEMENT_ACCESS_DENIED', message: 'team_management_access_denied' },
+    )
+  }
+
+  async function state(f: Fixture) {
+    return {
+      members: await memberships(f),
+      sessions: await db
+        .selectFrom('auth.session')
+        .select(['id', 'userId', 'activeOrganizationId'])
+        .where('userId', 'in', [f.first.user.id, f.second.user.id])
+        .orderBy('id')
+        .execute(),
+      operations: await db
+        .selectFrom('organization_operations')
+        .selectAll()
+        .where('organization_id', '=', f.teamId)
+        .orderBy('id')
+        .execute(),
+      events: await db
+        .selectFrom('event_types')
+        .select(['id', 'is_active'])
+        .where('organization_id', '=', f.teamId)
+        .orderBy('id')
+        .execute(),
+      bookings: await db
+        .selectFrom('bookings')
+        .select(['id', 'status'])
+        .where('organization_id', '=', f.teamId)
+        .orderBy('id')
+        .execute(),
+      hosts: await db
+        .selectFrom('booking_hosts as host')
+        .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
+        .select(['host.booking_id', 'host.user_id'])
+        .where('booking.organization_id', '=', f.teamId)
+        .orderBy('host.booking_id')
+        .orderBy('host.user_id')
+        .execute(),
+    }
+  }
+
+  it.each(['leave', 'remove', 'REST leave'] as const)(
+    'keeps a sole team owner through safe %s with the stable refusal and a handling step',
     async (action) => {
       const f = await fixture('member')
-      const before = await memberships(f)
+      const before = await state(f)
       await ownerRequired(await request(f, action, f.first), action.startsWith('REST'))
-      expect(await memberships(f)).toEqual(before)
+      expect(await state(f)).toEqual(before)
     },
   )
 
-  it.each(['leave', 'remove', 'demote', 'REST leave', 'REST remove'] as const)(
-    'allows a single %s when another owner remains',
+  it.each(['demote', 'REST remove'] as const)(
+    'refuses a sole owner self target through %s before writing',
+    async (action) => {
+      const f = await fixture('member')
+      const before = await state(f)
+      await accessDenied(await request(f, action, f.first), action.startsWith('REST'))
+      expect(await state(f)).toEqual(before)
+    },
+  )
+
+  it.each(['leave', 'remove', 'REST leave'] as const)(
+    'allows safe self departure through %s when another owner remains',
     async (action) => {
       const f = await fixture()
-      const actor = action === 'remove' || action === 'REST remove' ? f.second : f.first
-      expect((await request(f, action, actor, f.first)).status).toBe(200)
-      const current = await memberships(f)
-      expect(current.filter((member) => member.role === 'owner')).toEqual([
-        { userId: f.second.user.id, role: 'owner' },
-      ])
-      expect(current.some((member) => member.userId === f.first.user.id)).toBe(action === 'demote')
+      expect((await request(f, action, f.first)).status).toBe(200)
+      expect(await memberships(f)).toEqual([{ userId: f.second.user.id, role: 'owner' }])
     },
   )
 
-  async function legacyOwnerChange(
-    action: 'leave' | 'demote' | 'remove' | 'self remove',
+  async function ownerTargetProtection(
+    action: 'demote' | 'remove' | 'REST remove',
+    self = false,
     copy?: SourceCopy,
   ) {
+    const f = await fixture()
+    const target = self ? f.first : f.second
+    await createFixtures(db).eventType(f.teamId, null, {
+      title: 'Owner hosting must remain active after refusal',
+      hosts: [{ userId: target.user.id }],
+    })
+    const before = await state(f)
+    await accessDenied(
+      await request(f, action, f.first, target, copy ? application(copy).app : app),
+      action.startsWith('REST'),
+    )
+    expect(
+      await state(f),
+      'denied owner targets must not change any team or session state',
+    ).toEqual(before)
+  }
+
+  it.each(['demote', 'remove', 'REST remove'] as const)(
+    'refuses another owner target through %s without writing',
+    (action) => ownerTargetProtection(action),
+  )
+
+  it.each(['demote', 'REST remove'] as const)(
+    'refuses an owner self target through %s when another owner remains',
+    (action) => ownerTargetProtection(action, true),
+  )
+
+  const roleTargetGuard = `if (!target || target.userId === facts.userId || teamRoles(target.role).includes('owner'))
+      throw teamRoleDenied()`
+
+  it('detects reallowing owner-to-owner demotion with a real HTTP assertion', async () => {
+    const copy = await sourceCopy({
+      policy: [
+        [roleTargetGuard, 'if (!target || target.userId === facts.userId) throw teamRoleDenied()'],
+      ],
+    })
+    await expect(ownerTargetProtection('demote', false, copy)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it('detects reallowing owner self-demotion with a real HTTP assertion', async () => {
+    const copy = await sourceCopy({
+      policy: [
+        [
+          roleTargetGuard,
+          `if (!target || (target.userId !== facts.userId && teamRoles(target.role).includes('owner')))
+      throw teamRoleDenied()`,
+        ],
+      ],
+    })
+    await expect(ownerTargetProtection('demote', true, copy)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  async function legacyOwnerChange(action: 'leave' | 'remove' | 'REST leave', copy?: SourceCopy) {
     const role = ' member , owner '
     const f = await fixture(role)
     const server = copy ? application(copy).app : app
-    const actualAction = action === 'self remove' ? 'remove' : action
-    const target = action === 'remove' ? f.second : f.first
-    const response = await request(f, actualAction, f.first, target, server)
+    const response = await request(f, action, f.first, f.first, server)
     expect(response.status, 'native owner counts must recognize the second legacy owner').toBe(200)
-    expect(
-      await db
-        .selectFrom('auth.member')
-        .select('role')
-        .where('organizationId', '=', f.teamId)
-        .where('userId', '=', action === 'remove' ? f.first.user.id : f.second.user.id)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ role: action === 'remove' ? 'owner' : role })
+    expect(await memberships(f)).toEqual([{ userId: f.second.user.id, role }])
   }
 
-  it.each(['leave', 'demote', 'remove', 'self remove'] as const)(
-    'recognizes a second legacy whitespace owner for native %s without rewriting stored roles',
+  it.each(['leave', 'remove', 'REST leave'] as const)(
+    'recognizes a second legacy whitespace owner for safe %s without rewriting stored roles',
     (action) => legacyOwnerChange(action),
+  )
+
+  it.each(['demote', 'remove', 'REST remove'] as const)(
+    'refuses a legacy whitespace owner target through %s without writing',
+    async (action) => {
+      const f = await fixture(' member , owner ')
+      const before = await state(f)
+      await accessDenied(await request(f, action, f.first, f.second), action.startsWith('REST'))
+      expect(await state(f)).toEqual(before)
+    },
   )
 
   it('detects omitted normalization of native early owner counts with a real HTTP assertion', async () => {
@@ -391,7 +520,10 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
 
   it('detects omission of administrative self-removal protection in rebuilt HTTP routes', async () => {
     const copy = await sourceCopy({
-      removal: [['if (member.userId === actor.userId) throw teamManagementDenied()', '']],
+      removal: [
+        ["    roles.includes('owner') ||\n", ''],
+        ['if (member.userId === actor.userId) throw teamManagementDenied()', ''],
+      ],
     })
     await expect(selfRemovalProtection(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
@@ -406,10 +538,15 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     },
   )
 
-  async function race(actions: readonly [Action, Action], copy?: SourceCopy) {
+  type Call = readonly [action: Action, actor: Participant, target?: Participant]
+
+  async function lockedRequests(
+    f: Fixture,
+    calls: readonly Call[],
+    waiting: number,
+    copy?: SourceCopy,
+  ) {
     const server = copy ? application(copy).app : app
-    const f = await fixture()
-    const firstElsewhere = { ...f.first, login: await login(f.first.user, f.teamId) }
     const holder = await owned.pool.connect()
     const pending: Promise<Response>[] = []
     try {
@@ -417,25 +554,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
       await holder.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [f.teamId])
       const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
         ?.pid
-      // Cross-target administrative mutations race with an independent loss of the other
-      // owner: A removes B while A leaves; self-demotions let each owner act independently.
-      const calls: readonly [Participant, Participant][] =
-        actions[0] === 'remove' || actions[0] === 'REST remove'
-          ? [
-              [f.first, f.second],
-              actions[1] === 'remove' ? [f.second, f.first] : [firstElsewhere, firstElsewhere],
-            ]
-          : actions[0] === 'demote' && actions[1] === 'demote'
-            ? [
-                [f.first, f.second],
-                [f.second, f.first],
-              ]
-            : [
-                [f.first, f.first],
-                [f.second, f.second],
-              ]
-      for (const [index, action] of actions.entries()) {
-        const [actor, target] = calls[index] as [Participant, Participant]
+      for (const [action, actor, target] of calls) {
         pending.push(Promise.resolve(request(f, action, actor, target, server)))
       }
       await vi.waitFor(
@@ -452,25 +571,22 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
           )
           expect(
             result.rows[0]?.waiting,
-            'both owner changes must wait for the organization lock',
-          ).toBe(2)
+            'all permitted changes must wait for the organization lock',
+          ).toBe(waiting)
         },
         { timeout: 3000, interval: 10 },
       )
+      // A native policy refusal must complete while the permitted write is still blocked.
+      for (const [index, [action]] of calls.entries()) {
+        if (waiting === 1 && action !== 'leave' && action !== 'REST leave') {
+          await accessDenied(
+            await (pending[index] as Promise<Response>).then((response) => response.clone()),
+            action.startsWith('REST'),
+          )
+        }
+      }
       await holder.query('COMMIT')
-      const responses = await Promise.all(pending)
-      expect(
-        responses.filter((response) => response.status === 200),
-        'exactly one owner change succeeds',
-      ).toHaveLength(1)
-      expect(responses.every((response) => [200, 403, 409].includes(response.status))).toBe(true)
-      const remaining = (await memberships(f)).filter((member) =>
-        member.role
-          .split(',')
-          .map((role) => role.trim())
-          .includes('owner'),
-      )
-      expect(remaining, 'the team retains exactly one owner').toHaveLength(1)
+      return await Promise.all(pending)
     } finally {
       await holder.query('ROLLBACK')
       holder.release()
@@ -478,16 +594,165 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     }
   }
 
+  async function ownerLeaveRace(actions: readonly [Action, Action], copy?: SourceCopy) {
+    const f = await fixture()
+    const responses = await lockedRequests(
+      f,
+      [
+        [actions[0], f.first],
+        [actions[1], f.second],
+      ],
+      2,
+      copy,
+    )
+    expect(
+      responses.filter((response) => response.status === 200),
+      'exactly one owner departure succeeds',
+    ).toHaveLength(1)
+    const refusedIndex = responses.findIndex((response) => response.status !== 200)
+    await ownerRequired(
+      responses[refusedIndex] as Response,
+      actions[refusedIndex]?.startsWith('REST'),
+    )
+    expect(await memberships(f), 'the team retains exactly one owner').toHaveLength(1)
+    expect((await memberships(f))[0]?.role).toBe('owner')
+  }
+
   it.each([
     ['leave', 'leave'],
-    ['leave', 'demote'],
-    ['demote', 'demote'],
-    ['remove', 'remove'],
+    ['REST leave', 'leave'],
+    ['REST leave', 'REST leave'],
     ['remove', 'leave'],
-    ['REST leave', 'demote'],
-    ['REST remove', 'leave'],
-  ] as const)('serializes %s with %s under the same organization lock', (first, second) =>
-    race([first, second]),
+  ] as const)(
+    'serializes safe owner %s with %s under the same organization lock',
+    (first, second) => ownerLeaveRace([first, second]),
+  )
+
+  async function memberChangeRace(
+    action: 'demote' | 'promote' | 'remove' | 'REST remove',
+    copy?: SourceCopy,
+    leave: 'leave' | 'REST leave' = 'leave',
+  ) {
+    const f = await fixture()
+    const user = await createTestUser(db, 'Other team member')
+    const member = await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: f.teamId,
+        userId: user.id,
+        role: action === 'demote' ? 'admin' : 'member',
+        createdAt: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const target = { user, memberId: member.id, login: await login(user, f.teamId) }
+    const responses = await lockedRequests(
+      f,
+      [
+        [leave, f.first],
+        [action, f.second, target],
+      ],
+      2,
+      copy,
+    )
+    expect(
+      responses.map((response) => response.status),
+      'safe leave and a permitted change of another member both succeed',
+    ).toEqual([200, 200])
+    const current = await memberships(f)
+    expect(current.filter((member) => member.role === 'owner')).toEqual([
+      { userId: f.second.user.id, role: 'owner' },
+    ])
+    expect(current.find((member) => member.userId === user.id)).toEqual(
+      action === 'remove' || action === 'REST remove'
+        ? undefined
+        : { userId: user.id, role: action === 'demote' ? 'member' : 'admin' },
+    )
+  }
+
+  it.each(['demote', 'promote', 'remove', 'REST remove'] as const)(
+    'serializes owner leave with permitted %s of another member',
+    (action) => memberChangeRace(action),
+  )
+
+  it('serializes REST owner leave with an administrator role change of another member', () =>
+    memberChangeRace('demote', undefined, 'REST leave'))
+
+  it.each(['demote', 'remove', 'REST remove'] as const)(
+    'refuses concurrent owner-on-owner %s requests without writing',
+    async (action) => {
+      const f = await fixture()
+      const before = await state(f)
+      const responses = await Promise.all([
+        request(f, action, f.first, f.second),
+        request(f, action, f.second, f.first),
+      ])
+      for (const response of responses) await accessDenied(response, action.startsWith('REST'))
+      expect(await state(f)).toEqual(before)
+    },
+  )
+
+  it.each(['demote', 'remove', 'REST remove'] as const)(
+    'refuses an owner-on-owner %s while that owner safely leaves',
+    async (action) => {
+      const f = await fixture()
+      const responses = await lockedRequests(
+        f,
+        [
+          ['leave', f.first],
+          [action, f.second, f.first],
+        ],
+        action === 'REST remove' ? 2 : 1,
+      )
+      expect(responses[0]?.status).toBe(200)
+      await accessDenied(responses[1] as Response, action.startsWith('REST'))
+      expect(await memberships(f)).toEqual([{ userId: f.second.user.id, role: 'owner' }])
+      const operations = (await state(f)).operations
+      expect(operations).toHaveLength(1)
+      expect(operations[0]).toMatchObject({
+        operation: 'member_removed',
+        actor_user_id: f.first.user.id,
+        target_user_id: f.first.user.id,
+      })
+    },
+  )
+
+  it('refuses owner self-demotion while the other owner safely leaves', async () => {
+    const f = await fixture()
+    const responses = await lockedRequests(
+      f,
+      [
+        ['leave', f.first],
+        ['demote', f.second],
+      ],
+      1,
+    )
+    expect(responses[0]?.status).toBe(200)
+    await accessDenied(responses[1] as Response)
+    expect(await memberships(f)).toEqual([{ userId: f.second.user.id, role: 'owner' }])
+    expect((await state(f)).operations).toHaveLength(1)
+  })
+
+  it.each(['demote', 'remove', 'REST remove'] as const)(
+    'retains the last owner while safe leave races a forbidden %s',
+    async (action) => {
+      const f = await fixture('admin')
+      const before = await state(f)
+      const responses = await lockedRequests(
+        f,
+        [
+          ['REST leave', f.first],
+          [action, f.second, f.first],
+        ],
+        action === 'REST remove' ? 2 : 1,
+      )
+      await ownerRequired(responses[0] as Response, true)
+      await accessDenied(responses[1] as Response, action.startsWith('REST'))
+      expect(
+        await state(f),
+        'neither refused request writes or leaves the team without an owner',
+      ).toEqual(before)
+    },
   )
 
   async function destructiveRefusal(copy?: SourceCopy, trusted = false) {
@@ -597,8 +862,8 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
 
   it('runs the same race and deletion assertions against unchanged rebuilt source modules', async () => {
     const copy = await sourceCopy()
-    await race(['leave', 'demote'], copy)
-    await race(['remove', 'leave'], copy)
+    await ownerLeaveRace(['leave', 'leave'], copy)
+    await memberChangeRace('REST remove', copy)
     await destructiveRefusal(copy)
   })
 
@@ -638,12 +903,24 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     }
   }
 
-  it('recounts demotion owners after the shared organization lock in rebuilt sources', async () => {
-    await freshDemotionCount(await sourceCopy())
+  // Owner targets are forbidden in production. Bypass only that earlier refusal here so
+  // these HTTP probes exercise the retained count as independent defense in depth.
+  function demotionDefenseCopy(mutations: Copies = {}) {
+    return sourceCopy({
+      ...mutations,
+      policy: [
+        [roleTargetGuard, 'if (!target) throw teamRoleDenied()'],
+        ...(mutations.policy ?? []),
+      ],
+    })
+  }
+
+  it('recounts demotion owners after the shared organization lock as defense in depth', async () => {
+    await freshDemotionCount(await demotionDefenseCopy())
   })
 
   it('detects moving the demotion owner count before its lock with a real HTTP assertion', async () => {
-    const copy = await sourceCopy({
+    const copy = await demotionDefenseCopy({
       policy: [
         [
           'const { facts } = await manager(ctx, targetDb, lock)',
@@ -661,10 +938,29 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
   })
 
   it('detects an omitted demotion owner check with a real HTTP assertion', async () => {
-    const copy = await sourceCopy({
+    const copy = await demotionDefenseCopy({
       policy: [['await assertTeamOwnerRemains(targetDb, facts.organizationId, target.userId)', '']],
     })
     await expect(freshDemotionCount(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('detects a leave owner count taken before the shared lock with a real HTTP assertion', async () => {
+    const copy = await sourceCopy({
+      leave: [
+        [
+          'const personalId = await ensurePersonalOrganization(ctx.db, principal.user.id)',
+          `const personalId = await ensurePersonalOrganization(ctx.db, principal.user.id)
+  const ownersBeforeLock = await ctx.db.selectFrom('auth.member').select('role').where('organizationId', '=', input.teamId).where('userId', '!=', principal.user.id).execute()`,
+        ],
+        [
+          "if (!otherMembers.some((member) => teamRoles(member.role).includes('owner')))",
+          "if (!ownersBeforeLock.some((member) => teamRoles(member.role).includes('owner')))",
+        ],
+      ],
+    })
+    await expect(ownerLeaveRace(['leave', 'leave'], copy)).rejects.toThrow(
+      'exactly one owner departure succeeds',
+    )
   })
 
   it('detects reallowing team deletion with a real HTTP assertion', async () => {
@@ -697,8 +993,32 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
         ],
       ],
     })
-    await expect(race(['remove', 'leave'], copy)).rejects.toThrow(
-      'both owner changes must wait for the organization lock',
+    await expect(memberChangeRace('remove', copy)).rejects.toThrow(
+      'all permitted changes must wait for the organization lock',
+    )
+  })
+
+  it('detects omitted REST removal organization locks in both layers with a real HTTP assertion', async () => {
+    const copy = await sourceCopy({
+      management: [
+        [
+          `            teamId,
+            true,
+            options && {`,
+          `            teamId,
+            false,
+            options && {`,
+        ],
+      ],
+      removal: [
+        [
+          'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
+          'checkTeamManagementAccess(trx, principal, input.teamId, false, {',
+        ],
+      ],
+    })
+    await expect(memberChangeRace('REST remove', copy)).rejects.toThrow(
+      'all permitted changes must wait for the organization lock',
     )
   })
 

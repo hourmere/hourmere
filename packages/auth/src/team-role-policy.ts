@@ -220,7 +220,8 @@ export function createTeamRolePolicy(
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
     const target = await targetQuery.executeTakeFirst()
-    if (!target) throw teamRoleDenied()
+    if (!target || target.userId === facts.userId || teamRoles(target.role).includes('owner'))
+      throw teamRoleDenied()
     if (lock && teamRoles(target.role).includes('owner')) {
       await assertTeamOwnerRemains(targetDb, facts.organizationId, target.userId)
     }

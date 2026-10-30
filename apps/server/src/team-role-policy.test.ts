@@ -295,6 +295,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       actorRole,
       allowed:
         actorRole === 'owner' &&
+        cell.targetRole !== 'owner' &&
         (cell.requestedRole === 'member' ||
           cell.requestedRole === 'admin' ||
           (Array.isArray(cell.requestedRole) && cell.requestedRole.length === 1)),
@@ -382,9 +383,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     async (actorRole) => {
       const f = await fixture(actorRole)
       const before = await snapshot(f)
-      for (const role of actorRole === 'owner'
-        ? ['owner', 'member,owner']
-        : ['owner', 'admin', 'member', 'member,owner']) {
+      for (const role of ['owner', 'admin', 'member', 'member,owner']) {
         await refused(
           await post(f, 'update-member-role', {
             organizationId: f.teamId,
@@ -600,7 +599,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
   )
 
   it.each(['member,owner', 'member, owner', 'admin,owner'])(
-    'allows only an owner to demote an owner target represented as %j',
+    'refuses every owner target represented as %j',
     async (targetRole) => {
       for (const actorRole of ['owner', 'admin']) {
         const f = await fixture(actorRole, targetRole)
@@ -610,13 +609,8 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
           memberId: f.targetMemberId,
           role: 'member',
         })
-        if (actorRole === 'admin') {
-          await refused(response)
-          expect(await snapshot(f)).toEqual(before)
-        } else {
-          expect(response.status).toBe(200)
-          expect(await operations(f)).toEqual([roleOperation(f, targetRole, 'member')])
-        }
+        await refused(response)
+        expect(await snapshot(f)).toEqual(before)
       }
     },
   )
@@ -829,23 +823,21 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       return result
     }
     try {
-      expect(
-        (
-          await post(f, 'update-member-role', {
-            organizationId: f.teamId,
-            memberId: f.targetMemberId,
-            role: 'admin',
-          })
-        ).status,
-      ).toBe(200)
+      await refused(
+        await post(f, 'update-member-role', {
+          organizationId: f.teamId,
+          memberId: f.targetMemberId,
+          role: 'admin',
+        }),
+      )
       expect(
         await db
           .selectFrom('auth.member')
           .select('role')
           .where('id', '=', f.targetMemberId)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ role: 'admin' })
-      expect(await operations(f)).toEqual([roleOperation(f, 'member,owner', 'admin')])
+      ).toEqual({ role: 'member,owner' })
+      expect(await operations(f)).toEqual([])
     } finally {
       hooks.beforeUpdateMemberRole = original as (input: HookInput) => unknown
     }
@@ -879,15 +871,15 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         { interval: 10, timeout: 1_500 },
       )
       await holder.query('COMMIT')
-      expect((await pending).status).toBe(200)
+      await refused(await pending)
       expect(
         await db
           .selectFrom('auth.member')
           .select('role')
           .where('id', '=', f.targetMemberId)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ role: 'member' })
-      expect(await operations(f)).toEqual([roleOperation(f, 'member,owner', 'member')])
+      ).toEqual({ role: 'member,owner' })
+      expect(await operations(f)).toEqual([])
     } finally {
       await holder.query('ROLLBACK')
       holder.release()

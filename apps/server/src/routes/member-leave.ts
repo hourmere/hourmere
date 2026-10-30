@@ -47,7 +47,7 @@ export function memberLeaveRoutes(deps: ServiceDeps): RouteModule {
           },
           409: {
             description:
-              'member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner (another owner is needed before you can leave), or organization_context_changed: reload before retrying',
+              'member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), or organization_context_changed: reload before retrying',
             content: json(
               ErrorBody.extend({
                 impact: DepartureImpact.optional(),
