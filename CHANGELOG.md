@@ -164,7 +164,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
   a separate worker is supported.
 - [Public booking pages and emails](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/interface-languages.md)
-  support English, Simplified Chinese, German, French and Spanish. Account and sign-in interfaces
+  support English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces
   support English and Simplified Chinese.
 - Schema downgrade is not automatic. Some migrations are not rolling-upgrade safe: stop
   all old app and worker processes as required by the

@@ -1,4 +1,6 @@
-import { auditLocales, auditPages, openAuditPage } from '../audit-pages.ts'
+import { a11yFindings, scanA11y } from '../a11y.ts'
+import { AUDIT_GUEST_NAME, AUDIT_TEAM_NAME, AUDIT_TITLE } from '../audit-data.ts'
+import { auditLocales, auditPages, openAuditPage, settleAuditLayout } from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 import { layoutViewports, measureKeyboard, measureLayout } from '../layout.ts'
 import {
@@ -74,7 +76,8 @@ for (const viewport of [
               }),
             ).toBe(true)
           }
-          if (id === 'team-booking') await expect(page.locator(selector)).toHaveText('FixtureTeam')
+          if (id === 'team-booking')
+            await expect(page.locator(selector)).toHaveText(AUDIT_TEAM_NAME)
           if (id === 'oauth-consent')
             await expect(page.locator(selector)).toHaveText(/^(Allow access|允许访问)$/)
           const viewport = page.viewportSize()
@@ -85,6 +88,66 @@ for (const viewport of [
       })
   })
 }
+
+test.describe('team administrator bookings at 320px', () => {
+  const viewport = { width: 320, height: 568 }
+  test.use({ viewport, isMobile: true, hasTouch: true })
+  for (const locale of ['en-US', 'zh-CN'] as const)
+    test(`supports long names, keyboard detail and focus return ${locale}`, async ({
+      page,
+      app,
+    }) => {
+      await openAuditPage(page, app, 'team-bookings', { locale })
+      const opener = page
+        .locator('.team-bookings-list')
+        .getByRole('button', { name: AUDIT_TITLE, exact: true })
+      await expect(opener).toBeVisible()
+      await expect(page.locator('main').getByText(AUDIT_TEAM_NAME, { exact: true })).toBeVisible()
+      const inspect = async () => {
+        await page.evaluate(settleAuditLayout)
+        expect(await page.evaluate(measureLayout, viewport)).toEqual([])
+        const scan = await scanA11y(page)
+        expect(a11yFindings('team-bookings', scan.violations, []).findings).toEqual([])
+      }
+      await inspect()
+      const filters = page.locator('.team-bookings-filters')
+      const filterToggle = filters.locator('summary')
+      await filterToggle.focus()
+      await page.keyboard.press('Enter')
+      await expect(filters).toHaveAttribute('open', '')
+      await expect(filters.locator('input[type="datetime-local"]')).toHaveCount(4)
+      await inspect()
+      await filterToggle.focus()
+      await page.keyboard.press('Enter')
+      await expect(filters).not.toHaveAttribute('open', '')
+      await opener.focus()
+      await page.keyboard.press('Enter')
+      const detail = page.locator('.team-booking-detail')
+      await expect(detail).toBeVisible()
+      await expect(detail.locator('h2')).toBeFocused()
+      await expect(detail.locator('li').filter({ hasText: AUDIT_GUEST_NAME })).toBeVisible()
+      await inspect()
+      const cancel = detail.getByRole('button', { name: /^(Cancel booking…|取消预约…)$/ })
+      await cancel.focus()
+      await page.keyboard.press('Enter')
+      await expect(detail.locator('form')).toBeVisible()
+      await expect(detail.getByRole('textbox')).toBeFocused()
+      await inspect()
+      await detail.getByRole('button', { name: /^(Keep booking|保留预约)$/ }).focus()
+      await page.keyboard.press('Enter')
+      await expect(detail.locator('form')).toHaveCount(0)
+      await expect(cancel).toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(detail).toHaveCount(0)
+      await expect(opener).toBeFocused()
+      await page.keyboard.press('Enter')
+      const close = detail.getByRole('button', { name: /^(Close details|关闭详情)$/ })
+      await close.focus()
+      await page.keyboard.press('Enter')
+      await expect(detail).toHaveCount(0)
+      await expect(opener).toBeFocused()
+    })
+})
 
 for (const viewport of layoutViewports) {
   const mobileViewport = viewport.width <= 480 || (viewport.width <= 960 && viewport.height <= 430)

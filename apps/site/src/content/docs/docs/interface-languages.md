@@ -4,11 +4,11 @@ description: Choose a registered interface language, with English fallback and l
 ---
 
 Public booking, cancellation and rescheduling pages, embedded widgets and notification
-emails are available in English, Simplified Chinese, German, French and Spanish. The account
+emails are available in English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese. The account
 and sign-in interfaces remain available in English and Simplified Chinese. The language control is
 available on sign-in, account and standalone public booking pages.
 
-German, French and Spanish translations are AI-assisted (machine-translated) and have not yet
+German, French, Spanish and Brazilian Portuguese translations are AI-assisted (machine-translated) and have not yet
 been reviewed by a native speaker. Corrections are welcome through a GitHub issue or pull request.
 German regional preferences such as `de-AT` and `de-CH` resolve to `de`.
 French regional preferences such as `fr-CA`, `fr-BE` and `fr-CH` resolve to `fr`, using
@@ -17,6 +17,11 @@ Spanish regional preferences, including `es-ES`, `es-MX`, `es-419`, `es-AR`, `es
 `es-US`, resolve to `es`. Spanish uses one formatting locale, `es-ES`, for consistent
 Gregorian date and 24-hour time formatting across regional preferences. This formatting
 choice does not change the selected IANA time zone.
+Brazilian Portuguese preferences `pt-BR` and bare `pt` resolve to `pt-BR`, as do other
+Latin-script Portuguese variants such as `pt-AO`. European Portuguese (`pt-PT`) is excluded:
+it is skipped in favor of the next supported preference, or English when there is none,
+so it never silently selects Brazilian text. Brazilian Portuguese uses `pt-BR` Gregorian
+date and 24-hour time formatting without changing the selected IANA time zone.
 Changing the language updates the existing page without restarting a form, discarding a chosen time,
 reissuing a booking or replacing its private management link.
 
@@ -41,7 +46,7 @@ locale independently of display changes, so retrying after a lost response keeps
 body and idempotency key.
 
 The language preference stores only a registered language code (currently `en`, `zh-CN`, `de`,
-`fr` or `es`), under `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
+`fr`, `es` or `pt-BR`), under `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
 cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage mechanism
 does not prevent changing the current page. No account identifiers, answers or management
 capabilities enter preference storage. Sign-in emails and the standalone email sign-in
@@ -78,7 +83,7 @@ the product's translation catalogues.
 
 The standalone helper accepts an optional, strictly validated `language` value in
 `initInline` and `openPopup`, or `data-hourmere-language` on declarative elements. Values
-must be exact registered codes (currently `en`, `zh-CN`, `de`, `fr` and `es`). Without an
+must be exact registered codes (currently `en`, `zh-CN`, `de`, `fr`, `es` and `pt-BR`). Without an
 explicit value, the helper uses the host page's supported `<html lang>`, then a supported browser language, then English. Embedded pages hide their
 page-level language picker; choose the page or widget language before initialization.
 The iframe receives only that non-sensitive allowlisted value in its
@@ -108,6 +113,8 @@ Add one entry to
 code, native name, ordered fallback codes, Intl formatting locale and `ltr` direction.
 An optional `interfaces` list limits a language to `public` or `admin` interfaces; omitting
 it enables both. Notification language choices remain independent of this UI scope.
+The registry's `excludedRegions` can leave a regional preference unsupported; for example,
+the `pt-BR` entry excludes `PT` while accepting bare Portuguese and other Latin-script variants.
 Add the corresponding catalogue files; loaders and language selectors discover them automatically:
 
 - `apps/web/src/i18n/catalogues/{code}/common.ts`: public/shared messages (`common` export).
@@ -119,7 +126,7 @@ Add the corresponding catalogue files; loaders and language selectors discover t
 Use the existing English files as the key and placeholder reference. Partial catalogues are
 allowed for future languages. Catalogue tests report each locale's coverage, warn about
 missing translations for new locales, and fail for malformed or mismatched placeholders.
-English and Simplified Chinese remain complete. German, French and Spanish public
+English and Simplified Chinese remain complete. German, French, Spanish and Brazilian Portuguese public
 catalogues and mail tables are also required to match every English key and placeholder; none has an admin catalogue.
 
 Use `t(key, values)` during render and `msg(key, values)` for a notice or validation message
