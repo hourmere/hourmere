@@ -353,8 +353,8 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
 
   it('detects dropping native removal protection with a real assertion failure', async () => {
     const copy = await sourceCopy([
-      'new Set([changeRole, accept, remove])',
-      'new Set([changeRole, accept])',
+      'new Set([changeRole, accept, getInvitation, remove])',
+      'new Set([changeRole, accept, getInvitation])',
     ])
     await expect(assertProtectedRemoval(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })

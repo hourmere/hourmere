@@ -451,6 +451,41 @@ describe('accept invitation entry', () => {
     expect(api.to(acceptRoute)).toHaveLength(1)
   })
 
+  it('recovers a mail-failed invitation refusal after lookup through reads without joining or switching', async () => {
+    let unavailable = false
+    const { api } = server({
+      [lookupRoute]: () =>
+        unavailable
+          ? json(400, { code: 'INVITATION_NOT_FOUND', message: 'private failure details' })
+          : json(200, invitation),
+      [acceptRoute]: () => {
+        unavailable = true
+        return json(400, {
+          code: 'INVITATION_NOT_FOUND',
+          message: 'private failure details',
+        })
+      },
+    })
+    renderApp(path)
+    await screen.findByRole('button', { name: 'Join team' })
+    expect(api.to(acceptRoute)).toHaveLength(0)
+    await userEvent.click(joinButton())
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Ask the team owner for a new invitation.',
+    )
+    noJoinButton()
+    act(() => window.dispatchEvent(new Event('focus')))
+    expect(api.to(acceptRoute)).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
+    await waitFor(() => expect(api.to(lookupRoute)).toHaveLength(2))
+    await screen.findByRole('alert')
+    noJoinButton()
+    expect(screen.getByRole('main').textContent).not.toContain('private failure details')
+    expect(api.to(acceptRoute)).toHaveLength(1)
+    expect(api.to(switchRoute)).toHaveLength(0)
+    expect(location()).toBe(path)
+  })
+
   it.each([
     [
       'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
