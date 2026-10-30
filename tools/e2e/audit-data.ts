@@ -13,6 +13,8 @@ export const AUDIT_DESCRIPTION =
   `https://hourmere.invalid/${'unbrokenlayoutmeasurement'.repeat(16)}`
 export const AUDIT_EMAIL = `${'long.synthetic.attendee.'.repeat(6)}@hourmere.invalid`
 export const AUDIT_CONFIRMATION_EMAIL = `${'synthetic.confirmation.'.repeat(6)}attendee@hourmere.invalid`
+export const AUDIT_TEAM_NAME = 'InternationalResearchAndSchedulingTeam'.repeat(5)
+export const AUDIT_GUEST_NAME = '跨地区协作访客InternationalResearchGuest'.repeat(5)
 
 export interface AuditFixtureState {
   organizationId: string

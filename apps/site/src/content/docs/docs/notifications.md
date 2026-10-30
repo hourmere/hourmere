@@ -127,7 +127,7 @@ below). Legacy host notifications retain their invitations and cancellations.
 ### Email language
 
 Booking emails use the shared [locale registry](/docs/interface-languages#development),
-currently English, Simplified Chinese, German, French and Spanish, throughout the subject,
+currently English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese, throughout the subject,
 plain text, HTML and user-facing calendar SUMMARY/DESCRIPTION. Each missing translated message falls back to
 English independently; the selected locale still controls date/time formatting. The HTML `lang` matches the email language.
 The invitee's language comes from `booking_attendees.locale`, captured from the booking
@@ -135,7 +135,7 @@ page's interface language at the first valid submission; changing the interface 
 retrying that submission keeps the original request and its language. REST/MCP callers can
 provide the same invitee locale. Guests follow the invitee's booking language. Each host
 uses their current profile locale independently. Supported English, Simplified Chinese,
-German, French and Spanish BCP 47 tags map to registered language codes (`en`, `zh-CN`, `de`, `fr` and `es` today); missing, invalid or
+German, French, Spanish and Brazilian Portuguese BCP 47 tags map to registered language codes (`en`, `zh-CN`, `de`, `fr`, `es` and `pt-BR` today); missing, invalid or
 unsupported languages fall back to English. Reschedules retain the booking's saved language.
 Team invitation emails use an explicit language choice, then an instance default, then English.
 
@@ -143,7 +143,11 @@ French regional preferences including `fr-CA`, `fr-BE` and `fr-CH` map to `fr`.
 Spanish regional preferences including `es-ES`, `es-MX`, `es-419`, `es-AR`, `es-CO` and
 `es-US` map to `es` and use `es-ES` date and time formatting without changing the recipient
 time zone.
-German, French and Spanish translations are AI-assisted (machine-translated), have not yet
+Brazilian Portuguese preferences `pt-BR`, bare `pt` and other Latin-script variants such as
+`pt-AO` map to `pt-BR` and use Brazilian date and 24-hour time formatting. European Portuguese
+(`pt-PT`) is unsupported and falls through to the next supported language choice, then English;
+it never silently receives Brazilian text. The recipient time zone stays unchanged.
+German, French, Spanish and Brazilian Portuguese translations are AI-assisted (machine-translated), have not yet
 been reviewed by a native speaker, and corrections are welcome.
 
 Dates and times use that email language and the recipient time zone described above;

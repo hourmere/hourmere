@@ -1,15 +1,12 @@
 import './SpaceSwitcher.css'
-import { type KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
-import {
-  getActiveOrganizationMember,
-  listOrganizations,
-  setActiveOrganization,
-} from '../api/auth.ts'
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
+import { listOrganizations, setActiveOrganization } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
 import { useLoad } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { useMe, useSession } from '../session.tsx'
+import { useTeamManagementAccess } from '../team-management.tsx'
 import { useConfirmLeave } from '../unsaved-changes.tsx'
 
 let handoffFocus: { userId: string; organizationId: string } | null = null
@@ -34,24 +31,7 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
   const organizationId = me.organization.id
   const personalId = me.personalOrganizationId
 
-  const loadRole = useCallback(
-    async (signal: AbortSignal) => {
-      if (me.organization.personal) return ['owner']
-      const member = await getActiveOrganizationMember(signal)
-      const roles = member.role.split(',').map((role) => role.trim())
-      if (
-        member.userId !== me.user.id ||
-        member.organizationId !== me.organization.id ||
-        !roles.length ||
-        roles.some((role) => !['owner', 'admin', 'member'].includes(role))
-      ) {
-        throw new Error('Membership does not match the displayed context')
-      }
-      return [...new Set(roles)]
-    },
-    [me],
-  )
-  const [role, reloadRole] = useLoad(loadRole)
+  const role = useTeamManagementAccess()
   const roleLabels: Record<string, string> = {
     owner: t('Owner'),
     admin: t('Admin'),
@@ -133,7 +113,7 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
     if (busy || switching.current) return
     firstFocus.current = position
     if (organizations.status !== 'loading') reloadOrganizations()
-    if (role.status !== 'loading') reloadRole()
+    if (role.status !== 'loading') role.reload()
     setOpen(true)
   }
 
@@ -238,8 +218,8 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
           <span className="space-role">
             {busy
               ? t('Switching space…')
-              : role.status === 'ready'
-                ? role.data.map((value) => roleLabels[value]).join(', ')
+              : role.status === 'ready' && role.roles
+                ? role.roles.map((value) => roleLabels[value]).join(', ')
                 : role.status === 'loading'
                   ? t('Checking role…')
                   : t('Role unavailable')}

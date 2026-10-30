@@ -50,6 +50,7 @@ describe('catalogue coverage and interpolation', () => {
     ['de', 'German'],
     ['fr', 'French'],
     ['es', 'Spanish'],
+    ['pt-BR', 'Brazilian Portuguese'],
   ] as const)
     for (const group of ['common', 'widget'] as const) {
       it(`requires complete ${name} public ${group} messages`, () => {

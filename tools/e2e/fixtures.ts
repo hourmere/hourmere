@@ -26,10 +26,12 @@ import {
   AUDIT_BOOKING_START,
   AUDIT_DESCRIPTION,
   AUDIT_EMAIL,
+  AUDIT_GUEST_NAME,
   AUDIT_HOST_TIME_ZONE,
   AUDIT_NOW,
   AUDIT_OVERNIGHT_BOOKING_END,
   AUDIT_OVERNIGHT_BOOKING_START,
+  AUDIT_TEAM_NAME,
   AUDIT_TITLE,
   type AuditFixtureState,
 } from './audit-data.ts'
@@ -43,7 +45,7 @@ export interface FixtureApp {
   personalPath: string
   auditState: () => Promise<AuditFixtureState>
   screenshotState: () => Promise<ScreenshotFixtureState>
-  auditSignIn: (signedIn: boolean, locale?: string) => Promise<void>
+  auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
   auditOAuthQuery: () => Promise<string>
   teamPath: string
   collectivePath: string
@@ -455,6 +457,7 @@ export const test = base.extend<{
       let auditState: AuditFixtureState | undefined
       let screenshotState: ScreenshotFixtureState | undefined
       let auditCookie: string | undefined
+      let auditSessionId: string | undefined
       let auditOAuthQuery: string | undefined
       await use({
         url,
@@ -503,6 +506,11 @@ export const test = base.extend<{
             .updateTable('auth.organization')
             .set({ name: 'Synthetic organization' })
             .where('id', '=', host.organizationId)
+            .execute()
+          await db
+            .updateTable('auth.organization')
+            .set({ name: AUDIT_TEAM_NAME })
+            .where('id', '=', team)
             .execute()
           await db
             .updateTable('profiles')
@@ -578,6 +586,31 @@ export const test = base.extend<{
             .set({ title: AUDIT_TITLE, created_at: AUDIT_NOW })
             .where('id', '=', overnightBookingId)
             .execute()
+          const teamEventTypeId = await f.eventType(team, null, {
+            slug: 'admin-layout-audit',
+            title: AUDIT_TITLE,
+            hosts: [{ userId: secondHost.userId }],
+          })
+          const teamBookingId = await f.booking(
+            team,
+            [secondHost.userId],
+            AUDIT_BOOKING_START,
+            AUDIT_BOOKING_END,
+            {
+              eventTypeId: teamEventTypeId,
+              attendee: { name: 'Synthetic team invitee', email: AUDIT_EMAIL },
+            },
+          )
+          await db
+            .insertInto('booking_attendees')
+            .values({
+              booking_id: teamBookingId,
+              name: AUDIT_GUEST_NAME,
+              email: 'synthetic.team.guest@hourmere.invalid',
+              time_zone: 'America/Argentina/Buenos_Aires',
+              is_booker: false,
+            })
+            .execute()
           auditState = {
             organizationId: host.organizationId,
             eventTypeId,
@@ -589,7 +622,7 @@ export const test = base.extend<{
           }
           return auditState
         },
-        auditSignIn: async (signedIn, locale = 'en') => {
+        auditSignIn: async (signedIn, locale = 'en', space) => {
           // Audit pages exercise the same browser-session endpoints as people do.
           // No API-key header remains when switching back to a public/sign-in state.
           authorization = undefined
@@ -605,11 +638,11 @@ export const test = base.extend<{
             .execute()
           if (!auditCookie) {
             const token = randomBytes(24).toString('base64url')
-            await db
+            const session = await db
               .insertInto('auth.session')
               .values({
                 userId: host.userId,
-                activeOrganizationId: host.organizationId,
+                activeOrganizationId: space === 'team' ? team : host.organizationId,
                 token,
                 updatedAt: new Date(),
                 expiresAt: new Date(
@@ -617,11 +650,19 @@ export const test = base.extend<{
                     86_400_000,
                 ),
               })
-              .execute()
+              .returning('id')
+              .executeTakeFirstOrThrow()
+            auditSessionId = session.id
             auditCookie = encodeURIComponent(
               `${token}.${createHmac('sha256', authSecret).update(token).digest('base64')}`,
             )
           }
+          if (auditSessionId)
+            await db
+              .updateTable('auth.session')
+              .set({ activeOrganizationId: space === 'team' ? team : host.organizationId })
+              .where('id', '=', auditSessionId)
+              .execute()
           await context.addCookies([
             {
               name: 'better-auth.session_token',
