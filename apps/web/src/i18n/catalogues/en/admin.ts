@@ -7,6 +7,53 @@ export const admin = {
   'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
     'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
 
+  'Loading team bookings…': 'Loading team bookings…',
+  'Team bookings': 'Team bookings',
+  'Owners and admins can view this team’s bookings and cancel bookings before they start.':
+    'Owners and admins can view this team’s bookings and cancel bookings before they start.',
+  Team: 'Team',
+  'Access revoked': 'Access revoked',
+  'Team bookings access is no longer available.': 'Team bookings access is no longer available.',
+  'Team bookings are not available in this space.':
+    'Team bookings are not available in this space.',
+  'Your team access may have changed. Return to your bookings or choose another space.':
+    'Your team access may have changed. Return to your bookings or choose another space.',
+  'Choose a team where you are an owner or admin to view its bookings.':
+    'Choose a team where you are an owner or admin to view its bookings.',
+  'Go to your bookings': 'Go to your bookings',
+  'All bookings': 'All bookings',
+  'Filter bookings': 'Filter bookings',
+  'Filter times use this browser’s time zone: {zone}.':
+    'Filter times use this browser’s time zone: {zone}.',
+  'All statuses': 'All statuses',
+  Order: 'Order',
+  'Oldest first': 'Oldest first',
+  'Newest first': 'Newest first',
+  'Upcoming includes meetings in progress. Custom end-time filters replace the tab’s time range.':
+    'Upcoming includes meetings in progress. Custom end-time filters replace the tab’s time range.',
+  'Apply filters': 'Apply filters',
+  'Clear filters': 'Clear filters',
+  'Could not load team bookings.': 'Could not load team bookings.',
+  'Oldest first. ': 'Oldest first. ',
+  'Times are in {zone}, this browser’s time zone.':
+    'Times are in {zone}, this browser’s time zone.',
+  'No team bookings match these filters.': 'No team bookings match these filters.',
+  'Try another time range or clear the filters. New team bookings will appear here.':
+    'Try another time range or clear the filters. New team bookings will appear here.',
+  'Deleted event type': 'Deleted event type',
+  ' + {0} guests': ' + {0} guests',
+  'Team booking details': 'Team booking details',
+  'Close details': 'Close details',
+  'Booking ID': 'Booking ID',
+  'Event type ID': 'Event type ID',
+  'Host ID: {0}': 'Host ID: {0}',
+  Guest: 'Guest',
+  'This booking has already started, so it can no longer be cancelled. Wait until it ends or coordinate with the hosts offline.':
+    'This booking has already started, so it can no longer be cancelled. Wait until it ends or coordinate with the hosts offline.',
+  'Starts at or after': 'Starts at or after',
+  'Starts before': 'Starts before',
+  'Ends after': 'Ends after',
+  'Ends at or before': 'Ends at or before',
   'Selected calendars cannot provide conflict checks.':
     'Selected calendars cannot provide conflict checks.',
   'Configuration checks': 'Configuration checks',
@@ -768,6 +815,8 @@ export const admin = {
   'These hours overlap: {0}.': 'These hours overlap: {0}.',
   'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.':
     'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.',
+  'This booking can no longer be cancelled. It may have started or become unavailable.':
+    'This booking can no longer be cancelled. It may have started or become unavailable.',
   'This booking does not exist, or it is not one of yours.':
     'This booking does not exist, or it is not one of yours.',
   'This booking has already started, so it can no longer be cancelled.':

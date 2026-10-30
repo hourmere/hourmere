@@ -69,15 +69,15 @@ const ownSiteReferences: Record<string, readonly string[]> = {
   ],
 }
 
-describe('Spanish public-language documentation', () => {
+describe('public-language documentation', () => {
   it('discloses public and email support without expanding the account interface languages', () => {
     const languages = prose(read(`${siteDocs}/interface-languages.md`))
     expect(languages).toContain(
-      'emails are available in English, Simplified Chinese, German, French and Spanish.',
+      'emails are available in English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese.',
     )
     expect(languages).toContain('interfaces remain available in English and Simplified Chinese.')
     expect(languages).toContain(
-      'German, French and Spanish translations are AI-assisted (machine-translated)',
+      'German, French, Spanish and Brazilian Portuguese translations are AI-assisted (machine-translated)',
     )
     expect(languages).toContain('have not yet been reviewed by a native speaker')
     expect(languages).toContain('Corrections are welcome through a GitHub issue or pull request.')
@@ -92,10 +92,35 @@ describe('Spanish public-language documentation', () => {
     expect(languages).toContain('Gregorian date and 24-hour time formatting')
     expect(languages).toContain('choice does not change the selected IANA time zone.')
     const notifications = prose(read(`${siteDocs}/notifications.md`))
-    expect(notifications).toContain('German, French and Spanish')
+    expect(notifications).toContain('German, French, Spanish and Brazilian Portuguese')
     expect(notifications).toContain('es-US map to es and use es-ES date and time formatting')
     expect(notifications).toContain('without changing the recipient time zone.')
-    expect(prose(read(`${siteDocs}/embedding.md`))).toContain('es for Spanish.')
+    expect(prose(read(`${siteDocs}/embedding.md`))).toContain('es for Spanish')
+  })
+
+  it('documents Brazilian formatting and excludes European Portuguese from Brazilian text', () => {
+    const languages = prose(read(`${siteDocs}/interface-languages.md`))
+    expect(languages).toContain('pt-BR and bare pt resolve to pt-BR')
+    expect(languages).toContain('Latin-script Portuguese variants such as pt-AO')
+    expect(languages).toContain(
+      'European Portuguese (pt-PT) is excluded: it is skipped in favor of the next supported preference, or English when there is none',
+    )
+    expect(languages).toContain(
+      'Brazilian Portuguese uses pt-BR Gregorian date and 24-hour time formatting without changing the selected IANA time zone.',
+    )
+    const notifications = prose(read(`${siteDocs}/notifications.md`))
+    expect(notifications).toContain(
+      'European Portuguese (pt-PT) is unsupported and falls through to the next supported language choice, then English',
+    )
+    expect(notifications).toContain('The recipient time zone stays unchanged.')
+    const embedding = prose(read(`${siteDocs}/embedding.md`))
+    expect(embedding).toContain('pt-BR for Brazilian Portuguese.')
+    expect(embedding).toContain('are the accepted explicit values; an invalid value fails')
+    const mail = prose(read('packages/mail/README.md'))
+    expect(mail).toContain('pt-BR, bare pt and other Latin-script Portuguese variants')
+    expect(mail).toContain(
+      'European Portuguese (pt-PT) is excluded and falls through to the next supported language choice, then English',
+    )
   })
 })
 
@@ -230,7 +255,7 @@ describe('launch documentation disclosures', () => {
     {
       topic: 'interface languages',
       claims: [
-        /Public booking pages and emails support English, Simplified Chinese, German, French and Spanish/,
+        /Public booking pages and emails support English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese/,
         /Account and sign-in interfaces support English and Simplified Chinese/,
       ],
     },

@@ -16,7 +16,7 @@ import {
 
 describe('shared locale registry', () => {
   it('offers public translations independently of admin and notification languages', () => {
-    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de', 'fr', 'es'])
+    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de', 'fr', 'es', 'pt-BR'])
     expect(interfaceLanguages('admin')).toEqual(['en', 'zh-CN'])
     expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
     expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('de')
@@ -27,6 +27,9 @@ describe('shared locale registry', () => {
     expect(acceptLanguage('es-419,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
     expect(acceptLanguage('es-419,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('es')
     expect(localeFallbacks('es')).toEqual(['es', 'en'])
+    expect(acceptLanguage('pt-BR,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
+    expect(acceptLanguage('pt-BR,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('pt-BR')
+    expect(localeFallbacks('pt-BR')).toEqual(['pt-BR', 'en'])
     const fixture = createLocaleResolver({
       ...localeRegistry,
       qaa: {
@@ -97,6 +100,42 @@ describe('shared locale registry', () => {
     expect(acceptLanguage('es-419;q=0,es-US;q=0.9,en;q=0.8', 'public')).toBe('es')
     expect(acceptLanguage('es-MX;q=broken,en;q=0.5', 'public')).toBe('en')
     expect(acceptLanguage('qaa,not_a_locale', 'public')).toBe('en')
+  })
+
+  it.each(['pt-BR', 'PT-br', 'pt', 'pt-Latn', 'pt-Latn-BR', 'pt-BR-u-ca-gregory', 'pt-AO'])(
+    'negotiates %s using Brazilian Portuguese formatting metadata',
+    (value) => {
+      expect(interfaceLanguage(value)).toBe('pt-BR')
+      expect(acceptLanguage(`qaa,${value};q=0.8,en;q=0.5`, 'public')).toBe('pt-BR')
+      expect(formattingLocale('pt-BR')).toBe('pt-BR')
+      expect(
+        new Intl.DateTimeFormat(formattingLocale('pt-BR'), {
+          calendar: 'gregory',
+          timeZone: 'America/Sao_Paulo',
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }).format(new Date('2026-10-27T15:30:00Z')),
+      ).toBe('27 de outubro de 2026 às 12:30')
+    },
+  )
+
+  it.each(['pt-PT', 'pt-Latn-PT', 'pt-PT-u-ca-gregory', 'pt-Cyrl'])(
+    'skips unsupported Portuguese preference %s without silently selecting Brazilian text',
+    (value) => {
+      expect(interfaceLanguage(value)).toBeUndefined()
+      expect(acceptLanguage(value, 'public')).toBe('en')
+      expect(acceptLanguage(`${value},fr;q=0.8,en;q=0.5`, 'public')).toBe('fr')
+    },
+  )
+
+  it('negotiates Portuguese quality preferences and preserves exact regional cookie values', () => {
+    expect(acceptLanguage('pt-BR;q=0.5,fr;q=0.9,en;q=0.8', 'public')).toBe('fr')
+    expect(acceptLanguage('pt-PT,pt;q=0.9,en;q=0.8', 'public')).toBe('pt-BR')
+    expect(acceptLanguage('pt-BR;q=0,pt;q=0.9,en;q=0.8', 'public')).toBe('pt-BR')
+    expect(acceptLanguage('pt-BR;q=broken,en;q=0.5', 'public')).toBe('en')
+    expect(cookieLanguage('session=irrelevant; hourmere-language=pt-BR')).toBe('pt-BR')
+    expect(cookieLanguage('hourmere-language=pt')).toBeUndefined()
+    expect(cookieLanguage('hourmere-language=pt-PT')).toBeUndefined()
   })
 
   it('provides language metadata and explicit choices from the same entries', () => {
@@ -185,7 +224,7 @@ describe('shared locale registry', () => {
 })
 
 describe('bounded interface language preferences', () => {
-  it.each(['en', 'zh-CN', 'de', 'fr', 'es'] as const)(
+  it.each(['en', 'zh-CN', 'de', 'fr', 'es', 'pt-BR'] as const)(
     'accepts only the explicit value %s',
     (value) => {
       expect(explicitLanguage(value)).toBe(value)
@@ -199,6 +238,9 @@ describe('bounded interface language preferences', () => {
     'en-US',
     'fr-CA',
     'es-419',
+    'pt',
+    'PT-br',
+    'pt-PT',
     '__proto__',
     'constructor',
     '',
@@ -288,6 +330,12 @@ describe('bounded interface language preferences', () => {
 
 describe('server admin language precedence', () => {
   it.each([
+    [{ cookie: 'hourmere-language=pt-BR', acceptLanguage: 'pt-BR' }, 'en'],
+    [
+      { cookie: 'hourmere-language=pt-BR', accountLocale: 'pt-BR', acceptLanguage: 'zh-CN' },
+      'zh-CN',
+    ],
+    [{ accountLocale: 'pt', acceptLanguage: 'zh-CN' }, 'zh-CN'],
     [{ cookie: 'hourmere-language=es', acceptLanguage: 'es-MX' }, 'en'],
     [{ cookie: 'hourmere-language=es', accountLocale: 'es-419', acceptLanguage: 'zh-CN' }, 'zh-CN'],
     [{ cookie: 'hourmere-language=de', acceptLanguage: 'zh-CN' }, 'zh-CN'],

@@ -7,6 +7,50 @@ export const admin = {
   'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
     '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请和此实例的注册规则。',
 
+  'Loading team bookings…': '正在加载团队预约…',
+  'Team bookings': '团队预约',
+  'Owners and admins can view this team’s bookings and cancel bookings before they start.':
+    '所有者和管理员可以查看本团队的预约，并在预约开始前取消预约。',
+  Team: '团队',
+  'Access revoked': '访问权限已撤销',
+  'Team bookings access is no longer available.': '团队预约访问权限已失效。',
+  'Team bookings are not available in this space.': '当前空间无法查看团队预约。',
+  'Your team access may have changed. Return to your bookings or choose another space.':
+    '你的团队访问权限可能已更改。请返回本人的预约，或选择其他空间。',
+  'Choose a team where you are an owner or admin to view its bookings.':
+    '请选择你担任所有者或管理员的团队，查看该团队的预约。',
+  'Go to your bookings': '前往本人的预约',
+  'All bookings': '全部预约',
+  'Filter bookings': '筛选预约',
+  'Filter times use this browser’s time zone: {zone}.': '筛选时间使用当前浏览器的时区：{zone}。',
+  'All statuses': '全部状态',
+  Order: '排序',
+  'Oldest first': '最早优先',
+  'Newest first': '最新优先',
+  'Upcoming includes meetings in progress. Custom end-time filters replace the tab’s time range.':
+    '即将进行包含正在进行的会议。自定义结束时间筛选会替换标签页的时间范围。',
+  'Apply filters': '应用筛选',
+  'Clear filters': '清除筛选',
+  'Could not load team bookings.': '无法加载团队预约。',
+  'Oldest first. ': '最早优先。',
+  'Times are in {zone}, this browser’s time zone.': '时间以当前浏览器的时区{zone}显示。',
+  'No team bookings match these filters.': '没有符合筛选条件的团队预约。',
+  'Try another time range or clear the filters. New team bookings will appear here.':
+    '请尝试其他时间范围或清除筛选。新的团队预约会显示在这里。',
+  'Deleted event type': '已删除的活动类型',
+  ' + {0} guests': ' + {0}位来宾',
+  'Team booking details': '团队预约详情',
+  'Close details': '关闭详情',
+  'Booking ID': '预约ID',
+  'Event type ID': '活动类型ID',
+  'Host ID: {0}': '主持人ID：{0}',
+  Guest: '来宾',
+  'This booking has already started, so it can no longer be cancelled. Wait until it ends or coordinate with the hosts offline.':
+    '此预约已经开始，无法再取消。请等待预约结束，或与主持人线下协调。',
+  'Starts at or after': '开始时间不早于',
+  'Starts before': '开始时间早于',
+  'Ends after': '结束时间晚于',
+  'Ends at or before': '结束时间不晚于',
   'Selected calendars cannot provide conflict checks.': '所选日历无法提供冲突检查。',
   'Configuration checks': '配置检查',
   'Configuration checks passed': '配置检查通过',
@@ -731,6 +775,8 @@ export const admin = {
   'These hours overlap: {0}.': '以下时间段重叠：{0}。',
   'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.':
     '此应用可在该组织中以你的权限使用 MCP 工具：查看活动类型和可用时间，以及创建、查看、改期或取消预约。应用将收到预约详情，包括参会人信息和回答。它无法管理你的账号或 API 密钥。',
+  'This booking can no longer be cancelled. It may have started or become unavailable.':
+    '此预约已无法取消，可能已开始或已不可用。',
   'This booking does not exist, or it is not one of yours.': '此预约不存在，或不属于你。',
   'This booking has already started, so it can no longer be cancelled.': '此预约已开始，无法取消。',
   'This booking was already cancelled. Reload to see the details.':
