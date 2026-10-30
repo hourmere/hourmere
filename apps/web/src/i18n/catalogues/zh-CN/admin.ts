@@ -1,5 +1,14 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Saved version readiness': '已保存版本的就绪检查',
+  'These unsaved changes have not been checked yet. Save to check the saved version.':
+    '尚未检查这些未保存的更改。保存后可检查已保存版本。',
+  'These checks describe the saved version. Availability is confirmed when someone books.':
+    '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+  'Readiness checks are unavailable for this account.': '此账号无法使用就绪检查。',
+  'Review enablement': '查看启用设置',
+  'Review meeting settings': '查看会议设置',
+  'Review round-robin activation': '查看轮询激活设置',
   'Selected calendars cannot provide conflict checks.': '所选日历无法提供冲突检查。',
   'Configuration checks': '配置检查',
   'Configuration checks passed': '配置检查通过',

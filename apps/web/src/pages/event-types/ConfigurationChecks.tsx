@@ -92,11 +92,13 @@ export function ConfigurationChecks({
   item,
   status,
   retry,
+  editor = false,
 }: {
   event: EventType
   item: EventReadiness | undefined
   status: 'loading' | 'error' | 'ready'
   retry: () => void
+  editor?: boolean
 }) {
   const { t } = useI18n()
   if (status !== 'ready')
@@ -131,6 +133,13 @@ export function ConfigurationChecks({
       (fix) => fix !== 'retry_summary' && !(fix === 'edit_event' && activationOnlyEdit),
     ),
   ])
+  const eventTargets: { path: string; label: MessageKey }[] = []
+  if (result.issues.some((issue) => issue.label === 'Host settings need attention.'))
+    eventTargets.push({ path: '#hosts', label: 'Review event settings' })
+  if (result.issues.some((issue) => issue.label === 'Automatic meeting settings need attention.'))
+    eventTargets.push({ path: '#location-heading', label: 'Review meeting settings' })
+  if (!eventTargets.length)
+    eventTargets.push({ path: '#basics-heading', label: 'Review event settings' })
   const entries: Record<
     Exclude<Fix, 'retry_summary' | 'ask_member'>,
     { path: string; label: MessageKey }
@@ -150,6 +159,18 @@ export function ConfigurationChecks({
   return (
     <div className="table-value event-checks">
       <span className={`badge${result.passed ? ' badge-success' : ''}`}>{t(result.label)}</span>
+      {editor && item?.enablement === 'disabled' && (
+        <>
+          <span>{t('Disabled')}</span>
+          <a href="#event-enablement">{t('Review enablement')}</a>
+        </>
+      )}
+      {editor && item?.activation === 'inactive' && (
+        <>
+          <span>{t('Needs activation')}</span>
+          <a href="#round-robin-heading">{t('Review round-robin activation')}</a>
+        </>
+      )}
       {result.issues.length > 0 && (
         <ul className="event-check-issues">
           {[...new Set(result.issues.map((issue) => issue.label))].map((label) => (
@@ -160,11 +181,21 @@ export function ConfigurationChecks({
       {fixes.has('ask_member') && (
         <>
           <span>{t('Ask the hosts to review their personal working hours and calendars.')}</span>
-          <Link to={`${eventTypePath(event.id)}#hosts`}>{t('Review hosts')}</Link>
+          {editor ? (
+            <a href="#hosts">{t('Review hosts')}</a>
+          ) : (
+            <Link to={`${eventTypePath(event.id)}#hosts`}>{t('Review hosts')}</Link>
+          )}
         </>
       )}
       {[...fixes].map((fix) => {
         if (fix === 'retry_summary' || fix === 'ask_member') return null
+        if (editor && (fix === 'event_editor' || fix === 'edit_event'))
+          return eventTargets.map((entry) => (
+            <a key={`${fix}:${entry.path}`} href={entry.path}>
+              {t(entry.label)}
+            </a>
+          ))
         if (!Object.hasOwn(entries, fix)) return null
         const entry = entries[fix]
         return (

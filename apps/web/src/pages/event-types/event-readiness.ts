@@ -91,7 +91,21 @@ export async function loadEventReadiness(me: Me, signal: AbortSignal) {
       )
       if (result.organizationId !== me.organization.id) throw new Error('Readiness context changed')
       page = result.eventTypes
-      for (const item of result.eventTypes.data) items.set(item.eventTypeId, item)
+      for (const item of result.eventTypes.data) {
+        // Team hints use only the coarse projection, even if a response gains fields.
+        items.set(item.eventTypeId, {
+          eventTypeId: item.eventTypeId,
+          enablement: item.enablement,
+          activation: item.activation,
+          summary: item.summary,
+          completeness: item.completeness,
+          evaluatedAt: item.evaluatedAt,
+          reasonCodes: item.reasonCodes,
+          fixKinds: item.fixKinds.filter((fix) =>
+            ['edit_event', 'ask_member', 'retry_summary'].includes(fix),
+          ),
+        })
+      }
     }
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
     eventTypeCursor = page.nextCursor ?? undefined
