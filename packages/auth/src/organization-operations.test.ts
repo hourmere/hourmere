@@ -3,6 +3,7 @@ import { setTimeout } from 'node:timers/promises'
 import { type AuthEndpointContext, runWithEndpointContext } from '@better-auth/core/context'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { leaveTeamMember } from '@hourmere/scheduling'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
@@ -41,6 +42,11 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     auth = createAuth({
       pool: authPool,
       db,
+      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember(
+          { db, principal, now: () => Temporal.Now.instant() },
+          { teamId, expectedOrganizationId },
+        ),
       baseURL: origin,
       secret,
       signup,
@@ -198,7 +204,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       .select('activeOrganizationId')
       .where('userId', '=', f.target.id)
       .executeTakeFirstOrThrow()
-    expect(session.activeOrganizationId).toBeNull()
+    expect(session.activeOrganizationId).toBe(await ensurePersonalOrganization(db, f.target.id))
   })
 
   it('retains only allowlisted role-change attribution without session credentials', async () => {
@@ -569,7 +575,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         LANGUAGE plpgsql AS $$ BEGIN
           RAISE EXCEPTION 'Synthetic operation record failure';
         END $$;
-        CREATE TRIGGER reject_synthetic_member_operation BEFORE ${path === 'update-member-role' ? 'INSERT' : 'UPDATE'}
+        CREATE TRIGGER reject_synthetic_member_operation BEFORE ${path === 'remove-member' ? 'UPDATE' : 'INSERT'}
         ON public.organization_operations FOR EACH ROW
         EXECUTE FUNCTION public.reject_synthetic_member_operation();
       `)

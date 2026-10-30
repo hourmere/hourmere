@@ -69,6 +69,20 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
   }
 }
 
+/** Share context ordering with native switches, without taking actor or team row locks. */
+export function organizationContextWriteLock(principal: Principal) {
+  return async (db: Db): Promise<void> => {
+    if (principal.kind !== 'session') return
+    // Refuse contention promptly rather than filling the app pool behind a switch.
+    const lock = await sql<{
+      locked: boolean
+    }>`SELECT pg_try_advisory_xact_lock_shared(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
+      db,
+    )
+    if (!lock.rows[0]?.locked) throw contextChanged()
+  }
+}
+
 /**
  * Host booking actions keep their existing explicit-ID authority. Browser callers may
  * additionally bind the action to its opening organization; older clients and credentials
@@ -90,12 +104,7 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
     // A context transition uses its dedicated lock pool and then reads the app database.
     // Booking writes may overlap; only an exclusive context transition should conflict.
     // Refuse that contention promptly so waiting transactions cannot fill the lock pool.
-    const lock = await sql<{
-      locked: boolean
-    }>`SELECT pg_try_advisory_xact_lock_shared(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
-      db,
-    )
-    if (!lock.rows[0]?.locked) throw contextChanged()
+    await organizationContextWriteLock(principal)(db)
     const user = await db
       .selectFrom('auth.user')
       .select('emailVerified')
@@ -154,6 +163,21 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
   }
 }
 
+/** Session-only entry; consumers recheck team authority inside their own locked service. */
+export function teamManagementSessionCaller(caller: CallerMiddleware) {
+  return createMiddleware<CallerEnv>(async (c, next) => {
+    // Authorization selects the agent credential boundary, even with a valid cookie.
+    // Never let a session resolver grant team-management privileges to that request.
+    if (c.req.raw.headers.has('authorization')) throw denied()
+    const response = await caller(c, next)
+    if (response instanceof Response && response.status === 401) {
+      c.header('WWW-Authenticate', undefined)
+      throw denied()
+    }
+    return response
+  })
+}
+
 /**
  * Shared entry for new team-management web routes.
  *
@@ -180,17 +204,7 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
  * their own authorization and organization bindings.
  */
 export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
-  const sessionCaller = createMiddleware<CallerEnv>(async (c, next) => {
-    // Authorization selects the agent credential boundary, even with a valid cookie.
-    // Never let a session resolver grant team-management privileges to that request.
-    if (c.req.raw.headers.has('authorization')) throw denied()
-    const response = await caller(c, next)
-    if (response instanceof Response && response.status === 401) {
-      c.header('WWW-Authenticate', undefined)
-      throw denied()
-    }
-    return response
-  })
+  const sessionCaller = teamManagementSessionCaller(caller)
   const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
