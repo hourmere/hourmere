@@ -441,8 +441,27 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await page.getByRole('button', { name: text[other(selected)].create, exact: true }).click()
     const response = await saved
     expect(response.status()).toBe(201)
-    const event = (await response.json()) as { title: string; durationMinutes: number }
+    const event = (await response.json()) as { id: string; title: string; durationMinutes: number }
     expect(event.title === 'Settings' && event.durationMinutes === 25).toBe(true)
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/app/event-types/${event.id}`)
+    await expect(
+      page.getByRole('heading', {
+        name: other(selected) === 'en' ? 'Edit “Settings”' : '编辑“Settings”',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('region', {
+        name: other(selected) === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await page
+      .getByRole('link', {
+        name: other(selected) === 'en' ? 'Back to event types' : '返回活动类型',
+        exact: true,
+      })
+      .click()
     await expect.poll(() => new URL(page.url()).pathname).toBe('/app/event-types')
     await language(page, selected)
     await expect(page.getByText('Settings', { exact: true })).toBeVisible()
@@ -533,6 +552,14 @@ test('zh-CN collective host drafts, validation and public booking preserve every
   await language(page, 'zh-CN')
   await expect(page.getByLabel('Second Required Host', { exact: true })).toBeChecked()
   await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: '编辑“Chinese panel interview”', exact: true }),
+  ).toBeVisible()
+  expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
+  await expect(
+    page.getByRole('region', { name: '已保存版本的就绪检查', exact: true }),
+  ).toBeVisible()
+  await page.getByRole('link', { name: '返回活动类型', exact: true }).click()
   await expect(page.getByRole('heading', { name: '活动类型', exact: true })).toBeVisible()
   await page.goto(`${app.url}/team/FixtureTeam/chinese-panel-interview`)
   await expect(
