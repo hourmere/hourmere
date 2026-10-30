@@ -10,6 +10,12 @@ test('Chinese double quotes use full-width CJK glyphs without widening Latin apo
   const title = 'O’Brien / Ada’s plan'
   await page.getByLabel('标题', { exact: true }).fill(title)
   await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
+  await expect(page.getByRole('heading', { name: `编辑“${title}”`, exact: true })).toBeVisible()
+  expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
+  await expect(
+    page.getByRole('region', { name: '已保存版本的就绪检查', exact: true }),
+  ).toBeVisible()
+  await page.getByRole('link', { name: '返回活动类型', exact: true }).click()
   await expect(page.getByRole('link', { name: title, exact: true })).toBeVisible()
   await page.getByRole('link', { name: title, exact: true }).click()
   await page.getByRole('button', { name: '删除活动类型', exact: true }).click()

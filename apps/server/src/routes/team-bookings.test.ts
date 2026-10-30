@@ -16,9 +16,9 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   cancelTeamAdminBooking,
   listTeamAdminBookings,
-  type TeamAdminBookingPage,
-  TeamAdminBookingPageSchema,
-  TeamAdminBookingSchema,
+  TeamAdminBookingListItemSchema,
+  TeamAdminBookingListPageSchema,
+  type TeamAdminBookingListPage as TeamAdminBookingPage,
 } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import {
@@ -244,7 +244,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
   async function page(response: Response): Promise<TeamAdminBookingPage> {
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    return TeamAdminBookingPageSchema.parse(await response.json())
+    return TeamAdminBookingListPageSchema.parse(await response.json())
   }
 
   async function expectDenied(response: Response) {
@@ -294,8 +294,15 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       start: '2026-11-04T09:00:00.000Z',
       end: '2026-11-04T09:30:00.000Z',
       cancelledAt: '2026-11-01T12:00:00.000Z',
-      eventType: { id: seeded.eventId, title: 'Team consultation' },
-      hosts: [{ userId: seeded.hosts[0]?.id, name: 'Saved host A' }],
+      eventType: { id: seeded.eventId, title: 'Team consultation', publicBookingPath: null },
+      hosts: [
+        {
+          userId: seeded.hosts[0]?.id,
+          name: 'Saved host A',
+          timeZone: null,
+          isCurrentMember: true,
+        },
+      ],
       attendees: [
         { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC', isBooker: true },
       ],
@@ -309,6 +316,130 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC', isBooker: true },
       { name: 'Guest', email: 'guest@example.com', timeZone: 'Asia/Shanghai', isBooker: false },
     ])
+  })
+
+  async function publicContextFixture() {
+    const f = await bookingsFixture()
+    const [first, second] = f.hosts as [TestUser, TestUser]
+    await db
+      .insertInto('profiles')
+      .values([
+        {
+          user_id: first.id,
+          handle: `host-${randomUUID().slice(0, 8)}`,
+          time_zone: 'Europe/Berlin',
+        },
+        { user_id: second.id, handle: `host-${randomUUID().slice(0, 8)}`, time_zone: 'Asia/Tokyo' },
+      ])
+      .execute()
+    // The event's current pool may change independently of the historical booking hosts.
+    await db
+      .deleteFrom('event_type_hosts')
+      .where('event_type_id', '=', f.eventId)
+      .where('user_id', '=', first.id)
+      .execute()
+    const event = await db
+      .selectFrom('event_types')
+      .select('slug')
+      .where('id', '=', f.eventId)
+      .executeTakeFirstOrThrow()
+    const publicPath = `/team/${f.team.as(f.owner).organization.slug}/${event.slug}`
+    return { ...f, first, second, publicPath }
+  }
+
+  async function verifyHostContext(target = app) {
+    const f = await publicContextFixture()
+    const current = await page(await get(f.adminSession.cookie, '', {}, target))
+    expect(current.data[0]?.hosts).toEqual([
+      { userId: f.first.id, name: f.first.name, timeZone: 'Europe/Berlin', isCurrentMember: true },
+    ])
+    expect(current.data[0]?.eventType?.publicBookingPath).toBe(f.publicPath)
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.first.id)
+      .execute()
+    // Membership in a different team or the host's personal organization is irrelevant.
+    const departed = await page(await get(f.adminSession.cookie, '', {}, target))
+    expect(departed.data[0]?.hosts).toEqual([
+      { userId: f.first.id, name: f.first.name, timeZone: 'Europe/Berlin', isCurrentMember: false },
+    ])
+    expect(departed.data[0]?.eventType?.publicBookingPath).toBe(f.publicPath)
+    expect(departed.data[2]?.hosts.find((host) => host.userId === f.second.id)).toEqual({
+      userId: f.second.id,
+      name: f.second.name,
+      timeZone: 'Asia/Tokyo',
+      isCurrentMember: true,
+    })
+  }
+
+  it('returns public profile zones and exact current-team membership for saved departed hosts', () =>
+    verifyHostContext())
+
+  async function verifyEventBookability(target = app) {
+    const f = await publicContextFixture()
+    const read = async () =>
+      (await page(await get(f.adminSession.cookie, '', {}, target))).data[0]?.eventType
+    expect((await read())?.publicBookingPath).toBe(f.publicPath)
+    await db
+      .updateTable('event_types')
+      .set({ is_active: false })
+      .where('id', '=', f.eventId)
+      .execute()
+    expect(await read()).toEqual({
+      id: f.eventId,
+      title: 'Team consultation',
+      publicBookingPath: null,
+    })
+    await db
+      .updateTable('event_types')
+      .set({ is_active: true, deleted_at: new Date() })
+      .where('id', '=', f.eventId)
+      .execute()
+    expect(await read()).toEqual({ id: f.eventId, title: null, publicBookingPath: null })
+    await db
+      .updateTable('event_types')
+      .set({ deleted_at: null })
+      .where('id', '=', f.eventId)
+      .execute()
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.second.id)
+      .execute()
+    expect((await read())?.publicBookingPath).toBeNull()
+    await db.deleteFrom('event_types').where('id', '=', f.eventId).execute()
+    expect(await read()).toBeNull()
+  }
+
+  it('returns no public path for disabled, deleted or no-longer-publicly-bookable event types', () =>
+    verifyEventBookability())
+
+  it('returns the personal public path for an enabled personal event in the team and null without its public profile', async () => {
+    const f = await publicContextFixture()
+    const handle = (
+      await db
+        .selectFrom('profiles')
+        .select('handle')
+        .where('user_id', '=', f.first.id)
+        .executeTakeFirstOrThrow()
+    ).handle
+    const eventId = await createFixtures(db).eventType(f.team.id, f.first.id, {
+      slug: 'personal-consultation',
+    })
+    await db
+      .updateTable('bookings')
+      .set({ event_type_id: eventId })
+      .where('id', '=', f.ids[0] as string)
+      .execute()
+    const read = async () => (await page(await get(f.adminSession.cookie))).data[0]
+    expect((await read())?.eventType?.publicBookingPath).toBe(`/${handle}/personal-consultation`)
+    await createFixtures(db).schedule(f.first.id, { timeZone: 'America/Los_Angeles' })
+    await db.deleteFrom('profiles').where('user_id', '=', f.first.id).execute()
+    const missing = await read()
+    expect(missing?.eventType?.publicBookingPath).toBeNull()
+    expect(missing?.hosts[0]?.timeZone).toBeNull()
+    expect(missing?.hosts[0]?.isCurrentMember).toBe(true)
   })
 
   it('returns the shared denial for ordinary members and personal-organization owners', async () => {
@@ -565,6 +696,25 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       'start',
       'status',
     ])
+    type Schema = Record<string, unknown> & { properties?: Record<string, Schema>; items?: Schema }
+    const properties = item.properties as Record<string, Schema>
+    const event = properties.eventType as Schema
+    const host = properties.hosts?.items as Schema
+    expect(Object.keys(event.properties ?? {}).sort()).toEqual(['id', 'publicBookingPath', 'title'])
+    expect(Object.keys(host.properties ?? {}).sort()).toEqual([
+      'isCurrentMember',
+      'name',
+      'timeZone',
+      'userId',
+    ])
+    for (const [field, type] of [
+      [event.properties?.publicBookingPath, 'string'],
+      [host.properties?.timeZone, 'string'],
+      [host.properties?.isCurrentMember, 'boolean'],
+    ] as const) {
+      expect(field?.type).toEqual([type, 'null'])
+      expect(field?.description).toContain('Additive, read-only:')
+    }
   })
 
   function sourceCopy(
@@ -572,6 +722,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     accessObserved: () => void,
     replacement?: [string, string],
     managementFactory = teamManagementAccess,
+    listService = listTeamAdminBookings,
   ): typeof teamBookingRoutes {
     let source = readFileSync('apps/server/src/routes/team-bookings.ts', 'utf8')
     if (replacement) {
@@ -591,9 +742,9 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       createRoute,
       z,
       cancelTeamAdminBooking,
-      listTeamAdminBookings,
-      TeamAdminBookingPageSchema,
-      TeamAdminBookingSchema,
+      listTeamAdminBookings: listService,
+      TeamAdminBookingListPageSchema,
+      TeamAdminBookingListItemSchema,
       ErrorBody,
       errorResponses,
       json,
@@ -616,6 +767,130 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       ...Object.values(bindings),
     ) as typeof teamBookingRoutes
   }
+
+  async function listSourceCopy(replacements: [string, string][] = []) {
+    const location = new URL(
+      '../../../../packages/scheduling/src/team-bookings.ts',
+      import.meta.url,
+    )
+    let source = readFileSync(location, 'utf8')
+    for (const replacement of replacements) {
+      expect(source.includes(replacement[0]), 'mutation matches real source').toBe(true)
+      source = source.replaceAll(...replacement)
+    }
+    const javascript = stripTypeScriptTypes(source).replace(
+      /from '([^']+)'/g,
+      (_, specifier: string) =>
+        `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+    )
+    return (await import(
+      `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+    )) as {
+      listTeamAdminBookings: typeof listTeamAdminBookings
+    }
+  }
+
+  async function listApplication(replacements: [string, string][] = []) {
+    const service = await listSourceCopy(replacements)
+    const factory = sourceCopy(
+      false,
+      () => {},
+      undefined,
+      teamManagementAccess,
+      service.listTeamAdminBookings,
+    )
+    return application([factory({ db, now: () => NOW })])
+  }
+
+  async function verifyContextIsolation(target = app) {
+    const f = await publicContextFixture()
+    const foreignHost = await createTestUser(db, 'Other team host')
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: f.other.id,
+        userId: foreignHost.id,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: foreignHost.id,
+        handle: `foreign-${randomUUID().slice(0, 8)}`,
+        time_zone: 'Pacific/Honolulu',
+      })
+      .execute()
+    const eventId = await createFixtures(db).eventType(f.other.id, null, {
+      slug: 'other-team-event',
+      hosts: [{ userId: foreignHost.id }],
+    })
+    await db
+      .updateTable('bookings')
+      .set({ event_type_id: eventId })
+      .where('id', '=', f.otherBooking)
+      .execute()
+    await db.deleteFrom('booking_hosts').where('booking_id', '=', f.otherBooking).execute()
+    await db
+      .insertInto('booking_hosts')
+      .values({ booking_id: f.otherBooking, user_id: foreignHost.id })
+      .execute()
+    const foreignPath = `/team/${f.other.as(f.owner).organization.slug}/other-team-event`
+    const result = await page(await get(f.adminSession.cookie, '', {}, target))
+    const serialized = JSON.stringify(result)
+    expect(serialized.includes(foreignPath)).toBe(false)
+    expect(serialized.includes('Pacific/Honolulu')).toBe(false)
+    expect(result.data.map((booking) => booking.id)).toEqual(f.ids)
+    expect(result.data[0]?.eventType?.publicBookingPath).toBe(f.publicPath)
+    // The same public fields are returned through an authorized session in that team.
+    const otherSession = await session(f.owner, f.other.id)
+    const other = await page(await get(otherSession.cookie, '', {}, target))
+    expect(other.data[0]?.eventType?.publicBookingPath).toBe(foreignPath)
+    expect(other.data[0]?.hosts[0]?.timeZone).toBe('Pacific/Honolulu')
+  }
+
+  it('keeps the additive public context isolated to the active organization', () =>
+    verifyContextIsolation())
+
+  it('passes public-context HTTP assertions for an unmodified service source copy', async () => {
+    const target = await listApplication()
+    await verifyHostContext(target)
+    await verifyContextIsolation(target)
+    await verifyEventBookability(target)
+  })
+
+  it.each<[string, [string, string][], (target: ReturnType<typeof createApp>) => Promise<void>]>([
+    ['public profile zone', [['facts?.time_zone ?? null', 'null']], verifyHostContext],
+    [
+      'unbookable event path suppression',
+      [
+        [
+          'paths.get(booking.eventType.id) ?? null',
+          "paths.get(booking.eventType.id) ?? '/team/unavailable/event'",
+        ],
+      ],
+      verifyEventBookability,
+    ],
+    [
+      'current-team host membership',
+      [[".whereRef('current_member.organizationId', '=', 'booking.organization_id')", '']],
+      verifyHostContext,
+    ],
+    [
+      'another organization public context',
+      [
+        [".where('b.organization_id', '=', teamId)", ''],
+        [".where('booking.organization_id', '=', teamId)", ''],
+      ],
+      verifyContextIsolation,
+    ],
+  ])('detects broken %s with a real HTTP assertion failure', async (_, replacements, verify) => {
+    const target = await listApplication(replacements)
+    await expect(verify(target)).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
 
   async function verifyAccess(factory: typeof teamBookingRoutes, observed: () => number) {
     const copy = application([factory({ db, now: () => NOW })])
@@ -705,7 +980,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
   it.each<[string, [string, string]]>([
     [
       'strict shared page schema',
-      ['content: json(TeamAdminBookingPage)', 'content: json(TeamAdminBookingPageSchema)'],
+      ['content: json(TeamAdminBookingPage)', 'content: json(TeamAdminBookingListPageSchema)'],
     ],
     [
       'closed page',

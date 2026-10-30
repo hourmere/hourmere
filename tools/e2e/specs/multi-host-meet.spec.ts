@@ -51,6 +51,22 @@ for (const language of ['en', 'zh-CN'] as const) {
       .getByRole('button', { name: zh ? '创建活动类型' : 'Create event type', exact: true })
       .click()
     await expect(
+      page.getByRole('heading', {
+        name: zh ? '编辑“Multi browser Meet”' : 'Edit “Multi browser Meet”',
+        exact: true,
+      }),
+    ).toBeVisible()
+    expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
+    await expect(
+      page.getByRole('region', {
+        name: zh ? '已保存版本的就绪检查' : 'Saved version readiness',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await page
+      .getByRole('link', { name: zh ? '返回活动类型' : 'Back to event types', exact: true })
+      .click()
+    await expect(
       page.getByRole('heading', { name: zh ? '活动类型' : 'Event types', exact: true }),
     ).toBeVisible()
     await page.goto(`${app.url}/team/FixtureTeam/multi-browser-meet`)

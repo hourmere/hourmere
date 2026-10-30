@@ -17,7 +17,7 @@ import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../compone
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { StickyFormActions } from '../../components/StickyFormActions.tsx'
-import { flash } from '../../flash.ts'
+import { flash, useFlash } from '../../flash.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -34,6 +34,8 @@ import { randomHex } from '../../random.ts'
 import { type Me, useMe, useSession } from '../../session.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
+import { ConfigurationChecks } from './ConfigurationChecks.tsx'
+import { useEditorReadiness } from './editor-readiness.ts'
 import {
   comparable,
   draftFromEventType,
@@ -146,6 +148,7 @@ function EventTypeForm({
   const { confirmReload } = useSession()
   const [contextChanged, setContextChanged] = useState(false)
   const navigate = useNavigate()
+  const message = useFlash()
   const [saved, setSaved] = useState<EventType | null>(eventType)
   const [baseline, setBaseline] = useState(() =>
     eventType
@@ -160,9 +163,14 @@ function EventTypeForm({
   const [formError, setFormError] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState<UiText>('')
+  const [status, setStatus] = useState<UiText>(message ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const mounted = useMounted()
+  const [readiness, retryReadiness, invalidateReadiness] = useEditorReadiness(
+    me,
+    saved,
+    contextChanged,
+  )
 
   const dirty = comparable(draft) !== comparable(baseline)
   useUnsavedChanges(dirty)
@@ -176,6 +184,7 @@ function EventTypeForm({
   const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
+    invalidateReadiness()
     setDraft((d) => ({ ...d, [name]: value }))
     setStatus('')
   }
@@ -199,6 +208,7 @@ function EventTypeForm({
     // The fields are locked until the answer comes, so it cannot overwrite later edits.
     // Focus moves off them first (a disabled field drops it) to the status, which says so.
     setStatus('Saving…')
+    invalidateReadiness()
     statusRef.current?.focus()
     setSaving(true)
     const body = saved ? toPatchInput(draft, baseline) : toInput(draft)
@@ -224,10 +234,9 @@ function EventTypeForm({
         // Left meanwhile: don't pull the person away from the page they are on now.
         if (!mounted.current) return
         setBaseline(draft)
-        navigate(
-          created.schedulingType === 'round_robin' ? eventTypePath(created.id) : PATHS.eventTypes,
-          { state: flash(msg('Created “{0}”.', { '0': created.title })) },
-        )
+        navigate(eventTypePath(created.id), {
+          state: flash(msg('Created “{0}”.', { '0': created.title })),
+        })
         return
       }
     } catch (err) {
@@ -258,6 +267,7 @@ function EventTypeForm({
     setErrors({})
     setFormError(null)
     setStatus(action === 'activate' ? 'Activating…' : 'Using default availability…')
+    invalidateReadiness()
     statusRef.current?.focus()
     setSaving(true)
     try {
@@ -343,13 +353,42 @@ function EventTypeForm({
           attempt={attempt}
         />
 
-        {contextChanged && (
-          <p>
-            <button type="button" className="button button-small" onClick={confirmReload}>
-              {t('Reload')}
-            </button>
-          </p>
-        )}
+        <section className="panel" aria-labelledby="saved-readiness-heading">
+          <h2 id="saved-readiness-heading">{t('Saved version readiness')}</h2>
+          {contextChanged ? (
+            <>
+              <p role="status">{t('Your team context changed. Reload before making changes.')}</p>
+              <p>
+                <button type="button" className="button button-small" onClick={confirmReload}>
+                  {t('Reload')}
+                </button>
+              </p>
+            </>
+          ) : dirty || !saved ? (
+            <p role="status">
+              {t(
+                'These unsaved changes have not been checked yet. Save to check the saved version.',
+              )}
+            </p>
+          ) : readiness.status === 'unavailable' ? (
+            <p>{t('Readiness checks are unavailable for this account.')}</p>
+          ) : (
+            <>
+              <p>
+                {t(
+                  'These checks describe the saved version. Availability is confirmed when someone books.',
+                )}
+              </p>
+              <ConfigurationChecks
+                event={saved}
+                item={readiness.status === 'ready' ? readiness.item : undefined}
+                status={readiness.status === 'unchecked' ? 'ready' : readiness.status}
+                retry={retryReadiness}
+                editor
+              />
+            </>
+          )}
+        </section>
 
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="basics-heading">
@@ -368,6 +407,7 @@ function EventTypeForm({
                     autoComplete="off"
                     onChange={(e) => {
                       const value = e.target.value
+                      invalidateReadiness()
                       setDraft((d) => ({
                         ...d,
                         title: value,
@@ -462,6 +502,7 @@ function EventTypeForm({
               </div>
               <label className="checkbox">
                 <input
+                  id="event-enablement"
                   type="checkbox"
                   checked={draft.isActive}
                   onChange={(e) => set('isActive', e.target.checked)}

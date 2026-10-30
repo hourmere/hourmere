@@ -6723,10 +6723,16 @@ export interface components {
             eventType: {
                 /** Format: uuid */
                 id: string;
+                /** @description Additive, read-only: the public booking path when the event type still exists, is enabled and has a publicly bookable configuration; otherwise null */
+                publicBookingPath: string | null;
                 title: string | null;
             } | null;
             hosts: {
+                /** @description Additive, read-only: whether this saved host is currently a member of the booking team; null when unavailable */
+                isCurrentMember: boolean | null;
                 name: string;
+                /** @description Additive, read-only: the host's public profile IANA time zone, or null when no profile is available */
+                timeZone: string | null;
                 /** Format: uuid */
                 userId: string;
             }[];

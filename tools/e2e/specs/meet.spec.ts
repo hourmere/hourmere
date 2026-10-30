@@ -25,6 +25,14 @@ test('a host explicitly enables automatic Meet and language switching preserves 
     page.getByRole('checkbox', { name: '为每次预约创建独立的 Google Meet 链接', exact: true }),
   ).toBeChecked()
   await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: '编辑“Automatic browser Meet”', exact: true }),
+  ).toBeVisible()
+  expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
+  await expect(
+    page.getByRole('region', { name: '已保存版本的就绪检查', exact: true }),
+  ).toBeVisible()
+  await page.getByRole('link', { name: '返回活动类型', exact: true }).click()
   await expect(page.getByRole('heading', { name: '活动类型', exact: true })).toBeVisible()
   await page.goto(`${app.url}/fixture-host/automatic-browser-meet`)
   await pickSlot(page, page)
