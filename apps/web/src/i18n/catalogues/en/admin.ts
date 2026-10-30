@@ -6,7 +6,35 @@ export const admin = {
   'You are already a member of {team}.': 'You are already a member of {team}.',
   'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
     'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
-
+  Pending: 'Pending',
+  'Team members': 'Team members',
+  'Pending invitations are not members or hosts.': 'Pending invitations are not members or hosts.',
+  'Manage team events': 'Manage team events',
+  'Could not load team members.': 'Could not load team members.',
+  'You do not have permission to view team members.':
+    'You do not have permission to view team members.',
+  '{0} joined members': '{0} joined members',
+  'No team members found.': 'No team members found.',
+  'Previous members page': 'Previous members page',
+  'Next members page': 'Next members page',
+  'Pending invitations': 'Pending invitations',
+  'Mail server acceptance does not confirm receipt in the inbox.':
+    'Mail server acceptance does not confirm receipt in the inbox.',
+  'Loading pending invitations…': 'Loading pending invitations…',
+  'Could not load pending invitations.': 'Could not load pending invitations.',
+  'You do not have permission to view pending invitations.':
+    'You do not have permission to view pending invitations.',
+  'No pending invitations on this page.': 'No pending invitations on this page.',
+  'Invitation {0}': 'Invitation {0}',
+  'Mail submission': 'Mail submission',
+  Submitted: 'Submitted',
+  'Submitting to the mail server': 'Submitting to the mail server',
+  'Accepted by the mail server': 'Accepted by the mail server',
+  'Submission failed': 'Submission failed',
+  'Submission skipped': 'Submission skipped',
+  'Submission status unknown': 'Submission status unknown',
+  'Previous invitations page': 'Previous invitations page',
+  'Next invitations page': 'Next invitations page',
   'Loading team bookings…': 'Loading team bookings…',
   'Team bookings': 'Team bookings',
   'Owners and admins can view this team’s bookings and cancel bookings before they start.':

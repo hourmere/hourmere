@@ -9,6 +9,7 @@ import { chooseLanguage } from '../i18n/store.ts'
 import { signInPath } from '../next-path.ts'
 import {
   emptyAccount,
+  emptyTeamLists,
   fakeApi,
   instance,
   json,
@@ -73,6 +74,7 @@ function server(overrides: Routes = {}) {
   const api = fakeApi({
     ...signedIn,
     ...emptyAccount,
+    ...emptyTeamLists,
     'GET /api/v1/me': () => json(200, state.me),
     [identityRoute]: () => session(state.me.user),
     [lookupRoute]: () => json(200, invitation),

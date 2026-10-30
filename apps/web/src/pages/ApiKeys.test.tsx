@@ -7,6 +7,7 @@ import { chooseLanguage } from '../i18n/store.ts'
 import type { Me } from '../session.tsx'
 import { browserLocale } from '../test/browser-locale.ts'
 import {
+  emptyTeamLists,
   fakeApi,
   json,
   later,
@@ -532,6 +533,7 @@ describe('the API keys page', () => {
     let me: Me = IN_TEAM
     let refuse: (res: Response) => void = () => {}
     fakeApi({
+      ...emptyTeamLists,
       'GET /api/v1/me': () => json(200, me),
       'GET /api/auth/organization/get-active-member': () =>
         json(200, { organizationId: TEAM.id, userId: ME.user.id, role: 'member' }),
