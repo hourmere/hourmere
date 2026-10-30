@@ -13,7 +13,7 @@ export type InvitationSummaryMailLimits = InvitationMailLimits & { secret: strin
 
 export const TeamInvitationSummarySchema = z.strictObject({
   id: z.uuid(),
-  status: z.enum(['pending', 'accepted', 'canceled', 'rejected', 'expired']),
+  status: z.enum(['pending', 'accepted', 'canceled', 'rejected', 'expired', 'unknown']),
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   delivery: z.strictObject({
@@ -84,7 +84,9 @@ export async function listTeamInvitationSummaries(
     WITH invitation_clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
     SELECT i.id, i.email, i.role, i.status AS "storedStatus", i."createdAt", i."expiresAt",
       CASE WHEN i.status = 'pending' AND i."expiresAt" <= invitation_clock.now
-        THEN 'expired' ELSE i.status END AS status,
+        THEN 'expired'
+        WHEN i.status IN ('pending', 'accepted', 'canceled', 'rejected') THEN i.status
+        ELSE 'unknown' END AS status,
       invitation_clock.now AS "databaseNow",
       d.generation, d.state, d.attempts, d.last_attempt_at AS "lastAttemptAt",
       d.last_error_code AS "lastErrorCode",

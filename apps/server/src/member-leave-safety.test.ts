@@ -164,7 +164,7 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       authHandler: authentication.handler,
       resolveCaller: createCallerResolver({ auth: authentication, db }),
       routes: production
-        ? productRoutes({ db, socialProviders: {} })
+        ? productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } })
         : [memberDepartureImpactRoutes({ db }), departureRoutes({ db: routeDb })],
     })
   }

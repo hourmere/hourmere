@@ -329,12 +329,15 @@ lifecycle states for the current team's verified owners/admins. It returns a str
 delivery summary and shares resend eligibility and request-budget checks with the write
 path. Pending expiry uses a materialized database-clock value, with terminal statuses
 preserved. Missing delivery rows read as unknown. Migration 0044 adds nullable
-`last_attempt_at` without rewriting or guessing legacy rows. A database trigger records
-the database clock when the attempt count increases, preserves that time through outcome
-or metadata updates, and clears it when a new generation has no attempt. No worker change
-is required. `lastAttemptAt` is null before any attempt or when the historical time is
-unknown; `updated_at` is not treated as an attempt timestamp. The additive column and
-trigger remain compatible with existing writers that increment attempts.
+`last_attempt_at` without rewriting or guessing legacy rows. The
+`invitation_delivery_attempt_time` trigger owns this column: senders, including the future
+invitation sender, must omit it from writes. Explicit INSERT or UPDATE values are
+overwritten. Inserts with a consumed attempt, attempt-count increases and generation
+changes with a consumed attempt record `clock_timestamp()`; zero attempts clear the
+column, and other updates preserve its previous value. `lastAttemptAt` is null before any
+attempt or when the historical time is unknown; `updated_at` is not treated as an attempt
+timestamp. Existing writers that increment attempts need no change. See the
+[invitation delivery design notes](https://hourmere.com/docs/notifications#team-invitation-delivery-design-notes).
 See the [API contract](https://hourmere.com/docs/api-conventions#team-invitation-delivery-summaries).
 
 Every delivery row remains while its invitation is pending and unexpired, including

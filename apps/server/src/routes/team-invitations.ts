@@ -11,6 +11,10 @@ import { teamManagementAccess } from '../team-management.ts'
 const TeamInvitationSummary = z
   .object({
     ...TeamInvitationSummarySchema.shape,
+    status: TeamInvitationSummarySchema.shape.status.openapi({
+      description:
+        'Known stored invitation lifecycle, with expired derived only for pending invitations using the database clock. Unrecognized stored statuses map to unknown, remain in pagination and are never pending or resendable.',
+    }),
     delivery: z.object(TeamInvitationSummarySchema.shape.delivery.shape).extend({
       lastAttemptAt: z.iso.datetime().nullable().openapi({
         description:
@@ -29,9 +33,12 @@ const TeamInvitationPage = z
 /** Hourmere's invitation summary protocol; native Better Auth schemas are not exposed. */
 export function teamInvitationRoutes(
   deps: ServiceDeps & {
-    invitationMailLimits?: InvitationSummaryMailLimits | undefined
+    invitationMailLimits: InvitationSummaryMailLimits
   },
 ): RouteModule {
+  const invitationMailLimits = deps.invitationMailLimits
+  if (!invitationMailLimits)
+    throw new Error('Invitation summary requires mail admission configuration')
   return ({ app, caller }) => {
     const access = teamManagementAccess(deps.db, caller)
     app.openapi(
@@ -71,16 +78,8 @@ export function teamInvitationRoutes(
         const page = await access.read(
           c.var.principal,
           c.var.principal.organization.id,
-          (db, actor) => {
-            if (!deps.invitationMailLimits)
-              throw new Error('Invitation summary requires mail admission configuration')
-            return listTeamInvitationSummaries(
-              db,
-              actor,
-              c.req.valid('query'),
-              deps.invitationMailLimits,
-            )
-          },
+          (db, actor) =>
+            listTeamInvitationSummaries(db, actor, c.req.valid('query'), invitationMailLimits),
         )
         return c.json(page, 200)
       },

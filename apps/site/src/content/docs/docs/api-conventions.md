@@ -309,7 +309,7 @@ response objects remain extensible for additive v1 changes.
 | Field | Meaning |
 |---|---|
 | `id` | Invitation UUID. |
-| `status` | `pending`, `accepted`, `canceled`, `rejected` or derived `expired`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. |
+| `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
 | `createdAt` | Stored invitation creation time in UTC. |
 | `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
 | `delivery.state` | Current generation's `queued`, `sending`, `smtp_accepted`, `failed` or `skipped`; `unknown` if no delivery row remains. Queued includes waiting for retry; SMTP acceptance does not imply inbox delivery, reading or joining. |
@@ -321,8 +321,8 @@ response objects remain extensible for additive v1 changes.
 Delivery error codes are `transport_error`, `smtp_auth`, `smtp_temporary`, `smtp_permanent`,
 `smtp_not_configured`, `mail_rate_limited`, `interrupted`, `attempts_exhausted`,
 `invitation_ineligible` and `legacy_delivery_unknown`. These are stored diagnostic
-classifications, distinct from the endpoint's HTTP errors. Expired, accepted, canceled or
-rejected invitations cannot be resent; elevated/custom historical roles are ineligible.
+classifications, distinct from the endpoint's HTTP errors. Expired, accepted, canceled,
+rejected or unknown invitations cannot be resent; elevated/custom historical roles are ineligible.
 An exhausted current generation can be explicitly resent if the new-generation rules allow it.
 
 No recipient address, inviter identity, role, message body, invitation link/token, credential,

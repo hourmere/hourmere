@@ -1,5 +1,9 @@
 -- Legacy attempt counts have no recorded attempt time. Add no backfill: metadata
 -- updates and SMTP outcomes must never invent one from updated_at or acceptance.
+-- The trigger owns last_attempt_at and overwrites explicit INSERT/UPDATE values.
+-- Senders must not write this column: positive inserts, attempt increases or a
+-- generation change with positive attempts record database time; zero attempts
+-- clear it, and other updates preserve the recorded attempt time.
 ALTER TABLE public.invitation_deliveries
   ADD COLUMN last_attempt_at timestamptz;
 

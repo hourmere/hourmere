@@ -35,7 +35,7 @@ export function invitationEligibilityDenial(
   return null
 }
 
-/** The read summary and explicit resend share these current-generation admission rules. */
+/** Read-only composition; the writer calls the same rules at its locked admission checkpoints. */
 export function invitationResendDenial(
   invitation: ResendInvitation,
   delivery: ResendInvitationDelivery | undefined,

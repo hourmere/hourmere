@@ -45,7 +45,7 @@ const generous: InvitationMailLimits = {
 }
 const { signJWT } = createRequire(import.meta.resolve('@hourmere/auth'))('better-auth/plugins/jwt')
 
-type InvitationStatus = 'pending' | 'accepted' | 'canceled' | 'rejected' | 'expired'
+type InvitationStatus = 'pending' | 'accepted' | 'canceled' | 'rejected' | 'expired' | 'unknown'
 type DeliveryState = 'queued' | 'sending' | 'smtp_accepted' | 'failed' | 'skipped'
 interface Summary {
   id: string
@@ -663,6 +663,59 @@ describe.skipIf(!serverUrl)(
       expect((await resend(row, seeded.adminSession.cookie)).status).toBe(200)
     })
 
+    async function verifyUnknownStatuses(target = app) {
+      const statuses = ['pending', 'archived', 'pending', 'retired', 'accepted']
+      const ids = statuses.map(
+        (_status, index) => `20000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      )
+      const storedRows: Awaited<ReturnType<typeof invitation>>[] = []
+      for (const [index, status] of statuses.entries())
+        storedRows.push(
+          await invitation({ id: ids[index] as string, status, expired: status === 'retired' }),
+        )
+
+      // The unknown row is inside a page with limit 3 and the cursor boundary with limit 2.
+      for (const limit of [3, 2]) {
+        const observed: Summary[] = []
+        let cursor: string | null = null
+        for (let index = 0; index < ids.length; index++) {
+          const query = new URLSearchParams({ limit: String(limit) })
+          if (cursor) query.set('cursor', cursor)
+          const result = await page(await get(seeded.ownerSession.cookie, `?${query}`, {}, target))
+          expect(result.data.length).toBeGreaterThan(0)
+          observed.push(...result.data)
+          cursor = result.nextCursor
+          if (cursor === null) break
+        }
+        expect(cursor).toBeNull()
+        expect(observed.map((row) => row.id)).toEqual(ids)
+        expect(observed.map((row) => row.status)).toEqual([
+          'pending',
+          'unknown',
+          'pending',
+          'unknown',
+          'accepted',
+        ])
+        expect(observed.filter((row) => row.status === 'pending')).toHaveLength(2)
+        for (const row of observed.filter((row) => row.status === 'unknown'))
+          expect(row.resendAllowed).toBe(false)
+      }
+      for (const row of storedRows.filter((row) => ['archived', 'retired'].includes(row.status))) {
+        const response = await resend(row)
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({ code: 'INVITATION_INELIGIBLE' })
+      }
+      expect(
+        (await db.selectFrom('auth.invitation').select('status').orderBy('id').execute()).map(
+          (row) => row.status,
+        ),
+      ).toEqual(statuses)
+      expect(await db.selectFrom('invitation_email_requests').selectAll().execute()).toEqual([])
+    }
+
+    it('normalizes unknown stored statuses without blocking pages or treating them as pending', () =>
+      verifyUnknownStatuses())
+
     it('uses stable invitation ID keysets, including ties and inserts before a page boundary', async () => {
       const ids = [1, 2, 3].map(
         (number) => `10000000-0000-4000-8000-${String(number).padStart(12, '0')}`,
@@ -737,6 +790,9 @@ describe.skipIf(!serverUrl)(
         'resendAllowed',
         'status',
       ])
+      expect((item.properties as Record<string, { enum: string[] }>).status?.enum).toContain(
+        'unknown',
+      )
     })
     function routeSourceCopy(replacement?: {
       file: 'access' | 'summary'
@@ -797,6 +853,8 @@ describe.skipIf(!serverUrl)(
       await verifyDatabaseExpiry(target)
       await db.deleteFrom('auth.invitation').execute()
       await verifyAttemptTimestamp(target)
+      await db.deleteFrom('auth.invitation').execute()
+      await verifyUnknownStatuses(target)
     })
 
     it.each<
@@ -838,6 +896,16 @@ describe.skipIf(!serverUrl)(
           after: 'lastAttemptAt: null,',
         },
         verifyAttemptTimestamp,
+      ],
+      [
+        'unknown invitation status normalization',
+        {
+          file: 'summary',
+          before:
+            "WHEN i.status IN ('pending', 'accepted', 'canceled', 'rejected') THEN i.status\n        ELSE 'unknown' END AS status,",
+          after: 'ELSE i.status END AS status,',
+        },
+        verifyUnknownStatuses,
       ],
       [
         'database expiration clock',

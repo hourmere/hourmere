@@ -69,7 +69,7 @@ export const productRoutes = (db: Db) => [
   publicRoutes({ db }),
   bookingRoutes({ db }),
   teamBookingRoutes({ db }),
-  teamInvitationRoutes({ db }),
+  teamInvitationRoutes({ db, invitationMailLimits: { secret: 'synthetic-route-test-only' } }),
   memberDepartureImpactRoutes({ db }),
   memberRemovalRoutes({ db }),
   analyticsRoutes({ db }),

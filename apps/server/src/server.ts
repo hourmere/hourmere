@@ -109,7 +109,7 @@ export function productRoutes({
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
-  invitationMailLimits?: InvitationSummaryMailLimits | undefined
+  invitationMailLimits: InvitationSummaryMailLimits
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string

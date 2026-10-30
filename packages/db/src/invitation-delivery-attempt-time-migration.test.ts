@@ -185,6 +185,39 @@ async function verifyReset(pool: pg.Pool) {
   expect(await lastAttempt(pool, zero)).toBeNull()
 }
 
+async function verifyColumnOwnership(pool: pg.Pool) {
+  const id = await invitation(pool)
+  await pool.query(
+    `INSERT INTO invitation_deliveries (invitation_id,state,attempts,last_attempt_at)
+      VALUES ($1,'queued',0,'2001-01-01T00:00:00Z')`,
+    [id],
+  )
+  expect(await lastAttempt(pool, id)).toBeNull()
+  await pool.query('UPDATE invitation_deliveries SET attempts=1 WHERE invitation_id=$1', [id])
+  const recorded = await lastAttempt(pool, id)
+  expect(recorded).toBeTypeOf('string')
+  // A direct column write cannot clear, backdate or move a recorded attempt forward.
+  for (const supplied of [null, '2001-01-01T00:00:00Z', '2099-01-01T00:00:00Z']) {
+    await pool.query('UPDATE invitation_deliveries SET last_attempt_at=$2 WHERE invitation_id=$1', [
+      id,
+      supplied,
+    ])
+    expect(await lastAttempt(pool, id)).toBe(recorded)
+  }
+  await pool.query(
+    `UPDATE invitation_deliveries SET generation=2,attempts=0,
+      last_attempt_at='2099-01-01T00:00:00Z' WHERE invitation_id=$1`,
+    [id],
+  )
+  expect(await lastAttempt(pool, id)).toBeNull()
+  await pool.query(
+    `UPDATE invitation_deliveries SET last_attempt_at='2099-01-01T00:00:00Z'
+      WHERE invitation_id=$1`,
+    [id],
+  )
+  expect(await lastAttempt(pool, id)).toBeNull()
+}
+
 async function withSourceCopy(
   replace: (source: string) => string,
   verify: (pool: pg.Pool) => Promise<void>,
@@ -338,6 +371,10 @@ describe.skipIf(!serverUrl)('invitation delivery attempt time migration', () => 
     )
   }, 30_000)
 
+  it('overwrites direct last_attempt_at writes on insert, update and generation reset', async () => {
+    await withSourceCopy((source) => source, verifyColumnOwnership)
+  }, 30_000)
+
   it.each([
     [
       'attempt stamp',
@@ -356,6 +393,12 @@ describe.skipIf(!serverUrl)('invitation delivery attempt time migration', () => 
       'ELSIF NEW.attempts = 0 THEN\n    NEW.last_attempt_at := NULL;',
       'ELSIF NEW.attempts = 0 THEN\n    NEW.last_attempt_at := OLD.last_attempt_at;',
       verifyReset,
+    ],
+    [
+      'direct timestamp write ownership',
+      'NEW.last_attempt_at := OLD.last_attempt_at;',
+      'NULL;',
+      verifyColumnOwnership,
     ],
   ] as const)(
     'detects a removed %s branch with the same real-database assertions',

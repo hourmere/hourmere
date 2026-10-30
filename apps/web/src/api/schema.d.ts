@@ -6751,8 +6751,11 @@ export interface components {
             /** Format: uuid */
             id: string;
             resendAllowed: boolean;
-            /** @enum {string} */
-            status: "pending" | "accepted" | "canceled" | "rejected" | "expired";
+            /**
+             * @description Known stored invitation lifecycle, with expired derived only for pending invitations using the database clock. Unrecognized stored statuses map to unknown, remain in pagination and are never pending or resendable.
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "canceled" | "rejected" | "expired" | "unknown";
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         TeamReadinessPage: {
