@@ -58,7 +58,7 @@ export const admin = {
   'Unavailable on this instance.': '此实例暂不可用。',
   'Synchronization needs attention. Review the failed calendars below.':
     '同步需要处理，请查看下方同步失败的日历。',
-  'Waiting for the first synchronization on selected calendars.': '已选日历正在等待首次同步。',
+  'Synchronization is not ready for selected calendars yet.': '所选日历的同步数据尚未就绪。',
   'No calendars selected for conflict checks.': '尚未选择用于冲突检查的日历。',
   'Latest synchronization of selected conflict calendars succeeded.':
     '所选冲突检查日历的最近一次同步已成功。',
@@ -631,6 +631,7 @@ export const admin = {
   Questions: '问题',
   'Reason:': '原因：',
   'Refresh calendar list': '刷新日历列表',
+  'Synchronizing busy times…': '正在同步忙碌时段…',
   Remove: '移除',
   'Remove {0}': '移除{0}',
   'Remove option {0}{1}, of question {2}': '移除问题{2}的选项{0}{1}',
@@ -796,8 +797,8 @@ export const admin = {
   'Use one line of up to 200 characters without control characters.':
     '请使用单行文字，最多 200 个字符，且不含控制字符。',
   'Using a key': '使用密钥',
-  'Waiting for the first synchronization. Booking times stay unavailable until it completes.':
-    '正在等待首次同步。完成前，相关时间将保持不可预约。',
+  'Synchronization is not ready yet. Booking times stay unavailable until it completes.':
+    '同步数据尚未就绪。同步完成前，相关时间将保持不可预约。',
   'wants to connect to Hourmere.': '希望连接至 Hourmere。',
   'We received your sign-in link request for': '我们已收到此邮箱的登录链接请求：',
   Wed: '周三',

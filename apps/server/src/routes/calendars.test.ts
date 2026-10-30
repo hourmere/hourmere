@@ -126,6 +126,195 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     return new URL(data.authorizationUrl).searchParams.get('state') as string
   }
 
+  async function connectForSync() {
+    provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
+    const state = await start('sync')
+    const response = await request(`/api/calendar/google/callback?state=${state}&code=fake-code`)
+    expect(response.headers.get('location')).toBe('/app/calendars?connection=connected')
+    return db.selectFrom('calendars').select(['id', 'connection_id']).executeTakeFirstOrThrow()
+  }
+
+  async function destination() {
+    return (
+      await db
+        .selectFrom('profiles')
+        .select('destination_calendar_id')
+        .where('user_id', '=', owner.user.id)
+        .executeTakeFirstOrThrow()
+    ).destination_calendar_id
+  }
+
+  it.each([
+    {
+      providerName: 'google',
+      body: {},
+      origin: 'https://accounts.google.com',
+      pathname: '/o/oauth2/v2/auth',
+      scopes: ['openid', 'email', 'https://www.googleapis.com/auth/calendar.calendarlist.readonly'],
+    },
+    {
+      providerName: 'google',
+      body: { access: 'sync' },
+      origin: 'https://accounts.google.com',
+      pathname: '/o/oauth2/v2/auth',
+      scopes: [
+        'openid',
+        'email',
+        'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+        'https://www.googleapis.com/auth/calendar.events.readonly',
+        'https://www.googleapis.com/auth/calendar.events.owned',
+      ],
+    },
+    {
+      providerName: 'microsoft',
+      body: {},
+      origin: 'https://login.microsoftonline.com',
+      pathname: '/common/oauth2/v2.0/authorize',
+      scopes: [
+        'openid',
+        'email',
+        'offline_access',
+        'https://graph.microsoft.com/Calendars.ReadBasic',
+      ],
+    },
+  ])('requests only the disclosed permissions: $providerName $body', async (entry) => {
+    const response = await request(
+      `/api/v1/calendar-connections/${entry.providerName}/authorize`,
+      'POST',
+      JSON.stringify(entry.body),
+    )
+    expect(response.status).toBe(200)
+    const { authorizationUrl } = (await response.json()) as { authorizationUrl: string }
+    const url = new URL(authorizationUrl)
+    expect(url.origin).toBe(entry.origin)
+    expect(url.pathname).toBe(entry.pathname)
+    expect(url.searchParams.get('scope')?.split(' ')).toEqual(entry.scopes)
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      `${TEST_PUBLIC_URL}/api/calendar/${entry.providerName}/callback`,
+    )
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(url.searchParams.get('prompt')).toBe('consent')
+    if (entry.providerName === 'google') {
+      expect(url.searchParams.get('access_type')).toBe('offline')
+      expect(url.searchParams.get('include_granted_scopes')).toBe('false')
+    }
+    expect(provider.calls).toHaveLength(0)
+    expect(microsoft.calls).toHaveLength(0)
+  })
+
+  it.each(['reader', 'freeBusyReader', 'writer', 'writerWithoutPrivateAccess'])(
+    'rejects a crafted destination request for a calendar with %s access',
+    async (accessRole) => {
+      const calendar = await connectForSync()
+      await db
+        .updateTable('calendars')
+        .set({ access_role: accessRole })
+        .where('id', '=', calendar.id)
+        .execute()
+      const calls = provider.calls.length
+      const response = await request(
+        '/api/v1/calendar-destination',
+        'PUT',
+        JSON.stringify({ calendarId: calendar.id }),
+      )
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'calendar_not_writable' })
+      expect(await destination()).toBeNull()
+      expect(provider.calls).toHaveLength(calls)
+    },
+  )
+
+  it.each(['needs_reauth', 'revoked'])(
+    'rejects a crafted destination request for a %s account',
+    async (status) => {
+      const calendar = await connectForSync()
+      await db
+        .updateTable('calendar_connections')
+        .set({ status })
+        .where('id', '=', calendar.connection_id)
+        .execute()
+      const calls = provider.calls.length
+      const response = await request(
+        '/api/v1/calendar-destination',
+        'PUT',
+        JSON.stringify({ calendarId: calendar.id }),
+      )
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'calendar_not_writable' })
+      expect(await destination()).toBeNull()
+      expect(provider.calls).toHaveLength(calls)
+    },
+  )
+
+  it.each(GOOGLE_CALENDAR_SYNC_SCOPES)(
+    'rejects a crafted destination request without the granted scope %s',
+    async (missingScope) => {
+      const calendar = await connectForSync()
+      await db
+        .updateTable('calendar_connections')
+        .set({ scopes: GOOGLE_CALENDAR_SYNC_SCOPES.filter((scope) => scope !== missingScope) })
+        .where('id', '=', calendar.connection_id)
+        .execute()
+      const calls = provider.calls.length
+      const response = await request(
+        '/api/v1/calendar-destination',
+        'PUT',
+        JSON.stringify({ calendarId: calendar.id }),
+      )
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'calendar_not_writable' })
+      expect(await destination()).toBeNull()
+      expect(provider.calls).toHaveLength(calls)
+    },
+  )
+
+  it('refuses a Microsoft destination even if its stored role and scope resemble a Google owner', async () => {
+    const calendar = await connectForSync()
+    await db
+      .updateTable('calendar_connections')
+      .set({ provider: 'microsoft' })
+      .where('id', '=', calendar.connection_id)
+      .execute()
+    const calls = provider.calls.length
+    const response = await request(
+      '/api/v1/calendar-destination',
+      'PUT',
+      JSON.stringify({ calendarId: calendar.id }),
+    )
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ error: 'calendar_not_found' })
+    expect(await destination()).toBeNull()
+    expect(provider.calls).toHaveLength(calls)
+    expect(microsoft.calls).toHaveLength(0)
+  })
+
+  it('requires a profile before saving a booking destination', async () => {
+    const calendar = await connectForSync()
+    const profile = await db
+      .deleteFrom('profiles')
+      .where('user_id', '=', owner.user.id)
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    try {
+      const response = await request(
+        '/api/v1/calendar-destination',
+        'PUT',
+        JSON.stringify({ calendarId: calendar.id }),
+      )
+      expect(response.status).toBe(404)
+      expect(await response.json()).toMatchObject({ error: 'profile_not_found' })
+      expect(
+        await db
+          .selectFrom('profiles')
+          .select('user_id')
+          .where('user_id', '=', owner.user.id)
+          .execute(),
+      ).toEqual([])
+    } finally {
+      await db.insertInto('profiles').values(profile).execute()
+    }
+  })
+
   it('protects the Microsoft authorization endpoint with browser sessions, origin and strict input', async () => {
     for (const [headers, expected] of [
       [{ cookie: '' }, 401],

@@ -24,7 +24,7 @@ const calendarMessages = {
   'Unavailable on this instance.': '此实例暂不可用。',
   'Synchronization needs attention. Review the failed calendars below.':
     '同步需要处理，请查看下方同步失败的日历。',
-  'Waiting for the first synchronization on selected calendars.': '已选日历正在等待首次同步。',
+  'Synchronization is not ready for selected calendars yet.': '所选日历的同步数据尚未就绪。',
   'No calendars selected for conflict checks.': '尚未选择用于冲突检查的日历。',
   'Latest synchronization of selected conflict calendars succeeded.':
     '所选冲突检查日历的最近一次同步已成功。',
