@@ -6,6 +6,7 @@ import { App } from '../App.tsx'
 import type { OrganizationMember } from '../api/auth.ts'
 import { PATHS } from '../paths.ts'
 import {
+  emptyTeamLists,
   fakeApi,
   json,
   later,
@@ -89,6 +90,7 @@ describe('team context in account settings', () => {
       const user = userEvent.setup()
       fakeApi({
         ...signedInAs(TEAM_ME),
+        ...emptyTeamLists,
         ...profile(PROFILE),
         'GET /api/auth/organization/get-active-member': () => json(200, { ...MEMBER, role }),
       })
@@ -113,6 +115,7 @@ describe('team context in account settings', () => {
     let recovered = false
     const api = fakeApi({
       ...signedInAs(TEAM_ME),
+      ...emptyTeamLists,
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () =>
         recovered ? json(200, MEMBER) : member.response.then((response) => response.clone()),
@@ -140,6 +143,7 @@ describe('team context in account settings', () => {
     async (changed) => {
       fakeApi({
         ...signedInAs(TEAM_ME),
+        ...emptyTeamLists,
         ...profile(PROFILE),
         'GET /api/auth/organization/get-active-member': () =>
           json(200, { ...MEMBER, role: 'owner', ...changed }),
@@ -159,6 +163,7 @@ describe('team context in account settings', () => {
     const member = later()
     fakeApi({
       ...signedInAs(TEAM_ME),
+      ...emptyTeamLists,
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () =>
         member.response.then((response) => response.clone()),
@@ -187,6 +192,7 @@ describe('team context in account settings', () => {
     const member = later()
     fakeApi({
       ...signedInAs(TEAM_ME),
+      ...emptyTeamLists,
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () =>
         member.response.then((response) => response.clone()),
@@ -203,6 +209,7 @@ describe('team context in account settings', () => {
   it('consumes the creation fallback so a reload fetches current membership without replaying it', async () => {
     const api = fakeApi({
       ...signedInAs(TEAM_ME),
+      ...emptyTeamLists,
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () =>
         json(503, { code: 'INTERNAL_SERVER_ERROR' }),
@@ -226,6 +233,7 @@ describe('team context in account settings', () => {
     const user = userEvent.setup()
     fakeApi({
       ...signedInAs(TEAM_ME),
+      ...emptyTeamLists,
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () => json(200, MEMBER),
     })
@@ -245,6 +253,7 @@ describe('team context in account settings', () => {
   ])('never uses a mismatched or invalid creation fallback: %j', async (changed) => {
     fakeApi({
       ...signedInAs(TEAM_ME),
+      ...emptyTeamLists,
       ...profile(PROFILE),
       'GET /api/auth/organization/get-active-member': () =>
         json(503, { code: 'INTERNAL_SERVER_ERROR' }),

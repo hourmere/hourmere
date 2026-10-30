@@ -19,6 +19,7 @@ import type { EnqueueInvitationEmail, ReserveInvitationEmail } from './invitatio
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
 import { mcpOAuthPlugins } from './mcp-oauth.ts'
+import { memberReadPrivacy } from './member-read-privacy.ts'
 import { serializeOrganizationContext } from './organization-context.ts'
 import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
@@ -417,6 +418,7 @@ export function createAuth({
         requireEmailVerificationOnInvitation: true,
         organizationHooks: organizationGuards(db),
       }),
+      memberReadPrivacy(db),
       apiKey({
         defaultPrefix: API_KEY_PREFIX,
         enableMetadata: true,
