@@ -66,6 +66,7 @@ export function AppShell() {
     if (list) keepActiveVisible(list)
     if (shownPath.current === pathname) return
     shownPath.current = pathname
+    setSpaceError(null)
     main.current?.focus()
   }, [pathname, locale])
 
@@ -156,9 +157,12 @@ export function AppShell() {
         </p>
       )}
       {spaceError && (
-        <p className="alert alert-error shell-alert" role="alert">
-          {ui(spaceError)}
-        </p>
+        <div className="alert alert-error shell-alert notice">
+          <p role="alert">{ui(spaceError)}</p>
+          <button type="button" className="button button-small" onClick={() => setSpaceError(null)}>
+            {t('Dismiss')}
+          </button>
+        </div>
       )}
       <div className="layout">
         <nav

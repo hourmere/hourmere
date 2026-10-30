@@ -1024,6 +1024,8 @@ export const admin = {
   'Could not load teams. Please try again.': 'Could not load teams. Please try again.',
   'Could not switch spaces. You are still in {space}. Please try again.':
     'Could not switch spaces. You are still in {space}. Please try again.',
+  'Could not confirm the switch. Checking your current space…':
+    'Could not confirm the switch. Checking your current space…',
   'You are now in your personal space. Your team access or active space changed.':
     'You are now in your personal space. Your team access or active space changed.',
 } as const

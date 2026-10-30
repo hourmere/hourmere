@@ -20,7 +20,7 @@ let handoffFocus: { userId: string; organizationId: string } | null = null
 export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => void }) {
   const { t } = useI18n()
   const me = useMe()
-  const { accept, beginContextSwitch } = useSession()
+  const { accept, beginContextSwitch, refresh } = useSession()
   const confirmLeave = useConfirmLeave()
   const [organizations, reloadOrganizations] = useLoad(listOrganizations)
   const [open, setOpen] = useState(false)
@@ -181,8 +181,11 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
     const controller = new AbortController()
     const release = beginContextSwitch()
     switching.current = { controller, release }
+    let committed = false
+    let reconcile = false
     try {
       await setActiveOrganization({ organizationId: option.id }, controller.signal)
+      committed = true
       const confirmed = await unwrap(api.GET('/api/v1/me', { signal: controller.signal }))
       if (controller.signal.aborted) return
       if (
@@ -197,16 +200,20 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
       accept(confirmed)
     } catch {
       if (!controller.signal.aborted) {
+        reconcile = committed
         onError(
-          msg('Could not switch spaces. You are still in {space}. Please try again.', {
-            space: me.organization.personal ? msg('Personal') : literal(me.organization.name),
-          }),
+          committed
+            ? msg('Could not confirm the switch. Checking your current space…')
+            : msg('Could not switch spaces. You are still in {space}. Please try again.', {
+                space: me.organization.personal ? msg('Personal') : literal(me.organization.name),
+              }),
         )
       }
     } finally {
       release()
       if (!controller.signal.aborted) setBusy(false)
       if (switching.current?.controller === controller) switching.current = null
+      if (reconcile && !controller.signal.aborted) void refresh({ fresh: true })
     }
   }
 

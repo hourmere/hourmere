@@ -59,6 +59,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
           await trigger.focus()
           await page.keyboard.press('ArrowDown')
           await expect(page.getByRole('menu')).toBeVisible()
+          await expect(personal).toHaveCount(1)
           const focusRing = await page.locator('.space-menu button:focus').evaluate((button) => {
             const style = getComputedStyle(button)
             return { style: style.outlineStyle, width: Number.parseFloat(style.outlineWidth) }

@@ -791,25 +791,38 @@ describe('when the account or organization changes elsewhere', () => {
     expect(api.to('GET /api/auth/api-key/list')).toHaveLength(2)
   })
 
-  it.each([
-    ['another target', ME],
-    ['another caller', { ...TEAM_ME, user: GRACE.user }],
-  ])('retains the original page if switch confirmation identifies %s', async (_, confirmedMe) => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const { api } = switchableKeys({ confirmedMe })
-    renderApp('/app/api-keys')
-    await screen.findByText('You have no API keys yet.')
-    const input = screen.getByLabelText<HTMLInputElement>('Name')
-    await userEvent.type(input, 'Original draft')
-    await chooseSpace('Acme')
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'Could not switch spaces. You are still in Personal. Please try again.',
-    )
-    expect(input.isConnected).toBe(true)
-    expect(input.value).toBe('Original draft')
-    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
-    expect(api.to('GET /api/v1/me')).toHaveLength(2)
-  })
+  it.each(['dismissal', 'navigation', 'a successful switch'])(
+    'clears a failed-switch banner after %s',
+    async (action) => {
+      let fail = true
+      const { active } = switchableKeys({
+        switchResponse: () => {
+          if (fail) return json(403, { code: 'FORBIDDEN' })
+          active.current = TEAM_ME
+          return json(200, TEAM)
+        },
+      })
+      renderApp('/app/api-keys')
+      await screen.findByText('You have no API keys yet.')
+      await chooseSpace('Acme')
+      await screen.findByRole('alert')
+      if (action === 'dismissal') {
+        await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      } else if (action === 'navigation') {
+        await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
+        await screen.findByRole('heading', { name: 'Settings', level: 1 })
+      } else {
+        fail = false
+        await chooseSpace('Acme')
+        await waitFor(() =>
+          expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain(
+            'Acme',
+          ),
+        )
+      }
+      expect(screen.queryByRole('alert')).toBeNull()
+    },
+  )
 
   it('defers background refresh while a deliberate switch is awaiting confirmation', async () => {
     const confirmation = later()
@@ -840,48 +853,185 @@ describe('when the account or organization changes elsewhere', () => {
     )
   })
 
-  it('keeps the original draft when confirmation fails after the server committed the switch', async () => {
+  it.each([
+    ['with request cancellation', true],
+    ['when request cancellation is unavailable', false],
+  ])('invalidates a refresh already in flight before switching %s', async (_, cancellable) => {
+    const background = later()
     const confirmation = later()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    let active = ME
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValue(false)
     let meReads = 0
-    fakeApi({
+    const api = fakeApi({
       ...profile(),
-      'GET /api/v1/me': () => (++meReads === 2 ? confirmation.response : json(200, active)),
+      'GET /api/v1/me': () =>
+        ++meReads === 1
+          ? json(200, ME)
+          : meReads === 2
+            ? background.response
+            : confirmation.response,
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'member' }),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/organization/set-active': () => json(200, TEAM),
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const input = screen.getByLabelText<HTMLInputElement>('Name')
+    await userEvent.type(input, 'Original draft')
+    act(() => window.dispatchEvent(new Event('focus')))
+    await waitFor(() => expect(meReads).toBe(2))
+    const refreshRequest = vi.mocked(fetch).mock.calls.findLast(([request]) => {
+      return request instanceof Request && new URL(request.url).pathname === '/api/v1/me'
+    })?.[0]
+    if (!(refreshRequest instanceof Request)) throw new Error('Expected a background /me request')
+
+    await userEvent.click(screen.getByRole('button', { name: /^Switch space/ }))
+    const teamOption = await screen.findByRole('menuitemradio', { name: /Acme/ })
+    // Exercise the epoch independently when a request adapter cannot cancel its read.
+    if (!cancellable) vi.spyOn(AbortController.prototype, 'abort').mockImplementationOnce(() => {})
+    await userEvent.click(teamOption)
+    await waitFor(() => expect(meReads).toBe(3))
+    expect(refreshRequest.signal.aborted).toBe(cancellable)
+
+    // The server has switched, but only the deliberate confirmation may apply that answer.
+    await background.answer(json(200, TEAM_ME))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(input.isConnected).toBe(true)
+    expect(input.value).toBe('Original draft')
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(1)
+
+    await confirmation.answer(json(200, TEAM_ME))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(input.isConnected).toBe(false)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('')
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Acme')
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(2)
+  })
+
+  it.each([
+    ['an unavailable confirmation', () => json(503, { error: 'unavailable' })],
+    ['a failed confirmation request', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['another target', () => json(200, ME)],
+    ['another caller', () => json(200, { ...TEAM_ME, user: GRACE.user })],
+  ])('reconciles a committed switch after %s without a focus event', async (_, answer) => {
+    const reconciliation = later()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let meReads = 0
+    const api = fakeApi({
+      ...profile(),
+      'GET /api/v1/me': () =>
+        ++meReads === 1 ? json(200, ME) : meReads === 2 ? answer() : reconciliation.response,
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'member' }),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/organization/set-active': () => json(200, TEAM),
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const input = screen.getByLabelText<HTMLInputElement>('Name')
+    await userEvent.type(input, 'Original draft')
+    await chooseSpace('Acme')
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not confirm the switch. Checking your current space…',
+    )
+    await waitFor(() => expect(meReads).toBe(3))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(input.isConnected).toBe(true)
+    await reconciliation.answer(json(200, TEAM_ME))
+    await waitFor(() => expect(input.isConnected).toBe(false))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Acme')
+    expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+      'The key will act in Acme.',
+    )
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(2)
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+    expect(api.calls.filter((call) => call.method !== 'GET')).toHaveLength(1)
+  })
+
+  it('keeps the original draft when reconciliation is declined after a committed switch', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValue(false)
+    let meReads = 0
+    const api = fakeApi({
+      ...profile(),
+      'GET /api/v1/me': () => json(++meReads === 2 ? 503 : 200, meReads === 1 ? ME : TEAM_ME),
       'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
-      'POST /api/auth/organization/set-active': () => {
-        active = TEAM_ME
-        return json(200, TEAM)
-      },
+      'POST /api/auth/organization/set-active': () => json(200, TEAM),
     })
     renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     const input = screen.getByLabelText<HTMLInputElement>('Name')
     await userEvent.type(input, 'Keep this draft')
     await chooseSpace('Acme')
-    await waitFor(() => expect(meReads).toBe(2))
-    await act(async () => {
-      window.dispatchEvent(new Event('focus'))
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
-    expect(meReads).toBe(2)
-    expect(confirm).toHaveBeenCalledTimes(1)
-    expect(input.isConnected).toBe(true)
-    expect(input.value).toBe('Keep this draft')
-    await confirmation.answer(json(503, { error: 'unavailable' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'Could not switch spaces. You are still in Personal. Please try again.',
-    )
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
     expect(input.isConnected).toBe(true)
     expect(input.value).toBe('Keep this draft')
     expect(screen.getByRole('button', { name: /^Switch space/ }).textContent).toContain('Personal')
-    confirm.mockReturnValue(false)
+    expect(screen.getByRole('alert').textContent).toContain('Could not confirm the switch.')
+
     await act(async () => window.dispatchEvent(new Event('focus')))
-    expect(meReads).toBe(3)
+    await waitFor(() => expect(meReads).toBe(4))
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(input.isConnected).toBe(true)
+    await userEvent.type(input, ' still usable')
+    expect(input.value).toBe('Keep this draft still usable')
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(1)
   })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'shows uncertainty if reconciliation fails and keeps explicit writes bound to the displayed space in %s',
+    async (language) => {
+      chooseLanguage(language)
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      let meReads = 0
+      const api = fakeApi({
+        ...profile(),
+        'GET /api/v1/me': () =>
+          ++meReads === 1 ? json(200, ME) : json(503, { error: 'unavailable' }),
+        'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM]),
+        'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+        'POST /api/auth/organization/set-active': () => json(200, TEAM),
+        'POST /api/auth/api-key/create': () => json(400, { code: 'BAD_REQUEST' }),
+      })
+      renderApp('/app/api-keys')
+      const name = language === 'en' ? 'Name' : '名称'
+      const trigger = new RegExp(language === 'en' ? '^Switch space' : '^切换空间')
+      const input = await screen.findByLabelText<HTMLInputElement>(name)
+      await userEvent.type(input, 'Personal draft')
+      await userEvent.click(screen.getByRole('button', { name: trigger }))
+      await userEvent.click(await screen.findByRole('menuitemradio', { name: /Acme/ }))
+      const uncertainty =
+        language === 'en'
+          ? 'Could not confirm the switch. Checking your current space…'
+          : '无法确认切换结果。正在检查你当前所在的空间…'
+      expect((await screen.findByRole('alert')).textContent).toBe(uncertainty)
+      await waitFor(() => expect(meReads).toBe(3))
+      expect(input.isConnected).toBe(true)
+      expect(input.value).toBe('Personal draft')
+      expect(screen.getByRole('button', { name: trigger }).textContent).toContain(
+        language === 'en' ? 'Personal' : '个人空间',
+      )
+      expect(api.calls.filter((call) => call.method !== 'GET')).toHaveLength(1)
+      await userEvent.click(
+        screen.getByRole('button', {
+          name: language === 'en' ? 'Create key' : '创建密钥',
+        }),
+      )
+      await waitFor(() => expect(api.to('POST /api/auth/api-key/create')).toHaveLength(1))
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toMatchObject({
+        metadata: { organizationId: ME.organization.id },
+      })
+      expect(screen.getByText(uncertainty)).toBeDefined()
+      expect(input.isConnected).toBe(true)
+    },
+  )
 
   it.each(['en', 'zh-CN'] as const)(
     'explains a team-to-personal fallback in %s and clears it on a deliberate team switch',

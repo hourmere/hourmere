@@ -971,6 +971,8 @@ export const admin = {
   'Could not load teams. Please try again.': '无法加载团队，请重试。',
   'Could not switch spaces. You are still in {space}. Please try again.':
     '无法切换空间。你仍位于{space}。请重试。',
+  'Could not confirm the switch. Checking your current space…':
+    '无法确认切换结果。正在检查你当前所在的空间…',
   'You are now in your personal space. Your team access or active space changed.':
     '你现在位于个人空间。你的团队访问权限或当前空间已更改。',
 } as const
