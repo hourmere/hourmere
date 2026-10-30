@@ -34,6 +34,11 @@ import {
   bookingNotificationJob,
   bookingNotifier,
   conferenceNotificationDispatchJob,
+  createInvitationEmailDispatcher,
+  createInvitationEmailRepairer,
+  type InvitationEmailQueue,
+  invitationEmailJob,
+  invitationEmailRepairJob,
   notificationEmailCleanupJob,
   queuedSignInEmail,
   reserveInvitationEmailBudget,
@@ -337,6 +342,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     mailRecipientMaxPerDay: config.MAIL_RECIPIENT_MAX_PER_DAY,
     mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
   }
+  const invitationQueue: InvitationEmailQueue = {
+    enqueue: (name, payload, options) => jobs.enqueue(name, payload, options),
+    hasLiveInvitationEmailJob: (identity, transaction) =>
+      jobs.hasLiveInvitationEmailJob(identity, transaction),
+  }
+  const invitationDeliveryDeps = { db, queue: invitationQueue }
+  const repairInvitations = createInvitationEmailRepairer(invitationDeliveryDeps)
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
@@ -354,6 +366,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       bookingNotificationJob(notificationDeps),
       conferenceNotificationDispatchJob(notificationDeps),
       notificationEmailCleanupJob(notificationDeps),
+      invitationEmailJob({ db }),
+      invitationEmailRepairJob(repairInvitations),
       bookingConferenceJob(calendarDeps),
       conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
       conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
@@ -388,14 +402,19 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       { singletonKey: connectionId },
     )
   enqueueCalendar = (id) => jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id })
-  try {
-    await jobs.start()
-  } catch (err) {
-    await Promise.all([db.destroy(), authPool?.end()])
-    throw err
-  }
   enqueueConference = (id) =>
     jobs.enqueue('booking-conference', { rootBookingId: id }, { singletonKey: id })
+  try {
+    await jobs.start()
+    if (role !== 'web') await repairInvitations()
+  } catch (err) {
+    try {
+      await jobs.stop()
+    } finally {
+      await Promise.all([db.destroy(), authPool?.end()])
+    }
+    throw err
+  }
   const checkDb = async () => {
     await sql`SELECT 1`.execute(db)
   }
@@ -426,6 +445,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       baseURL: config.PUBLIC_URL,
       secret: config.BETTER_AUTH_SECRET,
       mailer: countingMailer,
+      enqueueInvitationEmail: createInvitationEmailDispatcher(invitationDeliveryDeps),
       reserveInvitationEmail: (trx, input) =>
         reserveInvitationEmailBudget(trx, input, {
           ...notificationDeps,

@@ -541,11 +541,27 @@ never invokes the sign-in worker's account/sign-up eligibility decision and does
 grant an inviter any new registration authority. Errors use fixed codes and diagnostics
 omit recipients and underlying database/provider text.
 
-This release records queued invitation intent atomically with admission. The invitation
-sender, pg-boss dispatch and reconciler are not installed yet, so no invitation mail is
-sent by these requests. A future sender must check and debit the shared non-reserved
-mail capacity at send time, integrate its attempt budget and recheck lifecycle and
-authorization before SMTP. Admission accounting is separate from that send-time debit.
+Invitation admission commits the invitation and queued delivery intent together, then
+waits for durable pg-boss enqueueing before returning success. It never waits for SMTP.
+If enqueueing fails or cannot confirm the exclusive job, the request returns HTTP 503
+`INVITATION_DELIVERY_UNAVAILABLE`; the invitation and queued intent remain saved. Retry
+the same request, including the same resend request ID and expected generation, to
+recover without creating another generation or spending another admission slot.
+
+The `invitation-email-v1` queue carries only `{ invitationId, generation }`, with an
+exclusive `invitation-email:v1:<invitationId>:<generation>` key and zero pg-boss retries.
+The delivery record owns the eventual attempt budget. A worker-startup and every-minute
+repairer checks at most 100 due queued records per pass, advances its invitation-ID
+cursor even after an individual failure, and repairs missing live jobs transactionally.
+It checks the pinned pg-boss job identity, payload, state and expiry before enqueueing.
+Terminal delivery records are never automatically requeued.
+
+The invitation worker currently only rechecks lifecycle and generation: canceled,
+accepted, rejected, unknown-status or expired invitations become `skipped`; stale jobs
+leave the newer generation untouched. Current pending records remain queued for the
+future sender. No invitation mail is sent yet. A future sender must check and debit
+shared non-reserved mail capacity at send time, integrate attempts, leases and backoff,
+and recheck authorization before SMTP. Admission accounting is separate from that debit.
 
 Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
 5) across its entire reschedule chain. New response tokens and older email links use the

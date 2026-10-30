@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import pgBossPackage from 'pg-boss/package.json' with { type: 'json' }
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { createJobs, defineJob, type JobDefinition, JobPayloadError } from './index.ts'
@@ -203,6 +205,103 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     expect(await jobs.enqueue(name, {}, { singletonKey: 'booking-1' })).toBeNull()
     expect(await jobs.enqueue(name, {}, { singletonKey: 'booking-2' })).toBeTruthy()
     expect(await jobRows(name)).toHaveLength(2)
+  })
+
+  it('recognizes only the retained invitation job with exact queue, key, payload and live expiry', async () => {
+    const payload = { invitationId: randomUUID(), generation: 3 }
+    const key = `invitation-email:v1:${payload.invitationId}:3`
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+      handler: async () => {},
+    })
+    const other = defineJob({ ...definition, name: queueName('other-invitation') })
+    const jobs = await start([definition, other], { work: false })
+    const id = (await jobs.enqueue(definition.name, payload, { singletonKey: key })) as string
+    const identity = { id, ...payload }
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(true)
+    expect(await jobs.hasLiveInvitationEmailJob({ ...identity, id: randomUUID() })).toBe(false)
+    expect(await jobs.hasLiveInvitationEmailJob({ ...identity, generation: 2 })).toBe(false)
+    const otherId = (await jobs.enqueue(other.name, payload, { singletonKey: key })) as string
+    expect(await jobs.hasLiveInvitationEmailJob({ ...identity, id: otherId })).toBe(false)
+
+    await testDb.pool.query('UPDATE pgboss.job SET singleton_key=$2 WHERE id=$1', [id, 'wrong-key'])
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
+    await testDb.pool.query('UPDATE pgboss.job SET singleton_key=$2, data=$3::jsonb WHERE id=$1', [
+      id,
+      key,
+      JSON.stringify({ ...payload, extra: 'unexpected' }),
+    ])
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
+    await testDb.pool.query('UPDATE pgboss.job SET data=$2::jsonb WHERE id=$1', [
+      id,
+      JSON.stringify(payload),
+    ])
+
+    for (const state of ['created', 'retry', 'active', 'completed', 'cancelled', 'failed']) {
+      await testDb.pool.query(
+        `UPDATE pgboss.job SET state=$2::pgboss.job_state,
+        keep_until=clock_timestamp() + INTERVAL '1 day',
+        started_on=clock_timestamp(), expire_seconds=180 WHERE id=$1`,
+        [id, state],
+      )
+      expect(await jobs.hasLiveInvitationEmailJob(identity), state).toBe(
+        ['created', 'retry', 'active'].includes(state),
+      )
+    }
+    await testDb.pool.query(
+      "UPDATE pgboss.job SET state='created', keep_until=clock_timestamp() - INTERVAL '1 second' WHERE id=$1",
+      [id],
+    )
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
+    await testDb.pool.query(
+      "UPDATE pgboss.job SET state='active', started_on=clock_timestamp() - INTERVAL '181 seconds' WHERE id=$1",
+      [id],
+    )
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
+    await testDb.pool.query('UPDATE pgboss.job SET started_on=NULL WHERE id=$1', [id])
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
+  })
+
+  it('refuses invitation inspection when the pinned pg-boss version changes', async () => {
+    const jobs = await start([], { work: false })
+    const version = pgBossPackage.version
+    try {
+      pgBossPackage.version = 'unsupported-test-version'
+      await expect(
+        jobs.hasLiveInvitationEmailJob({
+          id: randomUUID(),
+          invitationId: randomUUID(),
+          generation: 1,
+        }),
+      ).rejects.toThrow('invitation job lookup requires pg-boss 12.38.0')
+    } finally {
+      pgBossPackage.version = version
+    }
+  })
+
+  it('reads an invitation job through the caller transaction without requiring another connection', async () => {
+    const definition = defineJob({
+      name: 'invitation-email-v1',
+      payload: z.strictObject({ invitationId: z.uuid(), generation: z.number().int() }),
+      policy: 'exclusive',
+      handler: async () => {},
+    })
+    const jobs = await start([definition], { work: false })
+    const payload = { invitationId: randomUUID(), generation: 2 }
+    const db = createDb(testDb.pool)
+    await expect(
+      db.transaction().execute(async (trx) => {
+        const id = (await jobs.enqueue(definition.name, payload, {
+          singletonKey: `invitation-email:v1:${payload.invitationId}:2`,
+          transaction: trx,
+        })) as string
+        expect(await jobs.hasLiveInvitationEmailJob({ id, ...payload })).toBe(false)
+        expect(await jobs.hasLiveInvitationEmailJob({ id, ...payload }, trx)).toBe(true)
+        throw new Error('synthetic rollback')
+      }),
+    ).rejects.toThrow('synthetic rollback')
   })
 
   it('starts a job no earlier than startAfter', async () => {

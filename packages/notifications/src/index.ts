@@ -36,6 +36,18 @@ import {
 } from './mail-limits.ts'
 
 export {
+  createInvitationEmailDispatcher,
+  createInvitationEmailRepairer,
+  INVITATION_EMAIL_JOB,
+  INVITATION_EMAIL_REPAIR_JOB,
+  InvitationEmailPayload,
+  type InvitationEmailQueue,
+  InvitationEmailQueueError,
+  type InvitationEmailRequest,
+  invitationEmailJob,
+  invitationEmailRepairJob,
+} from './invitation-email.ts'
+export {
   type InvitationMailLimits,
   reserveInvitationEmailBudget,
 } from './invitation-mail-limits.ts'

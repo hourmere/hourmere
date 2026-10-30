@@ -3,6 +3,7 @@
 // `pgboss` schema, which it installs and upgrades itself; our migration runner never touches it.
 import { inspect } from 'node:util'
 import { fromKysely, type KyselyTransactionLike, PgBoss, type Queue } from 'pg-boss'
+import pgBossPackage from 'pg-boss/package.json' with { type: 'json' }
 import type { z } from 'zod'
 
 export type { KyselyTransactionLike } from 'pg-boss'
@@ -91,6 +92,13 @@ export interface EnqueueOptions {
 
 type Named<Defs extends readonly AnyJobDefinition[], N> = Extract<Defs[number], { name: N }>
 
+/** The retained job identity for one invitation delivery generation. */
+export interface InvitationEmailJobIdentity {
+  id: string
+  invitationId: string
+  generation: number
+}
+
 export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
   /**
    * Validates the payload and queues a job. Resolves to the job id, or null when the job's
@@ -112,6 +120,11 @@ export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
   readonly running: boolean
   /** Resolves when pg-boss's own connection pool answers a query; rejects otherwise. */
   check(): Promise<void>
+  /** Narrow pg-boss adapter: only a matching, unexpired invitation delivery job is live. */
+  hasLiveInvitationEmailJob(
+    identity: InvitationEmailJobIdentity,
+    transaction?: KyselyTransactionLike,
+  ): Promise<boolean>
 }
 
 export interface JobsOptions<Defs extends readonly AnyJobDefinition[]> {
@@ -285,6 +298,34 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
     async check() {
       if (state !== 'running') throw new Error(`jobs are not running (${state})`)
       await boss.getDb().executeSql('SELECT 1')
+    },
+
+    async hasLiveInvitationEmailJob(identity, transaction) {
+      if (state !== 'running') throw new Error(`jobs are not running (${state})`)
+      // This intentionally reads pg-boss internals. Review the columns and expiry rules
+      // whenever its exact dependency version changes; never add an application FK.
+      if (pgBossPackage.version !== '12.38.0') {
+        throw new Error('invitation job lookup requires pg-boss 12.38.0')
+      }
+      const connection = transaction ? fromKysely(transaction) : boss.getDb()
+      const result = await connection.executeSql(
+        `SELECT 1 FROM pgboss.job
+         WHERE id = $1::uuid AND name = 'invitation-email-v1'
+           AND singleton_key = $2
+           AND data = $3::jsonb
+           AND (
+             (state IN ('created', 'retry') AND keep_until > clock_timestamp())
+             OR (state = 'active' AND started_on IS NOT NULL
+               AND started_on + expire_seconds * INTERVAL '1 second' > clock_timestamp())
+           )
+         LIMIT 1`,
+        [
+          identity.id,
+          `invitation-email:v1:${identity.invitationId}:${identity.generation}`,
+          JSON.stringify({ invitationId: identity.invitationId, generation: identity.generation }),
+        ],
+      )
+      return result.rows.length === 1
     },
 
     async enqueue(name, payload, enqueueOptions = {}) {
