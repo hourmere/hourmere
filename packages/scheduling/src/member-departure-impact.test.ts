@@ -42,6 +42,7 @@ const ResultSchema = z.strictObject({
         schedulingType: z.enum(['individual', 'round_robin', 'collective']),
         isActive: z.boolean(),
         reason: z.enum(['sole_host', 'round_robin_pool_member', 'collective_required_host']),
+        remainingHostCount: z.number().int().nonnegative(),
       }),
     ),
     nextCursor: z.string().nullable(),
@@ -333,6 +334,45 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     expect(restored.bookings.data.map((row) => row.id)).toEqual([original])
   }
 
+  async function verifyRemainingHosts(read: Read) {
+    const f = await setup()
+    const former = await createTestUser(db, 'Former team host')
+    const unverified = await createTestUser(db, 'Unverified team host')
+    await db
+      .insertInto('auth.member')
+      .values({
+        id: randomUUID(),
+        userId: unverified.id,
+        organizationId: f.team.id,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', unverified.id)
+      .execute()
+    const sole = await event(f, 'round_robin', { hosts: [f.member.id] })
+    const pool = await event(f, 'round_robin')
+    const formerPool = await event(f, 'round_robin', { hosts: [f.member.id, former.id] })
+    const unverifiedPool = await event(f, 'round_robin', {
+      hosts: [f.member.id, unverified.id],
+    })
+    const unrelated = await event(f, 'round_robin', { hosts: [f.host.id] })
+    const result = await read(f.adminCtx, input(f))
+    const byId = new Map(result.eventTypes.data.map((row) => [row.id, row]))
+    expect(byId.get(f.eventId)?.remainingHostCount).toBe(0)
+    expect(byId.get(sole)).toMatchObject({
+      reason: 'round_robin_pool_member',
+      remainingHostCount: 0,
+    })
+    expect(byId.get(pool)?.remainingHostCount).toBe(1)
+    expect(byId.get(formerPool)?.remainingHostCount).toBe(0)
+    expect(byId.get(unverifiedPool)?.remainingHostCount).toBe(0)
+    expect(byId.has(unrelated)).toBe(false)
+  }
+
   async function verifyWhitelist(read: Read) {
     const f = await setup()
     const id = await booking(f)
@@ -500,7 +540,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     )
     const eventPage = events.find(
       (node) =>
-        !JSON.stringify(node).includes('"func":"count"') &&
+        JSON.stringify(node).includes('"limit"') &&
         !JSON.stringify(node).includes('"alias":{"kind":"IdentifierNode","name":"b"}'),
     )
     expect(eventPage).toMatchObject({ limit: { limit: { value: 2 } } })
@@ -601,6 +641,8 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     verifyIsolation(getTeamMemberDepartureImpact))
   it('identifies each current host relationship and includes disabled, undeleted events', () =>
     verifyReasons(getTeamMemberDepartureImpact))
+  it('reports zero remaining hosts for single-host round-robin pools and ignores invalid hosts', () =>
+    verifyRemainingHosts(getTeamMemberDepartureImpact))
   it('includes unended bookings with the existing cancellation boundary at start', () =>
     verifyBoundary(getTeamMemberDepartureImpact))
   it('uses saved booking hosts independently from the event type current pool', () =>
@@ -937,6 +979,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     const read = sourceCopy()
     await verifyIsolation(read)
     await verifyReasons(read)
+    await verifyRemainingHosts(read)
     await verifySavedHosts(read)
     await verifyBoundary(read)
     await verifyWhitelist(read)
@@ -1006,6 +1049,39 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     verify: (read: Read) => Promise<void>
   }
   const mutations: Mutation[] = [
+    {
+      name: 'exclude the departing host from remaining hosts',
+      service: [".where('remaining_host.user_id', '!=', input.memberUserId)", ''],
+      verify: verifyRemainingHosts,
+    },
+    {
+      name: 'remaining host current team membership',
+      service: [
+        ".innerJoin('auth.member as remaining_member', (join) =>",
+        ".leftJoin('auth.member as remaining_member', (join) =>",
+      ],
+      verify: verifyRemainingHosts,
+    },
+    {
+      name: 'remaining host membership in the same team',
+      service: [".onRef('remaining_member.organizationId', '=', 'event.organization_id')", ''],
+      verify: verifyRemainingHosts,
+    },
+    {
+      name: 'remaining host verification',
+      service: [".where('remaining_user.emailVerified', '=', true)", ''],
+      verify: verifyRemainingHosts,
+    },
+    {
+      name: 'remaining host event association',
+      service: [".whereRef('remaining_host.event_type_id', '=', 'event.id')", ''],
+      verify: verifyRemainingHosts,
+    },
+    {
+      name: 'remaining host count projection',
+      service: ['remainingHostCount: Number(row.remaining_host_count)', 'remainingHostCount: 1'],
+      verify: verifyRemainingHosts,
+    },
     {
       name: 'one snapshot for authorization, lists and counts',
       service: [".setIsolationLevel('repeatable read')", ''],

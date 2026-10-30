@@ -5084,6 +5084,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/member-removals/{operationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Unfinished bookings requiring handling after a member's removal
+         * @description Requires a current verified owner/admin browser session in the requested team. The removal record remains readable after membership revocation. Returns the current confirmed bookings hosted by that removed member in this team and ending after evaluatedAt, including meetings in progress. Saved hosts and booking history are retained. In-progress bookings require waiting until the end or offline coordination; future cancellation retains existing authorization and time rules. Bookings are ordered by precise start time and id. Follow nextCursor as cursor with the same team and operation; limit defaults to 50 and is bounded to 100. Uses the team-administration field whitelist.
+         */
+        get: {
+            parameters: {
+                query: {
+                    cursor?: string;
+                    limit?: number;
+                    teamId: string;
+                };
+                header?: never;
+                path: {
+                    operationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current removal handling list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemberRemovalHandling"];
+                    };
+                };
+                /** @description Invalid parameters (invalid_request, invalid_cursor or invalid_limit) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: inaccessible team or removal record */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/members/{memberUserId}/departure-impact": {
         parameters: {
             query?: never;
@@ -5093,7 +5165,7 @@ export interface paths {
         };
         /**
          * Event types and unfinished bookings affected by a member's departure
-         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id; bookings by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.
+         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id and include remainingHostCount, the number of other current verified team hosts; zero identifies a round-robin pool left without a host. Bookings are ordered by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.
          */
         get: {
             parameters: {
@@ -5132,6 +5204,165 @@ export interface paths {
                 };
                 /** @description team_management_access_denied: requires a current team session without Authorization and an accessible member */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/members/{memberUserId}/removal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a team membership immediately
+         * @description Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing or stale context returns 409 organization_context_changed. Owners may remove admins and members; admins may remove members. Owner targets are refused. In one transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    /** @description Required: the organization where this removal action started */
+                    "x-expected-organization-id": string;
+                };
+                path: {
+                    memberUserId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        teamId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Membership revoked and removal recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemberRemoval"];
+                    };
+                };
+                /** @description Invalid parameters (invalid_request) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization and an accessible allowed member target; forbidden: cookie writes require same-origin Origin or Referer */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/members/{memberUserId}/removal-handling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Handling list for a member's latest recorded removal
+         * @description Requires a current verified owner/admin browser session in the requested team. Discovers the latest removal record for the known removed user, including removal through the native Better Auth endpoint. Uses the same current unfinished-booking whitelist, handling reasons and bounded pagination as the removal-record route. Keep the team and member unchanged while following cursors; use the returned id with the removal-record route to pin a particular record.
+         */
+        get: {
+            parameters: {
+                query: {
+                    cursor?: string;
+                    limit?: number;
+                    teamId: string;
+                };
+                header?: never;
+                path: {
+                    memberUserId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Latest removal handling list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemberRemovalHandling"];
+                    };
+                };
+                /** @description Invalid parameters (invalid_request, invalid_cursor or invalid_limit) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: inaccessible team or removal record */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6010,6 +6241,7 @@ export interface components {
                     isActive: boolean;
                     /** @enum {string} */
                     reason: "sole_host" | "round_robin_pool_member" | "collective_required_host";
+                    remainingHostCount: number;
                     /** @enum {string} */
                     schedulingType: "individual" | "round_robin" | "collective";
                     slug: string;
@@ -6018,6 +6250,60 @@ export interface components {
                 nextCursor: string | null;
                 totalCount: number;
             };
+        };
+        MemberRemoval: {
+            deactivatedEventTypeIds: string[];
+            /** Format: uuid */
+            memberUserId: string;
+            /** Format: uuid */
+            operationId: string;
+        };
+        MemberRemovalHandling: {
+            bookings: {
+                data: {
+                    attendees: {
+                        email: string;
+                        isBooker: boolean;
+                        name: string;
+                        timeZone: string;
+                    }[];
+                    /** Format: date-time */
+                    cancelledAt: string | null;
+                    /** Format: date-time */
+                    end: string;
+                    eventType: {
+                        /** Format: uuid */
+                        id: string;
+                        title: string | null;
+                    } | null;
+                    /** @enum {string} */
+                    handling: "coordinate_cancellation" | "wait_until_end_or_coordinate_offline";
+                    hosts: {
+                        name: string;
+                        /** Format: uuid */
+                        userId: string;
+                    }[];
+                    /** Format: uuid */
+                    id: string;
+                    inProgress: boolean;
+                    /** Format: date-time */
+                    start: string;
+                    /** @enum {string} */
+                    status: "confirmed" | "cancelled";
+                }[];
+                nextCursor: string | null;
+                totalCount: number;
+            };
+            /** Format: date-time */
+            evaluatedAt: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            memberUserId: string;
+            /** @enum {string} */
+            reason: "member_removed";
+            /** Format: date-time */
+            removedAt: string;
         };
         Profile: {
             /** Format: date-time */

@@ -449,7 +449,7 @@ describe('calendar recovery actions', () => {
   )
 
   it.each([null, '2020-01-01T12:00:00Z'])(
-    'uses only the returned first-sync or success fact when lastSyncedAt is %s',
+    'uses only the returned not-ready or success fact when lastSyncedAt is %s',
     async (lastSyncedAt) => {
       fakeApi({
         ...signedIn,
@@ -462,7 +462,7 @@ describe('calendar recovery actions', () => {
         within(card).getByText(
           lastSyncedAt
             ? 'Latest synchronization of selected conflict calendars succeeded.'
-            : 'Waiting for the first synchronization on selected calendars.',
+            : 'Synchronization is not ready for selected calendars yet.',
         ),
       ).toBeDefined()
       expect(within(card).getByRole('button', { name: 'Sync now' }).matches(':disabled')).toBe(
