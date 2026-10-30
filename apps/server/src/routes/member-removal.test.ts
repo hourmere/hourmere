@@ -705,8 +705,10 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     const before = await snapshot(f)
     for (const expected of [null, randomUUID(), 'invalid']) {
       const response = await remove(f, { expected })
-      expect(response.status).toBe(409)
-      expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+      expect(response.status).toBe(expected === null ? 409 : 403)
+      expect(await response.json()).toMatchObject({
+        error: expected === null ? 'organization_context_changed' : 'team_management_access_denied',
+      })
     }
     expect((await remove(f, { body: { teamId: f.team.id, unexpected: 'field' } })).status).toBe(400)
     expect((await remove(f, { origin: 'https://other.example' })).status).toBe(403)
@@ -1239,12 +1241,12 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
   it('keeps switched team context bound in an unmodified source copy', () =>
     verifySwitchedContext(sourceCopy()))
 
-  it('detects dropping the stale body context check with a real assertion', async () => {
+  it('detects silently replacing the draft team with the current team', async () => {
     await expect(
       verifySwitchedContext(
         sourceCopy([
-          'if (teamId.toLowerCase() !== c.var.principal.organization.id.toLowerCase())\n          throw contextChanged()',
-          '',
+          "const { teamId } = c.req.valid('json')",
+          'const teamId = c.var.principal.organization.id',
         ]),
       ),
     ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))

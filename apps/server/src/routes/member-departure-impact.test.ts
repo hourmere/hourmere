@@ -394,7 +394,12 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     expect(response.status).toBe(200)
     const document = await openApiDocument(app)
     expect(document.paths[path]?.get?.security).toEqual([{ session: [] }])
-    expect(Object.keys(document.paths[path]?.get?.responses ?? {})).toEqual(['200', '400', '403'])
+    expect(Object.keys(document.paths[path]?.get?.responses ?? {})).toEqual([
+      '200',
+      '400',
+      '403',
+      '409',
+    ])
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
     expect(document.components?.schemas?.MemberDepartureImpact).toMatchObject({
       properties: {

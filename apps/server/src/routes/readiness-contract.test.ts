@@ -187,7 +187,7 @@ describe('readiness published contract', () => {
       const operation = doc.paths[path]?.get
       expect(operation?.security).toEqual([{ session: [] }])
       const errorStatuses =
-        path === selfPath ? ['400', '401', '403', '429', '500'] : ['400', '403', '500']
+        path === selfPath ? ['400', '401', '403', '429', '500'] : ['400', '403', '409', '500']
       expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(['200', ...errorStatuses])
       for (const status of errorStatuses) {
         const schema = operation?.responses[status]?.content?.['application/json']?.schema

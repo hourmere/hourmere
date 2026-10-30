@@ -1,6 +1,4 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { teamRoles } from '@hourmere/auth'
-import { DomainError } from '@hourmere/scheduling'
 import { ErrorBody, json, type RouteModule, type ServiceDeps } from '../openapi.ts'
 import {
   type InvitationSummaryMailLimits,
@@ -49,7 +47,7 @@ export function teamInvitationRoutes(
         path: '/api/v1/team/invitations',
         summary: "Invitation delivery summaries of the session's current team",
         description:
-          'Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching between teams the reader still manages returns 409 organization_context_changed with reload guidance. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. No email, links, tokens, credentials, job or lease identities or raw provider errors are returned.',
+          'Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching to any other organization, including personal space or a member-role team, returns 409 organization_context_changed with reload guidance when the reader still owns or administers the expected team. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. The invited email address is returned only to verified owners/admins of the current team; members, other teams and API-key/OAuth callers cannot read it. No links, tokens, mail bodies, credentials, job or lease identities or raw provider errors are returned.',
         tags: ['Team invitations'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -57,7 +55,7 @@ export function teamInvitationRoutes(
           headers: z.object({
             'x-expected-organization-id': z.string().optional().openapi({
               description:
-                'Optional team where the page opened; a switch between teams still managed by the reader returns 409 reload guidance, while invalid or inaccessible targets receive 403 access denial',
+                'Optional team where the page opened; a switch to any other organization returns 409 reload guidance while the reader still owns or administers the expected team, otherwise uniform 403 access denial',
             }),
           }),
           query: z.object({
@@ -86,38 +84,13 @@ export function teamInvitationRoutes(
           },
           409: {
             description:
-              'organization_context_changed: the reader switched between teams they still manage; reload the page before trying again',
+              'organization_context_changed: the reader still owns or administers the expected team but the session switched to another organization; reload the page before trying again',
             content: json(ErrorBody),
           },
         },
       }),
       async (c) => {
         const expectedOrganizationId = c.req.valid('header')['x-expected-organization-id']
-        if (
-          expectedOrganizationId !== undefined &&
-          z.uuid().safeParse(expectedOrganizationId).success &&
-          expectedOrganizationId.toLowerCase() !== c.var.principal.organization.id.toLowerCase()
-        )
-          await access.read(c.var.principal, c.var.principal.organization.id, async (db, actor) => {
-            const membership = await db
-              .selectFrom('auth.member')
-              .leftJoin(
-                'personal_organizations',
-                'personal_organizations.organization_id',
-                'auth.member.organizationId',
-              )
-              .select('auth.member.role')
-              .where('auth.member.organizationId', '=', expectedOrganizationId)
-              .where('auth.member.userId', '=', actor.userId)
-              .where('personal_organizations.organization_id', 'is', null)
-              .executeTakeFirst()
-            if (teamRoles(membership?.role).some((role) => role === 'owner' || role === 'admin'))
-              throw new DomainError(
-                'conflict',
-                'organization_context_changed',
-                'Your team context changed. Reload the page before trying again.',
-              )
-          })
         const page = await access.read(
           c.var.principal,
           expectedOrganizationId ?? c.var.principal.organization.id,

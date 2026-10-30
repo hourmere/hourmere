@@ -29,6 +29,7 @@ import {
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -59,7 +60,10 @@ type Departure = typeof leaveTeamMember
 type Replacement = readonly [string, string]
 
 /** Compile a disposable in-memory copy, never changing the checked-in protection. */
-function serviceCopy(replacements: Replacement[] = []): Departure {
+function serviceCopy(
+  replacements: Replacement[] = [],
+  management = { checkTeamManagementAccess, TeamManagementError },
+): Departure {
   let source = readFileSync('packages/scheduling/src/member-leave.ts', 'utf8')
   for (const replacement of replacements) {
     expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
@@ -70,14 +74,13 @@ function serviceCopy(replacements: Replacement[] = []): Departure {
     '',
   )
   const bindings = {
-    checkTeamManagementAccess,
     ensurePersonalOrganization,
     MemberDepartureBlockedError,
     MemberDepartureOwnerRequiredError,
-    TeamManagementError,
     teamRoles,
     DomainError,
     getTeamMemberDepartureImpact,
+    ...management,
   }
   return new Function(...Object.keys(bindings), `${source}; return leaveTeamMember`)(
     ...Object.values(bindings),
@@ -101,6 +104,7 @@ function routeCopy(depart: Departure = leaveTeamMember, replacement?: Replacemen
     MemberDepartureOwnerRequiredError,
     leaveTeamMember: depart,
     MemberDepartureImpactSchema,
+    DomainError,
     ErrorBody,
     errorResponses,
     json,
@@ -498,8 +502,8 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     const production = application(auth, true)
     expect((await leave(f, production)).status).toBe(200)
     const repeated = await leave(f, production)
-    expect(repeated.status).toBe(409)
-    expect(await repeated.json()).toMatchObject({ error: 'organization_context_changed' })
+    expect(repeated.status).toBe(403)
+    expect(await repeated.json()).toMatchObject({ error: 'team_management_access_denied' })
     const response = await production.request('/api/v1/event-types', {
       method: 'POST',
       headers: headers(f),
@@ -521,8 +525,10 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     async (expected) => {
       const f = await fixture()
       const response = await leave(f, app, expected === null ? null : randomUUID())
-      expect(response.status).toBe(409)
-      expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+      expect(response.status).toBe(expected === null ? 409 : 403)
+      expect(await response.json()).toMatchObject({
+        error: expected === null ? 'organization_context_changed' : 'team_management_access_denied',
+      })
       await unchanged(f)
     },
   )
@@ -1345,8 +1351,8 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
     } else if (scenario === 'stale') {
       expect((await leave(f)).status).toBe(200)
       const response = await leave(f, target)
-      expect(response.status).toBe(409)
-      expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: 'team_management_access_denied' })
       await departed(f)
     } else {
       const response = await leave(f, target)
@@ -1373,14 +1379,6 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       ],
     ],
     [
-      'departed organization context',
-      'stale',
-      [
-        'input.expectedOrganizationId.toLowerCase() !== principal.organization.id.toLowerCase()',
-        'false',
-      ],
-    ],
-    [
       'personal fallback',
       'departure',
       [
@@ -1399,6 +1397,27 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
   ])('detects disabling %s with a real HTTP assertion', async (_, scenario, replacement) => {
     await expect(verifyService(serviceCopy([replacement]), scenario)).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it('detects exposing departed expected-team context before verifying membership', async () => {
+    let source = readFileSync('packages/auth/src/team-management.ts', 'utf8')
+    const guard = 'if (!role) throw denied()'
+    expect(source.includes(guard), 'mutation must match shared management source').toBe(true)
+    source = source.replace(guard, 'if (!role && !expectedTeamId) throw denied()')
+    source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+      /\bexport /g,
+      '',
+    )
+    const management = new Function(
+      'sql',
+      `${source}; return { checkTeamManagementAccess, TeamManagementError }`,
+    )(sql) as {
+      checkTeamManagementAccess: typeof checkTeamManagementAccess
+      TeamManagementError: typeof TeamManagementError
+    }
+    await expect(verifyService(serviceCopy([], management), 'stale')).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError', actual: 409, expected: 403 }),
     )
   })
 

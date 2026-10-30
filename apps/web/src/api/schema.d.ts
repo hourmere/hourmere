@@ -4928,7 +4928,7 @@ export interface paths {
         };
         /**
          * Bookings of the session's current team
-         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.
+         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.
          */
         get: {
             parameters: {
@@ -4948,7 +4948,10 @@ export interface paths {
                     /** @description Only bookings starting before */
                     to?: string;
                 };
-                header?: never;
+                header?: {
+                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    "x-expected-organization-id"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -4981,6 +4984,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -5002,7 +5014,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel a booking of the session's current team
-         * @description Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.
+         * @description Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.
          */
         post: {
             parameters: {
@@ -5093,7 +5105,7 @@ export interface paths {
         };
         /**
          * Invitation delivery summaries of the session's current team
-         * @description Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching between teams the reader still manages returns 409 organization_context_changed with reload guidance. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. No email, links, tokens, credentials, job or lease identities or raw provider errors are returned.
+         * @description Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching to any other organization, including personal space or a member-role team, returns 409 organization_context_changed with reload guidance when the reader still owns or administers the expected team. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. The invited email address is returned only to verified owners/admins of the current team; members, other teams and API-key/OAuth callers cannot read it. No links, tokens, mail bodies, credentials, job or lease identities or raw provider errors are returned.
          */
         get: {
             parameters: {
@@ -5104,7 +5116,7 @@ export interface paths {
                     status?: "pending" | "accepted" | "canceled" | "rejected" | "expired" | "unknown";
                 };
                 header?: {
-                    /** @description Optional team where the page opened; a switch between teams still managed by the reader returns 409 reload guidance, while invalid or inaccessible targets receive 403 access denial */
+                    /** @description Optional team where the page opened; a switch to any other organization returns 409 reload guidance while the reader still owns or administers the expected team, otherwise uniform 403 access denial */
                     "x-expected-organization-id"?: string;
                 };
                 path?: never;
@@ -5139,7 +5151,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description organization_context_changed: the reader switched between teams they still manage; reload the page before trying again */
+                /** @description organization_context_changed: the reader still owns or administers the expected team but the session switched to another organization; reload the page before trying again */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -5167,7 +5179,7 @@ export interface paths {
         };
         /**
          * Unfinished bookings requiring handling after a member's removal
-         * @description Requires a current verified owner/admin browser session in the requested team. The removal record remains readable after membership revocation. Returns the current confirmed bookings hosted by that removed member in this team and ending after evaluatedAt, including meetings in progress. Saved hosts and booking history are retained. In-progress bookings require waiting until the end or offline coordination; future cancellation retains existing authorization and time rules. Bookings are ordered by precise start time and id. Follow nextCursor as cursor with the same team and operation; limit defaults to 50 and is bounded to 100. Uses the team-administration field whitelist.
+         * @description Requires a current verified owner/admin browser session in the requested team. The removal record remains readable after membership revocation. Returns the current confirmed bookings hosted by that removed member in this team and ending after evaluatedAt, including meetings in progress. Saved hosts and booking history are retained. In-progress bookings require waiting until the end or offline coordination; future cancellation retains existing authorization and time rules. Bookings are ordered by precise start time and id. Follow nextCursor as cursor with the same team and operation; limit defaults to 50 and is bounded to 100. Uses the team-administration field whitelist. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.
          */
         get: {
             parameters: {
@@ -5176,7 +5188,10 @@ export interface paths {
                     limit?: number;
                     teamId: string;
                 };
-                header?: never;
+                header?: {
+                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     operationId: string;
                 };
@@ -5204,6 +5219,15 @@ export interface paths {
                 };
                 /** @description team_management_access_denied: inaccessible team or removal record */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5239,7 +5263,7 @@ export interface paths {
         };
         /**
          * Event types and unfinished bookings affected by a member's departure
-         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id and include remainingHostCount, the number of other current verified team hosts; zero identifies a round-robin pool left without a host. Bookings are ordered by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.
+         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id and include remainingHostCount, the number of other current verified team hosts; zero identifies a round-robin pool left without a host. Bookings are ordered by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.
          */
         get: {
             parameters: {
@@ -5250,7 +5274,10 @@ export interface paths {
                     eventTypesLimit?: number;
                     teamId: string;
                 };
-                header?: never;
+                header?: {
+                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     memberUserId: string;
                 };
@@ -5285,6 +5312,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -5306,7 +5342,7 @@ export interface paths {
         put?: never;
         /**
          * Revoke a team membership immediately
-         * @description Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing or stale context returns 409 organization_context_changed. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.
+         * @description Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing context returns 409 organization_context_changed. A caller who still owns or administers the expected team receives the same 409 after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.
          */
         post: {
             parameters: {
@@ -5398,7 +5434,7 @@ export interface paths {
         };
         /**
          * Handling list for a member's latest recorded removal
-         * @description Requires a current verified owner/admin browser session in the requested team. Discovers the latest removal record for the known removed user, including removal through the native Better Auth endpoint. Uses the same current unfinished-booking whitelist, handling reasons and bounded pagination as the removal-record route. Keep the team and member unchanged while following cursors; use the returned id with the removal-record route to pin a particular record.
+         * @description Requires a current verified owner/admin browser session in the requested team. Discovers the latest removal record for the known removed user, including removal through the native Better Auth endpoint. Uses the same current unfinished-booking whitelist, handling reasons and bounded pagination as the removal-record route. Keep the team and member unchanged while following cursors; use the returned id with the removal-record route to pin a particular record. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.
          */
         get: {
             parameters: {
@@ -5407,7 +5443,10 @@ export interface paths {
                     limit?: number;
                     teamId: string;
                 };
-                header?: never;
+                header?: {
+                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     memberUserId: string;
                 };
@@ -5435,6 +5474,15 @@ export interface paths {
                 };
                 /** @description team_management_access_denied: inaccessible team or removal record */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5472,7 +5520,7 @@ export interface paths {
         put?: never;
         /**
          * Leave a team after resolving event types and unfinished bookings
-         * @description Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied before credentials are resolved, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. Rechecks owner continuity and departure impact inside the locked membership transaction. A sole owner must arrange another owner before leaving. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.
+         * @description Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied before credentials are resolved, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Missing context retains the 409 reload response. Rechecks owner continuity and departure impact inside the locked membership transaction. A sole owner must arrange another owner before leaving. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.
          */
         post: {
             parameters: {
@@ -5561,7 +5609,7 @@ export interface paths {
         };
         /**
          * Read a minimal booking readiness summary for the acting team
-         * @description Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.
+         * @description Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.
          */
         get: {
             parameters: {
@@ -5570,7 +5618,10 @@ export interface paths {
                     limit?: number;
                     memberCursor?: string;
                 };
-                header?: never;
+                header?: {
+                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     teamId: string;
                 };
@@ -5598,6 +5649,15 @@ export interface paths {
                 };
                 /** @description team_management_access_denied: requires the current team owner/admin web session without Authorization */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6774,6 +6834,7 @@ export interface components {
                 /** @enum {string} */
                 state: "queued" | "sending" | "smtp_accepted" | "failed" | "skipped" | "unknown";
             };
+            email: string;
             /** Format: date-time */
             expiresAt: string;
             /** Format: uuid */

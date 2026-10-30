@@ -3,6 +3,7 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import { ensurePersonalOrganization, isMember, isUuid } from './organizations.ts'
+import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
 
 const covered = new Set([
   '/organization/invite-member',
@@ -91,7 +92,14 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
   const session = await getSessionFromCtx(ctx)
   // Leave unauthenticated requests to the endpoint's existing authentication response.
   if (!session) return
-  if (!expected || !isUuid(expected)) throw changed()
+  if (expected === null) throw changed()
+  if (!isUuid(expected)) {
+    if (boundSwitch) throw changed()
+    throw new APIError('FORBIDDEN', {
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      message: 'team_management_access_denied',
+    })
+  }
   const expectedId = expected.toLowerCase()
   // Read the live session, rather than trusting the organization cached while resolving
   // authentication. Removed members have the same personal fallback as REST callers.
@@ -107,7 +115,33 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
     live.activeOrganizationId && (await isMember(db, session.user.id, live.activeOrganizationId))
       ? live.activeOrganizationId
       : await ensurePersonalOrganization(db, session.user.id)
-  if (expectedId !== active.toLowerCase()) throw changed()
+  if (expectedId !== active.toLowerCase()) {
+    if (!boundSwitch) {
+      try {
+        await checkTeamManagementAccess(
+          db,
+          {
+            kind: 'session',
+            sessionId: session.session.id,
+            user: session.user,
+            organization: { id: active, name: '', slug: '', personal: false },
+          },
+          expectedId,
+          false,
+          { expectedOrganizationId: expectedId, allowPersonal: false },
+        )
+      } catch (error) {
+        if (!(error instanceof TeamManagementError)) throw error
+        if (error.code !== 'organization_context_changed') {
+          throw new APIError('FORBIDDEN', {
+            code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+            message: 'team_management_access_denied',
+          })
+        }
+      }
+    }
+    throw changed()
+  }
   if (boundSwitch) return
 
   const body = ctx.body as Record<string, unknown> | undefined

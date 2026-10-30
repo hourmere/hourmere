@@ -668,6 +668,12 @@ safe outcome/error code, SMTP acceptance time, creation/update times and nullabl
 accepted the invitation. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
 and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
 
+The session-only administrator summary includes the invited email address for verified
+owners/admins of that team, so they can identify their own team's invitations. Members,
+other teams and API-key/OAuth callers cannot read it. The summary exposes no invitation
+links or tokens, mail bodies, credentials or raw provider errors. Delivery storage,
+diagnostics and job payloads keep their separate recipient-privacy rules.
+
 Migration 0044 makes `last_attempt_at` exclusively owned by the
 `invitation_delivery_attempt_time` database trigger. The future invitation sender must
 not write this column; it records an attempt by incrementing `attempts`. The trigger

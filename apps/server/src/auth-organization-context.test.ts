@@ -261,12 +261,16 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
         .execute(),
     }
   }
-  async function refused(response: Response) {
-    expect(response.status).toBe(409)
-    expect(await response.json()).toEqual({
-      code: 'ORGANIZATION_CONTEXT_CHANGED',
-      message: 'Your team context changed. Reload this page before trying again.',
-    })
+  async function refused(response: Response, status = 409) {
+    expect(response.status).toBe(status)
+    expect(await response.json()).toEqual(
+      status === 409
+        ? {
+            code: 'ORGANIZATION_CONTEXT_CHANGED',
+            message: 'Your team context changed. Reload this page before trying again.',
+          }
+        : { code: 'TEAM_MANAGEMENT_ACCESS_DENIED', message: 'team_management_access_denied' },
+    )
   }
 
   it.each(operations)(
@@ -297,6 +301,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
           { organizationId: f.first.id, data: { name: 'Forged' } },
           expected,
         ),
+        expected === f.second.id ? 409 : 403,
       )
     }
     await refused(
@@ -383,6 +388,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
         { organizationId: f.first.id, data: { name: 'Removed' } },
         f.first.id,
       ),
+      403,
     )
     // Forging the fallback cannot authorize a write to the removed team's target.
     await refused(

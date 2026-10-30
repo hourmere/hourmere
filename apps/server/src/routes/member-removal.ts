@@ -77,7 +77,7 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/members/{memberUserId}/removal',
         summary: 'Revoke a team membership immediately',
         description:
-          'Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing or stale context returns 409 organization_context_changed. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.',
+          'Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing context returns 409 organization_context_changed. A caller who still owns or administers the expected team receives the same 409 after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.',
         tags: ['Team members'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -153,12 +153,18 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/member-removals/{operationId}',
         summary: "Unfinished bookings requiring handling after a member's removal",
         description:
-          'Requires a current verified owner/admin browser session in the requested team. The removal record remains readable after membership revocation. Returns the current confirmed bookings hosted by that removed member in this team and ending after evaluatedAt, including meetings in progress. Saved hosts and booking history are retained. In-progress bookings require waiting until the end or offline coordination; future cancellation retains existing authorization and time rules. Bookings are ordered by precise start time and id. Follow nextCursor as cursor with the same team and operation; limit defaults to 50 and is bounded to 100. Uses the team-administration field whitelist.',
+          'Requires a current verified owner/admin browser session in the requested team. The removal record remains readable after membership revocation. Returns the current confirmed bookings hosted by that removed member in this team and ending after evaluatedAt, including meetings in progress. Saved hosts and booking history are retained. In-progress bookings require waiting until the end or offline coordination; future cancellation retains existing authorization and time rules. Bookings are ordered by precise start time and id. Follow nextCursor as cursor with the same team and operation; limit defaults to 50 and is bounded to 100. Uses the team-administration field whitelist. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.',
         tags: ['Team members'],
         security: [{ session: [] }],
         middleware: access.middleware,
         request: {
           params: z.strictObject({ operationId: z.uuid() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
+            }),
+          }),
           query: HandlingQuery,
         },
         responses: {
@@ -167,6 +173,11 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
             400: 'Invalid parameters (invalid_request, invalid_cursor or invalid_limit)',
             403: 'team_management_access_denied: inaccessible team or removal record',
           }),
+          409: {
+            description:
+              'organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying',
+            content: json(ErrorBody),
+          },
         },
       }),
       async (c) => {
@@ -183,12 +194,18 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/members/{memberUserId}/removal-handling',
         summary: "Handling list for a member's latest recorded removal",
         description:
-          'Requires a current verified owner/admin browser session in the requested team. Discovers the latest removal record for the known removed user, including removal through the native Better Auth endpoint. Uses the same current unfinished-booking whitelist, handling reasons and bounded pagination as the removal-record route. Keep the team and member unchanged while following cursors; use the returned id with the removal-record route to pin a particular record.',
+          'Requires a current verified owner/admin browser session in the requested team. Discovers the latest removal record for the known removed user, including removal through the native Better Auth endpoint. Uses the same current unfinished-booking whitelist, handling reasons and bounded pagination as the removal-record route. Keep the team and member unchanged while following cursors; use the returned id with the removal-record route to pin a particular record. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.',
         tags: ['Team members'],
         security: [{ session: [] }],
         middleware: access.middleware,
         request: {
           params: z.strictObject({ memberUserId: z.uuid() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
+            }),
+          }),
           query: HandlingQuery,
         },
         responses: {
@@ -197,6 +214,11 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
             400: 'Invalid parameters (invalid_request, invalid_cursor or invalid_limit)',
             403: 'team_management_access_denied: inaccessible team or removal record',
           }),
+          409: {
+            description:
+              'organization_context_changed: the caller still owns or administers the expected team but the current space changed; reload before retrying',
+            content: json(ErrorBody),
+          },
         },
       }),
       async (c) => {

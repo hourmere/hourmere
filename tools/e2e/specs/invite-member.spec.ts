@@ -78,7 +78,11 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     await expect(
       pending.getByText(chinese ? '等待发送' : 'Waiting to send', { exact: true }),
     ).toBeVisible()
-    await expect(pending.getByRole('heading', { level: 3 })).toContainText(invitation.id)
+    await expect(pending.getByRole('heading', { level: 3 })).toHaveText(
+      chinese
+        ? '发给 invited-member@hourmere.invalid 的邀请'
+        : 'Invitation to invited-member@hourmere.invalid',
+    )
     await fits(page)
   })
 }

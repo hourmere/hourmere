@@ -6,6 +6,7 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  ensurePersonalOrganization,
   maySignUp,
   type SignupPolicy,
 } from '@hourmere/auth'
@@ -54,6 +55,7 @@ interface Invitation {
   email: string
   role: string
   expiresAt: string
+  existing: boolean
   delivery: { generation: number; state: string; attempts: number }
 }
 
@@ -255,14 +257,19 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     }
   }
 
-  function invite(i: Instance, a: Actor, body: Record<string, unknown> = {}) {
+  function invite(
+    i: Instance,
+    a: Actor,
+    body: Record<string, unknown> = {},
+    expected: string | null = a.organizationId,
+  ) {
     return i.app.request('/api/auth/organization/invite-member', {
       method: 'POST',
       headers: {
         origin,
         cookie: a.cookie,
         'content-type': 'application/json',
-        'x-expected-organization-id': a.organizationId,
+        ...(expected === null ? {} : { 'x-expected-organization-id': expected }),
       },
       body: JSON.stringify({
         email: `${randomUUID()}@outside.example`,
@@ -355,6 +362,143 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
 
   it.each(['owner', 'admin'])('allows %s to create only member invitations', async (role) => {
     await verifyInvitationRoles(createAuth, role)
+  })
+
+  async function invitationContext(current: 'personal' | 'member' | 'unset') {
+    const a = await actor('admin')
+    const currentId =
+      current === 'member' ? (await team()).id : await ensurePersonalOrganization(db, a.userId)
+    if (current === 'member') {
+      await db
+        .insertInto('auth.member')
+        .values({
+          userId: a.userId,
+          organizationId: currentId,
+          role: 'member',
+          createdAt: new Date(),
+        })
+        .execute()
+    }
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: current === 'unset' ? null : currentId })
+      .where('id', '=', a.sessionId)
+      .execute()
+    return { a, currentId }
+  }
+
+  async function verifyInvitationContext(
+    factory = createAuth,
+    current: 'personal' | 'member' | 'unset' = 'personal',
+  ) {
+    const i = instance(factory)
+    const { a, currentId } = await invitationContext(current)
+    const before = await snapshot()
+    for (const organizationId of [a.organizationId, currentId, undefined]) {
+      await error(await invite(i, a, { organizationId }), 409, 'ORGANIZATION_CONTEXT_CHANGED')
+    }
+    expect(await snapshot()).toEqual(before)
+  }
+
+  it.each(['personal', 'member', 'unset'] as const)(
+    'returns a context conflict before the current %s space role when the expected team is managed',
+    async (current) => {
+      await verifyInvitationContext(createAuth, current)
+    },
+  )
+
+  it.each(['personal', 'member', 'unset'] as const)(
+    'keeps the uniform denial after expected-team administration is revoked in the current %s space',
+    async (current) => {
+      const i = instance()
+      const { a, currentId } = await invitationContext(current)
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', a.organizationId)
+        .where('userId', '=', a.userId)
+        .execute()
+      const before = await snapshot()
+      for (const organizationId of [a.organizationId, currentId, undefined]) {
+        await error(await invite(i, a, { organizationId }), 403, denied.code)
+      }
+      await error(await invite(i, a, {}, randomUUID()), 403, denied.code)
+      expect(await snapshot()).toEqual(before)
+    },
+  )
+
+  it('keeps missing invitation-context headers subject to the existing target authorization', async () => {
+    const i = instance()
+    const a = await actor('admin')
+    await error(await invite(i, a, {}, null), 409, 'ORGANIZATION_CONTEXT_CHANGED')
+    const member = await actor('member', a.organizationId)
+    await error(await invite(i, member, {}, null), 403, denied.code)
+    const { a: switched } = await invitationContext('personal')
+    await error(await invite(i, switched, {}, null), 409, 'ORGANIZATION_CONTEXT_CHANGED')
+    await error(await invite(i, switched, { organizationId: undefined }, null), 403, denied.code)
+  })
+
+  async function verifyInvalidInvitationContext(factory = createAuth) {
+    const i = instance(factory)
+    const admin = await actor('admin')
+    const member = await actor('member', admin.organizationId)
+    const before = await snapshot()
+    for (const a of [admin, member]) {
+      for (const expected of ['', 'invalid', 'malformed@outside.example']) {
+        await error(await invite(i, a, {}, expected), 403, denied.code)
+      }
+    }
+    expect(await snapshot()).toEqual(before)
+  }
+
+  it('keeps malformed supplied invitation context uniformly denied for administrators and members', async () => {
+    await verifyInvalidInvitationContext()
+  })
+
+  async function verifyExistingInvitation(factory = createAuth) {
+    const i = instance(factory)
+    const a = await actor()
+    const invitation = await created(i, a)
+    expect(invitation.existing, 'a new invitation is not marked as already pending').toBe(false)
+    const before = await snapshot()
+    const repeated = await invite(i, a, { email: ` ${invitation.email.toUpperCase()} ` })
+    expect(repeated.status).toBe(200)
+    expect(
+      await repeated.json(),
+      'an ordinary queued retry identifies its retained pending invitation',
+    ).toEqual({ ...invitation, existing: true })
+    expect(await snapshot()).toEqual(before)
+
+    await ageGeneration(invitation)
+    const requestId = randomUUID()
+    const resent = await resend(i, a, invitation, { requestId })
+    expect(resent.status).toBe(200)
+    const current = (await resent.json()) as Invitation
+    expect(current).toMatchObject({
+      id: invitation.id,
+      existing: true,
+      delivery: { generation: 2, state: 'queued' },
+    })
+    const replayed = await resend(i, a, invitation, { requestId })
+    expect(replayed.status).toBe(200)
+    expect(await replayed.json()).toEqual(current)
+  }
+
+  it('identifies retained pending invitations even when their delivery is queued', async () => {
+    await verifyExistingInvitation()
+  })
+
+  it('identifies an existing legacy invitation when creating its first delivery metadata', async () => {
+    const i = instance()
+    const a = await actor()
+    const invitation = await created(i, a)
+    await db
+      .deleteFrom('invitation_deliveries')
+      .where('invitation_id', '=', invitation.id)
+      .execute()
+    const repeated = await invite(i, a, { email: invitation.email })
+    expect(repeated.status).toBe(200)
+    expect(await repeated.json()).toMatchObject({ id: invitation.id, existing: true })
   })
 
   async function verifyAlreadyMember(factory = createAuth) {
@@ -916,6 +1060,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     }
     const invitation: Invitation = {
       id: row.id,
+      existing: true,
       email: row.email,
       role: 'member',
       expiresAt: row.expiresAt.toISOString(),
@@ -1359,6 +1504,24 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     },
   )
   it.each<[string, string, string, (factory: typeof createAuth) => Promise<void>, string?]>([
+    [
+      'malformed invitation expected-team denial',
+      '!isUuid(options.expectedOrganizationId)',
+      'false',
+      verifyInvalidInvitationContext,
+    ],
+    [
+      'invitation expected-team authorization before the current team role',
+      'options.requireContext && options.expectedOrganizationId',
+      'false',
+      verifyInvitationContext,
+    ],
+    [
+      'existing pending invitation marker',
+      'const existing = Boolean(invitation)',
+      'const existing = false',
+      verifyExistingInvitation,
+    ],
     [
       'verified actor check',
       'if (!user?.emailVerified) throw denied()',

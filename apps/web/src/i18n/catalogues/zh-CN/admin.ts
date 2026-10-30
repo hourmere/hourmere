@@ -24,7 +24,7 @@ export const admin = {
   'Invitation requests are temporarily limited. Try again later.':
     '邀请请求暂时受到限制。请稍后再试。',
   'Try again in {0} seconds.': '请在{0}秒后重试。',
-  'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.':
+  'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.':
     '在限制注册的实例上，仅当邀请者为实例首位用户，或其当前邮箱域名在允许名单中时，邀请才允许注册。受邀者须验证该确切邮箱地址，并另行接受邀请才能加入团队。',
   'Join team': '加入团队',
   'Go to team': '前往团队',
@@ -49,7 +49,11 @@ export const admin = {
   'Could not load pending invitations.': '无法加载待接受的邀请。',
   'You do not have permission to view pending invitations.': '你没有查看待接受邀请的权限。',
   'No pending invitations on this page.': '本页没有待接受的邀请。',
-  'Invitation {0}': '邀请{0}',
+  'Invitation to {email}': '发给{email}的邀请',
+  'Invited {time}': '邀请时间：{time}',
+  'Resend invitation': '重新发送邀请',
+  'Invitation delivery is in progress. Try again shortly.': '邀请正在投递中。请稍后再试。',
+  'This invitation has reached its resend limit.': '此邀请已达到重新发送次数上限。',
   'Mail submission': '邮件提交状态',
   Submitted: '已提交',
   'Submitting to the mail server': '正在提交至邮件服务器',

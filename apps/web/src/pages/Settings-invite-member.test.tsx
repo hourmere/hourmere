@@ -33,6 +33,7 @@ const TEAM_ME: Schemas['Me'] = {
 const EMAIL = 'new-member@example.com'
 const INVITATION: Schemas['TeamInvitationSummary'] = {
   id: '00000000-0000-7000-8000-000000000020',
+  email: EMAIL,
   status: 'pending',
   createdAt: '2026-10-30T10:00:00.000Z',
   expiresAt: '2026-11-13T10:00:00.000Z',
@@ -40,6 +41,7 @@ const INVITATION: Schemas['TeamInvitationSummary'] = {
   delivery: { state: 'queued', attempts: 0, lastAttemptAt: null, lastErrorCode: null },
 }
 const QUEUED_INVITATION: QueuedInvitation = {
+  existing: false,
   ...INVITATION,
   email: EMAIL,
   organizationId: TEAM_ME.organization.id,
@@ -111,7 +113,7 @@ describe('inviting a team member in settings', () => {
       const pending = await screen.findByRole('region', { name: 'Pending invitations' })
       expect(await within(pending).findByText('Waiting to send')).toBeDefined()
       expect(
-        within(pending).getByRole('heading', { name: `Invitation ${INVITATION.id}` }),
+        within(pending).getByRole('heading', { name: `Invitation to ${INVITATION.email}` }),
       ).toBeDefined()
       expect(invitationForm.textContent).not.toMatch(/invitation sent|delivered/i)
       expect(emailInput.value).toBe('')
@@ -173,12 +175,16 @@ describe('inviting a team member in settings', () => {
     ).toBeNull()
   })
 
-  it.each(['sending', 'smtp_accepted', 'failed', 'skipped', 'unknown'] as const)(
+  it.each(['queued', 'sending', 'smtp_accepted', 'failed', 'skipped', 'unknown'] as const)(
     'does not claim a retained %s invitation was newly queued',
     async (state) => {
       const api = server({
         [INVITE_ROUTE]: () =>
-          json(200, { ...QUEUED_INVITATION, delivery: { ...QUEUED_INVITATION.delivery, state } }),
+          json(200, {
+            ...QUEUED_INVITATION,
+            existing: true,
+            delivery: { ...QUEUED_INVITATION.delivery, state },
+          }),
       })
       renderApp(PATHS.settings)
       const { invitationForm, emailInput } = await fillAndSubmit()
@@ -192,6 +198,163 @@ describe('inviting a team member in settings', () => {
       await waitFor(() => expect(api.to(PENDING_ROUTE)).toHaveLength(2))
     },
   )
+
+  it.each([false, true])(
+    'offers an explicit resend for an existing queued invitation only when allowed=%s',
+    async (resendAllowed) => {
+      let submissions = 0
+      const api = server({
+        [INVITE_ROUTE]: () => {
+          submissions += 1
+          return json(200, {
+            ...QUEUED_INVITATION,
+            existing: true,
+            delivery: { ...QUEUED_INVITATION.delivery, generation: submissions },
+          })
+        },
+        [PENDING_ROUTE]: () =>
+          json(200, { data: [{ ...INVITATION, resendAllowed }], nextCursor: null }),
+      })
+      renderApp(PATHS.settings)
+      const { user, invitationForm, emailInput } = await fillAndSubmit()
+      await within(invitationForm).findByText(
+        'An invitation already exists. Review its mail submission status below.',
+      )
+      expect(emailInput.value).toBe(EMAIL)
+      const pending = await screen.findByRole('region', { name: 'Pending invitations' })
+      await within(pending).findByRole('heading', { name: `Invitation to ${EMAIL}` })
+      if (!resendAllowed) {
+        expect(within(pending).queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+        expect(api.to(INVITE_ROUTE)).toHaveLength(1)
+        return
+      }
+      await user.click(await within(pending).findByRole('button', { name: 'Resend invitation' }))
+      await screen.findByText('Invitation queued for delivery.')
+      expect(api.to(INVITE_ROUTE)).toHaveLength(2)
+      expect(api.to(INVITE_ROUTE)[1]?.body).toEqual({
+        email: EMAIL,
+        organizationId: TEAM_ME.organization.id,
+        role: 'member',
+        invitationId: INVITATION.id,
+        resend: true,
+        expectedGeneration: 1,
+        requestId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
+      })
+      expect(api.to(INVITE_ROUTE)[1]?.headers.get('X-Expected-Organization-Id')).toBe(
+        TEAM_ME.organization.id,
+      )
+      await waitFor(() => expect(api.to(PENDING_ROUTE)).toHaveLength(3))
+      expect(screen.queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+    },
+  )
+
+  it('moves keyboard focus to stable status feedback after the resend button is removed', async () => {
+    const api = server({
+      [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing: true }),
+      [PENDING_ROUTE]: () =>
+        json(200, { data: [{ ...INVITATION, resendAllowed: true }], nextCursor: null }),
+    })
+    renderApp(PATHS.settings)
+    const { user, invitationForm } = await fillAndSubmit()
+    const existing = await within(invitationForm).findByText(
+      'An invitation already exists. Review its mail submission status below.',
+    )
+    expect(document.activeElement).toBe(existing.parentElement)
+    await user.tab()
+    expect(document.activeElement).toBe(
+      within(invitationForm).getByRole('button', { name: 'Invite member' }),
+    )
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Resend invitation' }))
+    await user.keyboard('{Enter}')
+    const status = await screen.findByText('Invitation queued for delivery.')
+    expect(status.getAttribute('role')).toBe('status')
+    expect(document.activeElement).toBe(status)
+    expect(screen.queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+    expect(api.to(INVITE_ROUTE)).toHaveLength(2)
+  })
+
+  it('shows a completed resend replay without claiming it was newly queued', async () => {
+    let resent = false
+    server({
+      [INVITE_ROUTE]: ({ body }) => {
+        resent = Boolean((body as { resend?: boolean }).resend)
+        return json(200, {
+          ...QUEUED_INVITATION,
+          existing: true,
+          delivery: {
+            ...QUEUED_INVITATION.delivery,
+            state: resent ? 'smtp_accepted' : 'queued',
+          },
+        })
+      },
+      [PENDING_ROUTE]: () =>
+        json(200, {
+          data: [
+            {
+              ...INVITATION,
+              resendAllowed: !resent,
+              delivery: { ...INVITATION.delivery, state: resent ? 'smtp_accepted' : 'queued' },
+            },
+          ],
+          nextCursor: null,
+        }),
+    })
+    renderApp(PATHS.settings)
+    const { user, invitationForm } = await fillAndSubmit()
+    await within(invitationForm).findByText(
+      'An invitation already exists. Review its mail submission status below.',
+    )
+    const pending = await screen.findByRole('region', { name: 'Pending invitations' })
+    await user.click(await within(pending).findByRole('button', { name: 'Resend invitation' }))
+    await screen.findByText('Accepted by the mail server')
+    expect(screen.queryByText('Invitation queued for delivery.')).toBeNull()
+  })
+
+  it('reuses the explicit resend identity after an uncertain queue failure', async () => {
+    let submissions = 0
+    const api = server({
+      [INVITE_ROUTE]: () => {
+        submissions += 1
+        if (submissions === 2) return json(503, { code: 'INVITATION_DELIVERY_UNAVAILABLE' })
+        return json(200, { ...QUEUED_INVITATION, existing: true })
+      },
+      [PENDING_ROUTE]: () =>
+        json(200, { data: [{ ...INVITATION, resendAllowed: true }], nextCursor: null }),
+    })
+    renderApp(PATHS.settings)
+    const { user, invitationForm } = await fillAndSubmit()
+    await within(invitationForm).findByText(
+      'An invitation already exists. Review its mail submission status below.',
+    )
+    const pending = await screen.findByRole('region', { name: 'Pending invitations' })
+    await user.click(await within(pending).findByRole('button', { name: 'Resend invitation' }))
+    expect((await within(pending).findByRole('alert')).textContent).toMatch(/could not be queued/i)
+    await user.click(within(pending).getByRole('button', { name: 'Resend invitation' }))
+    await screen.findByText('Invitation queued for delivery.')
+    expect(api.to(INVITE_ROUTE)[2]?.body).toEqual(api.to(INVITE_ROUTE)[1]?.body)
+  })
+
+  it('localizes an existing queued invitation and its allowed resend in Simplified Chinese', async () => {
+    chooseLanguage('zh-CN')
+    server({
+      [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing: true }),
+      [PENDING_ROUTE]: () =>
+        json(200, { data: [{ ...INVITATION, resendAllowed: true }], nextCursor: null }),
+    })
+    renderApp(PATHS.settings)
+    const invitationForm = await screen.findByRole('region', { name: '邀请成员' })
+    const user = userEvent.setup()
+    await user.type(within(invitationForm).getByRole('textbox', { name: '邮箱' }), EMAIL)
+    await user.keyboard('{Enter}')
+    await within(invitationForm).findByText('邀请已存在。请查看下方的邮件提交状态。')
+    const pending = screen.getByRole('region', { name: '待接受的邀请' })
+    await within(pending).findByRole('heading', { name: `发给 ${EMAIL} 的邀请` })
+    expect(within(pending).getByRole('button', { name: '重新发送邀请' })).toBeDefined()
+    expect(within(invitationForm).queryByText('邀请已加入投递队列。')).toBeNull()
+  })
 
   it.each([
     {
@@ -396,7 +559,10 @@ describe('inviting a team member in settings', () => {
     const invitationForm = await form()
     expect(invitationForm.textContent).toMatch(/closed|restricted/i)
     expect(invitationForm.textContent).toMatch(
-      /trusted|sign.up.*(policy|rules)|registration.*(policy|rules)/i,
+      /earliest user or has a currently allowed email domain/i,
+    )
+    expect(invitationForm.textContent).toContain(
+      'The recipient must verify this exact address and accept the invitation separately to join.',
     )
     expect(invitationForm.textContent).not.toMatch(/anyone can sign up|every invited address can/i)
   })
@@ -407,6 +573,12 @@ describe('inviting a team member in settings', () => {
     renderApp(PATHS.settings)
     const invitationForm = await screen.findByRole('region', { name: '邀请成员' })
     expect(within(invitationForm).getByText(/角色.*成员/)).toBeDefined()
+    expect(invitationForm.textContent).toContain(
+      '仅当邀请者为实例首位用户，或其当前邮箱域名在允许名单中时，邀请才允许注册。',
+    )
+    expect(invitationForm.textContent).toContain(
+      '受邀者须验证该确切邮箱地址，并另行接受邀请才能加入团队。',
+    )
     const user = userEvent.setup()
     await user.type(within(invitationForm).getByRole('textbox', { name: '邮箱' }), EMAIL)
     await user.keyboard('{Enter}')

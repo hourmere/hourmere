@@ -58,6 +58,7 @@ function routeCopy(
     MemberDepartureBlockedError,
     MemberDepartureOwnerRequiredError,
     leaveTeamMember,
+    DomainError,
     MemberDepartureImpactSchema,
     ErrorBody,
     json,

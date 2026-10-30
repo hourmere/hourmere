@@ -163,6 +163,7 @@ export interface Invitation {
 }
 
 export interface QueuedInvitation extends Invitation {
+  existing: boolean
   delivery: {
     generation: number
     state: Schemas['TeamInvitationSummary']['delivery']['state']
@@ -178,6 +179,28 @@ export function inviteMember(
 ): Promise<QueuedInvitation> {
   return authRequest('/organization/invite-member', {
     body: { email, organizationId, role: 'member' },
+    headers: { 'X-Expected-Organization-Id': organizationId },
+    ...(signal && { signal }),
+  })
+}
+
+/** Resending retains one request ID across uncertain delivery retries. */
+export function resendInvitation(
+  invitation: QueuedInvitation,
+  organizationId: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<QueuedInvitation> {
+  return authRequest('/organization/invite-member', {
+    body: {
+      email: invitation.email,
+      organizationId,
+      role: 'member',
+      resend: true,
+      invitationId: invitation.id,
+      expectedGeneration: invitation.delivery.generation,
+      requestId,
+    },
     headers: { 'X-Expected-Organization-Id': organizationId },
     ...(signal && { signal }),
   })

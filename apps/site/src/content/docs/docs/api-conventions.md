@@ -21,6 +21,9 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `member` may be invited (also the default when `role` is omitted). Ordinary retries by
   the original inviter preserve an unambiguous pending invitation's generation/outcome;
   another inviter receives `409 INVITATION_ALREADY_PENDING` and must reload.
+  The additive `existing` boolean is false only for a newly created invitation and true
+  when a pending invitation is retained, including explicit resend and replay. A repeated
+  queued result therefore identifies the existing invitation instead of implying creation.
   Explicit resend additionally requires `resend: true`, `invitationId`,
   `expectedGeneration` (1–32) and a fresh UUID `requestId`. An identical request replays
   its current result; stale generations or ambiguous matches return 409
@@ -226,6 +229,28 @@ where the form or action started. Do not replace that value with the active orga
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
 separate protocol, without adding fields to either body.
 
+For team REST routes that accept this header, a different current organization returns
+`409 organization_context_changed` when the verified session user still owns or administers
+the expected non-personal team. This includes a switch to personal space or a team where
+the user is only a member. Expected-team authority is checked before current-team management
+eligibility; the header never authorizes reading or writing that team's data. Invalid,
+personal, missing or no-longer-managed expected teams receive the uniform
+`403 team_management_access_denied`, without revealing existence. Member self-service
+permissions remain separate; the mismatch recovery check still requires expected-team
+owner/admin authority. Omitting an optional read header keeps its existing current-team
+behavior, while required write headers remain required.
+Native team writes use the same mismatch rule with their uppercase
+`ORGANIZATION_CONTEXT_CHANGED` and `TEAM_MANAGEMENT_ACCESS_DENIED` codes. A missing required
+header retains the existing reload refusal. Explicit switching retains its source-context
+contract rather than requiring management authority in the previously active organization.
+
+The optional read header applies to `GET /api/v1/team/bookings`,
+`GET /api/v1/team/invitations`, `GET /api/v1/teams/{teamId}/readiness`,
+`GET /api/v1/team/members/{memberUserId}/departure-impact`,
+`GET /api/v1/team/member-removals/{operationId}` and
+`GET /api/v1/team/members/{memberUserId}/removal-handling`. Each retains its existing
+role and target restrictions when the expected organization matches or the header is absent.
+
 The existing covered endpoints are:
 
 | Write | Endpoint |
@@ -341,11 +366,12 @@ before reading invitations. It is session-only REST; MCP and CLI credentials gra
 team invitation management authority.
 
 Browsers may send optional `X-Expected-Organization-Id` to bind every page and retry to
-the team where the invitation section opened. Switching between teams the reader still
-manages returns `409 organization_context_changed`, with guidance to reload, before any
-summaries are read. Invalid, personal or inaccessible expected teams retain the same
-`403 team_management_access_denied`; a reader without current management authority is
-also denied. These checks cover the first page without a cursor. The header grants no
+the team where the invitation section opened. A switch to any other organization, including
+personal space or a team where the reader is only a member, returns
+`409 organization_context_changed` if the reader still owns or administers the expected
+team, with guidance to reload, before any summaries are read. Invalid, personal or
+inaccessible expected teams retain the same `403 team_management_access_denied`.
+These checks cover the first page without a cursor. The header grants no
 authority and must match the session's current team. Omitting it preserves existing
 current-team reads.
 
@@ -366,6 +392,7 @@ response objects remain extensible for additive v1 changes.
 | Field | Meaning |
 |---|---|
 | `id` | Invitation UUID. |
+| `email` | Invited recipient address, visible only to verified owners/admins of this team. |
 | `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
 | `createdAt` | Stored invitation creation time in UTC. |
 | `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
@@ -382,7 +409,9 @@ classifications, distinct from the endpoint's HTTP errors. Expired, accepted, ca
 rejected or unknown invitations cannot be resent; elevated/custom historical roles are ineligible.
 An exhausted current generation can be explicitly resent if the new-generation rules allow it.
 
-No recipient address, inviter identity, role, message body, invitation link/token, credential,
+Recipient addresses are returned only to the current team's verified owners/admins.
+Members, other teams and API-key/OAuth callers cannot read them through this endpoint.
+No inviter identity, role, message body, invitation link/token, credential,
 job ID, lease identity, resend request ID or raw third-party error is returned. The endpoint
 does not send mail or change the invitation or delivery records.
 

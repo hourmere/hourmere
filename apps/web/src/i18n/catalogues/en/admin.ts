@@ -26,8 +26,8 @@ export const admin = {
   'Invitation requests are temporarily limited. Try again later.':
     'Invitation requests are temporarily limited. Try again later.',
   'Try again in {0} seconds.': 'Try again in {0} seconds.',
-  'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.':
-    'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.',
+  'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.':
+    'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.',
   'Join team': 'Join team',
   'Go to team': 'Go to team',
   'Invited email': 'Invited email',
@@ -53,7 +53,12 @@ export const admin = {
   'You do not have permission to view pending invitations.':
     'You do not have permission to view pending invitations.',
   'No pending invitations on this page.': 'No pending invitations on this page.',
-  'Invitation {0}': 'Invitation {0}',
+  'Invitation to {email}': 'Invitation to {email}',
+  'Invited {time}': 'Invited {time}',
+  'Resend invitation': 'Resend invitation',
+  'Invitation delivery is in progress. Try again shortly.':
+    'Invitation delivery is in progress. Try again shortly.',
+  'This invitation has reached its resend limit.': 'This invitation has reached its resend limit.',
   'Mail submission': 'Mail submission',
   Submitted: 'Submitted',
   'Submitting to the mail server': 'Submitting to the mail server',

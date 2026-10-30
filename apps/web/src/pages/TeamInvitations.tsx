@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
-import { inviteMember } from '../api/auth.ts'
+import { inviteMember, type QueuedInvitation, resendInvitation } from '../api/auth.ts'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
@@ -25,11 +25,45 @@ export function TeamInvitations({ organizationId }: { organizationId: string }) 
 }
 
 function InvitationManagement({ organizationId }: { organizationId: string }) {
+  const { ui } = useI18n()
   const [revision, setRevision] = useState(0)
+  const [existingInvitation, setExistingInvitation] = useState<QueuedInvitation | null>(null)
+  const [resendNotice, setResendNotice] = useState<UiText | null>(null)
+  const resendFeedback = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (resendNotice) resendFeedback.current?.focus()
+  }, [resendNotice])
   return (
     <>
-      <InviteMember organizationId={organizationId} onQueued={() => setRevision((v) => v + 1)} />
-      <PendingInvitations key={revision} organizationId={organizationId} />
+      <InviteMember
+        organizationId={organizationId}
+        onQueued={(invitation) => {
+          setExistingInvitation(invitation.existing ? invitation : null)
+          setResendNotice(null)
+          setRevision((value) => value + 1)
+        }}
+      />
+      {resendNotice && (
+        <p ref={resendFeedback} role="status" tabIndex={-1}>
+          {ui(resendNotice)}
+        </p>
+      )}
+      <PendingInvitations
+        key={revision}
+        organizationId={organizationId}
+        existingInvitation={existingInvitation}
+        onResent={(invitation) => {
+          setExistingInvitation(null)
+          setResendNotice(
+            msg(
+              invitation.delivery.state === 'queued'
+                ? 'Invitation queued for delivery.'
+                : 'An invitation already exists. Review its mail submission status below.',
+            ),
+          )
+          setRevision((value) => value + 1)
+        }}
+      />
     </>
   )
 }
@@ -51,6 +85,8 @@ function invitationError(error: unknown): UiText {
     INVITATION_REQUEST_FAILED: 'The invitation request could not be queued. Try again later.',
     INVITATION_CONFLICT: 'The invitation changed. Reload before trying again.',
     INVITATION_INELIGIBLE: 'This invitation is no longer pending. Reload before trying again.',
+    INVITATION_DELIVERY_BUSY: 'Invitation delivery is in progress. Try again shortly.',
+    INVITATION_GENERATION_LIMIT: 'This invitation has reached its resend limit.',
   }
   if (error.status === 403) return msg('You do not have permission to invite members.')
   if (error.status === 429)
@@ -64,7 +100,7 @@ function InviteMember({
   onQueued,
 }: {
   organizationId: string
-  onQueued: () => void
+  onQueued: (invitation: QueuedInvitation) => void
 }) {
   const { t, ui } = useI18n()
   const id = useId()
@@ -97,13 +133,13 @@ function InviteMember({
     try {
       const invitation = await inviteMember(email.trim(), organizationId, controller.signal)
       if (controller.signal.aborted) return
-      if (invitation.delivery.state === 'queued') {
+      if (!invitation.existing && invitation.delivery.state === 'queued') {
         setNotice(msg('Invitation queued for delivery.'))
         setEmail('')
       } else {
         setNotice(msg('An invitation already exists. Review its mail submission status below.'))
       }
-      onQueued()
+      onQueued(invitation)
     } catch (failure) {
       if (!controller.signal.aborted) setError(failure)
     } finally {
@@ -121,7 +157,7 @@ function InviteMember({
         <p className="hint">{t('Invitations always use the member role.')}</p>
         <p className="hint" id={`${id}-policy`}>
           {t(
-            'On a restricted instance, an invitation permits sign-up only when the inviter meets the current trusted-inviter rules. Signing in does not join the team; the recipient must accept the invitation separately.',
+            'On a restricted instance, an invitation permits sign-up only when the inviter is the instance’s earliest user or has a currently allowed email domain. The recipient must verify this exact address and accept the invitation separately to join.',
           )}
         </p>
         <div className="field">
@@ -179,7 +215,15 @@ function InviteMember({
 type InvitationPage = { data: Schemas['TeamInvitationSummary'][]; nextCursor: string | null }
 type PageState = { status: 'ready'; data: InvitationPage } | { status: 'error'; error: unknown }
 
-function PendingInvitations({ organizationId }: { organizationId: string }) {
+function PendingInvitations({
+  organizationId,
+  existingInvitation,
+  onResent,
+}: {
+  organizationId: string
+  existingInvitation: QueuedInvitation | null
+  onResent: (invitation: QueuedInvitation) => void
+}) {
   const { t, ui, locale } = useI18n()
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined])
   const [version, setVersion] = useState(0)
@@ -251,8 +295,15 @@ function PendingInvitations({ organizationId }: { organizationId: string }) {
             {state.data.data.map((invitation) => (
               <li key={invitation.id}>
                 <h3 className="user-content">
-                  <BreakableText>{t('Invitation {0}', { '0': invitation.id })}</BreakableText>
+                  <BreakableText>
+                    {t('Invitation to {email}', { email: invitation.email })}
+                  </BreakableText>
                 </h3>
+                <p className="hint">
+                  <time dateTime={invitation.createdAt}>
+                    {t('Invited {time}', { time: fmt.dateTime(invitation.createdAt) })}
+                  </time>
+                </p>
                 <dl className="details">
                   <dt>{t('Status')}</dt>
                   <dd>{t('Pending')}</dd>
@@ -265,6 +316,13 @@ function PendingInvitations({ organizationId }: { organizationId: string }) {
                     </time>
                   </dd>
                 </dl>
+                {existingInvitation?.id === invitation.id && invitation.resendAllowed && (
+                  <ResendExistingInvitation
+                    invitation={existingInvitation}
+                    organizationId={organizationId}
+                    onQueued={onResent}
+                  />
+                )}
               </li>
             ))}
           </ul>
@@ -292,5 +350,75 @@ function PendingInvitations({ organizationId }: { organizationId: string }) {
         )}
       </div>
     </section>
+  )
+}
+
+/** An ordinary retry retains the invitation; another generation needs an explicit action. */
+function ResendExistingInvitation({
+  invitation,
+  organizationId,
+  onQueued,
+}: {
+  invitation: QueuedInvitation
+  organizationId: string
+  onQueued: (invitation: QueuedInvitation) => void
+}) {
+  const { t, ui } = useI18n()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const [requestId] = useState(() => crypto.randomUUID())
+  const request = useRef<AbortController | null>(null)
+  useEffect(() => () => request.current?.abort(), [])
+  const conflict = isOrganizationContextChanged(error)
+
+  async function resend() {
+    if (request.current || conflict) return
+    const controller = new AbortController()
+    request.current = controller
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await resendInvitation(
+        invitation,
+        organizationId,
+        requestId,
+        controller.signal,
+      )
+      if (!controller.signal.aborted) onQueued(result)
+    } catch (failure) {
+      if (!controller.signal.aborted) setError(failure)
+    } finally {
+      if (!controller.signal.aborted) {
+        request.current = null
+        setBusy(false)
+      }
+    }
+  }
+
+  return (
+    <div className="stack">
+      {conflict ? (
+        <OrganizationContextConflict error={error} />
+      ) : error ? (
+        <div className="alert alert-error" role="alert">
+          <p>{ui(invitationError(error))}</p>
+          {error instanceof RequestError &&
+            error.retryAfterSeconds !== undefined &&
+            error.status === 429 && (
+              <p>{t('Try again in {0} seconds.', { '0': error.retryAfterSeconds })}</p>
+            )}
+        </div>
+      ) : null}
+      <div className="form-actions">
+        <button
+          type="button"
+          className="button button-small"
+          disabled={busy || conflict}
+          onClick={resend}
+        >
+          {busy ? t('Queueing invitation…') : t('Resend invitation')}
+        </button>
+      </div>
+    </div>
   )
 }

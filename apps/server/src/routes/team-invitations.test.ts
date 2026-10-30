@@ -10,7 +10,6 @@ import {
   createMcpOAuthResolver,
   invitationRecipientIsMember,
   invitationResendDenial,
-  teamRoles,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -51,6 +50,7 @@ type InvitationStatus = 'pending' | 'accepted' | 'canceled' | 'rejected' | 'expi
 type DeliveryState = 'queued' | 'sending' | 'smtp_accepted' | 'failed' | 'skipped'
 interface Summary {
   id: string
+  email: string
   status: InvitationStatus
   createdAt: string
   expiresAt: string
@@ -293,6 +293,7 @@ describe.skipIf(!serverUrl)(
         expect(Object.keys(row).sort()).toEqual([
           'createdAt',
           'delivery',
+          'email',
           'expiresAt',
           'id',
           'resendAllowed',
@@ -338,10 +339,13 @@ describe.skipIf(!serverUrl)(
     }
 
     async function verifyRoles(target = app) {
-      await invitation()
+      const own = await invitation()
+      const other = await invitation({ organizationId: seeded.other.id })
       for (const cookie of [seeded.ownerSession.cookie, seeded.adminSession.cookie]) {
         const result = await page(await get(cookie, '', {}, target))
         expect(result.data).toHaveLength(1)
+        expect(result.data[0]).toMatchObject({ id: own.id, email: own.email })
+        expect(JSON.stringify(result)).not.toContain(other.email)
       }
       await expectDenied(await get(seeded.memberSession.cookie, '', {}, target))
     }
@@ -411,6 +415,48 @@ describe.skipIf(!serverUrl)(
 
     it('binds first-page reads and retries to an optional expected team after a tab switches', () =>
       verifyExpectedOrganization())
+
+    async function verifyUnmanagedCurrentOrganization(
+      current: 'personal' | 'member',
+      target = app,
+    ) {
+      await invitation()
+      const currentId =
+        current === 'personal'
+          ? seeded.admin.principal.organization.id
+          : (
+              await createTestTeam(db, [
+                { user: seeded.owner, role: 'owner' },
+                { user: seeded.admin, role: 'member' },
+              ])
+            ).id
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: currentId })
+        .where('id', '=', seeded.adminSession.sessionId)
+        .execute()
+      const headers = { 'X-Expected-Organization-Id': seeded.team.id }
+      for (const _attempt of [1, 2]) {
+        const response = await get(seeded.adminSession.cookie, '', headers, target)
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+        expect(response.headers.has('www-authenticate')).toBe(false)
+      }
+      // Older clients still read only their current team and retain their previous denial.
+      await expectDenied(await get(seeded.adminSession.cookie, '', {}, target))
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('userId', '=', seeded.admin.id)
+        .where('organizationId', '=', seeded.team.id)
+        .execute()
+      await expectDenied(await get(seeded.adminSession.cookie, '', headers, target))
+    }
+
+    it.each(['personal', 'member'] as const)(
+      'returns reload guidance after switching to a %s space only while expected-team authority remains',
+      (current) => verifyUnmanagedCurrentOrganization(current),
+    )
 
     async function verifyInaccessibleExpectedOrganization(target = app) {
       const switched = await session(seeded.owner, seeded.other.id)
@@ -581,9 +627,13 @@ describe.skipIf(!serverUrl)(
         await get(seeded.ownerSession.cookie, `?organizationId=${seeded.other.id}`, {}, target),
       )
       expect(result.data.map((row) => row.id)).toEqual([own.id])
+      expect(result.data.map((row) => row.email)).toEqual([own.email])
+      expect(JSON.stringify(result)).not.toContain(other.email)
       const otherSession = await session(seeded.owner, seeded.other.id)
       const otherPage = await page(await get(otherSession.cookie, '', {}, target))
       expect(otherPage.data.map((row) => row.id)).toEqual([other.id])
+      expect(otherPage.data.map((row) => row.email)).toEqual([other.email])
+      expect(JSON.stringify(otherPage)).not.toContain(own.email)
     }
 
     it('scopes invitations to the current team, ignoring a client supplied organization', () =>
@@ -612,6 +662,7 @@ describe.skipIf(!serverUrl)(
           .executeTakeFirst()
         expect(summary).toMatchObject({
           id: stored.id,
+          email: stored.email,
           status:
             stored.expiresAt <= new Date() && stored.status === 'pending'
               ? 'expired'
@@ -626,7 +677,6 @@ describe.skipIf(!serverUrl)(
           },
         })
         if (summary?.status !== 'pending') expect(summary?.resendAllowed).toBe(false)
-        expect(JSON.stringify(result)).not.toContain(stored.email)
         if (delivery?.resend_request_id)
           expect(JSON.stringify(result)).not.toContain(delivery.resend_request_id)
         if (delivery?.last_job_id)
@@ -1039,6 +1089,7 @@ describe.skipIf(!serverUrl)(
       expect(Object.keys(item.properties as object).sort()).toEqual([
         'createdAt',
         'delivery',
+        'email',
         'expiresAt',
         'id',
         'resendAllowed',
@@ -1049,7 +1100,7 @@ describe.skipIf(!serverUrl)(
       )
     })
     function routeSourceCopy(replacement?: {
-      file: 'access' | 'summary' | 'route'
+      file: 'access' | 'summary' | 'route' | 'middleware'
       before: string
       after: string
     }): typeof teamInvitationRoutes {
@@ -1066,8 +1117,19 @@ describe.skipIf(!serverUrl)(
         { sql },
         '{ checkTeamManagementAccess, TeamManagementError }',
       )
+      const middlewareSource = readFileSync(
+        new URL('../team-management.ts', import.meta.url),
+        'utf8',
+      )
+      if (replacement?.file === 'middleware')
+        expect(
+          middlewareSource.includes(replacement.before),
+          'middleware mutation matches source',
+        ).toBe(true)
       const management = sourceCopy<Record<string, unknown>>(
-        readFileSync(new URL('../team-management.ts', import.meta.url), 'utf8'),
+        replacement?.file === 'middleware'
+          ? middlewareSource.replace(replacement.before, replacement.after)
+          : middlewareSource,
         { DomainError, createMiddleware, sql, ...role },
         '{ teamManagementAccess }',
       )
@@ -1079,7 +1141,7 @@ describe.skipIf(!serverUrl)(
         replacement?.file === 'route'
           ? routeSource.replace(replacement.before, replacement.after)
           : routeSource,
-        { createRoute, z, teamRoles, DomainError, ErrorBody, json, ...management, ...summary },
+        { createRoute, z, ErrorBody, json, ...management, ...summary },
         'teamInvitationRoutes',
       )
     }
@@ -1107,45 +1169,36 @@ describe.skipIf(!serverUrl)(
     it.each<
       [
         string,
-        { file: 'access' | 'summary' | 'route'; before: string; after: string },
+        { file: 'access' | 'summary' | 'route' | 'middleware'; before: string; after: string },
         (target: ReturnType<typeof createApp>) => Promise<void>,
       ]
     >([
       [
-        'expected-organization read target',
+        'expected-team check before current-team rejection',
         {
-          file: 'route',
-          before: 'expectedOrganizationId ?? c.var.principal.organization.id,',
-          after: 'c.var.principal.organization.id,',
-        },
-        verifyExpectedOrganization,
-      ],
-      [
-        'team-switch reload guidance',
-        {
-          file: 'route',
+          file: 'middleware',
           before:
-            "if (teamRoles(membership?.role).some((role) => role === 'owner' || role === 'admin'))",
-          after: 'if (false)',
+            '    await expectedContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))',
+          after: `    await check(db, c.var.principal, c.var.principal.organization.id)
+    await expectedContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))`,
         },
-        verifyExpectedOrganization,
+        (target) => verifyUnmanagedCurrentOrganization('personal', target),
       ],
       [
         'expected-team management authority',
         {
-          file: 'route',
-          before:
-            "teamRoles(membership?.role).some((role) => role === 'owner' || role === 'admin')",
-          after: 'true',
+          file: 'access',
+          before: 'if (!role) throw denied()',
+          after: 'if (!role && !expectedTeamId) throw denied()',
         },
         verifyInaccessibleExpectedOrganization,
       ],
       [
         'expected personal-team exclusion',
         {
-          file: 'route',
-          before: ".where('personal_organizations.organization_id', 'is', null)",
-          after: '',
+          file: 'access',
+          before: 'if (personal && !context?.allowPersonal) throw denied()',
+          after: 'if (personal && !context?.allowPersonal && !expectedTeamId) throw denied()',
         },
         verifyInaccessibleExpectedOrganization,
       ],
@@ -1159,7 +1212,7 @@ describe.skipIf(!serverUrl)(
         verifyStatusFiltering,
       ],
       [
-        'owner/admin role check',
+        'recipient email access for members',
         { file: 'access', before: 'if (!role) throw denied()', after: 'if (false) throw denied()' },
         verifyRoles,
       ],
@@ -1178,7 +1231,7 @@ describe.skipIf(!serverUrl)(
           file: 'summary',
           before: '    data,\n    nextCursor:',
           after:
-            '    data: data.map((summary, index) => ({ ...summary, email: rows[index].email })),\n    nextCursor:',
+            '    data: data.map((summary, index) => ({ ...summary, inviterId: rows[index].inviterId ?? "private" })),\n    nextCursor:',
         },
         verifyRoles,
       ],

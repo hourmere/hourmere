@@ -13,6 +13,7 @@ export type InvitationSummaryMailLimits = InvitationMailLimits & { secret: strin
 
 export const TeamInvitationSummarySchema = z.strictObject({
   id: z.uuid(),
+  email: z.string(),
   status: z.enum(['pending', 'accepted', 'canceled', 'rejected', 'expired', 'unknown']),
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
@@ -148,6 +149,7 @@ export async function listTeamInvitationSummaries(
     data.push(
       TeamInvitationSummarySchema.parse({
         id: row.id,
+        email: row.email,
         status: row.status,
         createdAt: row.createdAt.toISOString(),
         expiresAt: row.expiresAt.toISOString(),
