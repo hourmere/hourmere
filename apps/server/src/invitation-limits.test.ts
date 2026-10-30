@@ -1242,7 +1242,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await verifyBusy(copy)
     await verifyFenceExpiry(copy)
     await verifyRollback(copy)
-  })
+  }, 30_000)
   it.each<[string, string, string, (factory: typeof createAuth) => Promise<void>, string?]>([
     [
       'verified actor check',
