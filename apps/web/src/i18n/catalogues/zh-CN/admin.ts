@@ -1046,8 +1046,8 @@ export const admin = {
     '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
   'Accept invitation': '接受邀请',
   'Checking invitation…': '正在检查邀请…',
-  'This invitation is unavailable. It may have expired, been canceled or already been accepted. Ask the team owner for a new invitation.':
-    '此邀请已不可用，可能已过期、被撤销或已被接受。请向团队所有者申请新邀请。',
+  'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.':
+    '此邀请不可用。请团队所有者检查邀请状态，并视情况重新发送或提供新邀请。',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     '请使用收到此邀请的完整邮箱地址。如果你使用了其他邮箱登录，请切换账号。',
   'Confirm your email address by signing in with an email link, then return to this invitation.':
