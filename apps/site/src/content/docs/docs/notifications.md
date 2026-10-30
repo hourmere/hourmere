@@ -127,19 +127,20 @@ below). Legacy host notifications retain their invitations and cancellations.
 ### Email language
 
 Booking emails use the shared [locale registry](/docs/interface-languages#development),
-currently English, Simplified Chinese and German, throughout the subject, plain text, HTML and
+currently English, Simplified Chinese, German and French, throughout the subject, plain text, HTML and
 user-facing calendar SUMMARY/DESCRIPTION. Each missing translated message falls back to
 English independently; the selected locale still controls date/time formatting. The HTML `lang` matches the email language.
 The invitee's language comes from `booking_attendees.locale`, captured from the booking
 page's interface language at the first valid submission; changing the interface while
 retrying that submission keeps the original request and its language. REST/MCP callers can
 provide the same invitee locale. Guests follow the invitee's booking language. Each host
-uses their current profile locale independently. Supported English, Simplified Chinese and German
-BCP 47 tags map to registered language codes (`en`, `zh-CN` and `de` today); missing, invalid or
+uses their current profile locale independently. Supported English, Simplified Chinese, German and French
+BCP 47 tags map to registered language codes (`en`, `zh-CN`, `de` and `fr` today); missing, invalid or
 unsupported languages fall back to English. Reschedules retain the booking's saved language.
 Team invitation emails use an explicit language choice, then an instance default, then English.
 
-German translations are AI-assisted (machine-translated), have not yet been reviewed by a
+French regional preferences including `fr-CA`, `fr-BE` and `fr-CH` map to `fr`.
+German and French translations are AI-assisted (machine-translated), have not yet been reviewed by a
 native speaker, and corrections are welcome.
 
 Dates and times use that email language and the recipient time zone described above;

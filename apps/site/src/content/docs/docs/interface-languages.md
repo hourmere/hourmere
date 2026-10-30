@@ -4,14 +4,16 @@ description: Choose a registered interface language, with English fallback and l
 ---
 
 Public booking, cancellation and rescheduling pages, embedded widgets and notification
-emails are available in English, Simplified Chinese and German. The account and sign-in
+emails are available in English, Simplified Chinese, German and French. The account and sign-in
 interfaces remain available in English and Simplified Chinese. The language control is
 available on sign-in, account and standalone public booking pages.
 
-German translations are AI-assisted (machine-translated) and have not yet been reviewed
+German and French translations are AI-assisted (machine-translated) and have not yet been reviewed
 by a native speaker. Corrections are welcome through a GitHub issue or pull request.
 German regional preferences such as `de-AT` and `de-CH` resolve to `de`.
-Changing it updates the existing page without restarting a form, discarding a chosen time,
+French regional preferences such as `fr-CA`, `fr-BE` and `fr-CH` resolve to `fr`, using
+French (`fr-FR`) date and time formatting.
+Changing the language updates the existing page without restarting a form, discarding a chosen time,
 reissuing a booking or replacing its private management link.
 
 An explicit interface choice takes precedence over a supported signed-in profile default,
@@ -34,7 +36,7 @@ Gregorian calendar and the selected IANA time zone. A booking flow freezes its r
 locale independently of display changes, so retrying after a lost response keeps the same
 body and idempotency key.
 
-The language preference stores only a registered language code (currently `en`, `zh-CN` or `de`), under
+The language preference stores only a registered language code (currently `en`, `zh-CN`, `de` or `fr`), under
 `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
 cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage mechanism
 does not prevent changing the current page. No account identifiers, answers or management
@@ -72,7 +74,7 @@ the product's translation catalogues.
 
 The standalone helper accepts an optional, strictly validated `language` value in
 `initInline` and `openPopup`, or `data-hourmere-language` on declarative elements. Values
-must be exact registered codes (currently `en`, `zh-CN` and `de`). Without an explicit value, the helper uses the host page's supported
+must be exact registered codes (currently `en`, `zh-CN`, `de` and `fr`). Without an explicit value, the helper uses the host page's supported
 `<html lang>`, then a supported browser language, then English. Embedded pages hide their
 page-level language picker; choose the page or widget language before initialization.
 The iframe receives only that non-sensitive allowlisted value in its
@@ -113,8 +115,8 @@ Add the corresponding catalogue files; loaders and language selectors discover t
 Use the existing English files as the key and placeholder reference. Partial catalogues are
 allowed for future languages. Catalogue tests report each locale's coverage, warn about
 missing translations for new locales, and fail for malformed or mismatched placeholders.
-English and Simplified Chinese remain complete. German public catalogues and mail tables
-are also required to match every English key and placeholder; German has no admin catalogue.
+English and Simplified Chinese remain complete. German and French public catalogues and mail tables
+are also required to match every English key and placeholder; neither has an admin catalogue.
 
 Use `t(key, values)` during render and `msg(key, values)` for a notice or validation message
 held in state. Nested messages, date arguments and lists format when rendered, so visible

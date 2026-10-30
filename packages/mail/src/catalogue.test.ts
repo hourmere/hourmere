@@ -40,5 +40,8 @@ describe('mail catalogue coverage', () => {
     expect(mailMessage('zh-CN', 'calendar.summary', { event: '{other}', other: 'Ada' })).toBe(
       '{other}（与 Ada）',
     )
+    expect(mailMessage('fr', 'calendar.summary', { event: '{other}', other: 'Ada' })).toBe(
+      '{other} avec Ada',
+    )
   })
 })
