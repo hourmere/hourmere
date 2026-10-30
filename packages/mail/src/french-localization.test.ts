@@ -76,6 +76,8 @@ describe('French mail catalogue', () => {
           expect(content).not.toMatch(/Your meeting|What:|When:|You received this email/)
           if (kind === 'conference_failed') {
             expect(content).toContain('Aucune invitation de calendrier définitive n’a été envoyée.')
+            if (role === 'host')
+              expect(content).toContain('relancer la réconciliation en toute sécurité')
             expect(content).toContain(
               role === 'host'
                 ? 'Google Meet n’a pas pu être préparé'
@@ -211,7 +213,7 @@ describe('French mail catalogue', () => {
     expect(message.subject).toBe('Se connecter à Hourmere')
     expect(message.html).toContain('<html lang="fr">')
     for (const content of [message.text, message.html ?? '']) {
-      expect(content).toContain('Ce lien expire dans 7 minutes')
+      expect(content).toContain('Ce lien expire dans 7 min et')
       expect(content).toContain('ne fonctionne qu’une seule fois')
       expect(content).toContain('le bouton de connexion sur la page qui s’ouvre')
     }
@@ -219,5 +221,18 @@ describe('French mail catalogue', () => {
     expect(bookingAnswerText(true, 'fr')).toBe('Oui')
     expect(bookingAnswerText(false, 'fr')).toBe('Non')
     expect(bookingAnswerText(['Literal {other}', 'Réponse'], 'fr')).toBe('Literal {other}, Réponse')
+  })
+
+  it('keeps a one-minute sign-in expiry grammatical in both email alternatives', () => {
+    const message = magicLinkEmail({
+      to: meeting.inviteeEmail,
+      url: 'https://example.test/sign-in#token=fixture',
+      expiresInMinutes: 1,
+      language: 'fr',
+    })
+    for (const content of [message.text, message.html ?? '']) {
+      expect(content).toContain('Ce lien expire dans 1 min et ne fonctionne qu’une seule fois.')
+      expect(content).toContain('Si vous n’avez pas demandé à vous connecter')
+    }
   })
 })

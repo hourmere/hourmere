@@ -65,7 +65,7 @@ export const common = {
   'The original Google calendar is unavailable. This booking will not switch to a different account or calendar.':
     'Le calendrier Google d’origine est indisponible. Cette réservation ne sera pas transférée vers un autre compte ou calendrier.',
   'The host needs to reconnect the original Google Calendar account before retrying.':
-    'L’hôte doit reconnecter le compte Google Calendar d’origine avant de réessayer.',
+    'L’hôte doit reconnecter le compte Google Agenda d’origine avant de réessayer.',
   'Could not check the meeting link. Your booking has not been changed.':
     'Le lien de réunion n’a pas pu être vérifié. Votre réservation n’a pas été modifiée.',
   'Could not request a safe retry. Check the booking status before trying again.':
@@ -170,7 +170,7 @@ export const common = {
   From: 'De',
   'reschedule.previousTime': 'Horaire précédent',
   'reschedule.newTime': 'Nouvel horaire',
-  'Google Calendar': 'Google Calendar',
+  'Google Calendar': 'Google Agenda',
   'Guest {0} email': 'Adresse e-mail de l’invité {0}',
   'Guest {0} name': 'Nom de l’invité {0}',
   Guests: 'Invités',
@@ -241,7 +241,7 @@ export const common = {
   'The host no longer allows guests. Remove the guests to continue.':
     'L’hôte n’autorise plus les invités. Retirez les invités pour continuer.',
   'The link may be mistyped, or the host may have removed or renamed this event.':
-    'Le lien comporte peut-être une erreur de saisie, ou l’hôte a supprimé ou renommé cet événement.',
+    'Le lien comporte peut-être une erreur de saisie, ou l’hôte a peut-être supprimé ou renommé cet événement.',
   'The questions on this page have changed. Reload the page and try again.':
     'Les questions de cette page ont changé. Rechargez la page et réessayez.',
   'There is nothing at this address. Check the link you were given.':
@@ -279,7 +279,7 @@ export const common = {
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     'Pour consulter, replanifier ou annuler une réservation, ouvrez le lien de votre e-mail de confirmation ou celui que vous avez conservé lors de la réservation. Pour votre sécurité, il est retiré de la barre d’adresse après ouverture ; vous devrez donc utiliser à nouveau le lien pour recharger cette page.',
   'Too many requests from your network. Try again in {0} seconds.':
-    'Trop de requêtes depuis votre réseau. Réessayez dans {0} secondes.',
+    'Trop de requêtes depuis votre réseau. Réessayez dans {0} s.',
   'Too many requests from your network. Wait a minute and try again.':
     'Trop de requêtes depuis votre réseau. Attendez une minute et réessayez.',
   'Too many requests. Wait a minute and try again.':
@@ -325,13 +325,13 @@ export const common = {
   'Your time zone ({0}) was not accepted. Change the time, pick another time zone and try again.':
     'Votre fuseau horaire ({0}) n’a pas été accepté. Changez l’horaire, choisissez un autre fuseau horaire et réessayez.',
   '1 time zone': '1 fuseau horaire',
-  '{0} time zones': '{0} fuseaux horaires',
+  '{0} time zones': 'Nombre de fuseaux horaires : {0}',
   '(since {0})': '(depuis {0})',
   'Enter your name.': 'Saisissez votre nom.',
   'Enter a name.': 'Saisissez un nom.',
   'Confirm your email address by signing in with an email link before using API keys':
     'Confirmez votre adresse e-mail en vous connectant par un lien reçu par e-mail avant d’utiliser les clés API',
-  'Reconnect Google Calendar': 'Reconnecter Google Calendar',
+  'Reconnect Google Calendar': 'Reconnecter Google Agenda',
   'Make another schedule the default before deleting this one':
     'Définissez un autre calendrier de disponibilités par défaut avant de supprimer celui-ci',
   '{0} Your booking is not confirmed yet.': '{0} Votre réservation n’est pas encore confirmée.',
@@ -341,7 +341,7 @@ export const common = {
   '{date}, available': '{date}, disponible',
   '{date}, no times available': '{date}, aucun horaire disponible',
   '{count} time available on {day}.': '{count} horaire disponible le {day}.',
-  '{count} times available on {day}.': '{count} horaires disponibles le {day}.',
+  '{count} times available on {day}.': 'Horaires disponibles le {day} : {count}.',
   '{count} day has available times this month.':
     '{count} jour propose des horaires disponibles ce mois-ci.',
   '{count} days have available times this month.':

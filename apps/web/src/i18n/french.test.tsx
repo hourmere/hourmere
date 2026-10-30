@@ -12,7 +12,7 @@ import {
   TOKEN,
 } from '../test/public-fixtures.ts'
 import { chooseLanguage } from './store.ts'
-import { dateMessage, translateMessage } from './translate.ts'
+import { dateMessage, msg, translateMessage } from './translate.ts'
 
 vi.mock('../public/env.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../public/env.ts')>()),
@@ -96,9 +96,67 @@ describe('French public booking language', () => {
 
   it('uses provider wording and identifies the time-zone search value as a UTC offset', () => {
     expect(translateMessage('fr', 'Join Google Meet')).toBe('Participer avec Google Meet')
+    expect(translateMessage('fr', 'Google Calendar')).toBe('Google Agenda')
+    expect(translateMessage('fr', 'Reconnect Google Calendar')).toBe('Reconnecter Google Agenda')
+    expect(
+      translateMessage(
+        'fr',
+        'The host needs to reconnect the original Google Calendar account before retrying.',
+      ),
+    ).toBe('L’hôte doit reconnecter le compte Google Agenda d’origine avant de réessayer.')
     expect(translateMessage('fr', 'Search by city or offset')).toBe(
       'Rechercher par ville ou décalage UTC',
     )
+  })
+
+  it('preserves uncertainty about why an event link is missing', async () => {
+    chooseLanguage('fr')
+    fakeApi({ 'GET /api/v1/public/ada/intro': () => json(404, { error: 'event_type_not_found' }) })
+    renderApp('/ada/intro')
+    expect(
+      await screen.findByText(
+        'Le lien comporte peut-être une erreur de saisie, ou l’hôte a peut-être supprimé ou renommé cet événement.',
+      ),
+    ).toBeDefined()
+  })
+
+  it.each([1, 2])('keeps the retry delay grammatical for %i seconds', async (seconds) => {
+    chooseLanguage('fr')
+    fakeApi({
+      'GET /api/v1/public/ada/intro': () =>
+        new Response(JSON.stringify({ error: 'rate_limited' }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json', 'Retry-After': String(seconds) },
+        }),
+    })
+    renderApp('/ada/intro')
+    expect(
+      await screen.findByText(`Trop de requêtes depuis votre réseau. Réessayez dans ${seconds} s.`),
+    ).toBeDefined()
+  })
+
+  it('announces zero time-zone matches without a plural agreement error', async () => {
+    const user = userEvent.setup()
+    chooseLanguage('fr')
+    fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
+    renderApp('/ada/intro')
+    await user.click(await screen.findByRole('button', { name: /Fuseau horaire/ }))
+    await user.type(
+      screen.getByRole('combobox', { name: 'Rechercher un fuseau horaire' }),
+      'atlantis',
+    )
+    expect(screen.getAllByRole('status').map((status) => status.textContent)).toContain(
+      'Nombre de fuseaux horaires : 0',
+    )
+  })
+
+  it.each([0, 1, 2])('keeps slot-count grammar and the date intact for %i slots', (count) => {
+    expect(
+      translateMessage(
+        'fr',
+        msg('{count} times available on {day}.', { count, day: 'lundi 2 novembre' }),
+      ),
+    ).toBe(`Horaires disponibles le lundi 2 novembre : ${count}.`)
   })
 
   it('distinguishes previous and new times on the move confirmation with French dates', async () => {
