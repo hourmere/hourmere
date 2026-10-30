@@ -93,7 +93,7 @@ const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => 
   if (selected.some((calendar) => calendar.syncError))
     return 'Synchronization needs attention. Review the failed calendars below.'
   if (selected.some((calendar) => !calendar.lastSyncedAt))
-    return 'Waiting for the first synchronization on selected calendars.'
+    return 'Synchronization is not ready for selected calendars yet.'
   if (!selected.length) return 'No calendars selected for conflict checks.'
   return 'Latest synchronization of selected conflict calendars succeeded.'
 }
@@ -210,7 +210,7 @@ export function CalendarsPage() {
     action: 'toggle' | 'sync' | 'destination',
     selected = false,
   ) {
-    setPending(id)
+    setPending(action === 'sync' ? `sync:${id}` : id)
     setError(null)
     try {
       if (action === 'toggle')
@@ -568,6 +568,15 @@ export function CalendarsPage() {
                               </Link>
                             </p>
                           )}
+                        <div
+                          aria-live="polite"
+                          aria-atomic="true"
+                          role={pending === `sync:${calendar.id}` ? 'status' : undefined}
+                        >
+                          {pending === `sync:${calendar.id}`
+                            ? t('Synchronizing busy times…')
+                            : null}
+                        </div>
                         {connection.provider === 'google' &&
                           (connection.syncAuthorized ||
                             calendar.checkConflicts ||
@@ -575,6 +584,7 @@ export function CalendarsPage() {
                             <fieldset
                               className="form-fieldset calendar-controls"
                               aria-labelledby={`calendar-${calendar.id}`}
+                              aria-busy={pending === `sync:${calendar.id}` || undefined}
                               disabled={pending !== null}
                             >
                               <label className="checkbox">
@@ -610,7 +620,7 @@ export function CalendarsPage() {
                                             ),
                                           })
                                         : t(
-                                            'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+                                            'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
                                           )}
                                   </p>
                                   <button

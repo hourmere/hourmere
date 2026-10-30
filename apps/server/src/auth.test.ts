@@ -956,6 +956,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
             memberIdOrEmail: aliceMemberId,
             organizationId: personal.id,
           }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
         )
         // Leaving has no Better Auth hook; with a second owner its own rule would allow it.
         await refused(

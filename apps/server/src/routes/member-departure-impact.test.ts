@@ -218,6 +218,29 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     expect(await other.json()).toEqual(denied)
   })
 
+  it('reports a single-host round-robin pool as having no remaining host', async () => {
+    const f = await fixture('admin')
+    await db
+      .updateTable('event_types')
+      .set({ scheduling_type: 'round_robin' })
+      .where('id', '=', f.eventId)
+      .execute()
+    const first = await get(f)
+    expect(first.status).toBe(200)
+    expect(MemberDepartureImpactSchema.parse(await first.json()).eventTypes.data).toMatchObject([
+      { id: f.eventId, reason: 'round_robin_pool_member', remainingHostCount: 0 },
+    ])
+    await db
+      .insertInto('event_type_hosts')
+      .values({ event_type_id: f.eventId, user_id: f.actor.id })
+      .execute()
+    const pooled = await get(f)
+    expect(pooled.status).toBe(200)
+    expect(MemberDepartureImpactSchema.parse(await pooled.json()).eventTypes.data).toMatchObject([
+      { id: f.eventId, reason: 'round_robin_pool_member', remainingHostCount: 1 },
+    ])
+  })
+
   it.each(['superadmin', 'ownerish', 'admin-helper', 'unknown'])(
     'uniformly denies unknown or substring role %s',
     async (role) => {
@@ -371,6 +394,20 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     expect(document.paths[path]?.get?.security).toEqual([{ session: [] }])
     expect(Object.keys(document.paths[path]?.get?.responses ?? {})).toEqual(['200', '400', '403'])
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
+    expect(document.components?.schemas?.MemberDepartureImpact).toMatchObject({
+      properties: {
+        eventTypes: {
+          properties: {
+            data: {
+              items: {
+                properties: { remainingHostCount: { type: 'integer', minimum: 0 } },
+                required: expect.arrayContaining(['remainingHostCount']),
+              },
+            },
+          },
+        },
+      },
+    })
   })
 
   function sourceCopy(
@@ -418,8 +455,35 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
   }
 
+  async function verifyRemainingHostSchema(factory: typeof memberDepartureImpactRoutes) {
+    const document = await openApiDocument(application([factory({ db, now })]))
+    expect(document.components?.schemas?.MemberDepartureImpact).toMatchObject({
+      properties: {
+        eventTypes: {
+          properties: {
+            data: {
+              items: {
+                properties: { remainingHostCount: { type: 'integer', minimum: 0 } },
+                required: expect.arrayContaining(['remainingHostCount']),
+              },
+            },
+          },
+        },
+      },
+    })
+  }
+
   it('passes the OpenAPI assertion with an unmodified source copy', async () => {
     await verifyOpen(sourceCopy())
+    await verifyRemainingHostSchema(sourceCopy())
+  })
+
+  it('detects losing the additive remaining-host field from the published schema', async () => {
+    const copy = sourceCopy([
+      'const DepartureEventType = z.object(MemberDepartureEventTypeSchema.shape)',
+      'const DepartureEventType = z.object(MemberDepartureEventTypeSchema.shape).omit({ remainingHostCount: true })',
+    ])
+    await expect(verifyRemainingHostSchema(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
   it.each<[string, [string, string]]>([

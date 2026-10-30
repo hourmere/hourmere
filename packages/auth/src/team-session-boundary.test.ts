@@ -21,6 +21,7 @@ import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
 import { ensurePersonalOrganization, isUuid, personalOwner } from './organizations.ts'
+import { fixedTeamRole, teamRoleDenied } from './team-role-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:43830'
@@ -392,6 +393,8 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
       organizationContext,
       isUuid,
       personalOwner,
+      fixedTeamRole,
+      teamRoleDenied,
     }
     return new Function(...Object.keys(bindings), `${source}; return beforeHook`)(
       ...Object.values(bindings),

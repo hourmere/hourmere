@@ -77,6 +77,11 @@ export {
   type TeamManager,
   teamRoles,
 } from './team-management.ts'
+export {
+  removeTeamMember,
+  type TeamMemberRemoval,
+  type TeamMemberRemovalInput,
+} from './team-member-removal.ts'
 
 /** Separate lock connections cannot starve the handler's auth/application query pools. */
 class AuthPool extends pg.Pool {
