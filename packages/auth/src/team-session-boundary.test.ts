@@ -369,6 +369,27 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
     expect(organization?.id).toBe(f.organizationId)
   })
 
+  it('keeps standalone auth invitation fixtures usable without server job wiring', async () => {
+    const f = fixtures.get('owner') as Fixture
+    const response = await request(f, {
+      path: 'invite-member',
+      method: 'POST',
+      body: { organizationId: f.organizationId, email: `${randomUUID()}@example.test` },
+    })
+    expect(response.status).toBe(200)
+    const invitation = (await response.json()) as {
+      id: string
+      delivery: { generation: number; state: string; attempts: number }
+    }
+    expect(invitation.delivery).toEqual({ generation: 1, state: 'queued', attempts: 0 })
+    const delivery = await db
+      .selectFrom('invitation_deliveries')
+      .select(['generation', 'state', 'attempts'])
+      .where('invitation_id', '=', invitation.id)
+      .executeTakeFirstOrThrow()
+    expect(delivery).toEqual(invitation.delivery)
+  })
+
   function sourceCopy(removeBoundary: boolean): typeof beforeHook {
     let source = readFileSync('packages/auth/src/hooks.ts', 'utf8')
     if (removeBoundary) {

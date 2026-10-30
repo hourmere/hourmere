@@ -18,6 +18,12 @@ export type ReserveInvitationEmail = (
   now: Date,
 ) => Promise<boolean>
 
+/** The server queues durable delivery work without importing its jobs into auth. */
+export type EnqueueInvitationEmail = (payload: {
+  invitationId: string
+  generation: number
+}) => Promise<void>
+
 const denied = teamRoleDenied
 const invalid = () =>
   new APIError('BAD_REQUEST', {
@@ -57,6 +63,7 @@ export async function manageInvitation(
     expectedOrganizationId?: string | null
     requireContext?: boolean
     reserve?: ReserveInvitationEmail | undefined
+    enqueue?: EnqueueInvitationEmail | undefined
   } = {},
 ) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw invalid()
@@ -108,7 +115,7 @@ export async function manageInvitation(
   const email = input.email.trim().toLowerCase()
   const requestId = typeof input.requestId === 'string' ? input.requestId.toLowerCase() : undefined
 
-  return db
+  const admitted = await db
     .transaction()
     .setIsolationLevel('read committed')
     .execute(async (trx) => {
@@ -296,6 +303,37 @@ export async function manageInvitation(
         .executeTakeFirstOrThrow()
       return result(invitation, delivery)
     })
+  // Admission is already committed: queue failure must not discard the invitation or
+  // its due delivery intent. The repairer can enqueue that same generation later.
+  if (options.enqueue && admitted.delivery.state === 'queued') {
+    try {
+      await options.enqueue({
+        invitationId: admitted.id,
+        generation: admitted.delivery.generation,
+      })
+    } catch {
+      // Cancellation or acceptance can win after admission commits. A fresh read
+      // distinguishes that unavailable invitation from a retryable queue outage.
+      let retired = false
+      try {
+        const current = await db
+          .selectFrom('auth.invitation')
+          .select(['status', 'expiresAt'])
+          .select(sql<Date>`clock_timestamp()`.as('now'))
+          .where('id', '=', admitted.id)
+          .executeTakeFirst()
+        retired = current?.status !== 'pending' || current.expiresAt <= current.now
+      } catch {
+        // A failed recheck cannot establish eligibility; preserve the safe queue error.
+      }
+      if (retired) throw ineligible()
+      throw new APIError('SERVICE_UNAVAILABLE', {
+        code: 'INVITATION_DELIVERY_UNAVAILABLE',
+        message: 'The invitation was saved, but delivery could not be queued. Try again later.',
+      })
+    }
+  }
+  return admitted
 }
 
 function result<T>(
@@ -316,6 +354,7 @@ export async function invitationRules(
   ctx: AuthMiddlewareContext,
   db: Db,
   reserve?: ReserveInvitationEmail,
+  enqueue?: EnqueueInvitationEmail,
 ) {
   if (ctx.path !== '/organization/invite-member') return
   if (ctx.request && ctx.request.headers.get('origin') !== new URL(ctx.context.baseURL).origin)
@@ -337,6 +376,7 @@ export async function invitationRules(
           requireContext: Boolean(ctx.request),
           expectedOrganizationId: ctx.request?.headers.get('x-expected-organization-id'),
           reserve,
+          enqueue,
         },
       ),
     )

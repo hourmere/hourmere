@@ -15,7 +15,7 @@ import type { Principal } from './caller.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { sanitizeInitialDisplayName } from './display-name.ts'
 import { beforeHook } from './hooks.ts'
-import type { ReserveInvitationEmail } from './invitations.ts'
+import type { EnqueueInvitationEmail, ReserveInvitationEmail } from './invitations.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
 import { mcpOAuthPlugins } from './mcp-oauth.ts'
@@ -165,6 +165,8 @@ export interface AuthConfig {
     | undefined
   /** Invitation admission uses its own recipient domain under the shared mail-budget lock. */
   reserveInvitationEmail?: ReserveInvitationEmail | undefined
+  /** Runs after invitation admission commits; omitted by independent auth fixtures. */
+  enqueueInvitationEmail?: EnqueueInvitationEmail | undefined
   /** Who may create an account (SIGNUP); the same policy the pool was created with. */
   signup: SignupPolicy
   /** Each provider is enabled only when configured. */
@@ -196,6 +198,7 @@ export function createAuth({
   mailer,
   queueSignInEmail,
   reserveInvitationEmail,
+  enqueueInvitationEmail,
   signup,
   socialProviders = {},
   socialProviderOptions = {},
@@ -353,7 +356,9 @@ export function createAuth({
         },
       },
     },
-    hooks: { before: beforeHook(db, teamRolePolicy.before, reserveInvitationEmail) },
+    hooks: {
+      before: beforeHook(db, teamRolePolicy.before, reserveInvitationEmail, enqueueInvitationEmail),
+    },
     plugins: [
       {
         id: 'sign-in-token-updates',

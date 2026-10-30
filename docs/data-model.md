@@ -358,9 +358,9 @@ Existing pending, unexpired invitations are backfilled as
 `failed/legacy_delivery_unknown`, with generation 1 and zero attempts; other invitations
 and the sign-in mail tables are preserved. This prevents later repair from silently
 resending historic invitations with unknown mail outcomes. Restart every role with the
-new version. This migration installs storage and queries only; sender, queue registration,
-reconciliation and management integration are separate work. Explicit resend will extend
-expiry under the approved protocol; it is not implemented by these storage queries.
+new version. The migration itself installs storage and queries; management and queue
+integration are application code. Explicit resend extends expiry under the approved
+protocol, independently of these storage queries.
 
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
@@ -379,8 +379,22 @@ existing global mail-budget lock without debiting the shared sending allowance i
 shared capacity at send time. Both ledgers retain two days. Every admission record
 requires its recipient hash; migration 0043 creates this ledger without changing earlier
 shared mail accounting.
-The invitation sender, job queue and reconciler remain separate work; queued intent alone
-does not send mail or claim SMTP acceptance.
+After admission commits, the request dispatches its current queued generation through an
+injected dependency. A second short transaction locks invitation before delivery and
+commits the exclusive pg-boss job together with `last_job_id`. A queue exception or null
+enqueue rolls back only that dispatch; the admitted queued record and its due time remain
+available for request retry or periodic repair. A narrow adapter pinned to pg-boss 12.38.0
+checks job identity, exact payload, singleton key, live state and expiry without a foreign
+key into pg-boss, using pg-boss's own clock for job expiry. An unsupported pg-boss version
+fails job startup with a compatibility message. Startup and minute repair scans use bounded,
+fair cursor batches. A failed startup scan is logged and the minute schedule retries it.
+The repairer skips obsolete business states before enqueueing. No delivery consumer is
+registered yet, so current pending jobs remain `created`. After the 24-hour waiting
+retention expires and pg-boss removes the job, repair can create one replacement for a
+still-eligible generation; later scans reuse that live replacement. A queued job may remain
+after its generation is skipped or superseded. The future sender must reread the current
+delivery state and generation, invitation status and expiry before sending. An obsolete
+job cannot modify a successor's row.
 
 ## Guest recipients
 

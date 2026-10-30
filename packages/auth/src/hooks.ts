@@ -2,7 +2,11 @@ import type { Db } from '@hourmere/db'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
 import { displayNameRules } from './display-name.ts'
-import { invitationRules, type ReserveInvitationEmail } from './invitations.ts'
+import {
+  type EnqueueInvitationEmail,
+  invitationRules,
+  type ReserveInvitationEmail,
+} from './invitations.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
@@ -117,6 +121,7 @@ export function beforeHook(
   db: Db,
   teamRolePolicy: (ctx: AuthMiddlewareContext) => Promise<void>,
   reserveInvitationEmail?: ReserveInvitationEmail,
+  enqueueInvitationEmail?: EnqueueInvitationEmail,
 ) {
   return createAuthMiddleware(async (ctx) => {
     requireOrganizationSession(ctx)
@@ -137,7 +142,12 @@ export function beforeHook(
     ) {
       throw teamRoleDenied()
     }
-    const invitation = await invitationRules(ctx, db, reserveInvitationEmail)
+    const invitation = await invitationRules(
+      ctx,
+      db,
+      reserveInvitationEmail,
+      enqueueInvitationEmail,
+    )
     if (invitation) return invitation
     await organizationContext(ctx, db)
     await teamRolePolicy(ctx)
