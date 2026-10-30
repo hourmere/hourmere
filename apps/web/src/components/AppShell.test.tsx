@@ -35,6 +35,7 @@ vi.mock('../session.tsx', () => ({
 
 beforeEach(() => {
   session.me.organization = { id: 'personal-space', name: 'Ada', slug: 'ada', personal: true }
+  session.me.principal.kind = 'session'
   session.accept.mockClear()
   fakeApi({})
 })
@@ -61,6 +62,15 @@ function shell(path = '/app/event-types') {
 }
 
 describe('admin shell layout', () => {
+  it('offers space switching only to browser sessions', () => {
+    session.me.principal.kind = 'api_key'
+    const api = fakeApi({})
+    shell()
+    expect(screen.queryByRole('button', { name: /^Switch space/ })).toBeNull()
+    expect(api.to('GET /api/auth/organization/list')).toHaveLength(0)
+    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(0)
+  })
+
   it('keeps navigation and the header mounted while a route chunk suspends', () => {
     const Pending = lazy(() => new Promise<{ default: () => null }>(() => {}))
     render(

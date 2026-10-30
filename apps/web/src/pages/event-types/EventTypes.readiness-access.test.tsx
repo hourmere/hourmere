@@ -176,16 +176,19 @@ describe('team event readiness access', () => {
       chooseLanguage(language)
       const user = userEvent.setup()
       const membership = later()
-      const api = server('member', { [MEMBER_ROUTE]: () => membership.response })
+      const api = server('member', {
+        // The header and event list independently read the same live membership.
+        [MEMBER_ROUTE]: () => membership.response.then((response) => response.clone()),
+      })
       await open()
-      await waitFor(() => expect(api.to(MEMBER_ROUTE)).toHaveLength(1))
+      await waitFor(() => expect(api.to(MEMBER_ROUTE)).toHaveLength(2))
       expect(api.to(READINESS_ROUTE)).toHaveLength(0)
       await membership.answer(json(200, member('member')))
       expect(api.to(READINESS_ROUTE)).toHaveLength(0)
       await waitFor(() => expectChecksHidden(language))
       await user.click(screen.getByRole('button', { name: labels[language].copy }))
       expectChecksHidden(language)
-      expect(api.to(MEMBER_ROUTE)).toHaveLength(1)
+      expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
       expect(api.to(READINESS_ROUTE)).toHaveLength(0)
       expect(api.to('GET /api/v1/readiness/self')).toHaveLength(0)
       expect(api.to('GET /api/v1/event-types')).toHaveLength(1)
@@ -206,7 +209,7 @@ describe('team event readiness access', () => {
       await waitFor(() => expectChecksHidden(language))
       await user.click(screen.getByRole('button', { name: labels[language].copy }))
       expectChecksHidden(language)
-      expect(api.to(MEMBER_ROUTE)).toHaveLength(1)
+      expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
       expect(api.to(READINESS_ROUTE)).toHaveLength(1)
     },
   )
@@ -226,7 +229,7 @@ describe('team event readiness access', () => {
     const row = screen.getByRole('rowheader', { name: 'Intro call' }).closest('tr') as HTMLElement
     expect(within(row).getByText(labels[language].passed)).toBeDefined()
     expect(screen.queryByRole('button', { name: labels[language].retry })).toBeNull()
-    expect(api.to(MEMBER_ROUTE)).toHaveLength(1)
+    expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
     expect(api.to(READINESS_ROUTE)).toHaveLength(1)
   })
 
@@ -249,17 +252,19 @@ describe('team event readiness access', () => {
 
   it('keeps a failed role read retryable without prematurely requesting readiness', async () => {
     const user = userEvent.setup()
-    let attempts = 0
+    let roleAvailable = false
     const api = server('owner', {
       [MEMBER_ROUTE]: () =>
-        ++attempts === 1 ? json(503, { error: 'unavailable' }) : json(200, member('owner')),
+        roleAvailable ? json(200, member('owner')) : json(503, { error: 'unavailable' }),
     })
     await open()
     await screen.findByText('Configuration check failed')
+    expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
     expect(api.to(READINESS_ROUTE)).toHaveLength(0)
+    roleAvailable = true
     await user.click(screen.getByRole('button', { name: 'Retry checks' }))
     await screen.findByText('Configuration checks passed')
-    expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
+    expect(api.to(MEMBER_ROUTE)).toHaveLength(3)
     expect(api.to(READINESS_ROUTE)).toHaveLength(1)
   })
 

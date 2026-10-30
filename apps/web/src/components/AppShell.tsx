@@ -146,7 +146,7 @@ export function AppShell() {
             <button type="button" className="button button-small" onClick={handleSignOut}>
               {t('Sign out')}
             </button>
-            <SpaceSwitcher onError={setSpaceError} />
+            {me.principal.kind === 'session' && <SpaceSwitcher onError={setSpaceError} />}
           </div>
         </div>
       </header>

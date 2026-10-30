@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
@@ -308,8 +308,10 @@ describe('accept invitation entry', () => {
     await user.click(screen.getByRole('link', { name: 'Inspect organization' }))
     await screen.findByRole('heading', { name: 'Settings', level: 1 })
     expect(screen.getByText('Organization').nextElementSibling?.textContent).toBe('Team Alpha')
-    await screen.findByText('Member', { exact: true })
-    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(1)
+    const account = screen.getByRole('region', { name: 'Account' })
+    await within(account).findByText('Member', { exact: true })
+    // Both Settings and the shared selector confirm the current membership once.
+    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(2)
     expect(api.to(acceptRoute)).toHaveLength(1)
   })
 })
