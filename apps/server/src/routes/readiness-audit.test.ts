@@ -327,6 +327,8 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness privacy and HTTP query aud
       // Exact values close every string channel, including names, labels and reasons.
       expect(body).toEqual(f.expected)
       const { body: self } = await read<SelfPage>(selfPath, sessionCookie)
+      // A manager's own readiness must not carry a teammate's private data either.
+      assertNoCanaries(self, f.canaries)
       expect(self.member.details).toEqual({ schedules: [], calendars: [] })
       expect(self.eventTypes.data).toEqual([])
     }
