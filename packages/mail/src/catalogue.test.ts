@@ -45,3 +45,18 @@ describe('mail catalogue coverage', () => {
     )
   })
 })
+
+describe('Spanish mail punctuation', () => {
+  const texts = (value: unknown): string[] =>
+    typeof value === 'string'
+      ? [value]
+      : value && typeof value === 'object'
+        ? Object.values(value).flatMap(texts)
+        : []
+
+  it('opens every Spanish mail question and exclamation', () => {
+    for (const translation of texts(mailCatalogues.es))
+      for (const sentence of translation.match(/[^.!?]*[?!]/gu) ?? [])
+        expect(sentence, translation).toMatch(sentence.endsWith('?') ? /¿[^¿]*\?$/u : /¡[^¡]*!$/u)
+  })
+})
