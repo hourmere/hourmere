@@ -61,6 +61,10 @@ export const BookingsPage = page(
   () => import('./pages/bookings/Bookings.tsx'),
   (m) => m.BookingsPage,
 )
+export const TeamBookingsPage = page(
+  () => import('./pages/team-bookings/TeamBookings.tsx'),
+  (m) => m.TeamBookingsPage,
+)
 export const BookingDetailPage = page(
   () => import('./pages/bookings/BookingDetail.tsx'),
   (m) => m.BookingDetailPage,

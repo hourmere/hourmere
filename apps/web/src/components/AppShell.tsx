@@ -5,6 +5,7 @@ import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
+import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { InstanceLegalLinks } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
@@ -15,6 +16,7 @@ export const NAV_ITEMS = [
   { to: PATHS.eventTypes, label: 'Event types' },
   { to: PATHS.availability, label: 'Availability' },
   { to: PATHS.bookings, label: 'Bookings' },
+  { to: PATHS.teamBookings, label: 'Team bookings' },
   { to: PATHS.analytics, label: 'Booking activity' },
   { to: PATHS.conferences, label: 'Conference accounts' },
   { to: PATHS.calendars, label: 'Calendars' },
@@ -41,7 +43,16 @@ function keepActiveVisible(list: HTMLUListElement) {
 
 /** The frame around signed-in pages: header, navigation and the page itself. */
 export function AppShell() {
+  return (
+    <TeamManagementProvider>
+      <Shell />
+    </TeamManagementProvider>
+  )
+}
+
+function Shell() {
   const { locale, t, ui } = useI18n()
+  const teamAccess = useTeamManagementAccess()
 
   const me = useMe()
   const { signOut, notice, setNotice } = useSession()
@@ -173,7 +184,11 @@ export function AppShell() {
           data-scroll-end={navEdges.end}
         >
           <ul data-layout-scroll="horizontal">
-            {NAV_ITEMS.map((item) => (
+            {NAV_ITEMS.filter(
+              (item) =>
+                item.to !== PATHS.teamBookings ||
+                (teamAccess.status === 'ready' && teamAccess.role !== null),
+            ).map((item) => (
               <li key={item.to}>
                 <NavLink to={item.to}>{ui(item.label)}</NavLink>
               </li>
