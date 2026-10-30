@@ -387,7 +387,9 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
 
   it('registers the production route and both page parameters in OpenAPI', async () => {
     const f = await fixture('owner')
-    const app = application(productRoutes({ db, socialProviders: {} }))
+    const app = application(
+      productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+    )
     const response = await get(f, f.target.id, {}, app)
     expect(response.status).toBe(200)
     const document = await openApiDocument(app)

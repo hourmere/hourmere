@@ -17,6 +17,7 @@ import { publicRoutes } from './public.ts'
 import { readinessRoutes } from './readiness.ts'
 import { scheduleRoutes } from './schedules.ts'
 import { teamBookingRoutes } from './team-bookings.ts'
+import { teamInvitationRoutes } from './team-invitations.ts'
 import { webhookRoutes } from './webhooks.ts'
 
 export const PUBLIC_URL = 'http://localhost:3000'
@@ -68,6 +69,7 @@ export const productRoutes = (db: Db) => [
   publicRoutes({ db }),
   bookingRoutes({ db }),
   teamBookingRoutes({ db }),
+  teamInvitationRoutes({ db, invitationMailLimits: { secret: 'synthetic-route-test-only' } }),
   memberDepartureImpactRoutes({ db }),
   memberRemovalRoutes({ db }),
   analyticsRoutes({ db }),

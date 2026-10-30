@@ -122,3 +122,9 @@ booking, so the new time may overlap it. A host move returns the successor booki
 `manageToken: null` and preserves existing invitee links. The web booking detail page uses
 these same public APIs. Do not retry a move automatically; inspect your booking list if
 the answer is lost.
+
+Team owners/admins can also read `GET /api/v1/team/invitations` using a verified browser
+session in the current team. It returns paginated invitation lifecycle and safe current
+delivery state, attempts, fixed error classification and current resend eligibility.
+Expiry uses the database clock. API keys and OAuth are denied, including alongside a
+session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).

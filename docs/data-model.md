@@ -196,6 +196,12 @@ calendar-list access.
   address only when its inviter has a currently allowed email domain or is the earliest
   remaining auth user (creation time, then ID). Creating a team or accepting an invitation
   grants no registration authority. Existing invitations follow the current policy.
+- **Every team retains an owner through membership management.** Departure, removal and
+  demotion take the same organization row write lock before checking current owner role
+  tokens and writing the membership. Native and REST management paths share this rule.
+  Owners cannot be demoted or administratively removed; only their own safe departure
+  is allowed. Team deletion and ownership transfer are unavailable at launch; rejected
+  deletion requests cannot cascade into booking history.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
@@ -323,6 +329,22 @@ The notification package's storage query lists pending, unexpired invitations in
 organization with their delivery summaries. A missing delivery row reads as `unknown`,
 which provides no evidence of sending. Callers must authorize access to the organization
 before using this internal query; no HTTP endpoint is installed by the storage layer.
+
+The server's session-only `GET /api/v1/team/invitations` separately lists all invitation
+lifecycle states for the current team's verified owners/admins. It returns a strict safe
+delivery summary and shares resend eligibility and request-budget checks with the write
+path. Pending expiry uses a materialized database-clock value, with terminal statuses
+preserved. Missing delivery rows read as unknown. Migration 0044 adds nullable
+`last_attempt_at` without rewriting or guessing legacy rows. The
+`invitation_delivery_attempt_time` trigger owns this column: senders, including the future
+invitation sender, must omit it from writes. Explicit INSERT or UPDATE values are
+overwritten. Inserts with a consumed attempt, attempt-count increases and generation
+changes with a consumed attempt record `clock_timestamp()`; zero attempts clear the
+column, and other updates preserve its previous value. `lastAttemptAt` is null before any
+attempt or when the historical time is unknown; `updated_at` is not treated as an attempt
+timestamp. Existing writers that increment attempts need no change. See the
+[invitation delivery design notes](https://hourmere.com/docs/notifications#team-invitation-delivery-design-notes).
+See the [API contract](https://hourmere.com/docs/api-conventions#team-invitation-delivery-summaries).
 
 Every delivery row remains while its invitation is pending and unexpired, including
 terminal delivery outcomes. Cleanup takes bounded batches, locks invitations before

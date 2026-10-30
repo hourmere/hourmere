@@ -116,6 +116,7 @@ export const test = base.extend<{
         webDist: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
         routes: productRoutes({
           db,
+          invitationMailLimits: { secret },
           publicUrl: url,
           socialProviders: {},
           ...(zoomEnabled && {

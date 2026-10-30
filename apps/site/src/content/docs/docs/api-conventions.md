@@ -276,17 +276,80 @@ cannot be resent or accepted. Revoke them and issue a new member invitation inst
 Acceptance still requires the exact invited, verified email and does not depend on the
 session's active organization. Registration continues to follow the instance's signup policy.
 
-Only a current verified team owner may change a non-owner's role between `admin` and
-`member`. Admins cannot change roles, including their own. Assigning `owner`, changing an
-existing owner's role and custom role assignments are unavailable. Existing teams with
-multiple owners retain their memberships and management access. Stored comma-separated
+Only a current verified team owner may assign the fixed `admin` or `member` role.
+Owner targets cannot be demoted, including by themselves; only their own safe departure
+is allowed. Admins cannot change roles, including their own. Assigning `owner` and custom roles is
+unavailable; full ownership transfer is not offered at launch. Stored comma-separated
 roles are checked as exact role tokens.
+
+Role changes, removal and departure retain the same organization row `FOR UPDATE` lock
+and defensive current-owner check inside the membership write transaction. Owner-target
+role changes and administrative removals receive the uniform access denial before any
+write. A safe departure that would leave no owner returns
+`409 member_departure_owner_required`, with
+`handling.nextStep: add_another_owner_first` and message "The team must retain at least
+one owner." The existing `handling.owner: another_owner_is_needed_before_you_can_leave`
+remains for compatibility.
+Native Better Auth responses use `{code,message,handling}`; REST uses
+`{error,message,handling}`. Concurrent conflicting changes can commit only one loss of
+ownership. A caller whose authority has already been revoked receives the ordinary access
+denial instead.
+
+Team deletion at `/api/auth/organization/delete` returns
+`403 TEAM_OPERATION_NOT_SUPPORTED`, including trusted server-side calls, before any
+cascade can delete booking history. Owner assignments through `update-member-role`
+return `403 TEAM_MANAGEMENT_ACCESS_DENIED`; this instance exposes no separate ownership
+transfer endpoint. Personal-organization protections remain unchanged.
 
 These rules apply to direct Better Auth requests as well as the web app. Policy denials
 use HTTP 403 `TEAM_MANAGEMENT_ACCESS_DENIED` in Better Auth's error shape; missing and
 inaccessible role targets receive the same denial. Browser context mismatches retain the
 409 response above. The server-only Better Auth add-member operation is not an HTTP
 onboarding path; joining a team requires accepting a member invitation.
+
+### Team invitation delivery summaries
+
+`GET /api/v1/team/invitations` is Hourmere's own versioned read protocol, independent
+of Better Auth's invitation response schemas. It lists only the browser session's current
+team and requires a current verified owner/admin. Missing or invalid sessions, personal
+organizations, ordinary or removed members and any Authorization header receive the same
+`403 team_management_access_denied`, without `WWW-Authenticate`. Authorization headers
+are rejected before resolving API-key/OAuth credentials, even alongside a valid cookie.
+The route uses the shared team-management access middleware and rechecks current authority
+before reading invitations. It is session-only REST; MCP and CLI credentials grant no
+team invitation management authority.
+
+The envelope is `{data,nextCursor}`. `limit` accepts 1–100 (default 50); pass the opaque
+`nextCursor` as `cursor` in the same team until it is null. Ordering is invitation ID
+ascending, with an exclusive keyset boundary: deleting a previous row or inserting before
+the boundary does not shift later pages. Later inserts can appear. A cursor from another
+team returns `400 invalid_cursor`; malformed query parameters return `400 invalid_request`.
+
+Each item contains exactly these fields in the current implementation. Published OpenAPI
+response objects remain extensible for additive v1 changes.
+
+| Field | Meaning |
+|---|---|
+| `id` | Invitation UUID. |
+| `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
+| `createdAt` | Stored invitation creation time in UTC. |
+| `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
+| `delivery.state` | Current generation's `queued`, `sending`, `smtp_accepted`, `failed` or `skipped`; `unknown` if no delivery row remains. Queued includes waiting for retry; SMTP acceptance does not imply inbox delivery, reading or joining. |
+| `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
+| `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
+| `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |
+| `resendAllowed` | Current member-invitation eligibility, 60-second cooldown, generation cap, live sending lease, recipient membership and inviter/team/recipient request budgets, using the same rules as actual resend. This read spends no budget and reserves no permission; resend checks again. |
+
+Delivery error codes are `transport_error`, `smtp_auth`, `smtp_temporary`, `smtp_permanent`,
+`smtp_not_configured`, `mail_rate_limited`, `interrupted`, `attempts_exhausted`,
+`invitation_ineligible` and `legacy_delivery_unknown`. These are stored diagnostic
+classifications, distinct from the endpoint's HTTP errors. Expired, accepted, canceled,
+rejected or unknown invitations cannot be resent; elevated/custom historical roles are ineligible.
+An exhausted current generation can be explicitly resent if the new-generation rules allow it.
+
+No recipient address, inviter identity, role, message body, invitation link/token, credential,
+job ID, lease identity, resend request ID or raw third-party error is returned. The endpoint
+does not send mail or change the invitation or delivery records.
 
 ### Member departure preview
 
@@ -315,8 +378,12 @@ See the [full response and pagination contract](https://github.com/hourmere/hour
 
 `POST /api/v1/team/members/{memberUserId}/removal` accepts the strict body `{teamId}`
 and requires `X-Expected-Organization-Id`. A current verified owner can remove an admin
-or member; an admin can remove a member. Owner targets are refused. Missing and
-inaccessible members receive the same `403 team_management_access_denied`.
+or a member; an admin can remove a member only. Owner targets, administrative self targets,
+missing and inaccessible members receive the same `403 team_management_access_denied`
+before any write. Owner targets allow only the owner’s own safe departure. The locked
+write transaction retains a defensive owner count; its stable
+`409 member_departure_owner_required` uses message "The team must retain at least one
+owner." and `handling.nextStep: add_another_owner_first`.
 Missing or invalid sessions and any Authorization header, even with a valid session
 cookie, receive that same denial without a `WWW-Authenticate` challenge. Authorization
 headers are refused before credentials are resolved. Cookie writes require a same-origin
@@ -330,8 +397,10 @@ round-robin types are deactivated when no other current verified team host remai
 Personal event types and other teams are untouched. Existing bookings and saved hosts
 remain intact. Repair affected configurations and explicitly reactivate them before taking
 new bookings. For another member, Better Auth's native `remove-member` endpoint uses the
-same transaction and target policy, with its own response and error format. A self target
-uses safe team departure instead, including the owner and impact checks described below.
+same transaction and target policy, with its own response and error format. A native
+self target uses safe team departure instead, including the owner and impact checks
+described below. REST immediate removal refuses self targets; use the safe departure
+route so dependency checks and the personal-organization fallback run together.
 
 The REST response is `{operationId, memberUserId, deactivatedEventTypeIds}`.
 `GET /api/v1/team/member-removals/{operationId}?teamId={teamId}` lets current verified
@@ -360,10 +429,14 @@ headers are rejected before credential resolution. Stale context returns
 `409 organization_context_changed`; reload before retrying.
 
 An owner needs another current owner before leaving. The locked refusal is
-`409 member_departure_owner_required`, with the message "Another owner is needed before
-you can leave." and `handling.owner: another_owner_is_needed_before_you_can_leave`.
+`409 member_departure_owner_required`, with the message "The team must retain at least one
+owner." and `handling.owner: another_owner_is_needed_before_you_can_leave`.
 The owner check and the event/booking impact recheck share the membership transaction's
-organization write lock. Two owners leaving concurrently cannot both succeed.
+organization write lock. The handling object also includes
+`nextStep: add_another_owner_first`. Native `/organization/leave`, including an exact
+sole `owner` role, and self-directed native removal return the same stable 409 code.
+Two owners leaving concurrently cannot both succeed, including races with removal or
+demotion.
 Unresolved impact returns `409 member_departure_blocked` with bounded `impact` pages and
 handling steps. Success revokes membership and returns the personal `organizationId`.
 See the [full safe departure contract](https://github.com/hourmere/hourmere/blob/main/docs/member-leave.md).

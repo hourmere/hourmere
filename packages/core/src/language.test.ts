@@ -16,7 +16,7 @@ import {
 
 describe('shared locale registry', () => {
   it('offers public translations independently of admin and notification languages', () => {
-    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de', 'fr'])
+    expect(interfaceLanguages('public')).toEqual(['en', 'zh-CN', 'de', 'fr', 'es'])
     expect(interfaceLanguages('admin')).toEqual(['en', 'zh-CN'])
     expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
     expect(acceptLanguage('de-CH,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('de')
@@ -24,6 +24,9 @@ describe('shared locale registry', () => {
     expect(acceptLanguage('fr-CA,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
     expect(acceptLanguage('fr-CA,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('fr')
     expect(localeFallbacks('fr')).toEqual(['fr', 'en'])
+    expect(acceptLanguage('es-419,zh-CN;q=0.8,en;q=0.5', 'admin')).toBe('zh-CN')
+    expect(acceptLanguage('es-419,zh-CN;q=0.8,en;q=0.5', 'public')).toBe('es')
+    expect(localeFallbacks('es')).toEqual(['es', 'en'])
     const fixture = createLocaleResolver({
       ...localeRegistry,
       qaa: {
@@ -71,6 +74,30 @@ describe('shared locale registry', () => {
       ).toBe('27 octobre 2026 à 15:30')
     },
   )
+
+  it.each(['es', 'es-ES', 'es-MX', 'es-419', 'es-AR', 'es-CO', 'es-US', 'ES-cl'])(
+    'negotiates %s and formats Spanish dates through registry metadata',
+    (value) => {
+      expect(interfaceLanguage(value)).toBe('es')
+      expect(acceptLanguage(`qaa,${value};q=0.8,en;q=0.5`, 'public')).toBe('es')
+      expect(formattingLocale('es')).toBe('es-ES')
+      expect(
+        new Intl.DateTimeFormat(formattingLocale('es'), {
+          calendar: 'gregory',
+          timeZone: 'UTC',
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }).format(new Date('2026-10-27T15:30:00Z')),
+      ).toBe('27 de octubre de 2026 a las 15:30')
+    },
+  )
+
+  it('negotiates Spanish quality preferences while retaining the English unknown fallback', () => {
+    expect(acceptLanguage('es-MX;q=0.5,fr-CA;q=0.9,en;q=0.8', 'public')).toBe('fr')
+    expect(acceptLanguage('es-419;q=0,es-US;q=0.9,en;q=0.8', 'public')).toBe('es')
+    expect(acceptLanguage('es-MX;q=broken,en;q=0.5', 'public')).toBe('en')
+    expect(acceptLanguage('qaa,not_a_locale', 'public')).toBe('en')
+  })
 
   it('provides language metadata and explicit choices from the same entries', () => {
     expect(localeCodes).toEqual(Object.keys(localeRegistry))
@@ -158,9 +185,12 @@ describe('shared locale registry', () => {
 })
 
 describe('bounded interface language preferences', () => {
-  it.each(['en', 'zh-CN', 'de', 'fr'] as const)('accepts only the explicit value %s', (value) => {
-    expect(explicitLanguage(value)).toBe(value)
-  })
+  it.each(['en', 'zh-CN', 'de', 'fr', 'es'] as const)(
+    'accepts only the explicit value %s',
+    (value) => {
+      expect(explicitLanguage(value)).toBe(value)
+    },
+  )
   it.each([
     'EN',
     'zh',
@@ -168,6 +198,7 @@ describe('bounded interface language preferences', () => {
     'zh-TW',
     'en-US',
     'fr-CA',
+    'es-419',
     '__proto__',
     'constructor',
     '',
@@ -257,6 +288,8 @@ describe('bounded interface language preferences', () => {
 
 describe('server admin language precedence', () => {
   it.each([
+    [{ cookie: 'hourmere-language=es', acceptLanguage: 'es-MX' }, 'en'],
+    [{ cookie: 'hourmere-language=es', accountLocale: 'es-419', acceptLanguage: 'zh-CN' }, 'zh-CN'],
     [{ cookie: 'hourmere-language=de', acceptLanguage: 'zh-CN' }, 'zh-CN'],
     [{ cookie: 'hourmere-language=de', acceptLanguage: 'de-CH' }, 'en'],
     [{ cookie: 'hourmere-language=de', acceptLanguage: 'de-CH,zh-CN;q=0.8' }, 'zh-CN'],

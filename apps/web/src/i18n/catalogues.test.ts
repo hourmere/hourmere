@@ -49,6 +49,7 @@ describe('catalogue coverage and interpolation', () => {
   for (const [locale, name] of [
     ['de', 'German'],
     ['fr', 'French'],
+    ['es', 'Spanish'],
   ] as const)
     for (const group of ['common', 'widget'] as const) {
       it(`requires complete ${name} public ${group} messages`, () => {
@@ -65,6 +66,14 @@ describe('catalogue coverage and interpolation', () => {
         expect(catalogueCoverage(english, translated).malformed).toEqual([])
       })
     }
+
+  for (const group of ['common', 'widget'] as const)
+    it(`opens every Spanish public ${group} question and exclamation`, () => {
+      const spanish = groups[group][`./catalogues/es/${group}.ts`] ?? {}
+      for (const [key, translation] of Object.entries(spanish))
+        for (const sentence of translation.match(/[^.!?]*[?!]/gu) ?? [])
+          expect(sentence, key).toMatch(sentence.endsWith('?') ? /¿[^¿]*\?$/u : /¡[^¡]*!$/u)
+    })
 
   for (const group of ['common', 'widget'] as const)
     it(`keeps French non-breaking punctuation in every public ${group} message`, () => {

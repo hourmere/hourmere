@@ -24,6 +24,8 @@ import {
   signInRecipientHash,
 } from '../../../packages/notifications/src/mail-limits.ts'
 import { createApp } from './app.ts'
+import type { RouteModule } from './openapi.ts'
+import type { teamInvitationRoutes } from './routes/team-invitations.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4387'
@@ -75,11 +77,11 @@ function moduleUrl(source: string, location: URL, replacements: Record<string, s
   return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
 }
 
-async function authSourceCopy(
+async function authModuleSourceCopy(
   before: string,
   after: string,
   sourceFile = 'invitations.ts',
-): Promise<typeof createAuth> {
+): Promise<{ createAuth: typeof createAuth; url: string }> {
   const mutationLocation = new URL(`../../../packages/auth/src/${sourceFile}`, import.meta.url)
   const mutationSource = readFileSync(mutationLocation, 'utf8')
   expect(mutationSource.includes(before), 'mutation matches real auth source').toBe(true)
@@ -96,12 +98,21 @@ async function authSourceCopy(
     roleLocation,
     { './team-management.ts': managerUrl },
   )
+  const resendLocation = new URL('../../../packages/auth/src/invitation-resend.ts', import.meta.url)
+  const resendUrl =
+    sourceFile === 'invitation-resend.ts'
+      ? mutationUrl
+      : moduleUrl(readFileSync(resendLocation, 'utf8'), resendLocation)
   const serviceLocation = new URL('../../../packages/auth/src/invitations.ts', import.meta.url)
   const serviceSource = readFileSync(serviceLocation, 'utf8')
   const serviceUrl = moduleUrl(
     sourceFile === 'invitations.ts' ? serviceSource.replace(before, after) : serviceSource,
     serviceLocation,
-    { './team-management.ts': managerUrl, './team-role-policy.ts': roleUrl },
+    {
+      './team-management.ts': managerUrl,
+      './team-role-policy.ts': roleUrl,
+      './invitation-resend.ts': resendUrl,
+    },
   )
   const hookLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
   const hookUrl = moduleUrl(readFileSync(hookLocation, 'utf8'), hookLocation, {
@@ -109,13 +120,35 @@ async function authSourceCopy(
     './team-role-policy.ts': roleUrl,
   })
   const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
-  const copy = await import(
-    moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, {
-      './hooks.ts': hookUrl,
-      './team-role-policy.ts': roleUrl,
+  const url = moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, {
+    './hooks.ts': hookUrl,
+    './team-role-policy.ts': roleUrl,
+    './invitation-resend.ts': resendUrl,
+  })
+  const copy = await import(url)
+  return { createAuth: copy.createAuth, url }
+}
+
+async function authSourceCopy(before: string, after: string, sourceFile = 'invitations.ts') {
+  return (await authModuleSourceCopy(before, after, sourceFile)).createAuth
+}
+
+async function sharedAdmissionSourceCopy(before: string, after: string) {
+  const auth = await authModuleSourceCopy(before, after, 'invitation-resend.ts')
+  const summaryLocation = new URL('./team-invitations.ts', import.meta.url)
+  const summaryUrl = moduleUrl(readFileSync(summaryLocation, 'utf8'), summaryLocation, {
+    '@hourmere/auth': auth.url,
+  })
+  const routeLocation = new URL('./routes/team-invitations.ts', import.meta.url)
+  const route = await import(
+    moduleUrl(readFileSync(routeLocation, 'utf8'), routeLocation, {
+      '../team-invitations.ts': summaryUrl,
     })
   )
-  return copy.createAuth
+  return {
+    createAuth: auth.createAuth,
+    teamInvitationRoutes: route.teamInvitationRoutes as typeof teamInvitationRoutes,
+  }
 }
 
 describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and PostgreSQL', () => {
@@ -154,7 +187,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     }
   })
 
-  function instance(factory = createAuth) {
+  function instance(factory = createAuth, routes: RouteModule[] = []) {
     const auth = factory({
       pool,
       db,
@@ -172,6 +205,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
         resolveCaller: createCallerResolver({ auth, db }),
         checkDb: async () => {},
         publicUrl: origin,
+        routes,
       }),
     }
   }
@@ -1243,6 +1277,87 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await verifyFenceExpiry(copy)
     await verifyRollback(copy)
   }, 30_000)
+
+  it.each([
+    {
+      rule: 'role',
+      before: "if (invitation.role !== 'member')",
+      after: 'if (false)',
+      status: 403,
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+    },
+    {
+      rule: 'pending status',
+      before: "invitation.status !== 'pending' || invitation.expiresAt <= now",
+      after: 'false',
+      status: 409,
+      code: 'INVITATION_INELIGIBLE',
+    },
+    {
+      rule: 'expiry',
+      before: 'invitation.expiresAt <= now',
+      after: 'false',
+      status: 409,
+      code: 'INVITATION_INELIGIBLE',
+    },
+    {
+      rule: 'recipient membership',
+      before: 'return Boolean(member)',
+      after: 'return false',
+      status: 409,
+      code: 'INVITATION_RECIPIENT_ALREADY_MEMBER',
+    },
+  ])(
+    'detects one shared $rule mutation in both the HTTP summary and real resend',
+    async ({ rule, before, after, status, code }) => {
+      for (const mutate of [false, true]) {
+        const copy = await sharedAdmissionSourceCopy(before, mutate ? after : before)
+        const i = instance(copy.createAuth, [
+          copy.teamInvitationRoutes({ db, invitationMailLimits: { ...limits, secret } }),
+        ])
+        const a = await actor()
+        const invitation = await created(i, a)
+        await ageGeneration(invitation)
+        if (rule === 'recipient membership') {
+          const joined = await user(invitation.email)
+          await actor('member', a.organizationId, joined.id)
+        } else {
+          await db
+            .updateTable('auth.invitation')
+            .set(
+              rule === 'role'
+                ? { role: 'admin' }
+                : rule === 'expiry'
+                  ? { expiresAt: new Date(Date.now() - 1_000) }
+                  : { status: 'canceled' },
+            )
+            .where('id', '=', invitation.id)
+            .execute()
+        }
+        const summaryDenied = async () => {
+          const response = await i.app.request('/api/v1/team/invitations', {
+            headers: { cookie: a.cookie },
+          })
+          expect(response.status).toBe(200)
+          const page = (await response.json()) as {
+            data: { id: string; resendAllowed: boolean }[]
+          }
+          expect(page.data.find((entry) => entry.id === invitation.id)?.resendAllowed).toBe(false)
+        }
+        const resendDenied = async () => {
+          await error(await resend(i, a, invitation), status, code)
+        }
+        if (mutate) {
+          // Run both independently: an early summary failure cannot hide write-path drift.
+          await expect(summaryDenied()).rejects.toMatchObject({ name: 'AssertionError' })
+          await expect(resendDenied()).rejects.toMatchObject({ name: 'AssertionError' })
+        } else {
+          await summaryDenied()
+          await resendDenied()
+        }
+      }
+    },
+  )
   it.each<[string, string, string, (factory: typeof createAuth) => Promise<void>, string?]>([
     [
       'verified actor check',
@@ -1283,18 +1398,21 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       '(delivery?.updated_at ?? invitation.createdAt).getTime(),',
       '0,',
       verifyWorkerCooldown,
+      'invitation-resend.ts',
     ],
     [
       'explicit generation cooldown anchor',
       '(delivery?.generation_started_at ?? invitation.createdAt).getTime(),',
       '0,',
       verifyExplicitCooldown,
+      'invitation-resend.ts',
     ],
     [
       'resend cooldown',
       'now.getTime() - started.getTime() < 60_000',
       'now.getTime() - started.getTime() < 0',
       verifyCooldown,
+      'invitation-resend.ts',
     ],
     [
       'expected generation comparison',
@@ -1308,7 +1426,13 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       'generation === (input.expectedGeneration as number) + 2',
       verifyResendProtocol,
     ],
-    ['generation cap', 'if (generation >= 32)', 'if (false)', verifyGenerationCap],
+    [
+      'generation cap',
+      'if (generation >= 32)',
+      'if (false)',
+      verifyGenerationCap,
+      'invitation-resend.ts',
+    ],
     [
       'expiry extension',
       '.set({ expiresAt: new Date(now.getTime() + duration) })',
@@ -1332,16 +1456,18 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       "invitation.status !== 'pending' || invitation.expiresAt <= now",
       'false',
       verifyIneligible,
+      'invitation-resend.ts',
     ],
     [
       'live sending lease',
       "delivery?.state === 'sending' && delivery.lease_until && delivery.lease_until > now",
       'false',
       verifyBusy,
+      'invitation-resend.ts',
     ],
     [
       'expiry recheck after the global mail fence',
-      'if (invitation && invitation.expiresAt <= now) throw ineligible()',
+      "if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()",
       '',
       verifyFenceExpiry,
     ],

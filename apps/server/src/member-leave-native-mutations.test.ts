@@ -54,7 +54,7 @@ async function sourceCopy(mutation?: Mutation): Promise<NativeCopy> {
     expect(source.includes(mutation[0]), 'mutation must match the native departure policy').toBe(
       true,
     )
-    source = source.replace(...mutation)
+    source = source.replaceAll(...mutation)
   }
   const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
   const copied = await import(
@@ -288,8 +288,11 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       code: 'member_departure_owner_required',
-      message: 'Another owner is needed before you can leave.',
-      handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+      message: 'The team must retain at least one owner.',
+      handling: {
+        owner: 'another_owner_is_needed_before_you_can_leave',
+        nextStep: 'add_another_owner_first',
+      },
     })
     expect(await currentMembership(f)).toEqual({ id: f.memberId })
   }

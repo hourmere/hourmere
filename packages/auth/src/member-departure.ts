@@ -16,12 +16,15 @@ export class MemberDepartureBlockedError extends Error {
   }
 }
 
-/** Leave paths must retain at least one current owner under the organization write lock. */
+/** Membership writes retain at least one current owner under the organization write lock. */
 export class MemberDepartureOwnerRequiredError extends Error {
   readonly code = 'member_departure_owner_required'
-  readonly handling = { owner: 'another_owner_is_needed_before_you_can_leave' } as const
+  readonly handling = {
+    owner: 'another_owner_is_needed_before_you_can_leave',
+    nextStep: 'add_another_owner_first',
+  } as const
 
   constructor() {
-    super('Another owner is needed before you can leave.')
+    super('The team must retain at least one owner.')
   }
 }

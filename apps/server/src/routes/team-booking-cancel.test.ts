@@ -132,7 +132,12 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
         return result
       },
       routes: options.production
-        ? productRoutes({ db, socialProviders: {}, notify: notifier })
+        ? productRoutes({
+            db,
+            socialProviders: {},
+            invitationMailLimits: { secret: secret },
+            notify: notifier,
+          })
         : [
             bookings.bookingRoutes({ db, now: () => NOW, notify: notifier }),
             (options.factory ?? teamBookingRoutes)({ db, now: () => NOW, notify: notifier }),

@@ -3,6 +3,11 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import type { AuthMiddlewareContext } from './api-keys.ts'
+import {
+  invitationEligibilityDenial,
+  invitationRecipientIsMember,
+  invitationResendDeliveryDenial,
+} from './invitation-resend.ts'
 import { isUuid } from './organizations.ts'
 import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
 import { fixedTeamRole, recipientAlreadyMember, teamRoleDenied } from './team-role-policy.ts'
@@ -141,13 +146,7 @@ export async function manageInvitation(
 
       // Team admins may already list their own members. This fixed refusal reveals
       // no account existence outside that team and prevents duplicate memberships.
-      const recipient = await trx
-        .selectFrom('auth.member as m')
-        .innerJoin('auth.user as u', 'u.id', 'm.userId')
-        .select('m.id')
-        .where('m.organizationId', '=', organizationId)
-        .where(sql<string>`lower(btrim(u.email))`, '=', email)
-        .executeTakeFirst()
+      const recipient = await invitationRecipientIsMember(trx, organizationId, email)
       if (recipient) throw recipientAlreadyMember()
 
       let query = trx
@@ -160,7 +159,12 @@ export async function manageInvitation(
       const candidates = await query.orderBy('id').limit(2).forUpdate().execute()
       if (candidates.length > 1) throw conflict()
       let invitation = candidates[0]
-      if (invitation && invitation.role !== 'member') throw denied()
+      // Preserve the role refusal before waiting for a delivery lock.
+      if (
+        invitation &&
+        invitationEligibilityDenial(invitation, now) === 'TEAM_MANAGEMENT_ACCESS_DENIED'
+      )
+        throw denied()
       if (!invitation && (resend || input.invitationId !== undefined)) throw ineligible()
       let delivery = invitation
         ? await trx
@@ -173,7 +177,7 @@ export async function manageInvitation(
       // Row locks can wait beyond the invitation or session's remaining lifetime.
       now = await wallClock(trx)
       if (session.expiresAt <= now) throw denied()
-      if (invitation && (invitation.status !== 'pending' || invitation.expiresAt <= now))
+      if (invitation && invitationEligibilityDenial(invitation, now) === 'INVITATION_INELIGIBLE')
         throw ineligible()
 
       if (resend) {
@@ -187,25 +191,18 @@ export async function manageInvitation(
           return result(invitation, delivery)
         if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
           throw conflict()
-        if (generation >= 32)
+        const resendDenial = invitationResendDeliveryDenial(invitation, delivery, now)
+        if (resendDenial === 'INVITATION_GENERATION_LIMIT')
           throw new APIError('CONFLICT', {
             code: 'INVITATION_GENERATION_LIMIT',
             message: 'This invitation has reached its resend limit.',
           })
-        if (delivery?.state === 'sending' && delivery.lease_until && delivery.lease_until > now)
+        if (resendDenial === 'INVITATION_DELIVERY_BUSY')
           throw new APIError('CONFLICT', {
             code: 'INVITATION_DELIVERY_BUSY',
             message: 'Invitation delivery is in progress. Try again shortly.',
           })
-        // The future sender must update updated_at on every delivery attempt so
-        // the post-delivery cooldown starts again even within the same generation.
-        const started = new Date(
-          Math.max(
-            (delivery?.generation_started_at ?? invitation.createdAt).getTime(),
-            (delivery?.updated_at ?? invitation.createdAt).getTime(),
-          ),
-        )
-        if (now.getTime() - started.getTime() < 60_000)
+        if (resendDenial === 'INVITATION_RESEND_COOLDOWN')
           throw new APIError(
             'TOO_MANY_REQUESTS',
             {
@@ -248,7 +245,8 @@ export async function manageInvitation(
       // A shared mail-budget lock may have waited behind another bounded send.
       now = await wallClock(trx)
       if (session.expiresAt <= now) throw denied()
-      if (invitation && invitation.expiresAt <= now) throw ineligible()
+      const admissionDenial = invitation ? invitationEligibilityDenial(invitation, now) : null
+      if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()
       if (!invitation) {
         invitation = await trx
           .insertInto('auth.invitation')

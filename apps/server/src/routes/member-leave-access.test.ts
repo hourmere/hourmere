@@ -127,7 +127,9 @@ describe.skipIf(!serverUrl)('team leave session boundary', () => {
         resolved()
         return resolveCaller(headers)
       },
-      routes: production ? productRoutes({ db, socialProviders: {} }) : [factory({ db })],
+      routes: production
+        ? productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } })
+        : [factory({ db })],
     })
   }
 

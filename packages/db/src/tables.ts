@@ -524,6 +524,7 @@ export interface InvitationDeliveries {
   generation: Generated<number>;
   generation_started_at: Generated<Timestamp>;
   invitation_id: string;
+  last_attempt_at: Timestamp | null;
   last_error_code: string | null;
   last_job_id: string | null;
   lease_id: string | null;

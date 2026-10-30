@@ -127,21 +127,24 @@ below). Legacy host notifications retain their invitations and cancellations.
 ### Email language
 
 Booking emails use the shared [locale registry](/docs/interface-languages#development),
-currently English, Simplified Chinese, German and French, throughout the subject, plain text, HTML and
-user-facing calendar SUMMARY/DESCRIPTION. Each missing translated message falls back to
+currently English, Simplified Chinese, German, French and Spanish, throughout the subject,
+plain text, HTML and user-facing calendar SUMMARY/DESCRIPTION. Each missing translated message falls back to
 English independently; the selected locale still controls date/time formatting. The HTML `lang` matches the email language.
 The invitee's language comes from `booking_attendees.locale`, captured from the booking
 page's interface language at the first valid submission; changing the interface while
 retrying that submission keeps the original request and its language. REST/MCP callers can
 provide the same invitee locale. Guests follow the invitee's booking language. Each host
-uses their current profile locale independently. Supported English, Simplified Chinese, German and French
-BCP 47 tags map to registered language codes (`en`, `zh-CN`, `de` and `fr` today); missing, invalid or
+uses their current profile locale independently. Supported English, Simplified Chinese,
+German, French and Spanish BCP 47 tags map to registered language codes (`en`, `zh-CN`, `de`, `fr` and `es` today); missing, invalid or
 unsupported languages fall back to English. Reschedules retain the booking's saved language.
 Team invitation emails use an explicit language choice, then an instance default, then English.
 
 French regional preferences including `fr-CA`, `fr-BE` and `fr-CH` map to `fr`.
-German and French translations are AI-assisted (machine-translated), have not yet been reviewed by a
-native speaker, and corrections are welcome.
+Spanish regional preferences including `es-ES`, `es-MX`, `es-419`, `es-AR`, `es-CO` and
+`es-US` map to `es` and use `es-ES` date and time formatting without changing the recipient
+time zone.
+German, French and Spanish translations are AI-assisted (machine-translated), have not yet
+been reviewed by a native speaker, and corrections are welcome.
 
 Dates and times use that email language and the recipient time zone described above;
 language selection never changes the meeting instant or calendar UID/SEQUENCE. Titles,
@@ -629,6 +632,27 @@ so hosts must request a new link later, and all booking notification mail is sup
 never sent later. Existing sessions are unaffected. Operators can raise `MAIL_MAX_PER_HOUR`
 while keeping the cap, reserve and other mail within their provider's limit; raising it does
 not resend messages that were already suppressed.
+
+## Team invitation delivery design notes
+
+Team invitations keep their current delivery generation in `invitation_deliveries`,
+separate from the invitation's acceptance and expiry state. The delivery record contains
+the generation, bounded attempt count, due time, claim lease, job and resend request IDs,
+safe outcome/error code, SMTP acceptance time, creation/update times and nullable
+`last_attempt_at`. An SMTP acceptance does not mean that the recipient received, read or
+accepted the invitation. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
+and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
+
+Migration 0044 makes `last_attempt_at` exclusively owned by the
+`invitation_delivery_attempt_time` database trigger. The future invitation sender must
+not write this column; it records an attempt by incrementing `attempts`. The trigger
+overwrites any explicit INSERT or UPDATE value. Inserts with positive attempts,
+increased attempts and a changed generation with positive attempts receive the database's
+`clock_timestamp()`. Zero attempts clear the timestamp, including a new generation's
+reset; all other updates preserve the prior value. Outcome and metadata changes cannot
+fabricate an attempt time. Legacy rows remain null because their historical attempt
+times are unknown, even if their counters are positive. Senders must still update
+`updated_at` for the resend cooldown; it is separate from this attempt timestamp.
 
 ## Outbound booking webhooks
 

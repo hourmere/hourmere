@@ -7,6 +7,7 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  MemberDepartureOwnerRequiredError,
   removeTeamMember,
   TeamManagementError,
 } from '@hourmere/auth'
@@ -28,7 +29,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
-import { errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
+import { ErrorBody, errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
 import {
   EXPECTED_ORGANIZATION_HEADER,
@@ -1185,12 +1186,14 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       z,
       removeTeamMember,
       TeamManagementError,
+      MemberDepartureOwnerRequiredError,
       getLatestTeamMemberRemovalHandling,
       getTeamMemberRemovalHandling,
       MemberDepartureBookingSchema,
       MemberRemovalHandlingSchema,
       TeamAdminBookingSchema,
       DomainError,
+      ErrorBody,
       errorResponses,
       json,
       serviceContext,
@@ -1316,7 +1319,9 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
   })
 
   it('registers all production routes with open responses and a strict removal request', async () => {
-    const app = application(productRoutes({ db, socialProviders: {} }))
+    const app = application(
+      productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+    )
     const document = await openApiDocument(app)
     expect(document.paths[removalPath]?.post?.security).toEqual([{ session: [] }])
     expect(document.paths[handlingPath]?.get?.security).toEqual([{ session: [] }])

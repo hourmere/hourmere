@@ -1,5 +1,9 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { removeTeamMember, TeamManagementError } from '@hourmere/auth'
+import {
+  MemberDepartureOwnerRequiredError,
+  removeTeamMember,
+  TeamManagementError,
+} from '@hourmere/auth'
 import {
   getLatestTeamMemberRemovalHandling,
   getTeamMemberRemovalHandling,
@@ -9,6 +13,7 @@ import {
 } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import {
+  ErrorBody,
   errorResponses,
   json,
   type RouteModule,
@@ -72,7 +77,7 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/members/{memberUserId}/removal',
         summary: 'Revoke a team membership immediately',
         description:
-          'Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing or stale context returns 409 organization_context_changed. Owners may remove admins and members; admins may remove members. Owner targets are refused. In one transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.',
+          'Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing or stale context returns 409 organization_context_changed. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.',
         tags: ['Team members'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -94,8 +99,20 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
           ...sessionErrorResponses({
             400: 'Invalid parameters (invalid_request)',
             403: 'team_management_access_denied: requires a current team owner/admin session without Authorization and an accessible allowed member target; forbidden: cookie writes require same-origin Origin or Referer',
-            409: ORGANIZATION_CONTEXT_CHANGED,
           }),
+          409: {
+            description: `${ORGANIZATION_CONTEXT_CHANGED}; member_departure_owner_required: add another owner first`,
+            content: json(
+              ErrorBody.extend({
+                handling: z
+                  .object({
+                    owner: z.literal('another_owner_is_needed_before_you_can_leave').optional(),
+                    nextStep: z.literal('add_another_owner_first').optional(),
+                  })
+                  .optional(),
+              }),
+            ),
+          },
         },
       }),
       async (c) => {
@@ -118,6 +135,12 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
           )
           return c.json(result, 200)
         } catch (error) {
+          if (error instanceof MemberDepartureOwnerRequiredError) {
+            return c.json(
+              { error: error.code, message: error.message, handling: error.handling },
+              409,
+            )
+          }
           if (!(error instanceof TeamManagementError)) throw error
           if (error.code === 'organization_context_changed') throw contextChanged()
           throw new DomainError('forbidden', 'team_management_access_denied')
