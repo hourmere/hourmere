@@ -84,6 +84,18 @@ describe('formatChineseTemplate', () => {
 })
 
 describe('subjectLine', () => {
+  it.each(['\u00a0', '\u202f'])(
+    'preserves non-breaking typography %j while removing header controls',
+    (space) => {
+      expect(
+        subjectLine(`  Confirmation${space}:  Réunion\r\nBcc: victim@example.test\u202e  `),
+      ).toBe(`Confirmation${space}: Réunion Bcc: victim@example.test`)
+      expect(subjectLine(`Invitation «${space}Équipe${space}»${space}!`)).toBe(
+        `Invitation «${space}Équipe${space}»${space}!`,
+      )
+    },
+  )
+
   it('keeps a subject on one line, so it cannot end the header and start another', () => {
     expect(subjectLine('Hello\r\nBcc: victim@example.com')).toBe('Hello Bcc: victim@example.com')
     expect(subjectLine('a\u2028b\u2029c\u0085d\u000be\u202ef')).toBe('a b c d e f')

@@ -1,0 +1,7 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`existing language output before French registration > preserves every rendered de message byte 1`] = `"a0455477e08f912d6deb08eb0afce9f036374bf482c1d6fe4969621cd0c198e4"`;
+
+exports[`existing language output before French registration > preserves every rendered en message byte 1`] = `"4865a29ddddec481b7e2ec08bdfb88b10c71a363aa8c2124ce6613e7204e86ff"`;
+
+exports[`existing language output before French registration > preserves every rendered zh-CN message byte 1`] = `"6c4b18516da15642d199143557b2ce548b5be94537402b55f6706b29e172b3e0"`;

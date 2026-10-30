@@ -1,5 +1,6 @@
-// These probes use a test-only delivery ledger, real pg-boss inserts and native Better Auth
-// requests. They establish transaction boundaries, not a shipped invitation delivery service.
+// These dependency probes deliberately bypass Hourmere's invitation admission hook to
+// retain evidence of Better Auth's native transaction gaps. Product behavior is covered
+// separately by invitation-limits.test.ts; production always installs the admission hook.
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { createAuth, createAuthPool, createCallerResolver, type SignupPolicy } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -100,6 +101,8 @@ describe.skipIf(!serverUrl)('invitation creation and delivery enqueue ordering',
       signup: OPEN,
       mailer: { send: async () => {} },
     })
+    const hookOptions: { hooks?: typeof auth.options.hooks } = auth.options
+    hookOptions.hooks = undefined
     const plugin = auth.options.plugins.find((candidate) => candidate.id === 'organization')
     const options = (plugin as unknown as { options: OrganizationOptions }).options
     instrument(options)

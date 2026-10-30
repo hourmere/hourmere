@@ -71,7 +71,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  function instance(instrument?: (options: OrganizationOptions) => void) {
+  function instance(instrument?: (options: OrganizationOptions) => void, nativeProbe = false) {
     const secret = randomBytes(32).toString('base64')
     const auth = createAuth({
       pool,
@@ -81,6 +81,11 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       signup: OPEN,
       mailer: { send: async (message) => void outbox.push(message) },
     })
+    // Native dependency probes explicitly omit the product admission hook.
+    if (nativeProbe) {
+      const hookOptions: { hooks?: typeof auth.options.hooks } = auth.options
+      hookOptions.hooks = undefined
+    }
     // organization() closes over this same options object; this changes only the isolated
     // fixture. Production currently has neither sendInvitationEmail nor after-create hooks.
     const plugin = auth.options.plugins.find((candidate) => candidate.id === 'organization')
@@ -161,7 +166,10 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       organizationId,
     })
     expect(response.status).toBe(200)
-    return (await response.json()) as Invitation
+    const { delivery: _delivery, ...invitation } = (await response.json()) as Invitation & {
+      delivery: unknown
+    }
+    return invitation
   }
   async function state(organizationId: string) {
     // This independent connection can see only committed rows, including inside callbacks.
@@ -313,7 +321,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
     for (const [actor, status, code] of [
       [member, 403, 'TEAM_MANAGEMENT_ACCESS_DENIED'],
-      [outsider, 409, 'ORGANIZATION_CONTEXT_CHANGED'],
+      [outsider, 403, 'TEAM_MANAGEMENT_ACCESS_DENIED'],
     ] as const) {
       const response = await post(i.app, 'invite-member', actor.cookie, {
         email: 'other@example.com',
@@ -325,7 +333,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       const canceled = await post(i.app, 'cancel-invitation', actor.cookie, {
         invitationId: invitation.id,
       })
-      expect(canceled.status).toBe(status)
+      expect(canceled.status).toBe(actor === member ? 403 : 409)
       expect(await canceled.json()).toMatchObject({
         code:
           actor === member
@@ -371,12 +379,12 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     expect(body.session.activeOrganizationId).not.toBe(org.id)
   })
 
-  it('rejects an identical retry without a second row; explicit resend preserves id/role and only refreshes expiry', async () => {
+  it('pins native retry/resend behavior independently of the product admission protocol', async () => {
     const calls: string[] = []
     const i = instance((options) => {
       options.organizationHooks.afterCreateInvitation = async () => void calls.push('created')
       options.sendInvitationEmail = async () => void calls.push('mail')
-    })
+    }, true)
     const owner = await account(i, 'owner@example.com')
     const org = await team(i, owner.cookie)
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
@@ -407,7 +415,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
   })
 
   it.each(['beforeCreateInvitation', 'sendInvitationEmail', 'afterCreateInvitation'] as const)(
-    'keeps the real commit boundary when %s throws during invitation creation',
+    'pins the native commit boundary when %s throws independently of product admission',
     async (throwAt) => {
       const calls: { hook: string; rows: Awaited<ReturnType<typeof state>> }[] = []
       const i = instance((options) => {
@@ -425,7 +433,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
           if (hook === 'sendInvitationEmail') options.sendInvitationEmail = observe
           else options.organizationHooks[hook] = observe
         }
-      })
+      }, true)
       const owner = await account(i, 'owner@example.com')
       const org = await team(i, owner.cookie)
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {})

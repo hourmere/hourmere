@@ -410,9 +410,9 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     }
   })
 
-  async function verifyNativeBoundary(replacement?: Replacement) {
+  async function verifyNativeBoundary(handler = copiedNativePolicy()) {
     const f = await fixture()
-    expect((await native(f, copiedNativePolicy(replacement))).status).toBe(200)
+    expect((await native(f, handler)).status).toBe(200)
     expect(await active(f.eventId)).toBe(false)
     expect(await member(f)).toBeUndefined()
     expect(
@@ -428,12 +428,12 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     verifyNativeBoundary())
 
   it('detects a bypassed native persistence interceptor with a real assertion', async () => {
-    await expect(
-      verifyNativeBoundary([
-        "if (ctx?.path !== remove || request.model !== 'member') return deleteOne(request)",
-        "if (true || request.model !== 'member') return deleteOne(request)",
-      ]),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    const mutation: Replacement = [
+      "if (!ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {",
+      "if (true || !ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {",
+    ]
+    const handler = copiedNativePolicy(mutation)
+    await expect(verifyNativeBoundary(handler)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
   async function verifyNativeRecheck(

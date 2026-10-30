@@ -16,10 +16,12 @@ import {
   createCallerResolver,
   createMcpOAuthResolver,
 } from './index.ts'
+import { invitationRules } from './invitations.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
 import { ensurePersonalOrganization, isUuid, personalOwner } from './organizations.ts'
+import { fixedTeamRole, teamRoleDenied } from './team-role-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:43830'
@@ -384,12 +386,15 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
       getSessionFromCtx,
       apiKeyRules,
       displayNameRules,
+      invitationRules,
       checkListQuery,
       emptyMemberList,
       defaultMagicLinkErrorRedirect,
       organizationContext,
       isUuid,
       personalOwner,
+      fixedTeamRole,
+      teamRoleDenied,
     }
     return new Function(...Object.keys(bindings), `${source}; return beforeHook`)(
       ...Object.values(bindings),
@@ -409,7 +414,7 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
   }
 
   it('passes the real HTTP boundary assertions with an unmodified auth hook source copy', async () => {
-    await verifyBoundary(sourceCopy(false))
+    await expect(verifyBoundary(sourceCopy(false))).resolves.toBeUndefined()
   })
 
   it('detects removal of Authorization precedence with a real HTTP assertion failure', async () => {

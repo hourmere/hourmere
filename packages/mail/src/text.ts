@@ -29,7 +29,11 @@ export function multiLine(text: string): string {
  * and at most `max` characters.
  */
 export function subjectLine(text: string, max = 200): string {
-  const line = singleLine(text)
+  // Keep typographic non-breaking spaces in translated subjects while removing controls.
+  const line = text
+    .replace(CONTROL, ' ')
+    .replace(/[^\S\u00a0\u202f]+/g, ' ')
+    .trim()
   return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`
 }
 

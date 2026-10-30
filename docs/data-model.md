@@ -338,7 +338,27 @@ and the sign-in mail tables are preserved. This prevents later repair from silen
 resending historic invitations with unknown mail outcomes. Restart every role with the
 new version. This migration installs storage and queries only; sender, queue registration,
 reconciliation and management integration are separate work. Explicit resend will extend
-expiry under the approved protocol; it is not implemented by these queries.
+expiry under the approved protocol; it is not implemented by these storage queries.
+
+Invitation admission now writes the invitation and its queued delivery intent in one
+transaction. The explicit resend cooldown uses the later of `generation_started_at`
+and `updated_at`. The future sender must update `updated_at` on every delivery attempt
+so attempts restart the post-delivery wait. `expiry_duration_ms` retains the original
+validity length across successive renewals. The migration retains delivery creation time as the cooldown anchor
+and seeds the known legacy 48-hour validity policy. Historic native resends changed expiry
+without changing invitation creation time, so their difference cannot recover original
+validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.
+
+`invitation_email_requests` retains actor/team UUIDs, an invitation-domain recipient HMAC
+and request time for rolling inviter/team/recipient limits. It has no foreign keys, so
+deleting an invitation, account or team cannot reset the budget. Admission holds the
+existing global mail-budget lock without debiting the shared sending allowance in
+`notification_email_sends`. A future sender must check and debit ordinary, non-reserved
+shared capacity at send time. Both ledgers retain two days. Every admission record
+requires its recipient hash; migration 0043 creates this ledger without changing earlier
+shared mail accounting.
+The invitation sender, job queue and reconciler remain separate work; queued intent alone
+does not send mail or claim SMTP acceptance.
 
 ## Guest recipients
 
