@@ -379,7 +379,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
   })
 
   it.each(['owner', 'admin', 'member'])(
-    'refuses %s self-promotion and self-role changes without changing any membership',
+    'refuses %s self-promotion and unauthorized self-role changes',
     async (actorRole) => {
       const f = await fixture(actorRole)
       const before = await snapshot(f)
@@ -599,18 +599,17 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
   )
 
   it.each(['member,owner', 'member, owner', 'admin,owner'])(
-    'protects an owner target represented as %j against another owner and admin',
+    'refuses every owner target represented as %j',
     async (targetRole) => {
       for (const actorRole of ['owner', 'admin']) {
         const f = await fixture(actorRole, targetRole)
         const before = await snapshot(f)
-        await refused(
-          await post(f, 'update-member-role', {
-            organizationId: f.teamId,
-            memberId: f.targetMemberId,
-            role: 'member',
-          }),
-        )
+        const response = await post(f, 'update-member-role', {
+          organizationId: f.teamId,
+          memberId: f.targetMemberId,
+          role: 'member',
+        })
+        await refused(response)
         expect(await snapshot(f)).toEqual(before)
       }
     },
@@ -838,6 +837,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
           .where('id', '=', f.targetMemberId)
           .executeTakeFirstOrThrow(),
       ).toEqual({ role: 'member,owner' })
+      expect(await operations(f)).toEqual([])
     } finally {
       hooks.beforeUpdateMemberRole = original as (input: HookInput) => unknown
     }
@@ -879,6 +879,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
           .where('id', '=', f.targetMemberId)
           .executeTakeFirstOrThrow(),
       ).toEqual({ role: 'member,owner' })
+      expect(await operations(f)).toEqual([])
     } finally {
       await holder.query('ROLLBACK')
       holder.release()

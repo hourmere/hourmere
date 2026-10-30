@@ -21,7 +21,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
-import { isUuid, organizationGuards } from './organizations.ts'
+import { isUuid, organizationGuards, personalOwner } from './organizations.ts'
 import {
   checkTeamManagementAccess,
   TeamManagementError,
@@ -32,6 +32,7 @@ import {
 } from './team-management.ts'
 import * as removalExports from './team-member-removal.ts'
 import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
+import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 import type { createTeamRolePolicy } from './team-role-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -51,7 +52,14 @@ function sourceCopy(replacement?: Replacement): Remove {
     /\bexport /g,
     '',
   )
-  const bindings = { checkTeamManagementAccess, isUuid, teamManagementDenied, teamRoles }
+  const bindings = {
+    assertTeamOwnerRemains,
+    checkTeamManagementAccess,
+    isUuid,
+    personalOwner,
+    teamManagementDenied,
+    teamRoles,
+  }
   return new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
     ...Object.values(bindings),
   ) as Remove
@@ -72,6 +80,7 @@ function policySourceCopy(
   )
   const bindings = {
     AsyncLocalStorage,
+    assertTeamOwnerRemains,
     tryGetCurrentAuthEndpointContext,
     APIError,
     getSessionFromCtx,
@@ -79,6 +88,7 @@ function policySourceCopy(
     MemberDepartureOwnerRequiredError,
     recordTeamRoleChange,
     isUuid,
+    personalOwner,
     checkTeamManagementAccess,
     TeamManagementError,
     teamRoles,
@@ -527,14 +537,24 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
 
   async function verifyTarget(remove: Remove, actorRole: string, targetRole: string) {
     const f = await fixture(actorRole, targetRole)
-    expect((await request(f, remove)).status).toBe(403)
+    const response = await request(f, remove)
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
     expect(await member(f)).toBeDefined()
+    expect(await active(f.eventId)).toBe(true)
+    expect(
+      await db
+        .selectFrom('organization_operations')
+        .select('id')
+        .where('organization_id', '=', f.team.id)
+        .execute(),
+    ).toEqual([])
   }
 
   async function verifyTeamBinding(remove: Remove) {
     const f = await fixture()
     const other = await fixture()
-    // Isolate team binding from the independent prohibition on owner targets.
+    // Isolate team binding from the independent restrictions on elevated targets.
     await db
       .deleteFrom('auth.member')
       .where('userId', '=', other.target.id)
@@ -674,6 +694,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   it('passes the removal assertions against an unmodified source copy', async () => {
     const remove = sourceCopy()
     await verifyTarget(remove, 'owner', 'owner,member')
+    await verifyTarget(remove, 'admin', 'owner,member')
     await verifyTarget(remove, 'admin', 'admin')
     await verifyTeamBinding(remove)
     await verifyDeactivation(remove)
@@ -693,7 +714,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   }[] = [
     {
       name: 'owner target refusal',
-      replacement: ["roles.includes('owner') ||", 'false ||'],
+      replacement: ["    roles.includes('owner') ||\n", ''],
       verify: (remove) => verifyTarget(remove, 'owner', 'owner,member'),
     },
     {
@@ -703,7 +724,10 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     },
     {
       name: 'unknown role target refusal',
-      replacement: ["(!roles.includes('admin') && !roles.includes('member')) ||", 'false ||'],
+      replacement: [
+        "(!roles.includes('owner') && !roles.includes('admin') && !roles.includes('member')) ||",
+        'false ||',
+      ],
       verify: (remove) => verifyTarget(remove, 'owner', 'custom'),
     },
     {
