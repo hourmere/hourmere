@@ -133,7 +133,9 @@ describe('creating a team', () => {
         name: locale === 'en' ? 'Account' : '账号',
       })
       expect(account.textContent).toContain(team.name)
-      expect(await screen.findByText(locale === 'en' ? 'Owner' : '所有者')).toBeDefined()
+      expect(
+        await within(screen.getByRole('main')).findByText(locale === 'en' ? 'Owner' : '所有者'),
+      ).toBeDefined()
       expect(leaving()).toBe(false)
     },
   )
@@ -156,8 +158,8 @@ describe('creating a team', () => {
     const user = await fill()
     await user.click(submit())
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
-    expect(await screen.findByText('Member')).toBeDefined()
-    expect(screen.queryByText('Owner')).toBeNull()
+    expect(await within(screen.getByRole('main')).findByText('Member')).toBeDefined()
+    expect(within(screen.getByRole('main')).queryByText('Owner')).toBeNull()
   })
 
   it.each(['', '-bad', 'bad-', 'two words', 'a/b', '你好', 'a'.repeat(65), 'Admin'])(
@@ -419,7 +421,7 @@ describe('reconciling an uncertain creation result', () => {
       { name: team.name, slug: ME.organization.slug, keepCurrentActiveOrganization: true },
       { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
     ])
-    expect(await screen.findByText('Owner')).toBeDefined()
+    expect(await within(screen.getByRole('main')).findByText('Owner')).toBeDefined()
   })
 
   it('restores an editable address conflict when opening a recovered organization confirms it is personal', async () => {
@@ -541,15 +543,18 @@ describe('reconciling an uncertain creation result', () => {
     })
     renderApp('/app/teams/new')
     const user = await fill()
+    const initialLists = api.to('GET /api/auth/organization/list').length
     await user.click(submit())
-    await waitFor(() => expect(api.to('GET /api/auth/organization/list')).toHaveLength(1))
+    await waitFor(() =>
+      expect(api.to('GET /api/auth/organization/list')).toHaveLength(initialLists + 1),
+    )
     expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
     expect(createButton()).toBeNull()
     await user.click(await screen.findByRole('button', { name: 'Open team' }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
     expect(api.to('GET /api/v1/me').length).toBeGreaterThan(1)
     expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
-    expect(await screen.findByText('Owner')).toBeDefined()
+    expect(await within(screen.getByRole('main')).findByText('Owner')).toBeDefined()
   })
 
   it('permits only an explicit retry after refreshed session and list prove no matching team', async () => {
@@ -561,8 +566,11 @@ describe('reconciling an uncertain creation result', () => {
     })
     renderApp('/app/teams/new')
     const user = await fill()
+    const initialLists = api.to('GET /api/auth/organization/list').length
     await user.click(submit())
-    await waitFor(() => expect(api.to('GET /api/auth/organization/list')).toHaveLength(1))
+    await waitFor(() =>
+      expect(api.to('GET /api/auth/organization/list')).toHaveLength(initialLists + 1),
+    )
     await waitFor(() => expect(submit().matches(':disabled')).toBe(false))
     expect(api.to('GET /api/v1/me').length).toBeGreaterThan(1)
     expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
@@ -613,8 +621,11 @@ describe('reconciling an uncertain creation result', () => {
     })
     renderApp('/app/teams/new')
     const user = await fill()
+    const initialLists = api.to('GET /api/auth/organization/list').length
     await user.click(submit())
-    await waitFor(() => expect(api.to('GET /api/auth/organization/list')).toHaveLength(1))
+    await waitFor(() =>
+      expect(api.to('GET /api/auth/organization/list')).toHaveLength(initialLists + 1),
+    )
     await user.click(await screen.findByRole('button', { name: 'Open team' }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
     expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
@@ -637,14 +648,13 @@ describe('reconciling an uncertain creation result', () => {
 
   it('pins the address across a stale empty list and collision instead of creating a different team', async () => {
     let attempts = 0
-    let lists = 0
     const { api } = server({
       'POST /api/auth/organization/create': () =>
         ++attempts === 1
           ? json(500, { code: 'INTERNAL_SERVER_ERROR' })
           : json(400, { code: 'ORGANIZATION_ALREADY_EXISTS' }),
       'GET /api/auth/organization/list': () =>
-        json(200, ++lists === 1 ? [ME.organization] : [ME.organization, team]),
+        json(200, attempts < 2 ? [ME.organization] : [ME.organization, team]),
     })
     renderApp('/app/teams/new')
     const user = await fill()
@@ -663,7 +673,7 @@ describe('reconciling an uncertain creation result', () => {
       { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
       { name: 'Revised name', slug: team.slug, keepCurrentActiveOrganization: true },
     ])
-    expect(api.to('GET /api/auth/organization/list')).toHaveLength(2)
+    expect(api.to('GET /api/auth/organization/list')).toHaveLength(3)
     expect(createButton()).toBeNull()
     expect(screen.getByText(team.name)).toBeDefined()
     await user.click(open)
@@ -698,7 +708,7 @@ describe('reconciling an uncertain creation result', () => {
       expect(nameInput().matches(':disabled')).toBe(true)
       expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
       expect(screen.getByText(team.name)).toBeDefined()
-      expect(screen.getByText('Owner')).toBeDefined()
+      expect(within(screen.getByRole('main')).getByText('Owner')).toBeDefined()
       await user.click(open)
       await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
       expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
@@ -822,7 +832,7 @@ describe('reconciling an uncertain creation result', () => {
       const open = await screen.findByRole('button', { name: 'Open team' })
       await waitFor(() => expect(open.matches(':disabled')).toBe(false))
       expect(screen.getByText(team.name)).toBeDefined()
-      expect(screen.queryByText('Owner')).toBeNull()
+      expect(within(screen.getByRole('main')).queryByText('Owner')).toBeNull()
       expect(createButton()).toBeNull()
     },
   )

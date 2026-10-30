@@ -5084,6 +5084,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Invitation delivery summaries of the session's current team
+         * @description Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. All access denials are 403 team_management_access_denied without WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Delivery state is independent: queued is waiting, smtp_accepted means SMTP acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team for the next page. No email, links, tokens, credentials, job or lease identities or raw provider errors are returned.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A page of safe invitation delivery summaries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationPage"];
+                    };
+                };
+                /** @description invalid_request: invalid query; invalid_cursor: malformed cursor or cursor from another team */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires a current verified team owner/admin session without Authorization */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/member-removals/{operationId}": {
         parameters: {
             query?: never;
@@ -5622,7 +5682,7 @@ export interface components {
             email: string;
             /** @description The invitee who made the booking; the others are guests they added */
             isBooker: boolean;
-            /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+            /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
             locale: string | null;
             name: string;
             /** @description IANA time zone */
@@ -5802,7 +5862,7 @@ export interface components {
             invitee: {
                 /** Format: email */
                 email: string;
-                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
                 locale?: string;
                 name: string;
                 /** @description IANA time zone */
@@ -6175,6 +6235,11 @@ export interface components {
                 personal: boolean;
                 slug: string;
             };
+            /**
+             * Format: uuid
+             * @description The caller's own personal organization, independent of the active organization; null when unavailable
+             */
+            personalOrganizationId: string | null;
             principal: {
                 /**
                  * Format: uuid
@@ -6311,7 +6376,7 @@ export interface components {
             /** @example ada */
             handle: string;
             /**
-             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
+             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
              * @example en
              */
             locale: string;
@@ -6327,7 +6392,7 @@ export interface components {
              */
             handle: string;
             /**
-             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
+             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
              * @example en
              */
             locale: string;
@@ -6666,6 +6731,36 @@ export interface components {
         };
         TeamBookingCancellation: {
             cancelled: boolean;
+        };
+        TeamInvitationPage: {
+            data: components["schemas"]["TeamInvitationSummary"][];
+            nextCursor: string | null;
+        };
+        TeamInvitationSummary: {
+            /** Format: date-time */
+            createdAt: string;
+            delivery: {
+                attempts: number | null;
+                /**
+                 * Format: date-time
+                 * @description Database time when the current generation last recorded an attempt. Null before any attempt, for unknown legacy attempt times or without a delivery row. Independent of later delivery updates.
+                 */
+                lastAttemptAt: string | null;
+                /** @enum {string|null} */
+                lastErrorCode: "transport_error" | "smtp_auth" | "smtp_temporary" | "smtp_permanent" | "smtp_not_configured" | "mail_rate_limited" | "interrupted" | "attempts_exhausted" | "invitation_ineligible" | "legacy_delivery_unknown" | null;
+                /** @enum {string} */
+                state: "queued" | "sending" | "smtp_accepted" | "failed" | "skipped" | "unknown";
+            };
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            id: string;
+            resendAllowed: boolean;
+            /**
+             * @description Known stored invitation lifecycle, with expired derived only for pending invitations using the database clock. Unrecognized stored statuses map to unknown, remain in pagination and are never pending or resendable.
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "canceled" | "rejected" | "expired" | "unknown";
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         TeamReadinessPage: {

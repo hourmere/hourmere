@@ -73,9 +73,11 @@ import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
+import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
+import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 /**
@@ -103,6 +105,7 @@ export function productRoutes({
   hostedSignupUrl,
   privacyPolicyUrl,
   termsUrl,
+  invitationMailLimits,
 }: {
   db: Db
   automaticMeet?: boolean
@@ -111,6 +114,7 @@ export function productRoutes({
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
+  invitationMailLimits: InvitationSummaryMailLimits
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -155,6 +159,7 @@ export function productRoutes({
     publicRoutes({ db, notify, automaticMeet, automaticZoom }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     teamBookingRoutes({ db, notify }),
+    teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({ db }),
     memberLeaveRoutes({ db }),
@@ -351,6 +356,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   }
   const invitationDeliveryDeps = { db, queue: invitationQueue }
   const repairInvitations = createInvitationEmailRepairer(invitationDeliveryDeps)
+  const invitationMailLimits = {
+    ...notificationDeps,
+    invitationInviterMaxPerHour: config.INVITATION_INVITER_MAX_PER_HOUR,
+    invitationInviterMaxPerDay: config.INVITATION_INVITER_MAX_PER_DAY,
+    invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
+    invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
+  }
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
@@ -456,13 +468,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       mailer: countingMailer,
       enqueueInvitationEmail: createInvitationEmailDispatcher(invitationDeliveryDeps),
       reserveInvitationEmail: (trx, input) =>
-        reserveInvitationEmailBudget(trx, input, {
-          ...notificationDeps,
-          invitationInviterMaxPerHour: config.INVITATION_INVITER_MAX_PER_HOUR,
-          invitationInviterMaxPerDay: config.INVITATION_INVITER_MAX_PER_DAY,
-          invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
-          invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
-        }),
+        reserveInvitationEmailBudget(trx, input, invitationMailLimits),
       queueSignInEmail: queuedSignInEmail(jobs, {
         db,
         secret: config.BETTER_AUTH_SECRET,
@@ -486,6 +492,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
         publicUrl: config.PUBLIC_URL,
         db,
+        invitationMailLimits,
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,

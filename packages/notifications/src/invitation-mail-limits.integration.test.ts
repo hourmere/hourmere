@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { setTimeout } from 'node:timers/promises'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   type InvitationMailLimits,
+  invitationEmailBudgetAvailable,
   reserveInvitationEmailBudget,
 } from './invitation-mail-limits.ts'
 import {
@@ -82,6 +85,74 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
       .values(Array.from({ length: count }, () => ({ recipient_hash: hash, sent_at: at })))
       .execute()
   }
+
+  it('reads remaining capacity without acquiring the mail lock or writing accounting rows', async () => {
+    const held = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const blocker = db.transaction().execute(async (trx) => {
+      await lockNotificationEmailBudget(trx)
+      held.resolve()
+      await release.promise
+    })
+    await held.promise
+    const pending = invitationEmailBudgetAvailable(db, actor, { secret: SECRET }, NOW)
+    try {
+      expect(await Promise.race([pending, setTimeout(1_000, 'blocked')])).toBe(true)
+      expect(await counts()).toEqual({ requests: 0, mail: 0 })
+    } finally {
+      release.resolve()
+      await blocker
+      await pending
+    }
+  })
+
+  it.each([
+    ['inviter hourly', { invitationInviterMaxPerHour: 1 }],
+    ['inviter daily', { invitationInviterMaxPerDay: 1 }],
+    ['team hourly', { invitationTeamMaxPerHour: 1 }],
+    ['team daily', { invitationTeamMaxPerDay: 1 }],
+    ['recipient hourly', { mailRecipientMaxPerHour: 1 }],
+    ['recipient daily', { mailRecipientMaxPerDay: 1 }],
+  ] as const)(
+    'reports the same configured %s capacity as a real reservation',
+    async (_, limits) => {
+      const available = () =>
+        invitationEmailBudgetAvailable(db, actor, { secret: SECRET, ...limits }, NOW)
+      expect(await available()).toBe(true)
+      expect(await counts()).toEqual({ requests: 0, mail: 0 })
+      expect(await reserve(limits)).toBe(true)
+      expect(await available()).toBe(false)
+      expect(await reserve(limits)).toBe(false)
+      expect(await counts()).toEqual({ requests: 1, mail: 0 })
+    },
+  )
+
+  it('detects a removed read-budget limit through a real assertion failure in a source copy', async () => {
+    const location = new URL('./invitation-mail-limits.ts', import.meta.url)
+    const source = readFileSync(location, 'utf8')
+    const guard = 'Number(counts.inviterHour) >= (deps.invitationInviterMaxPerHour ?? 20)'
+    expect(source.includes(guard)).toBe(true)
+    const copy = async (replacement: string) => {
+      const compiled = stripTypeScriptTypes(source.replace(guard, replacement)).replace(
+        /from '([^']+)'/g,
+        (_, specifier: string) =>
+          `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+      )
+      return (
+        await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+      ).invitationEmailBudgetAvailable as typeof invitationEmailBudgetAvailable
+    }
+    const verify = async (available: typeof invitationEmailBudgetAvailable) => {
+      await db.deleteFrom('invitation_email_requests').execute()
+      const limits = { invitationInviterMaxPerHour: 1 }
+      expect(await available(db, actor, { secret: SECRET, ...limits }, NOW)).toBe(true)
+      expect(await reserve(limits)).toBe(true)
+      expect(await available(db, actor, { secret: SECRET, ...limits }, NOW)).toBe(false)
+      expect(await counts()).toEqual({ requests: 1, mail: 0 })
+    }
+    await verify(await copy(guard))
+    await expect(verify(await copy('false'))).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
   it('requires a transaction and atomically counts one request without reserving a mail slot', async () => {
     await expect(reserveInvitationEmailBudget(db, actor, { secret: SECRET }, NOW)).rejects.toThrow(

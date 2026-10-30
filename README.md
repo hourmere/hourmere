@@ -234,6 +234,12 @@ Team invitation links open `/app/join?invitationId=<uuid>`. Sign in with the exa
 address that received the invitation; email-link and enabled social sign-in return to that
 page. Signing in does not join the team: review the invitation and choose **Accept invitation**.
 
+The signed-in header's space menu switches between **Personal** and your member organizations
+and shows your role in the current space. Switching asks before discarding unsaved changes
+and starts the page over in the selected space. A failed switch keeps the current page;
+returning to personal after team access or active context changes shows a notice. Switching
+the web app does not change an API key's organization or an existing MCP OAuth grant.
+
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
 committed isolation (Postgres's default) or serializable. Connect the app to Postgres
@@ -295,7 +301,7 @@ and linked operating guides before deploying:
 - Rate limiting uses in-process memory; multiple web replicas multiply the limits. Run a
   single web process; a separate worker is supported.
 - [Public booking pages and emails](https://hourmere.com/docs/interface-languages) support English,
-  Simplified Chinese, German and French. Account and sign-in interfaces support English and
+  Simplified Chinese, German, French and Spanish. Account and sign-in interfaces support English and
   Simplified Chinese. Missing translations fall back to English; dates follow the active locale.
 - No automatic schema downgrade; some migrations require stopping all old app and worker
   processes. Review the [migration notes](docs/data-model.md#changing-the-schema).

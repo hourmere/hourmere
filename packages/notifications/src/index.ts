@@ -49,6 +49,7 @@ export {
 } from './invitation-email.ts'
 export {
   type InvitationMailLimits,
+  invitationEmailBudgetAvailable,
   reserveInvitationEmailBudget,
 } from './invitation-mail-limits.ts'
 export { notificationEmailCleanupJob } from './mail-limits.ts'

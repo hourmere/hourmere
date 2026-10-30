@@ -69,6 +69,36 @@ const ownSiteReferences: Record<string, readonly string[]> = {
   ],
 }
 
+describe('Spanish public-language documentation', () => {
+  it('discloses public and email support without expanding the account interface languages', () => {
+    const languages = prose(read(`${siteDocs}/interface-languages.md`))
+    expect(languages).toContain(
+      'emails are available in English, Simplified Chinese, German, French and Spanish.',
+    )
+    expect(languages).toContain('interfaces remain available in English and Simplified Chinese.')
+    expect(languages).toContain(
+      'German, French and Spanish translations are AI-assisted (machine-translated)',
+    )
+    expect(languages).toContain('have not yet been reviewed by a native speaker')
+    expect(languages).toContain('Corrections are welcome through a GitHub issue or pull request.')
+    expect(languages).toContain('Changing the language updates the existing page')
+  })
+
+  it('documents one Spanish formatting convention and the regional mapping without changing zones', () => {
+    const languages = prose(read(`${siteDocs}/interface-languages.md`))
+    for (const regional of ['es-ES', 'es-MX', 'es-419', 'es-AR', 'es-CO', 'es-US'])
+      expect(languages).toContain(regional)
+    expect(languages).toContain('resolve to es. Spanish uses one formatting locale, es-ES')
+    expect(languages).toContain('Gregorian date and 24-hour time formatting')
+    expect(languages).toContain('choice does not change the selected IANA time zone.')
+    const notifications = prose(read(`${siteDocs}/notifications.md`))
+    expect(notifications).toContain('German, French and Spanish')
+    expect(notifications).toContain('es-US map to es and use es-ES date and time formatting')
+    expect(notifications).toContain('without changing the recipient time zone.')
+    expect(prose(read(`${siteDocs}/embedding.md`))).toContain('es for Spanish.')
+  })
+})
+
 describe('self-hosting documentation links', () => {
   it.each(pages)('uses clickable repository documentation links in $path', ({ source }) => {
     const remaining = source.replace(/\[[^\]]+\]\(([^)\s]+)\)/g, (link, target: string) => {
@@ -200,7 +230,7 @@ describe('launch documentation disclosures', () => {
     {
       topic: 'interface languages',
       claims: [
-        /Public booking pages and emails support English, Simplified Chinese, German and French/,
+        /Public booking pages and emails support English, Simplified Chinese, German, French and Spanish/,
         /Account and sign-in interfaces support English and Simplified Chinese/,
       ],
     },

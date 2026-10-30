@@ -19,7 +19,7 @@ import { AdminLoading } from './components/AdminLoading.tsx'
 import { admin } from './i18n/admin.ts'
 import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
-import { registerCatalog } from './i18n/translate.ts'
+import { msg, registerCatalog } from './i18n/translate.ts'
 import { signInPath } from './next-path.ts'
 import {
   UnsavedChangesProvider,
@@ -58,6 +58,8 @@ interface Session {
   refresh: (options?: { fresh?: boolean }) => Promise<Me | null>
   /** Applies a freshly confirmed /me response during a deliberate organization handoff. */
   accept: (me: Me) => void
+  /** Defers background reads during a deliberate switch; release on completion or unmount. */
+  beginContextSwitch: () => () => void
   /** Ends the session on the server; throws if that fails. */
   signOut: () => Promise<void>
   /**
@@ -71,10 +73,10 @@ interface Session {
 export interface Notice {
   message: UiText
   /**
-   * The page it is about (a pathname). It is shown only there and dropped once the person is
-   * elsewhere, including when it arrives after they left (a slow request).
+   * The page it is about (a pathname), or null for a session-wide context notice. A page
+   * notice is dropped once the person is elsewhere, including after a slow request.
    */
-  path: string
+  path: string | null
 }
 
 const SessionContext = createContext<Session | null>(null)
@@ -161,6 +163,7 @@ function SessionController({
   const refreshing = useRef<{ promise: Promise<Me | null>; controller: AbortController } | null>(
     null,
   )
+  const contextSwitches = useRef(new Set<symbol>())
 
   /** Makes every request in flight stale and cancels the background check. */
   const invalidate = useCallback(() => {
@@ -171,14 +174,37 @@ function SessionController({
     setNotice(null)
   }, [])
 
+  const explainPersonalFallback = useCallback((previous: SessionState, me: Me) => {
+    if (
+      previous.status === 'signed-in' &&
+      previous.me.user.id === me.user.id &&
+      !previous.me.organization.personal &&
+      me.organization.personal
+    )
+      setNotice({
+        path: null,
+        message: msg(
+          'You are now in your personal space. Your team access or active space changed.',
+        ),
+      })
+    else if (
+      !me.organization.personal ||
+      (previous.status === 'signed-in' && previous.me.user.id !== me.user.id)
+    )
+      setNotice((current) => (current?.path === null ? null : current))
+  }, [])
+
   const load = useCallback(
     (signal: AbortSignal) => {
       const started = epoch.current
+      const previous = currentState.current
       fetchMe(signal).then(
         (result) => {
           if (signal.aborted || epoch.current !== started) return
-          if (result.ok) setState({ status: 'signed-in', me: result.me })
-          else if (result.status === 401) setState(lapsed)
+          if (result.ok) {
+            explainPersonalFallback(previous, result.me)
+            setState({ status: 'signed-in', me: result.me })
+          } else if (result.status === 401) setState(lapsed)
           else setState({ status: 'error', message: result.message })
         },
         (err: unknown) => {
@@ -186,7 +212,7 @@ function SessionController({
         },
       )
     },
-    [setState],
+    [explainPersonalFallback, setState],
   )
 
   useEffect(() => {
@@ -220,8 +246,22 @@ function SessionController({
     }
   }, [confirmLeave, reload])
 
+  const beginContextSwitch = useCallback(() => {
+    // A focus event can arrive as the discard dialog closes, or while the server has
+    // switched but /me has not confirmed it. Only the deliberate handoff may apply it.
+    epoch.current += 1
+    refreshing.current?.controller.abort()
+    refreshing.current = null
+    const operation = Symbol('context switch')
+    contextSwitches.current.add(operation)
+    return () => {
+      contextSwitches.current.delete(operation)
+    }
+  }, [])
+
   const refresh = useCallback(
     (options?: { fresh?: boolean }) => {
+      if (contextSwitches.current.size) return Promise.resolve(null)
       if (refreshing.current) {
         if (!options?.fresh) return refreshing.current.promise
         refreshing.current.controller.abort()
@@ -259,6 +299,7 @@ function SessionController({
                   return null
                 }
               }
+              explainPersonalFallback(current, result.me)
               setState({ status: 'signed-in', me: result.me })
               return result.me
             }
@@ -274,7 +315,7 @@ function SessionController({
       refreshing.current = { promise, controller }
       return promise
     },
-    [confirmLeave, hasUnsavedChanges, setState],
+    [confirmLeave, explainPersonalFallback, hasUnsavedChanges, setState],
   )
 
   // Coming back to the app (another tab, another window): check who is signed in and in
@@ -307,6 +348,7 @@ function SessionController({
       refreshing.current?.controller.abort()
       refreshing.current = null
       declinedContext.current = null
+      setNotice((current) => (current?.path === null ? null : current))
       setState((current) =>
         current.status === 'signed-in' && current.me.user.id === me.user.id
           ? { status: 'signed-in', me }
@@ -317,8 +359,18 @@ function SessionController({
   )
 
   const session = useMemo(
-    () => ({ state, reload, confirmReload, refresh, accept, signOut, notice, setNotice }),
-    [state, reload, confirmReload, refresh, accept, signOut, notice],
+    () => ({
+      state,
+      reload,
+      confirmReload,
+      refresh,
+      accept,
+      beginContextSwitch,
+      signOut,
+      notice,
+      setNotice,
+    }),
+    [state, reload, confirmReload, refresh, accept, beginContextSwitch, signOut, notice],
   )
   return <SessionContext value={session}>{children}</SessionContext>
 }

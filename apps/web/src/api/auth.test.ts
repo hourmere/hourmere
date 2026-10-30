@@ -20,6 +20,7 @@ import { errorMessage, RequestError, UNREACHABLE } from './errors.ts'
 
 const PERSONAL_ME: Schemas['Me'] = {
   user: { id: '00000000-0000-7000-8000-000000000001', name: 'Ada', email: 'ada@example.com' },
+  personalOrganizationId: '00000000-0000-7000-8000-000000000002',
   organization: {
     id: '00000000-0000-7000-8000-000000000002',
     name: 'Ada',
