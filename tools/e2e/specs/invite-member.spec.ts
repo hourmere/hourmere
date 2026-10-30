@@ -84,5 +84,46 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
         : 'Invitation to invited-member@hourmere.invalid',
     )
     await fits(page)
+
+    const row = pending.getByRole('listitem').filter({ hasText: 'invited-member@hourmere.invalid' })
+    await expect(
+      row.getByRole('button', {
+        name: chinese ? '重新发送邀请' : 'Resend invitation',
+        exact: true,
+      }),
+    ).toBeDisabled()
+    await expect(row).toContainText(chinese ? '秒后重试' : 'seconds.')
+    const cancel = row.getByRole('button', {
+      name: chinese ? '取消邀请' : 'Cancel invitation',
+      exact: true,
+    })
+    await cancel.focus()
+    await page.keyboard.press('Enter')
+    const keep = row.getByRole('button', {
+      name: chinese ? '保留邀请' : 'Keep invitation',
+      exact: true,
+    })
+    await expect(keep).toBeFocused()
+    await fits(page)
+    await page.keyboard.press('Escape')
+    await expect(cancel).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(keep).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(
+      row.getByRole('button', {
+        name: chinese ? '确认取消邀请' : 'Confirm cancellation',
+        exact: true,
+      }),
+    ).toBeFocused()
+    const canceled = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/v1/team/invitations/${invitation.id}/cancel`,
+    )
+    await page.keyboard.press('Enter')
+    expect((await canceled).status()).toBe(200)
+    await expect(row.getByText(chinese ? '已取消' : 'Cancelled', { exact: true })).toBeVisible()
+    await expect(row).toContainText(chinese ? '无法使用' : 'can no longer be used')
+    await fits(page)
   })
 }

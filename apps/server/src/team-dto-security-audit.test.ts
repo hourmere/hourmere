@@ -41,6 +41,18 @@ const invitationKeys = [
   'role',
   'status',
 ]
+const invitationSummaryKeys = [
+  'id',
+  'email',
+  'status',
+  'createdAt',
+  'expiresAt',
+  'delivery',
+  'resendAllowed',
+  'generation',
+  'resendDeniedReason',
+  'resendRetryAfterSeconds',
+]
 const bookingKeys = [
   'attendees',
   'cancelledAt',
@@ -961,7 +973,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     keys(invitations, ['data', 'nextCursor'])
     expect(invitations.data).toHaveLength(1)
     for (const item of invitations.data) {
-      keys(item, ['id', 'email', 'status', 'createdAt', 'expiresAt', 'delivery', 'resendAllowed'])
+      keys(item, invitationSummaryKeys)
       keys(item.delivery, ['state', 'attempts', 'lastAttemptAt', 'lastErrorCode'])
       expect(item.delivery).toEqual({
         state: 'unknown',
@@ -969,6 +981,19 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
         lastAttemptAt: null,
         lastErrorCode: null,
       })
+      expect(item.generation).toBe(1)
+      const detail = await body(
+        await get(`/api/v1/team/invitations/${item.id}`, actor, {
+          'x-expected-organization-id': fixture.team.id,
+        }),
+      )
+      keys(detail, invitationSummaryKeys)
+      keys(detail.delivery, ['state', 'attempts', 'lastAttemptAt', 'lastErrorCode'])
+      const { resendRetryAfterSeconds: detailRetry, ...detailStable } = detail
+      const { resendRetryAfterSeconds: listRetry, ...listStable } = item
+      expect(detailStable).toEqual(listStable)
+      if (detailRetry !== null && listRetry !== null)
+        expect(Math.abs(detailRetry - listRetry)).toBeLessThanOrEqual(1)
     }
     const impact = await body(
       await get(
@@ -1042,13 +1067,19 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     const paths = [
       '/api/v1/team/bookings',
       '/api/v1/team/invitations',
+      `/api/v1/team/invitations/${fixture.invitationId}`,
       `/api/v1/teams/${fixture.team.id}/readiness`,
       `/api/v1/team/member-removals/${fixture.operationId}?teamId=${fixture.team.id}`,
       `/api/v1/team/members/${fixture.member.id}/removal-handling?teamId=${fixture.team.id}`,
     ]
     for (const actor of fixture.actors.slice(2))
       for (const path of paths)
-        expect(await body(await get(path, actor), 403)).toEqual({
+        expect(
+          await body(
+            await get(path, actor, { 'x-expected-organization-id': fixture.team.id }),
+            403,
+          ),
+        ).toEqual({
           error: 'team_management_access_denied',
         })
     for (const path of paths)
@@ -1064,8 +1095,13 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       `/api/v1/team/member-removals/${fixture.otherOperationId}?teamId=${fixture.team.id}`,
       `/api/v1/team/members/${fixture.outsider.id}/removal-handling?teamId=${fixture.team.id}`,
       `/api/v1/team/member-removals/${fixture.operationId}?teamId=${fixture.other.id}`,
+      `/api/v1/team/invitations/${fixture.otherInvitationId}`,
+      `/api/v1/team/invitations/${randomUUID()}`,
     ])
-      expect((await get(path)).status).toBe(403)
+      expect(
+        (await get(path, fixture.actors[0], { 'x-expected-organization-id': fixture.team.id }))
+          .status,
+      ).toBe(403)
     const cursor = Buffer.from(
       JSON.stringify([fixture.other.id, fixture.otherInvitationId]),
     ).toString('base64url')
@@ -1085,6 +1121,118 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
         )
       ).status,
     ).toBe(403)
+  })
+
+  it('keeps generation authority private and exposes expired replacement eligibility without renewing the old ID', async () => {
+    const original = await db
+      .selectFrom('auth.invitation')
+      .select(['status', 'expiresAt'])
+      .where('id', '=', fixture.invitationId)
+      .executeTakeFirstOrThrow()
+    try {
+      const old = new Date(Date.now() - 120_000)
+      await db
+        .insertInto('invitation_deliveries')
+        .values({
+          invitation_id: fixture.invitationId,
+          generation: 32,
+          authorized_by_user_id: fixture.admin.id,
+          state: 'failed',
+          attempts: 2,
+          last_error_code: 'smtp_permanent',
+          generation_started_at: old,
+          created_at: old,
+          updated_at: old,
+          resend_request_id: randomUUID(),
+          last_job_id: randomUUID(),
+        })
+        .execute()
+      for (const actor of fixture.actors.slice(0, 2)) {
+        const current = await body(
+          await get(`/api/v1/team/invitations/${fixture.invitationId}`, actor, {
+            'x-expected-organization-id': fixture.team.id,
+          }),
+        )
+        keys(current, invitationSummaryKeys)
+        keys(current.delivery, ['state', 'attempts', 'lastAttemptAt', 'lastErrorCode'])
+        expect(current).toMatchObject({
+          generation: 32,
+          status: 'pending',
+          resendAllowed: false,
+          resendDeniedReason: 'INVITATION_GENERATION_LIMIT',
+          resendRetryAfterSeconds: null,
+          delivery: { state: 'failed', attempts: 2, lastErrorCode: 'smtp_permanent' },
+        })
+        expect(typeof current.delivery.lastAttemptAt).toBe('string')
+        expect(JSON.stringify(current)).not.toContain(fixture.admin.id)
+      }
+      await db
+        .updateTable('auth.invitation')
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where('id', '=', fixture.invitationId)
+        .execute()
+      for (const actor of fixture.actors.slice(0, 2)) {
+        const expired = await body(
+          await get(`/api/v1/team/invitations/${fixture.invitationId}`, actor, {
+            'x-expected-organization-id': fixture.team.id,
+          }),
+        )
+        keys(expired, invitationSummaryKeys)
+        keys(expired.delivery, ['state', 'attempts', 'lastAttemptAt', 'lastErrorCode'])
+        expect(expired).toMatchObject({
+          id: fixture.invitationId,
+          status: 'expired',
+          generation: 32,
+          resendAllowed: true,
+          resendDeniedReason: null,
+          resendRetryAfterSeconds: null,
+        })
+        const page = await body(await get('/api/v1/team/invitations?status=expired', actor))
+        keys(page, ['data', 'nextCursor'])
+        expect(page.data).toHaveLength(1)
+        keys(page.data[0], invitationSummaryKeys)
+        expect(page.data[0]).toEqual(expired)
+      }
+      const canceled = await body(
+        await app.request(`/api/v1/team/invitations/${fixture.invitationId}/cancel`, {
+          method: 'POST',
+          headers: {
+            cookie: fixture.actors[0]?.cookie ?? '',
+            origin,
+            'content-type': 'application/json',
+            'x-expected-organization-id': fixture.team.id,
+          },
+          body: '{}',
+        }),
+      )
+      keys(canceled, invitationSummaryKeys)
+      keys(canceled.delivery, ['state', 'attempts', 'lastAttemptAt', 'lastErrorCode'])
+      expect(canceled).toMatchObject({
+        id: fixture.invitationId,
+        status: 'canceled',
+        generation: 32,
+        resendAllowed: false,
+        resendDeniedReason: 'INVITATION_INELIGIBLE',
+        resendRetryAfterSeconds: null,
+      })
+      expect(
+        await db
+          .selectFrom('auth.invitation')
+          .select('id')
+          .where('organizationId', '=', fixture.team.id)
+          .execute(),
+      ).toEqual([{ id: fixture.invitationId }])
+    } finally {
+      await db
+        .deleteFrom('invitation_deliveries')
+        .where('invitation_id', '=', fixture.invitationId)
+        .execute()
+      await db
+        .updateTable('auth.invitation')
+        .set(original)
+        .where('id', '=', fixture.invitationId)
+        .execute()
+    }
   })
 
   it('characterizes the existing webhook expected-organization gap without sending provider traffic', async () => {

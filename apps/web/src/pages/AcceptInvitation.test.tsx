@@ -251,7 +251,7 @@ describe('accept invitation entry', () => {
       expect(alert.textContent).toContain(message)
       if (status === 400 || status === 404)
         expect(alert.textContent).toContain(
-          'Ask the team owner to check its status and resend or replace it as appropriate.',
+          'Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.',
         )
       expect(screen.getByRole('main').textContent).not.toContain('private server prose')
       noJoinButton()
@@ -271,7 +271,7 @@ describe('accept invitation entry', () => {
       const { api } = server({ [lookupRoute]: () => json(200, { ...invitation, ...change }) })
       renderApp(path)
       expect((await screen.findByRole('alert')).textContent).toContain(
-        'Ask the team owner to check its status and resend or replace it as appropriate.',
+        'Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.',
       )
       noJoinButton()
       expect(screen.getByRole('link', { name: 'Go to Hourmere' }).getAttribute('href')).toBe('/app')
@@ -476,7 +476,7 @@ describe('accept invitation entry', () => {
     expect(api.to(acceptRoute)).toHaveLength(0)
     await userEvent.click(joinButton())
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Ask the team owner to check its status and resend or replace it as appropriate.',
+      'Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.',
     )
     noJoinButton()
     act(() => window.dispatchEvent(new Event('focus')))
@@ -484,7 +484,7 @@ describe('accept invitation entry', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
     await waitFor(() => expect(api.to(lookupRoute)).toHaveLength(2))
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Ask the team owner to check its status and resend or replace it as appropriate.',
+      'Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.',
     )
     noJoinButton()
     expect(screen.getByRole('main').textContent).not.toContain('private failure details')
@@ -720,7 +720,7 @@ describe('accept invitation entry', () => {
       if (stage === 'acceptance')
         await userEvent.click(await screen.findByRole('button', { name: '加入团队' }))
       expect((await screen.findByRole('alert')).textContent).toBe(
-        '此邀请不可用。请团队所有者检查邀请状态，并视情况重新发送或提供新邀请。',
+        '此邀请不可用。请团队所有者或管理员打开“设置 → 团队成员”，检查待接受的邀请并重新发送。如果邀请已过期，请选择“已过期”并发送新邀请。',
       )
       expect(api.to(acceptRoute)).toHaveLength(stage === 'acceptance' ? 1 : 0)
       expect(api.to(switchRoute)).toHaveLength(0)

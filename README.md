@@ -246,7 +246,10 @@ the web app does not change an API key's organization or an existing MCP OAuth g
 In a team space, Settings lists joined members by name and role with pagination.
 Owners and admins also see a separate paged section of pending invitations and their
 mail submission status. Mail server acceptance does not confirm inbox receipt;
-pending invitations never count as members or hosts.
+pending invitations never count as members or hosts. Owners/admins can resend or cancel each
+pending invitation, and select expired invitations to atomically cancel the old invitation
+and send a new invitation with a new link under the acting admin, without a duplicate pending
+row. Cancellation never removes a member who has already joined.
 Owners can promote members to admins or return admins to member access after reviewing
 the permission change. Only owners manage admins; owner roles cannot be changed, and
 ownership transfer is not available yet. A team must always retain at least one owner.

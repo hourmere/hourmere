@@ -63,7 +63,7 @@ async function sourceCopy(removeTeamLock: boolean, removeInvitationLocks: boolea
 
   const invitationLocation = new URL('../../../packages/auth/src/invitations.ts', import.meta.url)
   let invitations = readFileSync(invitationLocation, 'utf8')
-  expect(invitations.match(/\.forUpdate\(\)/g)).toHaveLength(2)
+  expect(invitations.match(/\.forUpdate\(\)/g)).toHaveLength(4)
   if (removeInvitationLocks) invitations = invitations.replaceAll('.forUpdate()', '')
   const invitationUrl = moduleUrl(invitations, invitationLocation, {
     './team-management.ts': managementUrl,

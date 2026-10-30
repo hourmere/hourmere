@@ -27,7 +27,6 @@ const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
 const remove = '/organization/remove-member'
 const updateOrganization = '/organization/update'
-const cancelInvitation = '/organization/cancel-invitation'
 const rejectInvitation = '/organization/reject-invitation'
 const createOrganization = '/organization/create'
 const setActiveOrganization = '/organization/set-active'
@@ -37,7 +36,6 @@ const protectedPaths = new Set([
   accept,
   remove,
   updateOrganization,
-  cancelInvitation,
   rejectInvitation,
   createOrganization,
   setActiveOrganization,
@@ -686,48 +684,6 @@ export function createTeamRolePolicy(
               .where('status', '=', 'pending')
               .returningAll()
               .executeTakeFirstOrThrow() as never
-          })
-        }
-        if (ctx?.path === cancelInvitation && request.model === 'invitation') {
-          return write(async (trx) => {
-            const facts = await managementWrite(ctx, trx)
-            const invitationId = body(ctx).invitationId
-            if (
-              typeof invitationId !== 'string' ||
-              !isUuid(invitationId) ||
-              !selects(request.where, { id: invitationId }) ||
-              Object.keys(request.increment).length !== 0 ||
-              Object.keys(request.set ?? {}).length !== 1 ||
-              request.set?.status !== 'canceled'
-            )
-              throw teamRoleDenied()
-            const invitation = await trx
-              .selectFrom('auth.invitation')
-              .selectAll()
-              .where('id', '=', invitationId)
-              .where('organizationId', '=', facts.organizationId)
-              .forUpdate()
-              .executeTakeFirst()
-            if (!invitation) throw teamRoleDenied()
-            if (invitation.status === 'canceled') return invitation as never
-            const clock = await trx
-              .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
-              .executeTakeFirstOrThrow()
-            if (invitation.status !== 'pending' || invitation.expiresAt <= clock.now) {
-              throw new APIError('CONFLICT', {
-                code: 'INVITATION_INELIGIBLE',
-                message: 'This invitation is no longer pending.',
-              })
-            }
-            const canceled = await trx
-              .updateTable('auth.invitation')
-              .set({ status: 'canceled' })
-              .where('id', '=', invitationId)
-              .where('organizationId', '=', facts.organizationId)
-              .returningAll()
-              .executeTakeFirst()
-            if (!canceled) throw teamRoleDenied()
-            return canceled as never
           })
         }
         if (

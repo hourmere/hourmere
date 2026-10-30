@@ -518,6 +518,7 @@ export interface EventTypes {
 
 export interface InvitationDeliveries {
   attempts: Generated<number>;
+  authorized_by_user_id: string | null;
   created_at: Generated<Timestamp>;
   due_at: Generated<Timestamp>;
   expiry_duration_ms: Generated<Int8>;

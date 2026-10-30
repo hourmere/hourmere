@@ -21,7 +21,7 @@ import { PATHS } from '../paths.ts'
 import { type Me, PageStatus, useSession } from '../session.tsx'
 
 const UNAVAILABLE =
-  'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.'
+  'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.'
 const WRONG_ACCOUNT =
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.'
 const VERIFY_EMAIL =

@@ -2,9 +2,17 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import { createRoute, z } from '@hono/zod-openapi'
+import {
+  type Auth,
+  cancelTeamInvitation,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { DomainError } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { organizationContext } from '../../../packages/auth/src/organization-context.ts'
@@ -20,6 +28,10 @@ import {
   teamSessionUser,
 } from '../../../packages/auth/src/team-management.ts'
 import { createApp } from './app.ts'
+import { ErrorBody, json } from './openapi.ts'
+import { teamInvitationRoutes } from './routes/team-invitations.ts'
+import { listTeamInvitationSummaries, TeamInvitationSummarySchema } from './team-invitations.ts'
+import { teamManagementAccess } from './team-management.ts'
 
 const { APIError, getSessionFromCtx } = await import(
   pathToFileURL(
@@ -67,6 +79,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       resolveCaller: createCallerResolver({ auth, db }),
       checkDb: async () => {},
       publicUrl: origin,
+      routes: [teamInvitationRoutes({ db, invitationMailLimits: { secret } })],
     })
   })
 
@@ -427,12 +440,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     const f = await fixture()
     const selected = application(selectedAuth)
     const adapter = (await selectedAuth.$context).adapter
-    const method = path === 'update' ? 'update' : 'incrementOne'
-    const original = adapter[method].bind(adapter)
-    const spy = vi.spyOn(adapter, method)
     let entered = false
-    spy.mockImplementation((async (input: Parameters<typeof original>[0]) => {
-      if (!entered && input.model === (path === 'update' ? 'organization' : 'invitation')) {
+    const demote = async () => {
+      if (!entered) {
         entered = true
         await db
           .updateTable('auth.member')
@@ -441,8 +451,35 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
           .where('userId', '=', f.actor.id)
           .execute()
       }
-      return original(input as never)
-    }) as typeof original)
+    }
+    const original = adapter.update.bind(adapter)
+    const transaction = db.transaction.bind(db)
+    function transactionBoundary(
+      builder: ReturnType<typeof transaction>,
+    ): ReturnType<typeof transaction> {
+      return new Proxy(builder, {
+        get(target, property, receiver) {
+          if (property === 'setIsolationLevel')
+            return (level: Parameters<typeof builder.setIsolationLevel>[0]) =>
+              transactionBoundary(target.setIsolationLevel(level))
+          if (property === 'execute')
+            return async (operation: Parameters<typeof builder.execute>[0]) => {
+              await demote()
+              return target.execute(operation)
+            }
+          return Reflect.get(target, property, receiver)
+        },
+      })
+    }
+    const spy =
+      path === 'cancel-invitation'
+        ? vi.spyOn(db, 'transaction').mockImplementation(() => transactionBoundary(transaction()))
+        : vi.spyOn(adapter, 'update').mockImplementation((async (
+            input: Parameters<typeof original>[0],
+          ) => {
+            if (input.model === 'organization') await demote()
+            return original(input)
+          }) as typeof original)
     try {
       const response = await request(f, path, f.team.id, origin, selected)
       expect(entered).toBe(true)
@@ -479,16 +516,14 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       origin,
       application(selectedAuth),
     )
-    expect(response.status).toBe(state === 'canceled' ? 200 : 409)
-    if (state !== 'canceled')
-      expect(await response.json()).toMatchObject({ code: 'INVITATION_INELIGIBLE' })
+    expect(response.status).toBe(200)
     expect(
       await db
         .selectFrom('auth.invitation')
         .select('status')
         .where('id', '=', f.invitation.id)
         .executeTakeFirstOrThrow(),
-    ).toEqual({ status })
+    ).toEqual({ status: state === 'expired' ? 'canceled' : status })
   }
 
   async function verifyRejection(terminal: 'accepted' | 'canceled', selectedAuth = auth) {
@@ -588,6 +623,176 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       expect(response.status, `${path}: ${source}`).toBe(403)
       await unchanged(f)
     }
+  })
+
+  function invitationRequest(
+    f: Fixture,
+    method: 'GET' | 'POST',
+    expected: string | null = f.team.id,
+    options: {
+      id?: string
+      authorization?: string
+      source?: string | null
+      body?: object
+      selected?: ReturnType<typeof createApp>
+    } = {},
+  ) {
+    return (options.selected ?? app).request(
+      `/api/v1/team/invitations/${options.id ?? f.invitation.id}${method === 'POST' ? '/cancel' : ''}`,
+      {
+        method,
+        headers: {
+          cookie: f.cookie,
+          ...(options.source === null ? {} : { origin: options.source ?? origin }),
+          'content-type': 'application/json',
+          ...(expected === null ? {} : { 'x-expected-organization-id': expected }),
+          ...(options.authorization === undefined ? {} : { authorization: options.authorization }),
+        },
+        ...(method === 'POST' ? { body: JSON.stringify(options.body ?? {}) } : {}),
+      },
+    )
+  }
+
+  it.each(['GET', 'POST'] as const)(
+    'invitation %s uses current authority before missing-context recovery',
+    async (method) => {
+      for (const role of ['owner', 'admin', 'member', 'removed', 'unverified'] as const) {
+        const f = await fixture(role)
+        const allowed = role === 'owner' || role === 'admin'
+        const response = await invitationRequest(f, method, null)
+        expect(response.status, `${method}: ${role}`).toBe(
+          allowed ? (method === 'GET' ? 200 : 409) : 403,
+        )
+        if (!allowed)
+          expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+        await unchanged(f)
+      }
+    },
+  )
+
+  it.each(['GET', 'POST'] as const)(
+    'invitation %s applies expected-team recovery and foreign target isolation',
+    async (method) => {
+      const f = await fixture()
+      const other = await createTestTeam(db, [{ user: f.owner, role: 'owner' }])
+      const foreign = await db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: other.id,
+          inviterId: f.owner.id,
+          email: `${randomUUID()}@example.test`,
+          role: 'member',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 3_600_000),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      for (const id of [foreign.id, randomUUID()]) {
+        const response = await invitationRequest(f, method, f.team.id, { id })
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+      }
+      for (const expected of ['malformed', other.id])
+        expect((await invitationRequest(f, method, expected)).status).toBe(403)
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: f.actor.principal.organization.id })
+        .where('id', '=', f.sessionId)
+        .execute()
+      expect((await invitationRequest(f, method)).status).toBe(409)
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', f.team.id)
+        .where('userId', '=', f.actor.id)
+        .execute()
+      expect((await invitationRequest(f, method)).status).toBe(403)
+      await unchanged(f)
+    },
+  )
+
+  it.each(['GET', 'POST'] as const)(
+    'invitation %s rejects every Authorization boundary with a valid cookie',
+    async (method) => {
+      const f = await fixture()
+      for (const authorization of [
+        '',
+        'Bearer hm_synthetic',
+        'Bearer synthetic-oauth',
+        'Basic synthetic',
+      ]) {
+        const response = await invitationRequest(f, method, f.team.id, { authorization })
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+      }
+      await unchanged(f)
+    },
+  )
+
+  it('invitation cancellation preserves cookie origin protection and refuses forged bodies', async () => {
+    const f = await fixture()
+    for (const source of ['https://foreign.example', 'null', null])
+      expect((await invitationRequest(f, 'POST', f.team.id, { source })).status).toBe(403)
+    expect(
+      (await invitationRequest(f, 'POST', f.team.id, { body: { organizationId: randomUUID() } }))
+        .status,
+    ).toBe(400)
+    await unchanged(f)
+  })
+
+  async function verifyInvitationMissingContext(routes: typeof teamInvitationRoutes) {
+    const f = await fixture()
+    const selected = createApp({
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      checkDb: async () => {},
+      publicUrl: origin,
+      routes: [routes({ db, invitationMailLimits: { secret } })],
+    })
+    expect((await invitationRequest(f, 'POST', null, { selected })).status).toBe(409)
+    await unchanged(f)
+  }
+
+  async function invitationRouteCopy(mutate = false) {
+    const location = new URL('./routes/team-invitations.ts', import.meta.url)
+    let source = readFileSync(location, 'utf8')
+    if (mutate) {
+      const start = source.indexOf('    const writeHeaders = z.object({\n')
+      const end = source.indexOf('    const params = z.object(')
+      expect(start >= 0 && end > start, 'write header mutation anchor').toBe(true)
+      source =
+        source.slice(0, start) +
+        source.slice(start, end).replace('.optional()', '') +
+        source.slice(end)
+    }
+    const code = stripTypeScriptTypes(
+      source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
+    ).replace(/\bexport /g, '')
+    const bindings = {
+      createRoute,
+      z,
+      cancelTeamInvitation,
+      TeamManagementError,
+      DomainError,
+      ErrorBody,
+      json,
+      listTeamInvitationSummaries,
+      TeamInvitationSummarySchema,
+      teamManagementAccess,
+    }
+    return new Function(...Object.keys(bindings), `${code}; return teamInvitationRoutes`)(
+      ...Object.values(bindings),
+    ) as typeof teamInvitationRoutes
+  }
+
+  it('passes invitation context recovery with the unchanged route source copy', async () => {
+    await verifyInvitationMissingContext(await invitationRouteCopy())
+  })
+
+  it('detects generic validation bypassing invitation context recovery with a real assertion', async () => {
+    await expect(
+      verifyInvitationMissingContext(await invitationRouteCopy(true)),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
   function sourceCopy(mutation?: 'authority' | 'identity' | 'session'): typeof organizationContext {
@@ -739,25 +944,73 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     for (const path of ['create', 'set-active'] as const) await verifyContextPersistence(path, copy)
   })
 
-  it.each(['update', 'cancel-invitation'] as const)(
-    'detects removal of the %s transaction guard through a real HTTP assertion',
-    async (path) => {
-      const branch =
-        path === 'update'
-          ? "if (ctx?.path === updateOrganization && request.model === 'organization') {"
-          : "if (ctx?.path === cancelInvitation && request.model === 'invitation') {"
-      await expect(
-        verifyRevocation(path, await policyCopy(branch, 'if (false) {')),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
-    },
-  )
+  it('detects removal of the update transaction guard through a real HTTP assertion', async () => {
+    const branch = "if (ctx?.path === updateOrganization && request.model === 'organization') {"
+    await expect(
+      verifyRevocation('update', await policyCopy(branch, 'if (false) {')),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
-  it.each(['accepted', 'expired'] as const)(
-    'detects removal of the %s lifecycle guard through a real HTTP assertion',
+  async function cancellationCopy(mutation?: 'authorization' | 'lifecycle') {
+    const location = new URL(
+      '../../../packages/auth/src/invitation-cancellation.ts',
+      import.meta.url,
+    )
+    let source = readFileSync(location, 'utf8')
+    if (mutation === 'authorization') {
+      const start = '        const facts = await checkTeamManagementAccess(\n'
+      const end = "        if (facts.role === 'member') throw teamRoleDenied()\n"
+      expect(source.includes(start), 'cancellation authorization mutation anchor').toBe(true)
+      source =
+        source.slice(0, source.indexOf(start)) +
+        "        const facts = { role: 'owner', organizationId: target.organizationId, userId: session.user.id }\n" +
+        source.slice(source.indexOf(end))
+    }
+    if (mutation === 'lifecycle') {
+      const guard = "if (invitation.status !== 'pending') return invitation"
+      expect(source.includes(guard), 'cancellation lifecycle mutation anchor').toBe(true)
+      source = source
+        .replace(guard, 'if (false) return invitation')
+        .replace(".where('status', '=', 'pending')", '')
+    }
+    const hooksLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
+    const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
+    const hooks = moduleUrl(readFileSync(hooksLocation, 'utf8'), hooksLocation, {
+      './invitation-cancellation.ts': moduleUrl(source, location),
+    })
+    const { createAuth: factory } = (await import(
+      moduleUrl(readFileSync(authLocation, 'utf8'), authLocation, {
+        './hooks.ts': hooks,
+      })
+    )) as { createAuth: typeof createAuth }
+    return factory({
+      pool,
+      db,
+      baseURL: origin,
+      secret,
+      signup: { mode: 'open', allowedDomains: [] },
+      mailer: { send: async () => {} },
+    })
+  }
+
+  it('passes the native cancellation boundary assertions with the original hook source copy', async () => {
+    const copy = await cancellationCopy()
+    await verifyRevocation('cancel-invitation', copy)
+    for (const state of ['accepted', 'rejected', 'expired', 'canceled'] as const)
+      await verifyTerminal(state, copy)
+  })
+
+  it('detects removal of native cancellation authorization through a real HTTP assertion', async () => {
+    await expect(
+      verifyRevocation('cancel-invitation', await cancellationCopy('authorization')),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it.each(['accepted', 'rejected'] as const)(
+    'detects cancellation overwriting %s through a real HTTP assertion',
     async (state) => {
-      const branch = "if (invitation.status !== 'pending' || invitation.expiresAt <= clock.now) {"
       await expect(
-        verifyTerminal(state, await policyCopy(branch, 'if (false) {')),
+        verifyTerminal(state, await cancellationCopy('lifecycle')),
       ).rejects.toMatchObject({ name: 'AssertionError' })
     },
   )
