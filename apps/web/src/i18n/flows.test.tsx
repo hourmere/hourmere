@@ -22,6 +22,7 @@ import {
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 
 vi.mock('../public/env.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../public/env.ts')>()),
@@ -31,6 +32,10 @@ vi.mock('../public/env.ts', async (importOriginal) => ({
 }))
 beforeEach(() => window.history.replaceState(null, '', '/'))
 const setLanguage = async (user: ReturnType<typeof userEvent.setup>, language: 'en' | 'zh-CN') => {
+  if (screen.queryByRole('button', { name: /^(Language:|语言：)/ })) {
+    await selectPublicLanguage(user, language)
+    return
+  }
   await user.selectOptions(
     screen.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
     language,
@@ -83,7 +88,7 @@ describe('changing interface language through booking and account flows', () => 
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       expect(screen.getByText('Enter your name.')).toBeDefined()
       const name = screen.getByLabelText<HTMLInputElement>('Your name')
-      if (embed) expect(screen.queryByRole('combobox', { name: 'Interface language' })).toBeNull()
+      if (embed) expect(screen.queryByRole('button', { name: /^(Language:|语言：)/ })).toBeNull()
       else await setLanguage(user, 'zh-CN')
       const attribution = screen.getByRole('contentinfo').querySelector('a')
       expect(attribution?.textContent).toBe(embed ? 'Powered by Hourmere' : '由 Hourmere 提供支持')

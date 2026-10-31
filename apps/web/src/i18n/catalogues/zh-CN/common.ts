@@ -108,6 +108,7 @@ export const common = {
   ' (primary)': '（主日历）',
   ' (personal)': '（个人）',
   'Interface language': '界面语言',
+  'Language: {0}': '语言：{0}',
   '. If it was moved to another time, the new booking has its own link.':
     '。如果已改期，新预约有单独的链接。',
   '(optional, shared with your host)': '（可选，将与主持人共享）',

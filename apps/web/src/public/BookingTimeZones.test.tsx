@@ -10,6 +10,7 @@ import {
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 
 const env = vi.hoisted(() => ({
   zone: 'Asia/Shanghai',
@@ -168,7 +169,7 @@ describe('cross-zone public booking details', () => {
     await chooseDay(user, '2026-11-11')
     await user.click(screen.getByRole('button', { name: '8:00 AM' }))
     expect(document.querySelector('.host-local-time')).toBeNull()
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectPublicLanguage(user, 'zh-CN')
     expect(required.textContent).toMatchInlineSnapshot(
       '"必选主持人：Ada（America/Los Angeles）、Grace（America/New York）"',
     )
@@ -197,7 +198,7 @@ describe('cross-zone public booking details', () => {
     expect(screen.getByText('Grace (America/New York)').textContent).toMatchInlineSnapshot(
       '"Grace (America/New York)"',
     )
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectPublicLanguage(user, 'zh-CN')
     expect(screen.getByText('Grace（America/New York）').textContent).toMatchInlineSnapshot(
       '"Grace（America/New York）"',
     )

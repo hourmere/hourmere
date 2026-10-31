@@ -12,7 +12,7 @@ test('Chinese public calendar days stay on one line and clear the today marker',
   await page.clock.setFixedTime(today)
   await page.addInitScript(() => localStorage.setItem('hourmere-language', 'zh-CN'))
   await page.goto(app.url + app.personalPath)
-  await expect(page.getByRole('combobox', { name: '界面语言' })).toHaveValue('zh-CN')
+  await expect(page.getByRole('button', { name: '语言：简体中文' })).toBeVisible()
   const current = page.locator('.calendar-grid [aria-current="date"]')
   await expect(current).toHaveText('10日')
   await expect(page.locator('.calendar-grid')).toHaveAttribute('aria-busy', 'false')

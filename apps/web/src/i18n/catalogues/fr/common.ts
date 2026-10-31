@@ -104,6 +104,7 @@ export const common = {
   ' (primary)': ' (principal)',
   ' (personal)': ' (personnel)',
   'Interface language': 'Langue de l’interface',
+  'Language: {0}': 'Langue : {0}',
   '. If it was moved to another time, the new booking has its own link.':
     '. Si elle a été replanifiée à un autre horaire, la nouvelle réservation dispose de son propre lien.',
   '(optional, shared with your host)': '(facultatif, partagé avec votre hôte)',

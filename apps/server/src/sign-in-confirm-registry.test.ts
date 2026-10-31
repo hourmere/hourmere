@@ -50,7 +50,8 @@ describe('registered sign-in confirmation locales', () => {
     expect(html).toContain('<html lang="qaa">')
     expect(html).toContain('<title>Fixture &lt;/script&gt; title</title>')
     expect(html).toContain('Press the button to finish signing in.')
-    expect(html).toContain('<option value="qaa" lang="qaa" selected>Fixture locale</option>')
+    expect(html).toContain('role="menuitemradio" lang="qaa" aria-checked="true"')
+    expect(html).toContain('<span id="language-current" lang="qaa">Fixture locale</span>')
     expect(inlineAsset(html, 'script')).not.toContain('</script>')
     expect(inlineAsset(html, 'script')).toContain('function setLanguage(language)')
   })
@@ -63,6 +64,9 @@ describe('registered sign-in confirmation locales', () => {
       return Object.assign(nodes.get(id) as { textContent: string }, {
         addEventListener() {},
         setAttribute() {},
+        querySelectorAll() {
+          return []
+        },
       })
     }
     const document = {
@@ -71,6 +75,7 @@ describe('registered sign-in confirmation locales', () => {
       cookie: '',
       getElementById: node,
       querySelector: () => node('button'),
+      addEventListener() {},
     }
     const context = {
       document,
