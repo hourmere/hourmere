@@ -264,7 +264,7 @@ test('popup booking keeps completion data private and supports cross-frame Escap
       .locator('body')
       .evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
   ).toBe(true)
-  await frame.getByRole('button', { name: 'Next month' }).focus()
+  await frame.getByRole('button', { name: 'Next month', exact: true }).focus()
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(opener).toBeFocused()
