@@ -52,11 +52,13 @@ export interface HostSchedule {
 
 /** Booking rules of an event type. All values are whole numbers within the stated bounds. */
 export interface EventTypeRules {
-  /** Length of a meeting in elapsed minutes, 1–1440. */
+  /** Default length of a meeting in elapsed minutes, 1–1440. */
   readonly durationMinutes: number
+  /** Distinct offered lengths, 1–1440 minutes, at most 12; includes the default. */
+  readonly allowedDurationsMinutes?: readonly number[]
   /**
    * Distance between candidate start times, counted in wall-clock minutes from
-   * the start of each working interval, 1–1440. Defaults to `durationMinutes`.
+   * the start of each working interval, 1–1440. Defaults to the selected duration.
    */
   readonly slotStepMinutes?: number
   /** Time that must be free before a meeting, 0–1440. Defaults to 0. */
@@ -97,6 +99,8 @@ export interface ExistingBooking extends InstantInterval {
 export interface AvailabilityInput {
   readonly schedule: HostSchedule
   readonly eventType: EventTypeRules
+  /** Selected offered duration; defaults to the event type’s durationMinutes. */
+  readonly durationMinutes?: number
   /**
    * Busy times from connected calendars, as plain intervals. They block slots but
    * do not count toward the daily limit.

@@ -18,6 +18,7 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     title: 'Intro call',
     description: null,
     durationMinutes: 30,
+    allowedDurationsMinutes: [30],
     slotStepMinutes: null,
     bufferBeforeMinutes: 0,
     bufferAfterMinutes: 0,

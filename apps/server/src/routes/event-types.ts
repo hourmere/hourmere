@@ -1,6 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
-import { EVENT_TYPE_RULE_BOUNDS } from '@hourmere/core'
+import { EVENT_TYPE_RULE_BOUNDS, MAX_ALLOWED_DURATIONS } from '@hourmere/core'
 import {
   activateRoundRobin,
   createEventType,
@@ -136,10 +136,17 @@ const fields = {
   }),
   title: z.string().openapi({ minLength: 1, maxLength: L.titleMaxLength, example: 'Intro call' }),
   description: z.string().nullable().openapi({ maxLength: L.descriptionMaxLength }),
-  durationMinutes: rule('durationMinutes', 'Length of a meeting'),
+  durationMinutes: rule('durationMinutes', 'Default length of a meeting'),
+  allowedDurationsMinutes: z.array(rule('durationMinutes', 'Permitted meeting length')).openapi({
+    description:
+      'Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes]',
+    minItems: 1,
+    maxItems: MAX_ALLOWED_DURATIONS,
+    uniqueItems: true,
+  }),
   slotStepMinutes: rule(
     'slotStepMinutes',
-    'Distance between start times; null = the duration',
+    'Distance between start times; null = the selected duration',
   ).nullable(),
   bufferBeforeMinutes: rule('bufferBeforeMinutes', 'Free time kept before a meeting'),
   bufferAfterMinutes: rule('bufferAfterMinutes', 'Free time kept after a meeting'),
@@ -202,6 +209,7 @@ const EventTypeInput = z
     slug: fields.slug,
     title: fields.title,
     durationMinutes: fields.durationMinutes,
+    allowedDurationsMinutes: fields.allowedDurationsMinutes.optional(),
     description: fields.description.optional(),
     slotStepMinutes: fields.slotStepMinutes.optional(),
     bufferBeforeMinutes: fields.bufferBeforeMinutes.optional().openapi({ default: 0 }),
@@ -231,6 +239,7 @@ const EventTypeUpdate = z
     slug: fields.slug.optional(),
     title: fields.title.optional(),
     durationMinutes: fields.durationMinutes.optional(),
+    allowedDurationsMinutes: fields.allowedDurationsMinutes.optional(),
     description: fields.description.optional(),
     slotStepMinutes: fields.slotStepMinutes.optional(),
     bufferBeforeMinutes: fields.bufferBeforeMinutes.optional(),
