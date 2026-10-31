@@ -29,6 +29,7 @@ import { DomainError } from './errors.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
+import type { SuccessRedirect } from './success-redirect.ts'
 
 /** Longest range one public slots request may cover. */
 export const MAX_SLOT_RANGE_DAYS = 62
@@ -95,6 +96,7 @@ export interface PublicEventTypeRecord {
   hostUserId: string
   hostUserIds: string[]
   eligibleHostUserIds: string[]
+  successRedirect: SuccessRedirect | null
   zoomConnectionId?: string | null
   conferenceOrganizerUserId: string | null
   schedulingType: 'individual' | 'collective' | 'round_robin'
@@ -162,6 +164,7 @@ export async function findPublicEventType(
       'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
+      'et.success_redirect',
       'p.user_id',
       'p.handle',
       'p.time_zone',
@@ -198,6 +201,7 @@ export async function findPublicEventType(
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
+    successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     hostName: row.name.trim() || row.handle,
     ...(image && { hostImage: image }),
     hostTimeZone: row.time_zone,
@@ -322,6 +326,7 @@ export async function findPublicTeamEventType(
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
+    successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     hostName:
       row.scheduling_type === 'round_robin' ? row.team_name : views.map((h) => h.name).join(', '),
     hostTimeZone: views[0]?.timeZone ?? 'UTC',

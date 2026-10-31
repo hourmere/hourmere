@@ -3895,7 +3895,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["BookingWithToken"];
+                        "application/json": components["schemas"]["PublicBookingResult"];
                     };
                 };
                 /** @description Booked */
@@ -3904,7 +3904,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["BookingWithToken"];
+                        "application/json": components["schemas"]["PublicBookingResult"];
                     };
                 };
                 /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
@@ -4127,7 +4127,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["BookingWithToken"];
+                        "application/json": components["schemas"]["PublicBookingResult"];
                     };
                 };
                 /** @description Booked */
@@ -4136,7 +4136,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["BookingWithToken"];
+                        "application/json": components["schemas"]["PublicBookingResult"];
                     };
                 };
                 /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
@@ -6864,6 +6864,18 @@ export interface components {
              * @example Europe/Berlin
              */
             timeZone: string;
+        };
+        PublicBookingResult: components["schemas"]["BookingWithToken"] & {
+            /** @description Present only after successful creation of a booking with saved redirect settings. Show the normal confirmation and an explicit Continue link; do not automatically navigate. */
+            successRedirect?: {
+                /** @description Explicit event-type opt-in for a user-activated continuation in the embedding parent. Otherwise embedded pages open a new tab with noopener noreferrer. */
+                allowEmbedParent: boolean;
+                /**
+                 * Format: uri
+                 * @description Saved booking-time continuation URL, with only explicitly selected parameters. Never taken from request parameters. The same idempotent creation replay returns the same URL.
+                 */
+                url: string;
+            };
         };
         PublicEventType: {
             /** @description Whether invitees may add guest recipients */

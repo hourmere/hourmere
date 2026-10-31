@@ -128,6 +128,10 @@ const schema = z
           error: 'PUBLIC_URL must not have a path: Hourmere is served at the root of its domain',
         }),
     ),
+    // Browser continuation only; this does not enable server-side requests to these hosts.
+    SUCCESS_REDIRECT_ALLOW_IP_HOSTS: optional(z.enum(['true', 'false'])).transform(
+      (value) => value === 'true',
+    ),
     // Public attribution points to the hosted service, independently of this instance.
     HOSTED_SIGNUP_URL: optional(
       z.url({ protocol: /^https?$/ }).refine(

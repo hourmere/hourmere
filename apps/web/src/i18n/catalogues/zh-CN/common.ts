@@ -368,4 +368,10 @@ export const common = {
     '你已无权访问此团队。请选择其他团队。',
   'Sign in with the email address that received this invitation. Signing in does not join the team.':
     '请使用收到此邀请的邮箱登录。登录不会自动加入团队。',
+  'Keep your booking details and link before continuing to the host’s website.':
+    '前往主办者的网站前，请保存预约详情和管理链接。',
+  'Continue to {host}': '继续前往 {host}',
+  'Opens the host’s website in the parent page.': '将在上层页面中打开主办者的网站。',
+  'Opens the host’s website in a new tab.': '将在新标签页中打开主办者的网站。',
+  'Opens the host’s website in this tab.': '将在当前标签页中打开主办者的网站。',
 } as const

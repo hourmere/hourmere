@@ -19,6 +19,26 @@ import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { BookingWithToken, Instant, LocationKind, Responses, Slot } from './bookings.ts'
 
+/** Only creation can offer a continuation; manage, cancel and reschedule never do. */
+export const PublicBookingResult = BookingWithToken.extend({
+  successRedirect: z
+    .object({
+      url: z.url({ protocol: /^https$/ }).openapi({
+        description:
+          'Saved booking-time continuation URL, with only explicitly selected parameters. Never taken from request parameters. The same idempotent creation replay returns the same URL.',
+      }),
+      allowEmbedParent: z.boolean().openapi({
+        description:
+          'Explicit event-type opt-in for a user-activated continuation in the embedding parent. Otherwise embedded pages open a new tab with noopener noreferrer.',
+      }),
+    })
+    .optional()
+    .openapi({
+      description:
+        'Present only after successful creation of a booking with saved redirect settings. Show the normal confirmation and an explicit Continue link; do not automatically navigate.',
+    }),
+}).openapi('PublicBookingResult')
+
 export const PublicEventType = z
   .object({
     handle: z.string(),
@@ -131,6 +151,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 
 export interface PublicRoutesDeps {
   db: Db
+  successRedirectPolicy?: PublicContext['successRedirectPolicy']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
@@ -150,9 +171,17 @@ export function publicRoutes({
   notify,
   automaticMeet,
   automaticZoom,
+  successRedirectPolicy,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
-  const ctx: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
+  const ctx: PublicContext = {
+    db,
+    now,
+    notify,
+    automaticMeet,
+    automaticZoom,
+    successRedirectPolicy,
+  }
   const limit = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
   const pageLimit = limit('page')
@@ -290,10 +319,10 @@ export function publicRoutes({
             body: { content: json(CreateBooking), required: true },
           },
           responses: {
-            201: { description: 'Booked', content: json(BookingWithToken) },
+            201: { description: 'Booked', content: json(PublicBookingResult) },
             200: {
               description: 'A retry of an earlier request with the same Idempotency-Key',
-              content: json(BookingWithToken),
+              content: json(PublicBookingResult),
             },
             400: error(
               'Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`)',

@@ -389,6 +389,7 @@ export interface Bookings {
   source: string;
   start_at: Timestamp;
   status: Generated<string>;
+  success_redirect: Json | null;
   title: string;
   updated_at: Generated<Timestamp>;
 }
@@ -511,6 +512,7 @@ export interface EventTypes {
   scheduling_type: Generated<string>;
   slot_step_minutes: number | null;
   slug: string;
+  success_redirect: Json | null;
   title: string;
   updated_at: Generated<Timestamp>;
   zoom_connection_id: string | null;

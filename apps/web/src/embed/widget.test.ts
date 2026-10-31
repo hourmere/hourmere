@@ -91,10 +91,11 @@ describe('standalone booking widget', () => {
       'allow-forms',
       'allow-popups',
       'allow-popups-to-escape-sandbox',
+      'allow-top-navigation-by-user-activation',
       'allow-downloads',
     ])
       expect(sandbox.split(' ')).toContain(value)
-    expect(sandbox).not.toContain('allow-top-navigation')
+    expect(sandbox.split(' ')).not.toContain('allow-top-navigation')
     expect(new URL(mount('https://hourmere.test/team/Alpha/intro').iframe.src).pathname).toBe(
       '/embed/team/Alpha/intro',
     )

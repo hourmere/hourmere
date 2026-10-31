@@ -31,6 +31,11 @@ import { DomainError } from './errors.ts'
 import { bookingHostIds, lockOrganization } from './hosts.ts'
 import { type Responses, validateResponses } from './questions.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
+import {
+  type BookingSuccessRedirect,
+  bookingSuccessRedirect,
+  validateSuccessRedirect,
+} from './success-redirect.ts'
 import { cleanText } from './text.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
@@ -376,10 +381,13 @@ interface IdempotencyScope {
  * The booking an earlier request with this key created, if any. A different request
  * reusing the key is refused rather than answered with someone else's booking.
  */
-async function findReplay(db: Db, scope: IdempotencyScope): Promise<BookingWithToken | undefined> {
+async function findReplay(
+  db: Db,
+  scope: IdempotencyScope,
+): Promise<(BookingWithToken & { successRedirect?: BookingSuccessRedirect }) | undefined> {
   const row = await db
     .selectFrom('bookings')
-    .select(['id', 'idempotency_fingerprint'])
+    .select(['id', 'idempotency_fingerprint', 'success_redirect'])
     .where('organization_id', '=', scope.organizationId)
     .where('api_key_id', scope.apiKeyId === null ? 'is' : '=', scope.apiKeyId)
     .where(
@@ -397,7 +405,13 @@ async function findReplay(db: Db, scope: IdempotencyScope): Promise<BookingWithT
       'This Idempotency-Key was already used for a different request',
     )
   }
-  return { booking: await loadBooking(db, row.id), manageToken: null }
+  return {
+    booking: await loadBooking(db, row.id),
+    manageToken: null,
+    ...(row.success_redirect && {
+      successRedirect: row.success_redirect as unknown as BookingSuccessRedirect,
+    }),
+  }
 }
 
 const pgError = (err: unknown) =>
@@ -645,6 +659,7 @@ async function requireOfferedSlot(
 }
 
 interface NewBooking {
+  successRedirect?: BookingSuccessRedirect | undefined
   organizationId: string
   eventTypeId: string | null
   start: Temporal.Instant
@@ -677,6 +692,7 @@ async function insertBooking(
     .values({
       organization_id: b.organizationId,
       event_type_id: b.eventTypeId,
+      success_redirect: b.successRedirect ? JSON.stringify(b.successRedirect) : null,
       start_at: b.start.toString(),
       end_at: b.end.toString(),
       title: b.title,
@@ -824,6 +840,7 @@ export interface BookingOrigin {
 const BOOKING_PAGE: BookingOrigin = { source: 'web', apiKeyId: null }
 
 export interface CreateBookingResult extends BookingWithToken {
+  successRedirect?: BookingSuccessRedirect | undefined
   /** True when an earlier request with the same Idempotency-Key created the booking. */
   replayed: boolean
 }
@@ -968,7 +985,24 @@ async function publicBooking(
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
+      const settings =
+        origin.source === 'web' || origin.source === 'embed'
+          ? validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
+          : null
+      const selectedHosts = selectedHostIds.map(
+        (id) => current.hosts[current.hostUserIds.indexOf(id)]?.name ?? current.hostName,
+      )
+      const successRedirect = bookingSuccessRedirect(settings, {
+        eventTypeSlug: current.slug,
+        start: toIso(input.start),
+        end: toIso(end),
+        timeZone: invitee.timeZone,
+        hostName: selectedHosts.join(', '),
+        inviteeName: invitee.name,
+        inviteeEmail: invitee.email,
+      })
       const { id, manageToken } = await insertBooking(trx, {
+        successRedirect,
         organizationId: current.organizationId,
         eventTypeId: current.id,
         start: input.start,
@@ -988,7 +1022,12 @@ async function publicBooking(
       // queued only if the booking commits.
       await prepareBookingConference(ctx, trx, id)
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
-      return { booking: await loadBooking(trx, id), manageToken, replayed: false }
+      return {
+        booking: await loadBooking(trx, id),
+        manageToken,
+        replayed: false,
+        ...(successRedirect && { successRedirect }),
+      }
     })
   } catch (err) {
     // The same key was committed concurrently for another host (the lock did not apply).

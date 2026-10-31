@@ -184,9 +184,10 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   iframe.title = widgetMessages(selectedLanguage).iframe
   iframe.referrerPolicy = 'no-referrer'
   iframe.setAttribute('allow', 'clipboard-write')
+  // The saved confirmation opt-in may show a _top link. It still needs a user click.
   iframe.setAttribute(
     'sandbox',
-    'allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox',
+    'allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation',
   )
   iframe.setAttribute('loading', 'lazy')
   Object.assign(iframe.style, {

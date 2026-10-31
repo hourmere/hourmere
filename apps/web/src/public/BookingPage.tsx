@@ -1,5 +1,5 @@
 import { interfaceLanguage } from '@hourmere/core/language'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
@@ -12,13 +12,13 @@ import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
 import {
-  type BookingWithToken,
   type CreateBooking,
   codeOf,
   createBooking,
   eventSlots,
   failureMessage,
   getEventType,
+  type PublicBookingResult,
   type PublicEventType,
   PublicRequestError,
   randomKey,
@@ -126,7 +126,7 @@ function BookingPageContent({
 
 const EMPTY_FORM: BookingFormValues = { name: '', email: '', guests: [], answers: {} }
 
-interface Confirmed extends BookingWithToken {
+interface Confirmed extends PublicBookingResult {
   /** An earlier attempt made this booking; its manage token cannot be shown again. */
   replayed: boolean
   timeZone: string
@@ -419,6 +419,7 @@ function Confirmation({
   const { t, text, ui, locale: language } = useI18n()
 
   usePageTitle('Booking confirmed')
+  const redirectDescription = useId()
   const embedded = useEmbedded()
   const notified = useRef(false)
   useEffect(() => {
@@ -581,6 +582,39 @@ function Confirmation({
           {booking.status === 'confirmed' &&
             (!booking.conference || booking.conference.status === 'ready') && <EmailDeliveryHint />}
         </div>
+        {booking.status === 'confirmed' && confirmed.successRedirect && (
+          <div className="confirmation-secondary stack">
+            <p>
+              {t('Keep your booking details and link before continuing to the host’s website.')}
+            </p>
+            <p>
+              <a
+                className="button button-primary"
+                href={confirmed.successRedirect.url}
+                aria-describedby={redirectDescription}
+                target={
+                  embedded
+                    ? confirmed.successRedirect.allowEmbedParent
+                      ? '_top'
+                      : '_blank'
+                    : undefined
+                }
+                rel="noopener noreferrer"
+              >
+                {t('Continue to {host}', { host: new URL(confirmed.successRedirect.url).host })}
+              </a>
+            </p>
+            <p className="hint" id={redirectDescription}>
+              {t(
+                embedded
+                  ? confirmed.successRedirect.allowEmbedParent
+                    ? 'Opens the host’s website in the parent page.'
+                    : 'Opens the host’s website in a new tab.'
+                  : 'Opens the host’s website in this tab.',
+              )}
+            </p>
+          </div>
+        )}
         <CreateBookingLink />
       </div>
     </PublicLayout>

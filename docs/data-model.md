@@ -265,6 +265,50 @@ Validated by the application (zod), not by the database:
   in; set when the key is created (the owner's personal organization unless they name
   another one they belong to) and re-checked against membership on every request.
 
+## Booking continuation contract
+
+Migration 0048 adds nullable `event_types.success_redirect` configuration and
+`bookings.success_redirect` snapshots. Existing event types and bookings remain unset;
+their data and confirmation behavior are preserved. The service accepts optional
+`successRedirect: { url, parameters?, includeInviteePersonalData?, allowEmbedParent? }`
+(or null to clear it). Configuration UI and REST/MCP/CLI writes are a later change.
+
+URLs must be absolute HTTPS, without userinfo, whitespace/control characters or malformed
+Unicode, and at most 2000 characters both before and after URL normalization. IDN hosts
+are stored as ASCII and Unicode paths are percent-encoded. IP-literal hosts, including
+alternate IPv4 spellings normalized by the URL parser, are refused unless the operator
+sets `SUCCESS_REDIRECT_ALLOW_IP_HOSTS=true` or the host equals the instance's `PUBLIC_URL`
+host. These exceptions still require HTTPS. Validation lives in the scheduling service;
+the browser never supplies or chooses the target. No server-side destination request is made.
+
+`parameters` defaults to an empty array. Its complete whitelist is `eventTypeSlug`,
+`start`, `end` (ISO instants), `timeZone` (invitee IANA zone), `hostName` (selected hosts'
+display names), `inviteeName` and `inviteeEmail`. The last two additionally require
+`includeInviteePersonalData: true`, which defaults to false. **Warning: opting in sends the
+invitee's selected name/email to the target site and its analytics, and can place them in
+browser history.** Custom answers, guest addresses, phone numbers, management/reschedule
+tokens and internal identifiers are never added. Existing target query parameters and
+fragments are preserved; selected parameters are URL-encoded using URLSearchParams and
+appended after existing values, including existing parameters with the same name.
+
+Only successful initial public web/embed booking creation captures a final
+`{ url, allowEmbedParent }` snapshot in the booking transaction, from the locked saved
+configuration and booking-time values. The additive `successRedirect` creation response
+offers that snapshot; an idempotent replay returns the identical target even after
+configuration or host-name changes. An unset initial configuration stays unset on replay.
+Request body targets are rejected and query targets are ignored. API/MCP-origin creation,
+management reads, rescheduling and cancellation do not offer continuations. A rescheduled
+successor has no snapshot. Replaying the original creation does not turn a cancellation
+or reschedule into a new booking or a new continuation.
+
+The confirmation keeps its calendar information and private manage link, then offers an
+accessible, explicit **Continue** link. There is no timed or automatic navigation.
+`allowEmbedParent` is a separate opt-in, default false: embeds normally open the target
+in a new tab with `rel="noopener noreferrer"`; true permits the invitee's click to open
+the parent using `target="_top"`. The widget sandbox permits top navigation only with user
+activation. No redirect URL or personal data is added to the embed completion message.
+Canceling from the confirmation removes the continuation link.
+
 ## Planned additions (each a new migration)
 
 | When | Change |
