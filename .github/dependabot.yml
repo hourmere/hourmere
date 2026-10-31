@@ -18,6 +18,10 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
     ignore:
+      # jsdom 30.1.3's CSSOM regression drops unresolved var(--bg) background
+      # shorthands used by the contrast harness. Leave later fixes eligible.
+      - dependency-name: jsdom
+        versions: [30.1.3]
       # TypeScript majors are upgraded by hand. apps/site must stay on a major @astrojs/check
       # supports (its typecheck runs on TypeScript's JavaScript API); #19's bump also left
       # package-lock.json inconsistent. Minor and patch updates still come through.

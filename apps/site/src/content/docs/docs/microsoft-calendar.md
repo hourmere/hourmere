@@ -1,5 +1,4 @@
 ---
-
 title: Microsoft Calendar connection
 description: Register an Entra application and connect Outlook calendars independently of sign-in.
 ---

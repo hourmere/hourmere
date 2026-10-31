@@ -91,6 +91,7 @@ for a later owner action; they have not been run by this task. Follow the curren
 [quickstart](https://github.com/modelcontextprotocol/registry/blob/11b7b0e274d518b6f449c5ee3518a6151d9848b9/docs/modelcontextprotocol-io/quickstart.mdx).
 
 The owner has two Registry submission options:
+
 - **Template entry:** retain `https://{hourmere_host}/mcp` and its declared hostname input.
   This fits the **2026-11-30 self-hosted launch**: each user supplies their own deployment's
   hostname, without implying an Hourmere-operated public endpoint. Run

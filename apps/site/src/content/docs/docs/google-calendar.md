@@ -1,5 +1,4 @@
 ---
-
 title: Google Calendar
 description: Configure separate OAuth credentials, busy-time checks and booking event projection.
 ---
@@ -205,16 +204,16 @@ request/integration before retrying. The known event remains pinned.
 
 ## Protocol and API
 
-| Endpoint                                                              | Purpose                                                                                                         |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/calendar-connections`                                    | Own connection/calendar metadata and whether Google is configured; no credentials                               |
-| `POST /api/v1/calendar-connections/google/authorize` with `{access?}` | Same-origin browser session; returns a Google authorization URL                                                 |
-| `GET /api/calendar/google/callback`                                   | Google OAuth protocol callback; immediately redirects to `/app/calendars` with a fixed result code              |
-| `POST /api/v1/calendar-connections/{id}/refresh` with `{}`            | Session or own API key; refresh own calendar list, obtaining a fresh access token when needed                   |
-| `PATCH /api/v1/calendars/{id}` with `{checkConflicts}`                | Select up to 20 owned/accessible readable calendars for conflict checks; queues an initial sync transactionally |
-| `POST /api/v1/calendars/{id}/sync` with `{}`                          | Synchronize a selected calendar now                                                                             |
-| `PUT /api/v1/calendar-destination` with `{calendarId}`                | Set/clear the profile's owned default destination for new bookings                                              |
-| `DELETE /api/v1/calendar-connections/{id}`                            | Browser session; remove own local connection, credentials and calendars                                         |
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/calendar-connections` | Own connection/calendar metadata and whether Google is configured; no credentials |
+| `POST /api/v1/calendar-connections/google/authorize` with `{access?}` | Same-origin browser session; returns a Google authorization URL |
+| `GET /api/calendar/google/callback` | Google OAuth protocol callback; immediately redirects to `/app/calendars` with a fixed result code |
+| `POST /api/v1/calendar-connections/{id}/refresh` with `{}` | Session or own API key; refresh own calendar list, obtaining a fresh access token when needed |
+| `PATCH /api/v1/calendars/{id}` with `{checkConflicts}` | Select up to 20 owned/accessible readable calendars for conflict checks; queues an initial sync transactionally |
+| `POST /api/v1/calendars/{id}/sync` with `{}` | Synchronize a selected calendar now |
+| `PUT /api/v1/calendar-destination` with `{calendarId}` | Set/clear the profile's owned default destination for new bookings |
+| `DELETE /api/v1/calendar-connections/{id}` | Browser session; remove own local connection, credentials and calendars |
 
 Non-credential settings accept the user's own API keys with the same ownership checks.
 Cookie-authenticated writes require the app's origin. OAuth authorization, code exchange
@@ -366,6 +365,7 @@ bounded read/poll budget for the same event and UUID; it does not repeat an ackn
 PATCH. If Google keeps ignoring the duplicate UUID, host retry can time out again.
 
 For a request that remains stuck, an operator must perform an explicit maintenance repair:
+
 1. Stop reconciliation for that intent and ensure every previous operation and lease has
    ended. Inspect the exact pinned Google event; verify the current booking is confirmed,
    its poll budget exhausted, the root UID matches and Google still reports a pending

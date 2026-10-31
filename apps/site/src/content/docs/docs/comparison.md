@@ -1,5 +1,4 @@
 ---
-
 title: Compare scheduling options
 description: Compare Hourmere, Calendly, Cal.com and Cal.diy by deployment, agent access and current limitations.
 lastVerified: '2026-10-20'
@@ -15,12 +14,12 @@ current availability, terms and plan requirements before choosing a service.
 
 ## Deployment and ownership
 
-| Option   | Deployment                                                                                                                                                                                                    | Source and operating responsibility                                                                                                                                                                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Hourmere | Build from source with Docker Compose: application and PostgreSQL; workers can run separately. See [self-hosting](/docs/self-hosting).                                                                        | You operate the instance, backups, email delivery and calendar credentials; see the [configuration reference](/docs/configuration) and [backup guide](/docs/self-hosting#back-up-and-restore).                                                                                                   |
-| Calendly | Vendor-hosted scheduling and MCP service. See its [service terms](https://calendly.com/legal/customer-terms-conditions) and [MCP documentation](https://developer.calendly.com/docs/mcp/calendly-mcp-server). | Its [MCP documentation](https://developer.calendly.com/docs/mcp/calendly-mcp-server) explicitly excludes self-hosting or local deployment of that server.                                                                                                                                        |
-| Cal.com  | Managed service or commercial enterprise self-hosting, as described in its [self-hosting guide](https://cal.com/blog/self-hosted-scheduling-platforms-benefits-and-challenges).                               | Cal.com's [transition announcement](https://cal.com/blog/cal-diy-open-source-to-closed-source) describes a private production codebase. Its [self-hosting guide](https://cal.com/blog/self-hosted-scheduling-platforms-benefits-and-challenges) directs enterprise deployments through its team. |
-| Cal.diy  | Community edition installed on your infrastructure; see its [README](https://github.com/calcom/cal.diy/blob/main/README.md).                                                                                  | [MIT-licensed](https://github.com/calcom/cal.diy/blob/main/LICENSE). Its [self-hosting documentation](https://www.cal.diy/) recommends personal, non-production use and describes the operator's responsibilities.                                                                               |
+| Option | Deployment | Source and operating responsibility |
+| --- | --- | --- |
+| Hourmere | Build from source with Docker Compose: application and PostgreSQL; workers can run separately. See [self-hosting](/docs/self-hosting). | You operate the instance, backups, email delivery and calendar credentials; see the [configuration reference](/docs/configuration) and [backup guide](/docs/self-hosting#back-up-and-restore). |
+| Calendly | Vendor-hosted scheduling and MCP service. See its [service terms](https://calendly.com/legal/customer-terms-conditions) and [MCP documentation](https://developer.calendly.com/docs/mcp/calendly-mcp-server). | Its [MCP documentation](https://developer.calendly.com/docs/mcp/calendly-mcp-server) explicitly excludes self-hosting or local deployment of that server. |
+| Cal.com | Managed service or commercial enterprise self-hosting, as described in its [self-hosting guide](https://cal.com/blog/self-hosted-scheduling-platforms-benefits-and-challenges). | Cal.com's [transition announcement](https://cal.com/blog/cal-diy-open-source-to-closed-source) describes a private production codebase. Its [self-hosting guide](https://cal.com/blog/self-hosted-scheduling-platforms-benefits-and-challenges) directs enterprise deployments through its team. |
+| Cal.diy | Community edition installed on your infrastructure; see its [README](https://github.com/calcom/cal.diy/blob/main/README.md). | [MIT-licensed](https://github.com/calcom/cal.diy/blob/main/LICENSE). Its [self-hosting documentation](https://www.cal.diy/) recommends personal, non-production use and describes the operator's responsibilities. |
 
 Cal.com and Cal.diy are different offerings. Cal.com's
 [technical transition announcement](https://cal.com/blog/cal-diy-open-source-to-closed-source)
@@ -70,6 +69,7 @@ Hourmere documents [personal booking and availability](/docs/self-hosting),
 [Google Calendar connections, busy-time synchronization and booking event writes](/docs/google-calendar).
 
 Check the documented limits when evaluating it:
+
 - [Microsoft calendar connections](/docs/microsoft-calendar) list calendars and refresh
   credentials, but do not synchronize busy times or write booking events.
 - [Zoom account connections](/docs/zoom-connections) are separate from sign-in and calendar

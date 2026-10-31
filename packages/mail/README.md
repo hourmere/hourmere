@@ -27,16 +27,16 @@ const message = teamInvitationEmail({
 
 This example renders a message only; it does not send one.
 
-| Option                      | Meaning                                                                                                                                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `to: string`                | The invited email address. Both bodies tell the recipient to sign in with this address and verify it before accepting.                                                                                        |
-| `publicUrl: string`         | The instance's own configured canonical HTTP(S) origin, supplied by trusted server configuration; an optional trailing `/` is accepted. Never take it from a request, invitation field or callback parameter. |
-| `invitationId: string`      | Invitation UUID; the only variable accepted in the join URL.                                                                                                                                                  |
-| `teamName: string`          | User-controlled team display name.                                                                                                                                                                            |
-| `inviterName: string`       | User-controlled inviter display name; pass the name, without an email-address fallback.                                                                                                                       |
-| `expiresAt: Date \| string` | The invitation expiry instant: Better Auth's direct API returns `Date` objects; HTTP JSON uses ISO timestamps with a time-zone offset. Both bodies show the same UTC timestamp.                               |
-| `language?: unknown`        | An explicit language chosen by the inviter.                                                                                                                                                                   |
-| `defaultLanguage?: unknown` | An optional instance language supplied by the caller; no new environment setting is added.                                                                                                                    |
+| Option | Meaning |
+| --- | --- |
+| `to: string` | The invited email address. Both bodies tell the recipient to sign in with this address and verify it before accepting. |
+| `publicUrl: string` | The instance's own configured canonical HTTP(S) origin, supplied by trusted server configuration; an optional trailing `/` is accepted. Never take it from a request, invitation field or callback parameter. |
+| `invitationId: string` | Invitation UUID; the only variable accepted in the join URL. |
+| `teamName: string` | User-controlled team display name. |
+| `inviterName: string` | User-controlled inviter display name; pass the name, without an email-address fallback. |
+| `expiresAt: Date \| string` | The invitation expiry instant: Better Auth's direct API returns `Date` objects; HTTP JSON uses ISO timestamps with a time-zone offset. Both bodies show the same UTC timestamp. |
+| `language?: unknown` | An explicit language chosen by the inviter. |
+| `defaultLanguage?: unknown` | An optional instance language supplied by the caller; no new environment setting is added. |
 
 Language selection uses `interfaceLanguage` from `@hourmere/core/language`: a supported
 `language`, then a supported `defaultLanguage`, then `en`. English locale variants resolve

@@ -1,9 +1,18 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 
 interface PackageManifest {
   devDependencies?: Record<string, string>
+}
+
+interface DependabotConfig {
+  updates: {
+    'package-ecosystem': string
+    directory: string
+    ignore?: { 'dependency-name': string; versions?: string[]; 'update-types'?: string[] }[]
+  }[]
 }
 
 interface TestDom {
@@ -21,6 +30,18 @@ const root = manifest('../package.json')
 const rootRequire = createRequire(new URL('../package.json', import.meta.url))
 
 describe('Vitest environment dependency ownership', () => {
+  it('holds only the known jsdom CSSOM regression in Dependabot', () => {
+    const config = parse(
+      readFileSync(new URL('../.github/dependabot.yml', import.meta.url), 'utf8'),
+    ) as DependabotConfig
+    const npm = config.updates.find(
+      (update) => update['package-ecosystem'] === 'npm' && update.directory === '/',
+    )
+    expect(npm?.ignore?.filter((entry) => entry['dependency-name'] === 'jsdom')).toEqual([
+      { 'dependency-name': 'jsdom', versions: ['30.1.3'] },
+    ])
+  })
+
   it('pins jsdom at the root that owns Vitest and keeps workspace versions aligned', () => {
     const pinned = root.devDependencies?.jsdom
     expect(pinned, 'The root test runner must directly own its jsdom environment').toMatch(

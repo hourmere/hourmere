@@ -2,10 +2,10 @@
 
 These session webhook compatibility rows mirror the canonical documentation for repository readers.
 
-| Request and supplied expectation                                                                            | Previous response                                                   | Current response                                                                                                                                   |
-| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session webhook writes: missing or malformed expected ID                                                    | 2xx success (header ignored)                                        | `409 organization_context_changed`, matching session event-type writes                                                                             |
-| Session webhook writes: ordinary member of the expected current team                                        | `403 insufficient_role`                                             | `403 team_management_access_denied`                                                                                                                |
-| Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization               | `409 organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform `403 team_management_access_denied` |
-| Session webhook writes: the caller's own expected personal organization differs from the current space      | 2xx success (header ignored; request used the current organization) | `409 organization_context_changed`                                                                                                                 |
-| Session webhook reads: malformed expected ID or a different expected personal organization                  | 200 (header ignored)                                                | `403 team_management_access_denied`                                                                                                                |
+| Request and supplied expectation | Previous response | Current response |
+|---|---|---|
+| Session webhook writes: missing or malformed expected ID | 2xx success (header ignored) | 409 `organization_context_changed`, matching session event-type writes |
+| Session webhook writes: ordinary member of the expected current team | 403 `insufficient_role` | 403 `team_management_access_denied` |
+| Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
+| Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
+| Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |

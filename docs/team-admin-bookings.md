@@ -17,15 +17,15 @@ by member departure and removal responses.
 
 List items use this explicit whitelist:
 
-| Field          | Purpose                                                                                                                                                                                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | Identify the booking to inspect or coordinate cancellation.                                                                                                                                                                                                                                  |
-| `status`       | `confirmed` or `cancelled`, including cancelled reschedule predecessors.                                                                                                                                                                                                                     |
-| `start`, `end` | Stored booking instants in UTC.                                                                                                                                                                                                                                                              |
-| `cancelledAt`  | Cancellation instant, or null.                                                                                                                                                                                                                                                               |
-| `eventType`    | `{ id, title, publicBookingPath }` for the activity; title is null for a deleted activity, and the object is null when no association remains. The additive, nullable path is present only while the activity exists, is enabled and resolves through its public booking endpoint.           |
-| `hosts`        | Saved booking hosts as `{ userId, name, timeZone, isCurrentMember }`, preserving the actual assignment rather than exposing the current event host pool. The two additive fields are nullable. The zone comes only from the host's public profile; membership refers to this booking's team. |
-| `attendees`    | `{ name, email, timeZone, isBooker }` for the invitee and guests: contact, scheduling and booker identification needed for coordination.                                                                                                                                                     |
+| Field | Purpose |
+|---|---|
+| `id` | Identify the booking to inspect or coordinate cancellation. |
+| `status` | `confirmed` or `cancelled`, including cancelled reschedule predecessors. |
+| `start`, `end` | Stored booking instants in UTC. |
+| `cancelledAt` | Cancellation instant, or null. |
+| `eventType` | `{ id, title, publicBookingPath }` for the activity; title is null for a deleted activity, and the object is null when no association remains. The additive, nullable path is present only while the activity exists, is enabled and resolves through its public booking endpoint. |
+| `hosts` | Saved booking hosts as `{ userId, name, timeZone, isCurrentMember }`, preserving the actual assignment rather than exposing the current event host pool. The two additive fields are nullable. The zone comes only from the host's public profile; membership refers to this booking's team. |
+| `attendees` | `{ name, email, timeZone, isBooker }` for the invitee and guests: contact, scheduling and booker identification needed for coordination. |
 
 The list envelope contains only `data` and opaque `nextCursor` (null on the last page).
 The additional fields are read-only and limited to this list. A missing public profile

@@ -1,5 +1,4 @@
 ---
-
 title: API conventions
 description: Versioning, authentication, validation, errors and booking semantics for the REST API.
 ---
@@ -137,22 +136,22 @@ absent or unknown, including when talking to older servers. Deprecating an error
 does not schedule its removal from v1: its original `error` value remains for **all of
 `/api/v1`**. Renaming or removing it requires a new API version.
 
-| `errorAlias`          | Preserved `error`                       | Meaning                                                                                                                                                                                      |
-| --------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `errorAlias` | Preserved `error` | Meaning |
+|---|---|---|
 | `zoom_operation_busy` | `zoom_refresh_in_progress` (deprecated) | HTTP 409: another token operation for the same Hourmere owner is in progress, possibly for a different Zoom identity. It does not mean the selected connection is refreshing; retry shortly. |
 
 See [Zoom connections](/docs/zoom-connections) for callback replay and recovery semantics.
 
-| Status                                                                          | Meaning                                                                                                                                                     |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400 `invalid_request`                                                           | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
-| 401 `unauthorized`                                                              | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer`                                         |
-| 403 `forbidden`                                                                 | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission)                              |
-| 404 `not_found`                                                                 | No such resource or endpoint, or one the caller cannot see                                                                                                  |
-| 409                                                                             | Conflict with the current state (e.g. the slot was just booked)                                                                                             |
-| 405 `method_not_allowed`, 413 `payload_too_large`, 415 `unsupported_media_type` | Raised by the HTTP layer for the obvious cases; any other 4xx from it is `invalid_request`                                                                  |
-| 429 `rate_limited`                                                              | Too many requests; `Retry-After` gives the seconds to wait when known                                                                                       |
-| 500 `internal_error`                                                            | An unexpected server error; details go to the server log only                                                                                               |
+| Status | Meaning |
+|---|---|
+| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
+| 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
+| 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
+| 404 `not_found` | No such resource or endpoint, or one the caller cannot see |
+| 409 | Conflict with the current state (e.g. the slot was just booked) |
+| 405 `method_not_allowed`, 413 `payload_too_large`, 415 `unsupported_media_type` | Raised by the HTTP layer for the obvious cases; any other 4xx from it is `invalid_request` |
+| 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
+| 500 `internal_error` | An unexpected server error; details go to the server log only |
 
 `message` is written for people and is safe to show: it never contains internal error text.
 
@@ -164,11 +163,11 @@ for failures the caller can act on; the server maps the kind to a status and ans
 `{ "error": code }` (plus `message` when given):
 
 | `DomainError` kind | Status |
-| ------------------ | ------ |
-| `invalid`          | 400    |
-| `forbidden`        | 403    |
-| `not_found`        | 404    |
-| `conflict`         | 409    |
+|---|---|
+| `invalid` | 400 |
+| `forbidden` | 403 |
+| `not_found` | 404 |
+| `conflict` | 409 |
 
 Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
 A lower-level error wrapped as a DomainError's `cause` is logged the same way and never sent
@@ -204,6 +203,7 @@ Nonbrowser HTTP clients must send the same Origin. This intentionally tightens B
 callbacks and trusted server-side calls do not acquire this Origin requirement.
 
 A request is authenticated by one of:
+
 - **API key** (agents, scripts): `Authorization: Bearer hm_…`. Keys belong to a user and act
   in one organization, chosen when the key is created (the user's personal organization by
   default). If the Authorization header is present it alone decides: a bad key is a 401
@@ -279,22 +279,22 @@ active organization.
 These browser context checks include the following status changes. They grant no new
 permission and do not affect API-key or MCP OAuth authority.
 
-| Request and supplied expectation                                                                                                                                                                                                 | Previous response                                                   | Current response                                                                                                                                   |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native `invite-member`, `cancel-invitation`, `update-member-role`, `remove-member`, `leave` or `update`: malformed expected ID                                                                                                   | `409 ORGANIZATION_CONTEXT_CHANGED`                                  | `403 TEAM_MANAGEMENT_ACCESS_DENIED`                                                                                                                |
-| The same native management writes (all above except `leave`): expected team differs from the current space and the caller no longer owns/administers it, including ordinary membership, missing teams and personal organizations | `409 ORGANIZATION_CONTEXT_CHANGED`                                  | `403 TEAM_MANAGEMENT_ACCESS_DENIED`                                                                                                                |
-| Native `leave`: expected team differs from the current space and the caller is no longer a member, or the expectation names a missing/personal organization                                                                      | `409 ORGANIZATION_CONTEXT_CHANGED`                                  | `403 TEAM_MANAGEMENT_ACCESS_DENIED`                                                                                                                |
-| REST `POST /api/v1/team/members/{memberUserId}/removal`: malformed expected ID, or a different expected team the caller no longer owns/administers                                                                               | `409 organization_context_changed`                                  | `403 team_management_access_denied`                                                                                                                |
-| REST `POST /api/v1/team/bookings/{id}/cancel`: malformed expected ID, or a different expected team the caller no longer owns/administers                                                                                         | `409 organization_context_changed`                                  | `403 team_management_access_denied`                                                                                                                |
-| REST `POST /api/v1/teams/{teamId}/leave`: malformed expected ID, or a different expected team the caller no longer belongs to, including missing/personal organizations                                                          | `409 organization_context_changed`                                  | `403 team_management_access_denied`                                                                                                                |
-| Team reads with the optional header: a different expected team still authorized for that read (any member for their own departure preview; owner/admin for management reads)                                                     | `403 team_management_access_denied`                                 | `409 organization_context_changed`                                                                                                                 |
-| Team reads that did not previously read the header (`GET /api/v1/team/bookings`, `GET /api/v1/teams/{teamId}/readiness`, departure impact, removal records, removal handling): malformed expected ID                             | 200 (header ignored)                                                | `403 team_management_access_denied`                                                                                                                |
-| The same reads: the expected team differs from the current team                                                                                                                                                                  | 200 (header ignored)                                                | `409 organization_context_changed` when still authorized for the expected team, otherwise `403 team_management_access_denied`                      |
-| Session webhook writes: missing or malformed expected ID                                                                                                                                                                         | 2xx success (header ignored)                                        | `409 organization_context_changed`, matching session event-type writes                                                                             |
-| Session webhook writes: ordinary member of the expected current team                                                                                                                                                             | `403 insufficient_role`                                             | `403 team_management_access_denied`                                                                                                                |
-| Session webhook writes and reads with the optional header: the expected team differs from the current space                                                                                                                      | Header ignored; request used the current organization               | `409 organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform `403 team_management_access_denied` |
-| Session webhook writes: the caller's own expected personal organization differs from the current space                                                                                                                           | 2xx success (header ignored; request used the current organization) | `409 organization_context_changed`                                                                                                                 |
-| Session webhook reads: malformed expected ID or a different expected personal organization                                                                                                                                       | 200 (header ignored)                                                | `403 team_management_access_denied`                                                                                                                |
+| Request and supplied expectation | Previous response | Current response |
+|---|---|---|
+| Native `invite-member`, `cancel-invitation`, `update-member-role`, `remove-member`, `leave` or `update`: malformed expected ID | 409 `ORGANIZATION_CONTEXT_CHANGED` | 403 `TEAM_MANAGEMENT_ACCESS_DENIED` |
+| The same native management writes (all above except `leave`): expected team differs from the current space and the caller no longer owns/administers it, including ordinary membership, missing teams and personal organizations | 409 `ORGANIZATION_CONTEXT_CHANGED` | 403 `TEAM_MANAGEMENT_ACCESS_DENIED` |
+| Native `leave`: expected team differs from the current space and the caller is no longer a member, or the expectation names a missing/personal organization | 409 `ORGANIZATION_CONTEXT_CHANGED` | 403 `TEAM_MANAGEMENT_ACCESS_DENIED` |
+| REST `POST /api/v1/team/members/{memberUserId}/removal`: malformed expected ID, or a different expected team the caller no longer owns/administers | 409 `organization_context_changed` | 403 `team_management_access_denied` |
+| REST `POST /api/v1/team/bookings/{id}/cancel`: malformed expected ID, or a different expected team the caller no longer owns/administers | 409 `organization_context_changed` | 403 `team_management_access_denied` |
+| REST `POST /api/v1/teams/{teamId}/leave`: malformed expected ID, or a different expected team the caller no longer belongs to, including missing/personal organizations | 409 `organization_context_changed` | 403 `team_management_access_denied` |
+| Team reads with the optional header: a different expected team still authorized for that read (any member for their own departure preview; owner/admin for management reads) | 403 `team_management_access_denied` | 409 `organization_context_changed` |
+| Team reads that did not previously read the header (`GET /api/v1/team/bookings`, `GET /api/v1/teams/{teamId}/readiness`, departure impact, removal records, removal handling): malformed expected ID | 200 (header ignored) | 403 `team_management_access_denied` |
+| The same reads: the expected team differs from the current team | 200 (header ignored) | 409 `organization_context_changed` when still authorized for the expected team, otherwise 403 `team_management_access_denied` |
+| Session webhook writes: missing or malformed expected ID | 2xx success (header ignored) | 409 `organization_context_changed`, matching session event-type writes |
+| Session webhook writes: ordinary member of the expected current team | 403 `insufficient_role` | 403 `team_management_access_denied` |
+| Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
+| Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
+| Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |
 
 A still-current ordinary member's stale REST or native leave request retains 409.
 Missing required write headers retain 409, and optional-header omission retains existing
@@ -311,25 +311,25 @@ role and target restrictions when the expected organization matches or the heade
 
 The existing covered endpoints are:
 
-| Write                                                 | Endpoint                                             |
-| ----------------------------------------------------- | ---------------------------------------------------- |
-| Create a personal or team event type                  | `POST /api/v1/event-types`                           |
-| Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}`                     |
-| Delete a personal or team event type                  | `DELETE /api/v1/event-types/{id}`                    |
-| Activate a round-robin team event type                | `POST /api/v1/event-types/{id}/round-robin/activate` |
-| Create an organization webhook                        | `POST /api/v1/webhooks`                              |
-| Change subscriptions or pause a webhook               | `PATCH /api/v1/webhooks/{id}`                        |
-| Delete a webhook                                      | `DELETE /api/v1/webhooks/{id}`                       |
-| Rotate a webhook signing secret                       | `POST /api/v1/webhooks/{id}/rotate-secret`           |
-| Cancel a current-team booking as an administrator     | `POST /api/v1/team/bookings/{id}/cancel`             |
-| Invite or resend an invitation                        | `POST /api/auth/organization/invite-member`          |
-| Revoke an invitation                                  | `POST /api/auth/organization/cancel-invitation`      |
-| Change a member's role                                | `POST /api/auth/organization/update-member-role`     |
-| Remove a member                                       | `POST /api/auth/organization/remove-member`          |
-| Remove a member and return the handling record        | `POST /api/v1/team/members/{memberUserId}/removal`   |
-| Leave a team                                          | `POST /api/auth/organization/leave`                  |
-| Leave a team safely after resolving impact            | `POST /api/v1/teams/{teamId}/leave`                  |
-| Change team settings, including name or slug          | `POST /api/auth/organization/update`                 |
+| Write | Endpoint |
+|---|---|
+| Create a personal or team event type | `POST /api/v1/event-types` |
+| Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}` |
+| Delete a personal or team event type | `DELETE /api/v1/event-types/{id}` |
+| Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
+| Create an organization webhook | `POST /api/v1/webhooks` |
+| Change subscriptions or pause a webhook | `PATCH /api/v1/webhooks/{id}` |
+| Delete a webhook | `DELETE /api/v1/webhooks/{id}` |
+| Rotate a webhook signing secret | `POST /api/v1/webhooks/{id}/rotate-secret` |
+| Cancel a current-team booking as an administrator | `POST /api/v1/team/bookings/{id}/cancel` |
+| Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
+| Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
+| Change a member's role | `POST /api/auth/organization/update-member-role` |
+| Remove a member | `POST /api/auth/organization/remove-member` |
+| Remove a member and return the handling record | `POST /api/v1/team/members/{memberUserId}/removal` |
+| Leave a team | `POST /api/auth/organization/leave` |
+| Leave a team safely after resolving impact | `POST /api/v1/teams/{teamId}/leave` |
+| Change team settings, including name or slug | `POST /api/auth/organization/update` |
 
 For the session writes above, the expected organization must match both the operation's
 target organization and the current valid session organization. Missing context and
@@ -491,21 +491,21 @@ team returns `400 invalid_cursor`; malformed query parameters return `400 invali
 Each item contains exactly these fields in the current implementation. Published OpenAPI
 response objects remain extensible for additive v1 changes.
 
-| Field                     | Meaning                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                      | Invitation UUID.                                                                                                                                                                                                                                                                                                                                  |
-| `email`                   | Invited recipient address, visible only to verified owners/admins of this team.                                                                                                                                                                                                                                                                   |
-| `status`                  | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend.                            |
-| `createdAt`               | Stored invitation creation time in UTC.                                                                                                                                                                                                                                                                                                           |
-| `expiresAt`               | Stored invitation expiry in UTC. Reading does not renew expiry or change status.                                                                                                                                                                                                                                                                  |
-| `delivery.state`          | Current generation's `queued` (waiting to send, including retry), `sending` (submitting to the mail server), `smtp_accepted` (accepted by the mail server), `failed` or `skipped`; `unknown` if no delivery row remains. Mail server acceptance does not imply inbox delivery, reading or joining.                                                |
-| `delivery.attempts`       | Stored current-generation attempts (0–4), or null without a delivery row.                                                                                                                                                                                                                                                                         |
-| `delivery.lastAttemptAt`  | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it.                                                                                                                                       |
-| `delivery.lastErrorCode`  | Fixed classification below, or null. No raw provider error text.                                                                                                                                                                                                                                                                                  |
-| `resendAllowed`           | Current member-invitation eligibility and actor/team/recipient request budgets. Unexpired resend checks the 60-second cooldown, generation cap and live sending lease; expired replacement checks recipient membership, active duplicates and the team pending limit. This read spends no budget and reserves no permission; resend checks again. |
-| `generation`              | Current generation (1–32), or 1 for legacy invitations without retained delivery metadata.                                                                                                                                                                                                                                                        |
-| `resendDeniedReason`      | Null when allowed, otherwise the fixed admission code describing why resend or replacement is unavailable.                                                                                                                                                                                                                                        |
-| `resendRetryAfterSeconds` | Remaining cooldown seconds (1–60), otherwise null.                                                                                                                                                                                                                                                                                                |
+| Field | Meaning |
+|---|---|
+| `id` | Invitation UUID. |
+| `email` | Invited recipient address, visible only to verified owners/admins of this team. |
+| `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
+| `createdAt` | Stored invitation creation time in UTC. |
+| `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
+| `delivery.state` | Current generation's `queued` (waiting to send, including retry), `sending` (submitting to the mail server), `smtp_accepted` (accepted by the mail server), `failed` or `skipped`; `unknown` if no delivery row remains. Mail server acceptance does not imply inbox delivery, reading or joining. |
+| `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
+| `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
+| `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |
+| `resendAllowed` | Current member-invitation eligibility and actor/team/recipient request budgets. Unexpired resend checks the 60-second cooldown, generation cap and live sending lease; expired replacement checks recipient membership, active duplicates and the team pending limit. This read spends no budget and reserves no permission; resend checks again. |
+| `generation` | Current generation (1–32), or 1 for legacy invitations without retained delivery metadata. |
+| `resendDeniedReason` | Null when allowed, otherwise the fixed admission code describing why resend or replacement is unavailable. |
+| `resendRetryAfterSeconds` | Remaining cooldown seconds (1–60), otherwise null. |
 
 Delivery error codes are `transport_error`, `smtp_auth`, `smtp_temporary`, `smtp_permanent`,
 `smtp_not_configured`, `mail_rate_limited`, `interrupted`, `attempts_exhausted`,
@@ -644,6 +644,7 @@ Settings mutations use REST with an API key; MCP OAuth grants remain limited to 
 ## Validation
 
 Input is checked in two layers:
+
 - **Shape** (the route's zod schema): JSON syntax, types and required fields. Request objects
   are strict: an unknown field (often a misspelling) is refused, not ignored. A route may also
   pre-check simple formats and lengths. Failures are 400 `invalid_request`, with `message`
@@ -857,14 +858,14 @@ member-owned calendar and schedule repairs require the member to act.
 
 Each self signal is `{id,state,reasonCode,checkedAt,ownerKind,fixKind}`. Its state is:
 
-| State                    | Meaning                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------- |
-| `satisfied`              | The condition passed at `checkedAt`; available slots are not promised.          |
-| `not_applicable`         | Successfully confirmed that this check does not apply.                          |
-| `configuration_blocker`  | A known configuration gap needs repair.                                         |
-| `dependency_unavailable` | Selected conflict-calendar data is unsafe or unavailable.                       |
-| `not_checked`            | The check is unknown or unsupported; `checkedAt` is null.                       |
-| `check_failed`           | A read or evaluation was attempted but failed; `checkedAt` is the attempt time. |
+| State | Meaning |
+|---|---|
+| `satisfied` | The condition passed at `checkedAt`; available slots are not promised. |
+| `not_applicable` | Successfully confirmed that this check does not apply. |
+| `configuration_blocker` | A known configuration gap needs repair. |
+| `dependency_unavailable` | Selected conflict-calendar data is unsafe or unavailable. |
+| `not_checked` | The check is unknown or unsupported; `checkedAt` is null. |
+| `check_failed` | A read or evaluation was attempted but failed; `checkedAt` is the attempt time. |
 
 Unknown and failed required checks set `completeness:"partial"`; they never imply passed
 checks or no slots. `slot_observation` always remains `not_checked` and is excluded from
@@ -896,6 +897,7 @@ check result; a page is not evidence that unreturned members or events passed.
 
 Booking pages and invitee links work without credentials. The web app serves them at the
 root, `/{handle}` and `/{handle}/{slug}`, and the invitee's page at `/booking`:
+
 - `/api/v1/public/{handle}`: the host's page, their name and bookable personal event types in
   the order they arranged them (404 `host_not_found`).
 - `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
@@ -914,6 +916,7 @@ root, `/{handle}` and `/{handle}/{slug}`, and the invitee's page at `/booking`:
 
 Two kinds of manage token are accepted, alike in shape (43 base64url characters) and
 everywhere a token is taken, REST and MCP:
+
 - **The booking's own token**, the `manageToken` the create (or reschedule) response
   returned. An invitee reschedule leaves it with the old, cancelled booking: cancelling or
   rescheduling with it gets 409 `booking_cancelled`. A host reschedule instead transfers

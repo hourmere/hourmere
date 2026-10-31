@@ -136,6 +136,7 @@ and [environment configuration](https://docs.github.com/en/actions/how-tos/deplo
 Tag-triggered runs execute the workflow from the tagged commit: the checks
 inside that file cannot replace repository-level protection against unauthorized tags
 or a changed workflow. Configure both before the first tag:
+
 - **Environment `release`:** required reviewer = the release owner; disable administrator
   bypass; select deployment **tags** matching `v*.*.*`. A protected-branches-only policy
   would reject these tag deployments. A sole owner who pushes the tag must be allowed to
@@ -239,10 +240,10 @@ After approval, Docker Buildx builds the repository's `Dockerfile` for **`linux/
 `linux/arm64`**, using QEMU on the GitHub runner. It publishes one multi-platform image to
 `ghcr.io/hourmere/hourmere` with the following tags:
 
-| Release tag   | Image tags               |
-| ------------- | ------------------------ |
-| `v1.0.0`      | `1.0.0`, `1.0`, `latest` |
-| `v1.1.0-rc.1` | `1.1.0-rc.1` only        |
+| Release tag | Image tags |
+|---|---|
+| `v1.0.0` | `1.0.0`, `1.0`, `latest` |
+| `v1.1.0-rc.1` | `1.1.0-rc.1` only |
 
 Prereleases never move `latest` or the stable major/minor alias. Version tags identify the
 release; major/minor and `latest` are moving aliases, so record the image digest for
@@ -340,6 +341,7 @@ gh attestation verify oci://ghcr.io/hourmere/hourmere:1.0.0 -R hourmere/hourmere
 Smoke-test the intended deployment and check the upgrade notes before announcing
 availability. After the first successful image push, complete this publication checklist.
 Make the documentation changes in a separate follow-up after verifying public access:
+
 - **Done before tagging:** `scripts/setup.sh` and `scripts/setup.test.ts` report the
   selected image version and its source, and reject a flag/environment version that
   differs from the exact checked-out release tag. The `.env.example` image/version
@@ -361,17 +363,17 @@ Make the documentation changes in a separate follow-up after verifying public ac
   map for the remaining release-day changes from the preparation baseline
   (headings/snippets remain the anchors if lines move):
 
-  | File / preparation lines                                                       | Release-day change                                                                                                                                                                                                                     |
-  | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Website publication branch                                                     | Cut `site-live` from `v1.0.0`, push it with its upstream, then cherry-pick the reviewed release-day website edits from `main` and deploy only from `site-live`; see [Website publication](#website-publication).                       |
-  | `README.md:2`, `:75–134` (Self-hosting)                                        | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative.                                                                        |
-  | `README.md:135–169` (upgrade/recovery)                                         | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup.                                                                                     |
-  | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker.                                                                                                          |
-  | Same guide `:122–173`, `:221–397` (plain / worker / webhook)                   | Preserve the image overlay in every file list and remove image-path builds.                                                                                                                                                            |
-  | Same guide `:454–551` (restore)                                                | Preserve the backed-up image selection/version and pull instead of building; keep drill isolation and fresh-volume restore.                                                                                                            |
-  | Same guide `:553–745` (Upgrade and roll back)                                  | Make version edit → `docker compose pull` → stop all old roles → `docker compose up -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives.                                                               |
-  | `apps/site/src/legal-content.test.ts:80` (comparison introduction guard)       | Replace the unpublished-image assertion with a published-image link assertion alongside the comparison copy in card 213; add install/version/rollback guards for README and self-hosting without weakening provider-acceptance guards. |
-  | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts`                | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling.                                                                                                                     |
+  | File / preparation lines | Release-day change |
+  |---|---|
+  | Website publication branch | Cut `site-live` from `v1.0.0`, push it with its upstream, then cherry-pick the reviewed release-day website edits from `main` and deploy only from `site-live`; see [Website publication](#website-publication). |
+  | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative. |
+  | `README.md:135–169` (upgrade/recovery) | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup. |
+  | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker. |
+  | Same guide `:122–173`, `:221–397` (plain / worker / webhook) | Preserve the image overlay in every file list and remove image-path builds. |
+  | Same guide `:454–551` (restore) | Preserve the backed-up image selection/version and pull instead of building; keep drill isolation and fresh-volume restore. |
+  | Same guide `:553–745` (Upgrade and roll back) | Make version edit → `docker compose pull` → stop all old roles → `docker compose up -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives. |
+  | `apps/site/src/legal-content.test.ts:80` (comparison introduction guard) | Replace the unpublished-image assertion with a published-image link assertion alongside the comparison copy in card 213; add install/version/rollback guards for README and self-hosting without weakening provider-acceptance guards. |
+  | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts` | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling. |
 
 - Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
   the site's self-hosting, comparison and index guides, homepage, site description and
@@ -461,6 +463,7 @@ and `id-token: write` permissions. No tag or pull request can publish through th
 while it is disabled.
 
 Before enabling npm publication, the owner must:
+
 1. Confirm control of the `hourmere` npm organization, package availability, publisher
    access and the approved package/lockfile version diff. The source repository is already
    public, as required for npm provenance.

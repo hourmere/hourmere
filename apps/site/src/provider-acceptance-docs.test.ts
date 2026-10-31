@@ -7,8 +7,6 @@ const siteDocs = 'apps/site/src/content/docs/docs'
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
 const source = (path: string) => readFileSync(join(root, path), 'utf8')
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim()
-// CommonMark permits an ordered list to interrupt a paragraph without a blank line.
-const paragraphs = (text: string) => text.split(/\r?\n[ \t]*\r?\n|\r?\n(?= {0,3}1[.)][ \t])/)
 const read = (path: string) => normalize(source(path))
 const zoomAcceptance =
   'Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app. Its scope was creating, rescheduling and cancelling a real meeting. Production Zoom Marketplace publication is a separate step for the hosted service; self-hosters use their own Zoom apps.'
@@ -115,7 +113,8 @@ describe('provider real-account acceptance documentation', () => {
   it.each(guides)(
     'keeps the complete acceptance paragraph bounded in $path',
     ({ path, acceptanceParagraph }) => {
-      const acceptanceParagraphs = paragraphs(source(path))
+      const acceptanceParagraphs = source(path)
+        .split(/\r?\n\s*\r?\n/)
         .map(normalize)
         .filter((paragraph) => paragraph.includes('Real-account acceptance'))
       expect(acceptanceParagraphs).toEqual([acceptanceParagraph])

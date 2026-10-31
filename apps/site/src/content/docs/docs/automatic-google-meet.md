@@ -1,5 +1,4 @@
 ---
-
 title: Automatic Google Meet
 description: Configure explicit automatic Meet creation, reconciliation and invitation delivery.
 ---

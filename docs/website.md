@@ -83,6 +83,7 @@ The lead has already created **`hourmere-cloud-waitlist`**, ID
 matching privacy policy section 12. The production binding is **`WAITLIST_DB`**;
 the development entry remains local-only. Do not create another database or use
 `--update-config`, which can rewrite existing bindings.
+
 1. Keep rate-limit namespace **`1001`** account-unique. Keep the
    **`WAITLIST_RATE_LIMITER`** binding and its `simple` limit 5, period 60.
    This is configured by the Worker binding; no KV, Durable Object or Turnstile

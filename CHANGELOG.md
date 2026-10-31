@@ -179,6 +179,7 @@ before upgrading. Review [self-hosting recovery guidance](https://github.com/hou
 schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
+
 - **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
   stop every old `web`, `all` and `worker` process, including any on other hosts, then
   start all roles with the upgraded code: build → stop app (and any separate worker) → up.

@@ -1,5 +1,4 @@
 ---
-
 title: Zoom account connections
 description: Independent Zoom identity OAuth and explicit single-host meeting authorization.
 ---
@@ -27,6 +26,7 @@ Real-account acceptance was performed on 2026-10-19 against a Zoom development-m
 Its scope was creating, rescheduling and cancelling a real meeting.
 Production Zoom Marketplace publication is a separate step for the hosted service;
 self-hosters use their own Zoom apps.
+
 1. For identity-only use configure **only** granular `user:read:user`. Enabling separate
    meeting authorization requires an independently approved compatible client configuration
    and `ZOOM_MEETINGS_ENABLED=true`; follow [automatic Zoom](/docs/automatic-zoom). Never grant meeting
@@ -129,15 +129,15 @@ contract and real-client acceptance limits.
 
 All writes require an empty JSON object and a live owner browser session:
 
-| Method | Path                                                     | Purpose                                           |
-| ------ | -------------------------------------------------------- | ------------------------------------------------- |
-| GET    | `/api/v1/conference-connections`                         | Own safe metadata and availability; never tokens  |
-| POST   | `/api/v1/conference-connections/zoom/authorize`          | New minimum-scope authorization attempt           |
-| POST   | `/api/v1/conference-connections/zoom/authorize-meetings` | Explicit new meeting authorization, if enabled    |
-| POST   | `/api/v1/conference-connections/{id}/authorize-meetings` | Explicit owner upgrade to meeting authorization   |
-| POST   | `/api/v1/conference-connections/{id}/reconnect`          | Replace access for the same identity              |
-| POST   | `/api/v1/conference-connections/{id}/refresh`            | Explicit credential rotation and metadata refresh |
-| DELETE | `/api/v1/conference-connections/{id}`                    | Local disconnect; retain stable record            |
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/conference-connections` | Own safe metadata and availability; never tokens |
+| POST | `/api/v1/conference-connections/zoom/authorize` | New minimum-scope authorization attempt |
+| POST | `/api/v1/conference-connections/zoom/authorize-meetings` | Explicit new meeting authorization, if enabled |
+| POST | `/api/v1/conference-connections/{id}/authorize-meetings` | Explicit owner upgrade to meeting authorization |
+| POST | `/api/v1/conference-connections/{id}/reconnect` | Replace access for the same identity |
+| POST | `/api/v1/conference-connections/{id}/refresh` | Explicit credential rotation and metadata refresh |
+| DELETE | `/api/v1/conference-connections/{id}` | Local disconnect; retain stable record |
 
 Callback redirects use a fixed allowlist of outcomes under `/app/conferences`. Responses use
 `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
@@ -195,11 +195,11 @@ request neither consumes state nor exchanges a provider code.
 
 The result describes lease contention, not the state of the submitted attempt:
 
-| Submitted attempt                                                   | While the owner's lease is occupied | After the lease is released                |
-| ------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------ |
-| Unclaimed, unexpired, same-session state with a valid provider code | `busy`, with the attempt unchanged  | Can complete normally                      |
-| Already claimed by an exchange still in progress                    | `busy`, without a second exchange   | `invalid_state`, without a second exchange |
-| Already completed or otherwise invalid state with valid syntax      | `busy`, without another exchange    | `invalid_state`, without another exchange  |
+| Submitted attempt | While the owner's lease is occupied | After the lease is released |
+| --- | --- | --- |
+| Unclaimed, unexpired, same-session state with a valid provider code | `busy`, with the attempt unchanged | Can complete normally |
+| Already claimed by an exchange still in progress | `busy`, without a second exchange | `invalid_state`, without a second exchange |
+| Already completed or otherwise invalid state with valid syntax | `busy`, without another exchange | `invalid_state`, without another exchange |
 
 In particular, replaying the same callback while its first exchange is in progress returns
 `busy`, rather than `invalid_state`. The same can happen when a different exchange for that

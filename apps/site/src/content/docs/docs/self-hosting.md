@@ -1,5 +1,4 @@
 ---
-
 title: Self-hosting
 description: Deploy and operate Hourmere with Docker Compose and optional automatic HTTPS.
 ---

@@ -24,10 +24,10 @@ team write locks before revoking the caller's membership.
 
 The response contains `evaluatedAt` and two independently paginated collections:
 
-| Collection   | Scope and fields                                                                                                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eventTypes` | Undeleted team event types currently configured with the target as a host, including disabled types. Each item has `id`, `title`, `slug`, `schedulingType`, `isActive`, `reason` and `remainingHostCount`.           |
-| `bookings`   | Confirmed bookings in that team with the target among the saved booking hosts and `end > evaluatedAt`. Each item uses the [team administration whitelist](team-admin-bookings.md), plus `inProgress` and `handling`. |
+| Collection | Scope and fields |
+|---|---|
+| `eventTypes` | Undeleted team event types currently configured with the target as a host, including disabled types. Each item has `id`, `title`, `slug`, `schedulingType`, `isActive`, `reason` and `remainingHostCount`. |
+| `bookings` | Confirmed bookings in that team with the target among the saved booking hosts and `end > evaluatedAt`. Each item uses the [team administration whitelist](team-admin-bookings.md), plus `inProgress` and `handling`. |
 
 Event reasons are `sole_host` for individual types, `round_robin_pool_member` for round-robin
 pools, and `collective_required_host` for collective types. Removing someone from a current

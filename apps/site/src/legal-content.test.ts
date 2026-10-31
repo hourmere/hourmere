@@ -151,19 +151,12 @@ describe('MCP quickstart authentication', () => {
       /accepts API keys and, when the instance operator enables it, organization-bound \[OAuth 2\.1 connections\]\(#connect-with-oauth\)/,
     )
     expect(source).not.toMatch(/no OAuth 2\.1 connector flow|OAuth-only client cannot connect/)
-    const rows = source.split('\n').map((line) => line.split('|').map((cell) => cell.trim()))
-    expect(rows).toContainEqual([
-      '',
-      '`list_calendar_connections`',
-      'No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination.',
-      '',
-    ])
-    expect(rows).toContainEqual([
-      '',
-      '`list_conference_connections`',
-      'No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status.',
-      '',
-    ])
+    expect(source).toContain(
+      '| `list_calendar_connections` | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination. |',
+    )
+    expect(source).toContain(
+      '| `list_conference_connections` | No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status. |',
+    )
   })
 })
 

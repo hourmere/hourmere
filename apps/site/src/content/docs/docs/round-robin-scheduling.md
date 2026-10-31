@@ -1,5 +1,4 @@
 ---
-
 title: Round-robin scheduling
 description: Configure and activate equal-rotation team scheduling pools.
 ---
