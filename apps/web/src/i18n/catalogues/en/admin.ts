@@ -28,6 +28,10 @@ export const admin = {
   'Create replacement': 'Create replacement',
   'Create a replacement for {0}': 'Create a replacement for {0}',
   'Cancel replacement': 'Cancel replacement',
+  ' (replacement)': ' (replacement)',
+  'Replacement expires: {0}': 'Replacement expires: {0}',
+  'After testing the new key, revoke the old key “{0}” ({1}).':
+    'After testing the new key, revoke the old key “{0}” ({1}).',
   'Switch to this key’s organization to create a replacement.':
     'Switch to this key’s organization to create a replacement.',
   'Save your new key before creating another replacement.':

@@ -28,6 +28,10 @@ export const admin = {
   'Create replacement': '创建替代密钥',
   'Create a replacement for {0}': '为{0}创建替代密钥',
   'Cancel replacement': '取消替换',
+  ' (replacement)': '（替换）',
+  'Replacement expires: {0}': '替代密钥到期时间：{0}',
+  'After testing the new key, revoke the old key “{0}” ({1}).':
+    '测试新密钥后，请撤销旧密钥“{0}”（{1}）。',
   'Switch to this key’s organization to create a replacement.':
     '请切换到此密钥的所属组织，再创建替代密钥。',
   'Save your new key before creating another replacement.': '请先保存新密钥，再创建其他替代密钥。',

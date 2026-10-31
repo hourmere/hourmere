@@ -44,6 +44,11 @@ through `HOURMERE_API_KEY`; `whoami` shows its organization and `apiKeyScope`.
 A key's scope is immutable. Use its **Create replacement** shortcut to prefill a new key,
 choose the scope you need, create it and copy it privately. Update the client to use the
 replacement, then revoke the old key. Creating a replacement does not revoke the old key.
+The shortcut adds a localized replacement suffix to the name and selects the closest
+available expiry period to the original key's lifetime (or **Never** for a non-expiring key).
+Review the displayed expiry before creating it. Switching from an unsaved draft asks before
+discarding it. After creation, the one-time view links to the old key, whose row keeps a
+revocation reminder with its name and key prefix until you revoke it or leave the page.
 Reconnect MCP clients or refresh their tool list after switching keys, because clients may
 cache the tools they discovered. Switching your active web space does not retarget an
 existing key. Native owner-authorized organization metadata updates retain the key's scope.

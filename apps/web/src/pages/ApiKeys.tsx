@@ -21,7 +21,7 @@ import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { type Me, useMe } from '../session.tsx'
-import { useUnsavedChanges } from '../unsaved-changes.tsx'
+import { useConfirmLeave, useUnsavedChanges } from '../unsaved-changes.tsx'
 
 const DAY = 24 * 60 * 60
 
@@ -78,6 +78,25 @@ interface Replacement {
   id: string
   name: string
   scope: ApiKeyScope
+  expiresIn: string
+}
+
+/** Match the original lifetime, even if the source key has already expired. */
+function replacementExpiry(apiKey: ApiKey) {
+  if (apiKey.expiresAt === null) return ''
+  const lifetime = (Date.parse(apiKey.expiresAt) - Date.parse(apiKey.createdAt)) / 1000
+  const finiteOptions = EXPIRY_OPTIONS.slice(1)
+  return finiteOptions.reduce((closest, option) =>
+    Math.abs(Number(option.value) - lifetime) < Math.abs(Number(closest.value) - lifetime)
+      ? option
+      : closest,
+  ).value
+}
+
+function clipKeyName(name: string, limit: number) {
+  const clipped = name.toWellFormed().slice(0, limit)
+  // Keep the UTF-16 length limit without leaving half of an emoji at the boundary.
+  return (clipped.isWellFormed() ? clipped : clipped.slice(0, -1)).trimEnd()
 }
 
 function formatDate(iso: string, locale: string | undefined) {
@@ -115,14 +134,17 @@ const curlExample = (key: string, publicUrl = window.location.origin) =>
 
 export function ApiKeysPage() {
   const { t, uiText: ui } = useI18n()
+  const confirmLeave = useConfirmLeave()
 
   usePageTitle('API keys')
   const me = useMe()
   const [keys, reload] = useLoad(loadKeys)
   const [instance, reloadInstance] = useLoad(loadInstance)
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
+  const [createdReplacement, setCreatedReplacement] = useState<ApiKey | null>(null)
   const [creating, setCreating] = useState(false)
   const [replacement, setReplacement] = useState<Replacement | null>(null)
+  const [replacedKeyIds, setReplacedKeyIds] = useState<string[]>([])
   const previousReplacement = useRef(replacement)
   useEffect(() => {
     if (previousReplacement.current && !replacement && !created) {
@@ -167,12 +189,14 @@ export function ApiKeysPage() {
       {created ? (
         <NewKey
           apiKey={created}
+          replacedKey={createdReplacement}
           organizations={organizations}
           publicUrl={publicUrl}
           configStatus={instance.status}
           onRetry={reloadInstance}
           onDone={() => {
             setCreated(null)
+            setCreatedReplacement(null)
             // The panel (and the focused button) goes away; the new key is in the list.
             keysHeading.current?.focus()
           }}
@@ -182,10 +206,16 @@ export function ApiKeysPage() {
           key={replacement?.id ?? 'new'}
           organization={me.organization}
           replacement={replacement}
-          onCancelReplacement={() => setReplacement(null)}
+          onCancelReplacement={() => {
+            if (confirmLeave()) setReplacement(null)
+          }}
           onCreatingChange={setCreating}
           onCreated={(key) => {
             setStatus('')
+            if (replacement) {
+              setReplacedKeyIds((previous) => [...new Set([...previous, replacement.id])])
+            }
+            setCreatedReplacement(visibleKeys.find((old) => old.id === replacement?.id) ?? null)
             setReplacement(null)
             setCreating(false)
             setCreated(key)
@@ -233,12 +263,20 @@ export function ApiKeysPage() {
               organization={me.organization}
               canReplace={!created}
               creating={creating}
+              replacedKeyIds={replacedKeyIds}
               onReplace={(key) => {
                 const scope = scopeOf(key)
-                if (!scope) return
-                setReplacement({ id: key.id, name: key.name ?? '', scope: scope.value })
+                if (!scope || key.id === replacement?.id || !confirmLeave()) return
+                setReplacement({
+                  id: key.id,
+                  name: key.name ?? '',
+                  scope: scope.value,
+                  expiresIn: replacementExpiry(key),
+                })
               }}
               onRevoked={(key) => {
+                setCreatedReplacement((old) => (old?.id === key.id ? null : old))
+                setReplacedKeyIds((previous) => previous.filter((id) => id !== key.id))
                 setRecentKeys((previous) => previous.filter((recent) => recent.id !== key.id))
                 setStatus(msg('Revoked “{0}”.', { '0': key.name || key.start || 'the key' }))
                 reload()
@@ -295,9 +333,16 @@ function CreateKeyForm({
 }) {
   const { t, text, uiText: ui } = useI18n()
   const [organization] = useState(openedOrganization)
-  const [name, setName] = useState((replacement?.name ?? '').slice(0, API_KEY_NAME_MAX_LENGTH))
+  const [name, setName] = useState(() => {
+    if (!replacement) return ''
+    const suffix = t(' (replacement)')
+    let base = clipKeyName(replacement.name, API_KEY_NAME_MAX_LENGTH - suffix.length)
+    // A maximum-length name may already end in the suffix; keep the new name distinct.
+    if (base + suffix === replacement.name) base = clipKeyName(base, base.length - 1)
+    return base + suffix
+  })
   const [scope, setScope] = useState<ApiKeyScope>(replacement?.scope ?? 'bookings')
-  const [expiresIn, setExpiresIn] = useState('')
+  const [expiresIn, setExpiresIn] = useState(replacement?.expiresIn ?? '')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<UiText | null>(null)
   const [contextError, setContextError] = useState<unknown>(null)
@@ -358,6 +403,11 @@ function CreateKeyForm({
             {t(
               'Review the scope and expiration, create and test the new key, then revoke the old one.',
             )}
+          </p>
+          <p>
+            {t('Replacement expires: {0}', {
+              '0': t(EXPIRY_OPTIONS.find((option) => option.value === expiresIn)?.label ?? 'Never'),
+            })}
           </p>
           <button
             type="button"
@@ -445,6 +495,7 @@ function CreateKeyForm({
 /** The new key's secret, shown this once: Better Auth stores only a hash of it. */
 function NewKey({
   apiKey,
+  replacedKey,
   organizations,
   publicUrl,
   configStatus,
@@ -452,6 +503,7 @@ function NewKey({
   onDone,
 }: {
   apiKey: CreatedApiKey
+  replacedKey: ApiKey | null
   organizations: ReadonlyMap<string, string>
   publicUrl: string | undefined
   configStatus: 'loading' | 'ready' | 'error'
@@ -474,6 +526,13 @@ function NewKey({
         {t('.')}
       </p>
       <p>{t('Scope: {scope}', { scope: scope ? t(scope.name) : t('Unknown scope') })}</p>
+      {replacedKey && (
+        <p>
+          <a href={`#api-key-${replacedKey.id}`}>
+            <ReplacementReminder apiKey={replacedKey} />
+          </a>
+        </p>
+      )}
       <p>
         {scope
           ? t(scope.abilities)
@@ -575,6 +634,15 @@ function McpConfig({ apiKey, publicUrl }: { apiKey: string; publicUrl: string })
   )
 }
 
+/** Identify the old key using only its safe list metadata. */
+function ReplacementReminder({ apiKey }: { apiKey: ApiKey }) {
+  const { t } = useI18n()
+  return t('After testing the new key, revoke the old key “{0}” ({1}).', {
+    '0': apiKey.name || t('Unnamed'),
+    '1': apiKey.start ? `${apiKey.start}…` : '…',
+  })
+}
+
 /** The name of the organization a key acts in. */
 function organizationOf(
   apiKey: ApiKey,
@@ -596,6 +664,7 @@ function KeyTable({
   organization,
   canReplace,
   creating,
+  replacedKeyIds,
   onReplace,
   onRevoked,
 }: {
@@ -605,6 +674,7 @@ function KeyTable({
   organization: Me['organization']
   canReplace: boolean
   creating: boolean
+  replacedKeyIds: readonly string[]
   onReplace: (key: ApiKey) => void
   onRevoked: (key: ApiKey) => void
 }) {
@@ -638,10 +708,15 @@ function KeyTable({
         </thead>
         <tbody>
           {keys.map((key) => (
-            <tr key={key.id}>
+            <tr key={key.id} id={`api-key-${key.id}`}>
               <th scope="row" data-label={t('Name')} className="user-content">
                 {key.name || <span className="muted">{t('Unnamed')}</span>}
                 {!key.enabled && <span className="badge">{t('Disabled')}</span>}
+                {replacedKeyIds.includes(key.id) && (
+                  <p className="hint" role="status">
+                    <ReplacementReminder apiKey={key} />
+                  </p>
+                )}
               </th>
               <td data-label={t('Key')} className="fit nowrap">
                 <div className="table-value">

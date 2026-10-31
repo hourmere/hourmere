@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import mcpDocs from '../../../../docs/mcp.md?raw'
 import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from '../../../../packages/auth/src/api-key-errors.ts'
 import siteMcpDocs from '../../../site/src/content/docs/docs/mcp.md?raw'
-import type { ApiKey } from '../api/auth.ts'
+import { API_KEY_NAME_MAX_LENGTH, type ApiKey } from '../api/auth.ts'
 import { chooseLanguage } from '../i18n/store.ts'
 import type { Me } from '../session.tsx'
 import styles from '../styles.css?raw'
@@ -230,6 +230,38 @@ describe('the API keys page', () => {
     },
   )
 
+  it('clears the old-key reminder when it is revoked while the new key is still revealed', async () => {
+    const user = userEvent.setup()
+    const api = keyServer()
+    renderApp('/app/api-keys')
+    await table()
+    await user.click(
+      screen.getByRole('button', { name: 'Create a replacement for Claude Desktop' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    const reveal = await screen.findByRole('region', { name: /Copy your new key/ })
+    expect(
+      within(reveal).getByRole('link', { name: /revoke the old key “Claude Desktop”/ }),
+    ).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Revoke Claude Desktop' }))
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }))
+    await waitFor(() =>
+      expect(within(reveal).queryByRole('link', { name: /revoke the old key/ })).toBeNull(),
+    )
+    expect(screen.getByRole('region', { name: /Copy your new key/ })).toBe(reveal)
+    expect(within(reveal).getByLabelText<HTMLInputElement>('New API key').value === SECRET).toBe(
+      true,
+    )
+    expect(api.to('POST /api/auth/api-key/delete').map((request) => request.body)).toEqual([
+      { keyId: existing.id },
+    ])
+    await user.click(screen.getByRole('button', { name: 'I’ve saved my key' }))
+    expect(
+      screen.getByRole('button', { name: 'Revoke Claude Desktop (replacement)' }),
+    ).toBeDefined()
+    expect(screen.queryByText(/After testing the new key, revoke the old key/)).toBeNull()
+  })
+
   it.each(['en', 'zh-CN'] as const)(
     'shows every stored scope, including migrated legacy full, in %s',
     async (locale) => {
@@ -277,42 +309,357 @@ describe('the API keys page', () => {
     },
   )
 
-  it('prefills a replacement, lets its scope change and leaves the old key for explicit revocation', async () => {
-    const user = userEvent.setup()
-    const api = keyServer()
-    renderApp('/app/api-keys')
-    const row = await rowFor('Claude Desktop')
-    await user.click(
-      within(row as HTMLElement).getByRole('button', {
+  it.each(['en', 'zh-CN'] as const)(
+    'prefills a distinct replacement and identifies the old key for explicit revocation in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const user = userEvent.setup()
+      const api = keyServer()
+      renderApp('/app/api-keys')
+      const row = await rowFor('Claude Desktop')
+      await user.click(
+        within(row as HTMLElement).getByRole('button', {
+          name:
+            locale === 'en'
+              ? 'Create a replacement for Claude Desktop'
+              : '为 Claude Desktop 创建替代密钥',
+        }),
+      )
+      const replacementName =
+        locale === 'en' ? 'Claude Desktop (replacement)' : 'Claude Desktop（替换）'
+      const name = screen.getByLabelText<HTMLInputElement>(locale === 'en' ? 'Name' : '名称')
+      expect(name.value).toBe(replacementName)
+      expect(document.activeElement).toBe(name)
+      expect(confirm).not.toHaveBeenCalled()
+      const group = screen.getByRole('group', { name: locale === 'en' ? 'Scope' : '权限范围' })
+      const choices = within(group).getAllByRole<HTMLInputElement>('radio')
+      expect(choices.find((choice) => choice.checked)?.value).toBe('full')
+      const expires = screen.getByLabelText<HTMLSelectElement>(
+        locale === 'en' ? 'Expires' : '到期时间',
+      )
+      expect(expires.value).toBe('')
+      expect(
+        screen.getByText(
+          locale === 'en' ? 'Replacement expires: Never' : '替代密钥到期时间：永不到期',
+        ),
+      ).toBeDefined()
+      expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
+      await user.click(choices.find((choice) => choice.value === 'read') as HTMLInputElement)
+      await user.selectOptions(expires, String(30 * 24 * 60 * 60))
+      expect(
+        screen.getByText(
+          locale === 'en' ? 'Replacement expires: In 30 days' : '替代密钥到期时间：30 天后',
+        ),
+      ).toBeDefined()
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Create key' : '创建密钥' }),
+      )
+      const reveal = await screen.findByRole('region', {
+        name: locale === 'en' ? /Copy your new key/ : /复制新密钥/,
+      })
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+        name: replacementName,
+        expiresIn: 30 * 24 * 60 * 60,
+        metadata: { organizationId: ME.organization.id, scope: 'read' },
+      })
+      expect(api.to('POST /api/auth/api-key/update')).toHaveLength(0)
+      expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
+      const rows = within(await table()).getAllByRole('row')
+      expect(rows).toHaveLength(3)
+      const reminder =
+        locale === 'en'
+          ? 'After testing the new key, revoke the old key “Claude Desktop” (hm_Old…).'
+          : '测试新密钥后，请撤销旧密钥“Claude Desktop”（hm_Old…）。'
+      expect(within(reveal).getByText(reminder).textContent).toBe(reminder)
+      expect(within(reveal).getByRole('link', { name: reminder }).getAttribute('href')).toBe(
+        `#api-key-${existing.id}`,
+      )
+      await user.click(
+        screen.getByRole('button', {
+          name: locale === 'en' ? 'I’ve saved my key' : '我已保存密钥',
+        }),
+      )
+      expect(screen.getByLabelText<HTMLInputElement>(locale === 'en' ? 'Name' : '名称').value).toBe(
+        '',
+      )
+      expect(
+        screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+      ).toBe('bookings')
+      const revokeOld = screen.getByRole('button', {
+        name: locale === 'en' ? 'Revoke Claude Desktop' : '撤销 Claude Desktop',
+      })
+      const oldRow = revokeOld.closest('tr') as HTMLElement
+      expect(oldRow.id).toBe(`api-key-${existing.id}`)
+      expect(within(oldRow).getByRole('status').textContent).toBe(reminder)
+      const newRow = screen
+        .getByRole('button', {
+          name: locale === 'en' ? `Revoke ${replacementName}` : `撤销 ${replacementName}`,
+        })
+        .closest('tr') as HTMLElement
+      expect(within(newRow).queryByRole('status')).toBeNull()
+      expect(document.body.innerHTML.includes(SECRET)).toBe(false)
+      await user.click(revokeOld)
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Revoke key' : '撤销密钥' }),
+      )
+      await waitFor(() => expect(document.getElementById(`api-key-${existing.id}`)).toBeNull())
+      expect(api.to('POST /api/auth/api-key/delete').map((request) => request.body)).toEqual([
+        { keyId: existing.id },
+      ])
+      expect(screen.queryByText(reminder)).toBeNull()
+      expect(
+        screen.getByRole('button', {
+          name: locale === 'en' ? `Revoke ${replacementName}` : `撤销 ${replacementName}`,
+        }),
+      ).toBeDefined()
+    },
+  )
+
+  it.each([
+    { lifetimeDays: 30, chosenDays: 30, label: 'In 30 days' },
+    { lifetimeDays: 90, chosenDays: 90, label: 'In 90 days' },
+    { lifetimeDays: 365, chosenDays: 365, label: 'In 1 year' },
+    { lifetimeDays: 45, chosenDays: 30, label: 'In 30 days' },
+    { lifetimeDays: 60, chosenDays: 30, label: 'In 30 days' },
+    { lifetimeDays: 75, chosenDays: 90, label: 'In 90 days' },
+    { lifetimeDays: 227.5, chosenDays: 90, label: 'In 90 days' },
+    { lifetimeDays: 300, chosenDays: 365, label: 'In 1 year' },
+    { lifetimeDays: null, chosenDays: null, label: 'Never' },
+  ])(
+    'prefills the closest expiry to the original $lifetimeDays-day lifetime',
+    async ({ lifetimeDays, chosenDays, label }) => {
+      const user = userEvent.setup()
+      const createdAt = '2025-01-01T09:00:00.000Z'
+      const api = keyServer([
+        {
+          ...existing,
+          createdAt,
+          expiresAt:
+            lifetimeDays === null
+              ? null
+              : new Date(Date.parse(createdAt) + lifetimeDays * 24 * 60 * 60 * 1000).toISOString(),
+        },
+      ])
+      renderApp('/app/api-keys')
+      await table()
+      await user.click(
+        screen.getByRole('button', { name: 'Create a replacement for Claude Desktop' }),
+      )
+      const expires = screen.getByLabelText<HTMLSelectElement>('Expires')
+      const seconds = chosenDays === null ? undefined : chosenDays * 24 * 60 * 60
+      expect(expires.value).toBe(seconds === undefined ? '' : String(seconds))
+      expect(within(expires).getByRole('option', { selected: true }).textContent).toBe(label)
+      expect(screen.getByText(`Replacement expires: ${label}`).textContent).toBe(
+        `Replacement expires: ${label}`,
+      )
+      await user.click(screen.getByRole('button', { name: 'Create key' }))
+      await screen.findByRole('region', { name: /Copy your new key/ })
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+        name: 'Claude Desktop (replacement)',
+        ...(seconds === undefined ? {} : { expiresIn: seconds }),
+        metadata: { organizationId: ME.organization.id, scope: 'full' },
+      })
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps the replacement suffix within the name limit in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const user = userEvent.setup()
+      const originalName = 'A'.repeat(API_KEY_NAME_MAX_LENGTH)
+      const suffix = locale === 'en' ? ' (replacement)' : '（替换）'
+      const api = keyServer([{ ...existing, name: originalName }])
+      renderApp('/app/api-keys')
+      await table()
+      await user.click(
+        screen.getByRole('button', {
+          name:
+            locale === 'en'
+              ? `Create a replacement for ${originalName}`
+              : `为 ${originalName} 创建替代密钥`,
+        }),
+      )
+      const name = screen.getByLabelText<HTMLInputElement>(locale === 'en' ? 'Name' : '名称')
+      expect(name.value).toBe(
+        `${originalName.slice(0, API_KEY_NAME_MAX_LENGTH - suffix.length)}${suffix}`,
+      )
+      expect(name.value.length).toBe(API_KEY_NAME_MAX_LENGTH)
+      expect(name.maxLength).toBe(API_KEY_NAME_MAX_LENGTH)
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Create key' : '创建密钥' }),
+      )
+      await screen.findByRole('region', {
+        name: locale === 'en' ? /Copy your new key/ : /复制新密钥/,
+      })
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toMatchObject({ name: name.value })
+    },
+  )
+
+  it.each(
+    (['en', 'zh-CN'] as const).flatMap((locale) =>
+      [false, true].map((alreadySuffixed) => ({ locale, alreadySuffixed })),
+    ),
+  )(
+    'preserves valid Unicode in a $locale replacement name (suffix collision: $alreadySuffixed)',
+    async ({ locale, alreadySuffixed }) => {
+      chooseLanguage(locale)
+      const user = userEvent.setup()
+      const suffix = locale === 'en' ? ' (replacement)' : '（替换）'
+      const originalName = alreadySuffixed
+        ? `${'A'.repeat(API_KEY_NAME_MAX_LENGTH - suffix.length - 2)}😀${suffix}`
+        : `a${'😀'.repeat(15)}`
+      const api = keyServer([{ ...existing, name: originalName }])
+      renderApp('/app/api-keys')
+      await table()
+      await user.click(
+        screen.getByRole('button', {
+          name: (label) => label.startsWith(locale === 'en' ? 'Create a replacement for ' : '为 '),
+        }),
+      )
+      const name = screen.getByLabelText<HTMLInputElement>(locale === 'en' ? 'Name' : '名称')
+      expect(name.value.isWellFormed()).toBe(true)
+      expect(name.value).not.toBe(originalName)
+      expect(name.value.endsWith(suffix)).toBe(true)
+      expect(name.value.length).toBeLessThanOrEqual(API_KEY_NAME_MAX_LENGTH)
+      const prefilledName = name.value
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Create key' : '创建密钥' }),
+      )
+      await screen.findByRole('region', {
+        name: locale === 'en' ? /Copy your new key/ : /复制新密钥/,
+      })
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toMatchObject({
+        name: prefilledName,
+      })
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps a maximum-length already suffixed replacement name distinct in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const user = userEvent.setup()
+      const suffix = locale === 'en' ? ' (replacement)' : '（替换）'
+      const originalName = `${'A'.repeat(API_KEY_NAME_MAX_LENGTH - suffix.length)}${suffix}`
+      keyServer([{ ...existing, name: originalName }])
+      renderApp('/app/api-keys')
+      await table()
+      await user.click(
+        screen.getByRole('button', {
+          name:
+            locale === 'en'
+              ? `Create a replacement for ${originalName}`
+              : `为 ${originalName}创建替代密钥`,
+        }),
+      )
+      const name = screen.getByLabelText<HTMLInputElement>(locale === 'en' ? 'Name' : '名称')
+      expect(name.value).not.toBe(originalName)
+      expect(name.value.endsWith(suffix)).toBe(true)
+      expect(name.value.length).toBeLessThanOrEqual(API_KEY_NAME_MAX_LENGTH)
+      expect(name.value.startsWith('A')).toBe(true)
+    },
+  )
+
+  it.each(['name', 'expiry', 'scope', 'all'] as const)(
+    'asks before replacing an unsaved $0 draft and preserves it on decline',
+    async (field) => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const user = userEvent.setup()
+      const api = keyServer([
+        {
+          ...existing,
+          expiresAt: new Date(
+            Date.parse(existing.createdAt) + 90 * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        },
+      ])
+      renderApp('/app/api-keys')
+      await table()
+      if (field === 'name' || field === 'all')
+        await user.type(screen.getByLabelText('Name'), 'Unfinished agent')
+      if (field === 'expiry' || field === 'all')
+        await user.selectOptions(screen.getByLabelText('Expires'), String(30 * 24 * 60 * 60))
+      if (field === 'scope' || field === 'all')
+        await user.click(screen.getByRole('radio', { name: /Read — analytics/ }))
+      const draftName = field === 'name' || field === 'all' ? 'Unfinished agent' : ''
+      const draftExpiry = field === 'expiry' || field === 'all' ? String(30 * 24 * 60 * 60) : ''
+      const draftScope = field === 'scope' || field === 'all' ? 'read' : 'bookings'
+      const replacement = screen.getByRole('button', {
         name: 'Create a replacement for Claude Desktop',
-      }),
+      })
+      await user.click(replacement)
+      expect(confirm).toHaveBeenCalledExactlyOnceWith(LEAVE_WITH_UNSAVED_CHANGES)
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(draftName)
+      expect(screen.getByLabelText<HTMLSelectElement>('Expires').value).toBe(draftExpiry)
+      expect(
+        screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+      ).toBe(draftScope)
+      expect(screen.queryByRole('button', { name: 'Cancel replacement' })).toBeNull()
+      confirm.mockReturnValue(true)
+      await user.click(replacement)
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+        'Claude Desktop (replacement)',
+      )
+      expect(screen.getByLabelText<HTMLSelectElement>('Expires').value).toBe(
+        String(90 * 24 * 60 * 60),
+      )
+      expect(
+        screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+      ).toBe('full')
+      expect(document.activeElement).toBe(screen.getByLabelText('Name'))
+      expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
+      expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
+    },
+  )
+
+  it('preserves the current replacement draft when reselected or a different replacement is declined', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    keyServer([
+      existing,
+      {
+        ...existing,
+        id: 'reports',
+        name: 'Reports',
+        metadata: { organizationId: ME.organization.id, scope: 'read' },
+        expiresAt: new Date(
+          Date.parse(existing.createdAt) + 365 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      },
+    ])
+    renderApp('/app/api-keys')
+    await table()
+    const first = screen.getByRole('button', { name: 'Create a replacement for Claude Desktop' })
+    await user.click(first)
+    expect(confirm).not.toHaveBeenCalled()
+    await user.clear(screen.getByLabelText('Name'))
+    await user.type(screen.getByLabelText('Name'), 'Replacement draft')
+    await user.selectOptions(screen.getByLabelText('Expires'), String(30 * 24 * 60 * 60))
+    await user.click(first)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Replacement draft')
+    const second = screen.getByRole('button', { name: 'Create a replacement for Reports' })
+    await user.click(second)
+    expect(confirm).toHaveBeenCalledExactlyOnceWith(LEAVE_WITH_UNSAVED_CHANGES)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Replacement draft')
+    expect(screen.getByLabelText<HTMLSelectElement>('Expires').value).toBe(
+      String(30 * 24 * 60 * 60),
     )
-    const name = screen.getByLabelText<HTMLInputElement>('Name')
-    expect(name.value).toBe('Claude Desktop')
-    expect(document.activeElement).toBe(name)
-    const group = screen.getByRole('group', { name: 'Scope' })
-    const choices = within(group).getAllByRole<HTMLInputElement>('radio')
-    expect(choices.find((choice) => choice.checked)?.value).toBe('full')
-    expect(screen.getByText(/Review the scope and expiration/)).toBeDefined()
-    expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
-    await user.click(choices.find((choice) => choice.value === 'read') as HTMLInputElement)
-    await user.selectOptions(screen.getByLabelText('Expires'), 'In 30 days')
-    await user.click(screen.getByRole('button', { name: 'Create key' }))
-    await screen.findByRole('region', { name: /Copy your new key/ })
-    expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
-      name: 'Claude Desktop',
-      expiresIn: 30 * 24 * 60 * 60,
-      metadata: { organizationId: ME.organization.id, scope: 'read' },
-    })
-    expect(api.to('POST /api/auth/api-key/update')).toHaveLength(0)
-    expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
-    const rows = within(await table()).getAllByRole('row')
-    expect(rows).toHaveLength(3)
-    await user.click(screen.getByRole('button', { name: 'I’ve saved my key' }))
-    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('')
     expect(
       screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
-    ).toBe('bookings')
+    ).toBe('full')
+    confirm.mockReturnValue(true)
+    await user.click(second)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Reports (replacement)')
+    expect(screen.getByLabelText<HTMLSelectElement>('Expires').value).toBe(
+      String(365 * 24 * 60 * 60),
+    )
+    expect(
+      screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+    ).toBe('read')
   })
 
   it('keeps replacement shortcuts unavailable while a new key request is pending', async () => {
@@ -352,7 +699,8 @@ describe('the API keys page', () => {
     expect(api.to('POST /api/auth/api-key/create')).toHaveLength(1)
   })
 
-  it('returns focus to the fresh name field when cancelling a replacement', async () => {
+  it('asks before cancelling an unsaved replacement and returns focus to the fresh name field', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const user = userEvent.setup()
     const api = keyServer()
     renderApp('/app/api-keys')
@@ -361,12 +709,28 @@ describe('the API keys page', () => {
       screen.getByRole('button', { name: 'Create a replacement for Claude Desktop' }),
     )
     await user.click(screen.getByRole('button', { name: 'Cancel replacement' }))
+    expect(confirm).toHaveBeenCalledExactlyOnceWith(LEAVE_WITH_UNSAVED_CHANGES)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+      'Claude Desktop (replacement)',
+    )
+    expect(screen.getByLabelText<HTMLSelectElement>('Expires').value).toBe('')
+    expect(
+      screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+    ).toBe('full')
+    confirm.mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: 'Cancel replacement' }))
     const name = screen.getByLabelText<HTMLInputElement>('Name')
     expect(name.value).toBe('')
     expect(document.activeElement).toBe(name)
     expect(
       screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
     ).toBe('bookings')
+    expect(screen.getByLabelText<HTMLSelectElement>('Expires').value).toBe('')
+    confirm.mockClear()
+    await user.click(
+      screen.getByRole('button', { name: 'Create a replacement for Claude Desktop' }),
+    )
+    expect(confirm).not.toHaveBeenCalled()
     expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
     expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
   })
