@@ -1,6 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
-import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
+import { type AuthMiddlewareContext, apiKeyCredentialBoundary, apiKeyRules } from './api-keys.ts'
 import { displayNameRules } from './display-name.ts'
 import { invitationCancellationRules } from './invitation-cancellation.ts'
 import {
@@ -125,6 +125,7 @@ export function beforeHook(
   enqueueInvitationEmail?: EnqueueInvitationEmail,
 ) {
   return createAuthMiddleware(async (ctx) => {
+    apiKeyCredentialBoundary(ctx)
     requireOrganizationSession(ctx)
     requireSocialAuthorizationRequest(ctx)
     requireUuidIds(ctx.query)

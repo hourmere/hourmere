@@ -208,6 +208,21 @@ describe.skipIf(!process.env.DATABASE_URL)('API key calendar write revalidation'
         await db.deleteFrom('auth.apikey').where('id', '=', s.key.id).execute()
         return
       }
+      if (change === 'invalid metadata') {
+        // Only this owned test database bypasses the new storage invariant, so the
+        // transaction-level guard is still exercised against a corrupted row.
+        await database.pool.query('ALTER TABLE auth.apikey DISABLE TRIGGER api_key_scope_guard')
+        try {
+          await db
+            .updateTable('auth.apikey')
+            .set({ metadata: '{' })
+            .where('id', '=', s.key.id)
+            .execute()
+        } finally {
+          await database.pool.query('ALTER TABLE auth.apikey ENABLE TRIGGER api_key_scope_guard')
+        }
+        return
+      }
       await db
         .updateTable('auth.apikey')
         .set(
@@ -215,23 +230,26 @@ describe.skipIf(!process.env.DATABASE_URL)('API key calendar write revalidation'
             ? { expiresAt: new Date(s.now) }
             : change === 'owner'
               ? { referenceId: other.user.id }
-              : change === 'invalid metadata'
-                ? { metadata: '{' }
-                : change === 'legacy organization'
-                  ? { metadata: null }
-                  : { metadata: JSON.stringify({ organizationId: other.organization.id }) },
+              : change === 'legacy organization'
+                ? { metadata: JSON.stringify({ scope: 'full' }) }
+                : {
+                    metadata: JSON.stringify({
+                      organizationId: other.organization.id,
+                      scope: 'full',
+                    }),
+                  },
         )
         .where('id', '=', s.key.id)
         .execute()
     })
-    // A metadata-free key must not keep authority in a stale non-personal organization.
+    // An organization-free key must not keep authority in a stale non-personal organization.
     if (change === 'legacy organization') {
       const team = await createTestTeam(db, [
         { user: { ...s.owner.user, principal: s.owner }, role: 'owner' },
       ])
       await db
         .updateTable('auth.apikey')
-        .set({ metadata: JSON.stringify({ organizationId: team.id }) })
+        .set({ metadata: JSON.stringify({ organizationId: team.id, scope: 'full' }) })
         .where('id', '=', s.key.id)
         .execute()
     }
@@ -255,7 +273,12 @@ describe.skipIf(!process.env.DATABASE_URL)('API key calendar write revalidation'
     const s = await setup()
     await db
       .updateTable('auth.apikey')
-      .set({ metadata: JSON.stringify({ organizationId: s.owner.organization.id.toUpperCase() }) })
+      .set({
+        metadata: JSON.stringify({
+          organizationId: s.owner.organization.id.toUpperCase(),
+          scope: 'full',
+        }),
+      })
       .where('id', '=', s.key.id)
       .execute()
     expect((await request(s, 'destination')).status).toBe(204)
@@ -313,7 +336,7 @@ describe.skipIf(!process.env.DATABASE_URL)('API key calendar write revalidation'
       const s = await setup()
       await db
         .updateTable('auth.apikey')
-        .set({ enabled, expiresAt: null, metadata: null })
+        .set({ enabled, expiresAt: null, metadata: JSON.stringify({ scope: 'full' }) })
         .where('id', '=', s.key.id)
         .execute()
       expect((await request(s, 'destination')).status).toBe(204)

@@ -11,6 +11,7 @@ import {
   createMcpOAuthResolver,
   ensurePersonalOrganization,
   type Principal,
+  parsePersistedApiKeyMetadata,
   type TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -356,6 +357,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
         'packages/auth/src/caller.ts',
         {
           ensurePersonalOrganization,
+          parsePersistedApiKeyMetadata,
           isUuid: (id: string) => z.uuid().safeParse(id).success,
           sql,
         },

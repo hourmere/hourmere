@@ -150,6 +150,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
                 organization: owner.organization,
                 kind,
                 apiKeyId: owner.sessionId,
+                apiKeyScope: 'full',
               }
             : {
                 user: owner.user,
@@ -185,6 +186,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       user: owner.user,
       organization: other.organization,
       kind: 'api_key',
+      apiKeyScope: 'full' as const,
       apiKeyId: owner.sessionId,
     }
     await expect(listConferenceConnections(deps, key)).rejects.toMatchObject({
@@ -207,6 +209,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
         user: disposable.user,
         organization: disposable.organization,
         kind: 'api_key',
+        apiKeyScope: 'full' as const,
         apiKeyId: disposable.sessionId,
       }),
     ).rejects.toMatchObject({ code: 'conference_access_denied' })

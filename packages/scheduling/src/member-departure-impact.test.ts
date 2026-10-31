@@ -876,6 +876,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
           principal: {
             ...f.ownerCtx.principal,
             kind: 'api_key',
+            apiKeyScope: 'full' as const,
             apiKeyId: randomUUID(),
           } as Principal,
         },

@@ -200,6 +200,7 @@ describe('route modules and errors', () => {
   // are written (see openapi.ts).
   const principal = {
     kind: 'api_key' as const,
+    apiKeyScope: 'full' as const,
     apiKeyId: '00000000-0000-7000-8000-000000000001',
     user: { id: '00000000-0000-7000-8000-000000000002', name: 'Ada', email: 'ada@example.com' },
     organization: {
@@ -570,6 +571,7 @@ describe('streamed request bodies', () => {
   }
   const principal = {
     kind: 'api_key' as const,
+    apiKeyScope: 'full' as const,
     apiKeyId: '00000000-0000-7000-8000-000000000001',
     user: { id: '00000000-0000-7000-8000-000000000002', name: 'Ada', email: 'ada@example.com' },
     organization: {

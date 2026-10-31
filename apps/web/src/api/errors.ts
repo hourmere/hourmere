@@ -141,6 +141,10 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    insufficient_scope: 'This API key does not allow this operation.',
+    API_KEY_SCOPE_IMMUTABLE: 'API key scope cannot be changed; create a replacement key.',
+    SESSION_REQUIRED: 'Use a browser session without an Authorization header.',
+    INVALID_METADATA: 'Check the API key organization and scope.',
     invalid_request: 'Check the form and try again.',
     organization_context_changed: 'Your team context changed. Reload before making changes.',
     ORGANIZATION_CONTEXT_CHANGED: 'Your team context changed. Reload before making changes.',

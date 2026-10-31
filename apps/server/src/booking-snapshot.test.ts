@@ -132,6 +132,7 @@ describe.skipIf(!bootstrap)('REST/MCP booking hydration snapshot', () => {
               .execute()
             const principal = {
               kind: 'api_key' as const,
+              apiKeyScope: 'full' as const,
               apiKeyId: randomUUID(),
               user: { id: host.userId, name: 'Host', email: 'host@example.test' },
               organization: { id: host.organizationId, name: '', slug: '', personal: true },
@@ -278,6 +279,7 @@ describe.skipIf(!bootstrap)('REST/MCP booking hydration snapshot', () => {
               now: () => MOVED_AT,
               principal: {
                 kind: 'api_key',
+                apiKeyScope: 'full' as const,
                 apiKeyId: randomUUID(),
                 user: { id: host.userId, name: 'Host', email: organizer.email },
                 organization: { id: host.organizationId, name: '', slug: '', personal: true },

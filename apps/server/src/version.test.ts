@@ -13,6 +13,7 @@ const manifest = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'))
 }
 const principal: Principal = {
   kind: 'api_key',
+  apiKeyScope: 'full' as const,
   apiKeyId: '00000000-0000-7000-8000-000000000001',
   user: { id: '00000000-0000-7000-8000-000000000002', name: 'Ada', email: 'ada@example.com' },
   organization: {

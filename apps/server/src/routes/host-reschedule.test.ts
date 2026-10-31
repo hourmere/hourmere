@@ -77,7 +77,7 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
     const key = crypto.randomUUID()
     const session = crypto.randomUUID()
     const apiKeyId = crypto.randomUUID()
-    principals.set(key, { ...base, kind: 'api_key', apiKeyId })
+    principals.set(key, { ...base, kind: 'api_key', apiKeyScope: 'full' as const, apiKeyId })
     principals.set(session, { ...base, kind: 'session', sessionId: crypto.randomUUID() })
     return { f, host, id, key, session, apiKeyId, base }
   }
@@ -182,12 +182,14 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
     principals.set('wrong-org', {
       ...base,
       kind: 'api_key',
+      apiKeyScope: 'full' as const,
       apiKeyId: crypto.randomUUID(),
       organization: { ...base.organization, id: team },
     })
     principals.set('not-host', {
       ...base,
       kind: 'api_key',
+      apiKeyScope: 'full' as const,
       apiKeyId: crypto.randomUUID(),
       user: { ...base.user, id: outsider.userId },
     })
@@ -320,6 +322,7 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
       principals.set(otherKey, {
         ...base,
         kind: 'api_key',
+        apiKeyScope: 'full' as const,
         apiKeyId: crypto.randomUUID(),
         organization: { ...base.organization, id: other.base.organization.id },
       })

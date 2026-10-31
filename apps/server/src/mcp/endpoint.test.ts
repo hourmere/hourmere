@@ -19,6 +19,7 @@ import { whoamiTool } from './whoami.ts'
 const PUBLIC_URL = 'http://localhost:3000'
 const principal: Principal = {
   kind: 'api_key',
+  apiKeyScope: 'full',
   apiKeyId: '00000000-0000-7000-8000-000000000001',
   user: { id: '00000000-0000-7000-8000-000000000002', name: 'Ada', email: 'ada@example.com' },
   organization: {
@@ -186,7 +187,7 @@ describe('MCP transport', () => {
         user: principal.user,
         personalOrganizationId: null,
         organization: principal.organization,
-        principal: { kind: 'api_key', apiKeyId: principal.apiKeyId },
+        principal: { kind: 'api_key', apiKeyId: principal.apiKeyId, apiKeyScope: 'full' },
       })
       expect(textOf(whoami)).toEqual(whoami.structuredContent)
       await client.close()

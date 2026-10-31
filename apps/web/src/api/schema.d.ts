@@ -100,7 +100,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: requires the personal owner or a team owner/admin */
+                /** @description insufficient_role: requires the personal owner or a team owner/admin. insufficient_scope: This API key does not allow this operation. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -190,6 +190,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
                 429: {
                     headers: {
@@ -248,6 +257,15 @@ export interface paths {
                 };
                 /** @description No valid session or API key */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -413,6 +431,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
                 404: {
                     headers: {
@@ -477,6 +504,24 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ManagedBooking"];
+                    };
+                };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
                 /** @description Missing or unknown manage token (`booking_not_found`) */
@@ -592,6 +637,24 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Missing or unknown manage token (`booking_not_found`) */
                 404: {
                     headers: {
@@ -663,6 +726,15 @@ export interface paths {
                 };
                 /** @description No valid session or API key */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -870,7 +942,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description conference_access_denied or conference_session_required */
+                /** @description conference_access_denied or conference_session_required. insufficient_scope: This API key does not allow this operation. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1074,7 +1146,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1140,6 +1212,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The API key's rate limit is used up */
                 429: {
                     headers: {
@@ -1193,6 +1274,15 @@ export interface paths {
                 };
                 /** @description No valid session or API key */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1478,6 +1568,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The API key's rate limit is used up */
                 429: {
                     headers: {
@@ -1525,6 +1624,15 @@ export interface paths {
                 };
                 /** @description No valid session or API key */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1615,6 +1723,24 @@ export interface paths {
                         "application/json": components["schemas"]["PublicHost"];
                     };
                 };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description No such host (`host_not_found`) */
                 404: {
                     headers: {
@@ -1673,6 +1799,24 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["PublicEventType"];
+                    };
+                };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
                 /** @description No such public event type (`event_type_not_found`) */
@@ -1771,6 +1915,24 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description No such public event type (`event_type_not_found`) */
                 404: {
                     headers: {
@@ -1830,6 +1992,24 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["PublicEventType"];
+                    };
+                };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
                 /** @description No such public event type (`event_type_not_found`) */
@@ -1922,6 +2102,24 @@ export interface paths {
                 };
                 /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2079,6 +2277,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The API key's rate limit is used up */
                 429: {
                     headers: {
@@ -2129,6 +2336,15 @@ export interface paths {
                 };
                 /** @description No valid session or API key */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2213,6 +2429,15 @@ export interface paths {
                 };
                 /** @description No valid session or API key */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3681,6 +3906,11 @@ export interface components {
                  * @description The key used, for kind api_key
                  */
                 apiKeyId: string | null;
+                /**
+                 * @description The immutable API key scope, included only for kind api_key
+                 * @enum {string}
+                 */
+                apiKeyScope?: "full" | "read" | "bookings";
                 /** @enum {string} */
                 kind: "session" | "api_key" | "oauth";
                 /**
@@ -4431,7 +4661,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4505,7 +4735,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4586,7 +4816,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4660,7 +4890,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4732,6 +4962,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing or unknown manage token (`booking_not_found`) */
             404: {
                 headers: {
@@ -4788,6 +5036,24 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4929,7 +5195,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5146,7 +5412,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5226,7 +5492,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5295,7 +5561,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5842,7 +6108,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5901,7 +6167,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5984,7 +6250,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6067,7 +6333,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6464,7 +6730,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6533,7 +6799,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6617,6 +6883,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description No such public event type (`event_type_not_found`) */
             404: {
                 headers: {
@@ -6693,6 +6977,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description No such public event type (`event_type_not_found`) */
             404: {
                 headers: {
@@ -6762,7 +7064,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6809,7 +7111,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6889,7 +7191,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6980,7 +7282,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7047,7 +7349,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7131,7 +7433,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description forbidden: a cookie-authenticated write from another origin */
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7475,7 +7777,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7564,7 +7866,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7641,7 +7943,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7727,7 +8029,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7811,7 +8113,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7893,7 +8195,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;

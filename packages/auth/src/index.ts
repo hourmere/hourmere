@@ -27,7 +27,28 @@ import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } fro
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
 
+export { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
+export {
+  API_KEY_CLI_OPERATIONS,
+  API_KEY_MCP_OPERATIONS,
+  API_KEY_NATIVE_REST_BOUNDARIES,
+  API_KEY_OPERATIONS,
+  API_KEY_REST_OPERATIONS,
+  type ApiKeyCliOperation,
+  type ApiKeyMcpOperation,
+  type ApiKeyOperation,
+  type ApiKeyOperationClass,
+  type ApiKeyRestOperation,
+  apiKeyOperation,
+  type ClassifiedApiKeyOperation,
+} from './api-key-operations.ts'
 export { InvalidApiKeyError, requireActiveApiKey } from './api-key-principal.ts'
+export {
+  ApiKeyScopeError,
+  type ApiKeyScopePrincipal,
+  apiKeyAllows,
+  requireApiKeyOperation,
+} from './api-key-scopes.ts'
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
 export {
   API_KEY_PREFIX,

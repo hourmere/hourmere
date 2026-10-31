@@ -1,5 +1,11 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'This API key does not allow this operation.': 'This API key does not allow this operation.',
+  'API key scope cannot be changed; create a replacement key.':
+    'API key scope cannot be changed; create a replacement key.',
+  'Use a browser session without an Authorization header.':
+    'Use a browser session without an Authorization header.',
+  'Check the API key organization and scope.': 'Check the API key organization and scope.',
   'View hosted team events': 'View hosted team events',
   'Showing team events with this member as a host or pool candidate.':
     'Showing team events with this member as a host or pool candidate.',
