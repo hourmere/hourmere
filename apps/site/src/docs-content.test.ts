@@ -2,6 +2,8 @@ import { existsSync, globSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
+import { createSatteriMarkdownProcessor } from '@astrojs/markdown-satteri'
+import { JSDOM } from 'jsdom'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
@@ -14,6 +16,21 @@ const pages = globSync('**/*.md', { cwd: join(root, siteDocs) }).map((path) => (
 }))
 const githubDocs = 'https://github.com/hourmere/hourmere/blob/main/docs/'
 const normalize = (source: string) => source.replace(/\s+/g, ' ')
+const normalizeTableSpacing = (source: string) =>
+  source
+    .split('\n')
+    .map((line) =>
+      line.startsWith('|')
+        ? line
+            .split('|')
+            .map((cell) => {
+              const text = cell.trim()
+              return /^:?-{3,}:?$/.test(text) ? text.replace(/-{3,}/, '---') : text
+            })
+            .join('|')
+        : line,
+    )
+    .join('\n')
 const prose = (source: string) =>
   normalize(source.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*`]/g, ''))
 const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
@@ -169,7 +186,9 @@ describe('self-hosting documentation links', () => {
     const allowed = ownSiteReferences[path] ?? []
     const source = read(path)
       .split('\n')
-      .filter((line) => !allowed.includes(line.trim()))
+      .filter(
+        (line) => !allowed.some((reference) => normalize(reference) === normalize(line.trim())),
+      )
       .join('\n')
     // Public documentation URLs are site destinations, rather than application-host examples.
     const examples = source.replace(
@@ -510,6 +529,55 @@ function sidebarLinks() {
 }
 
 describe('complete public documentation', () => {
+  it.each([
+    {
+      path: `${siteDocs}/api-conventions.md`,
+      expected: {
+        '409 ORGANIZATION_CONTEXT_CHANGED': 3,
+        '403 TEAM_MANAGEMENT_ACCESS_DENIED': 3,
+        '409 organization_context_changed': 8,
+        '403 team_management_access_denied': 9,
+        '403 insufficient_role': 1,
+      },
+    },
+    {
+      path: 'docs/api-conventions.md',
+      expected: {
+        '409 organization_context_changed': 3,
+        '403 team_management_access_denied': 3,
+        '403 insufficient_role': 1,
+      },
+    },
+  ])(
+    'renders separated compatibility statuses and error codes in $path',
+    async ({ path, expected }) => {
+      const processor = await createSatteriMarkdownProcessor({ syntaxHighlight: false })
+      const rendered = await processor.render(read(path))
+      const dom = new JSDOM(rendered.code)
+      try {
+        const cells = [...dom.window.document.querySelectorAll('td')].map(
+          (cell) => cell.textContent ?? '',
+        )
+        // Test the Markdown renderer's text nodes: source whitespace can disappear on format.
+        const statuses = cells.flatMap((cell) =>
+          [...cell.matchAll(/\b(?:403|409)\s+[A-Za-z]+(?:_[A-Za-z]+)+\b/g)].map(
+            ([status]) => status,
+          ),
+        )
+        const counts = Object.fromEntries(
+          [...new Set(statuses)].map((status) => [
+            status,
+            statuses.filter((value) => value === status).length,
+          ]),
+        )
+        expect(counts).toEqual(expected)
+        expect(cells.join('\n')).not.toMatch(/\b(?:403|409)[A-Za-z_]/)
+      } finally {
+        dom.window.close()
+      }
+    },
+  )
+
   it.each(publishedGuides)('publishes %s with Starlight metadata and one source', (guide) => {
     const source = read(`${siteDocs}/${guide}.md`)
     const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? ''
@@ -524,17 +592,19 @@ describe('complete public documentation', () => {
       // Retain only the requested compatibility excerpt; the full guide stays canonical.
       const webhookRows = source.split('\n').filter((line) => line.startsWith('| Session webhook'))
       expect(webhookRows.length).toBeGreaterThan(0)
-      expect(read(original)).toBe(
-        [
-          '[API conventions](https://hourmere.com/docs/api-conventions).',
-          '',
-          'These session webhook compatibility rows mirror the canonical documentation for repository readers.',
-          '',
-          '| Request and supplied expectation | Previous response | Current response |',
-          '|---|---|---|',
-          ...webhookRows,
-          '',
-        ].join('\n'),
+      expect(normalizeTableSpacing(read(original))).toBe(
+        normalizeTableSpacing(
+          [
+            '[API conventions](https://hourmere.com/docs/api-conventions).',
+            '',
+            'These session webhook compatibility rows mirror the canonical documentation for repository readers.',
+            '',
+            '| Request and supplied expectation | Previous response | Current response |',
+            '|---|---|---|',
+            ...webhookRows,
+            '',
+          ].join('\n'),
+        ),
       )
     } else {
       expect(existsSync(join(root, original)), original).toBe(false)
