@@ -255,6 +255,15 @@ Owners can promote members to admins or return admins to member access after rev
 the permission change. Only owners manage admins; owner roles cannot be changed, and
 ownership transfer is not available yet. A team must always retain at least one owner.
 
+Member rows show shared configuration and cached calendar health checks, without
+promising available times. Owners and admins see only coarse states for other members,
+including whether they have selected a conflict calendar or connected a conference account;
+ordinary members see their own readiness. Providers, calendar and connection IDs, account
+counts, private calendar names, account emails, events and busy times are excluded. Your own
+row links to schedule, calendar and conference settings and refreshes when you return. Your
+personal default schedule is reused across every team you belong to; an external calendar
+is optional for basic bookings.
+
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
 committed isolation (Postgres's default) or serializable. Connect the app to Postgres

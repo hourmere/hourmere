@@ -57,6 +57,61 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
   await user.click(screen.getByRole('button', { name: time }))
 }
 
+describe('public host identity', () => {
+  it.each([
+    ['/ada/intro', undefined],
+    ['/ada/intro', '/avatars/ada.png'],
+    ['/embed/ada/intro', undefined],
+    ['/embed/ada/intro', '/avatars/ada.png'],
+  ] as const)('shows the host directly under both titles at %s (image %j)', async (path, image) => {
+    const user = userEvent.setup()
+    const hostEmail = 'private-host@example.invalid'
+    const hostEmailHash = 'private-host-email-hash'
+    const event = {
+      ...EVENT,
+      host: { ...EVENT.host, image, email: hostEmail, emailHash: hostEmailHash },
+    }
+    fakeApi({
+      ...eventRoutes(event, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp(path)
+
+    function expectIdentityAfter(heading: HTMLElement) {
+      const identity = heading.nextElementSibling
+      expect(identity?.classList.contains('host-identity')).toBe(true)
+      expect(identity?.querySelector('.event-host')?.textContent).toBe('Ada Lovelace')
+      const avatar = identity?.querySelector('.host-avatar')
+      expect(avatar).not.toBeNull()
+      expect(avatar?.getAttribute('aria-hidden')).toBe('true')
+      if (image) {
+        expect(avatar?.querySelector('img')?.getAttribute('src')).toBe(image)
+      } else {
+        expect(avatar?.textContent).toBe('AL')
+        expect(avatar?.querySelector('img')).toBeNull()
+      }
+      expect(document.documentElement.outerHTML.includes(hostEmail)).toBe(false)
+      expect(document.documentElement.outerHTML.includes(hostEmailHash)).toBe(false)
+    }
+
+    const title = await screen.findByRole('heading', { level: 1, name: 'Intro call' })
+    expectIdentityAfter(title)
+    expect(screen.getByRole('complementary', { name: 'About this event' }).firstElementChild).toBe(
+      title,
+    )
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expectIdentityAfter(title)
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expectIdentityAfter(await screen.findByRole('heading', { name: 'You’re booked' }))
+    expect(screen.getByRole('main').closest('.public-embedded') !== null).toBe(
+      path.startsWith('/embed/'),
+    )
+  })
+})
+
 describe('the booking page', () => {
   it.each(['Change time', 'conflict'])(
     'restores the month, day, time zone and complete draft after returning through %s',
@@ -798,7 +853,13 @@ describe('the booking page', () => {
         [`POST ${prefix}/bookings`]: () => json(201, { booking: booking(), manageToken: TOKEN }),
       })
       renderApp(`/embed${team ? '/team/Alpha' : '/ada'}/intro${q}`)
-      await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+      const title = await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+      const identity = title.nextElementSibling
+      expect(identity?.classList.contains('host-identity')).toBe(true)
+      expect(identity?.querySelector('.event-host')?.textContent).toBe(
+        team ? 'Alpha Team' : 'Ada Lovelace',
+      )
+      expect(identity?.querySelectorAll('.host-avatar')).toHaveLength(team ? 0 : 1)
       const resizeMessages = postMessage.mock.calls.filter(
         ([data]) => data.type === 'hourmere:resize',
       )
@@ -929,8 +990,11 @@ describe('the booking page', () => {
       },
     })
     renderApp('/team/Cobaltmere/INTRO')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
-    expect(screen.getByText('Cobaltmere team')).toBeDefined()
+    const title = await screen.findByRole('heading', { level: 1, name: 'Intro call' })
+    expect(title.nextElementSibling?.querySelector('.event-host')).toBe(
+      screen.getByText('Cobaltmere team'),
+    )
+    expect(document.querySelector('.host-avatar')).toBeNull()
     expect(screen.getByTestId('location').textContent).toBe('/team/Cobaltmere/intro')
     await chooseSlot(user, /Monday, November 2, available/, '9:00 AM')
     await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
@@ -1616,6 +1680,41 @@ describe('the booking page', () => {
 })
 
 describe('the host page', () => {
+  it.each([undefined, '/avatars/ada.png'])(
+    'shows the host avatar before the profile title without exposing private fields (image %j)',
+    async (image) => {
+      const hostEmail = 'private-host@example.invalid'
+      const hostEmailHash = 'private-host-email-hash'
+      fakeApi({
+        'GET /api/v1/public/ada': () =>
+          json(200, {
+            handle: 'ada',
+            host: {
+              name: 'Ada Lovelace',
+              timeZone: 'Europe/Berlin',
+              image,
+              email: hostEmail,
+              emailHash: hostEmailHash,
+            },
+            eventTypes: [],
+          }),
+      })
+      renderApp('/ada')
+      const heading = await screen.findByRole('heading', { level: 1, name: 'Ada Lovelace' })
+      const avatar = heading.previousElementSibling
+      expect(avatar?.classList.contains('host-avatar')).toBe(true)
+      expect(avatar?.getAttribute('aria-hidden')).toBe('true')
+      if (image) {
+        expect(avatar?.querySelector('img')?.getAttribute('src')).toBe(image)
+      } else {
+        expect(avatar?.textContent).toBe('AL')
+        expect(avatar?.querySelector('img')).toBeNull()
+      }
+      expect(document.documentElement.outerHTML.includes(hostEmail)).toBe(false)
+      expect(document.documentElement.outerHTML.includes(hostEmailHash)).toBe(false)
+    },
+  )
+
   it('lists the host’s event types and links to their booking pages', async () => {
     const user = userEvent.setup()
     fakeApi({
@@ -1722,6 +1821,7 @@ it.each([false, true])(
     expect(
       screen.getByText(
         deleted ? 'Host no longer available' : 'Actual selected person (Asia/Shanghai)',
+        { selector: 'dd' },
       ),
     ).toBeDefined()
     expect(screen.queryByText('Team pool')).toBeNull()

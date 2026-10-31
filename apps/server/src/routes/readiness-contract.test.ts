@@ -5,7 +5,9 @@ import { createRoute, z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
   getSelfReadiness,
+  getTeamMemberReadiness,
   getTeamReadiness,
+  MemberReadinessPageSchema,
   SelfReadinessPageSchema,
   TeamReadinessPageSchema,
 } from '@hourmere/scheduling'
@@ -163,7 +165,9 @@ function routeCopy(mutation: [string, string]) {
     createRoute,
     z,
     getSelfReadiness,
+    getTeamMemberReadiness,
     getTeamReadiness,
+    MemberReadinessPageSchema,
     SelfReadinessPageSchema,
     TeamReadinessPageSchema,
     DomainError,

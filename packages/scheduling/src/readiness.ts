@@ -160,6 +160,16 @@ export const TeamReadinessPageSchema = z.object({
   members: pageSchema(TeamMember),
   eventTypes: pageSchema(TeamEvent),
 })
+const MemberHealth = z.object({
+  defaultSchedule: ReadinessStateSchema,
+  selectedCalendars: ReadinessStateSchema,
+  conferenceAccounts: z.enum(['connected', 'attention_required', 'not_connected', 'check_failed']),
+})
+export const MemberReadinessPageSchema = z.object({
+  organizationId: z.uuid(),
+  members: z.array(TeamMember.extend({ health: MemberHealth })),
+})
+export type MemberReadinessPage = z.infer<typeof MemberReadinessPageSchema>
 export type SelfReadiness = z.infer<typeof SelfReadinessSchema>
 export type SelfReadinessPage = z.infer<typeof SelfReadinessPageSchema>
 export type TeamReadinessPage = z.infer<typeof TeamReadinessPageSchema>
@@ -204,6 +214,12 @@ export interface ReadinessTeamContext {
   now: () => Temporal.Instant
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+}
+
+/** Construct only from teamManagementAccess.readMember's freshly authorized actor. */
+export interface ReadinessMemberContext extends ReadinessTeamContext {
+  userId: string
+  role: 'owner' | 'admin' | 'member'
 }
 
 function checkedPage(input: ReadinessPageInput) {
@@ -303,7 +319,7 @@ export async function getSelfReadiness(
       : [],
     options.limit,
   )
-  const facts = await loadFacts(ctx.db, principal.organization.id, events.data, [member])
+  const facts = await loadFacts(ctx.db, principal.organization.id, events.data, [member], true)
   const now = ctx.now()
   const memberView = evaluateMember(member, facts, now)
   return {
@@ -381,11 +397,79 @@ export async function getTeamReadiness(
   }
 }
 
+/** Coarse shared member checks; ordinary members may summarize only their own row. */
+export async function getTeamMemberReadiness(
+  ctx: ReadinessMemberContext,
+  memberIds: string[],
+): Promise<MemberReadinessPage> {
+  const actor = ctx
+  if (!isUuid(actor.organizationId) || !isUuid(actor.userId))
+    throw new DomainError('forbidden', 'team_management_access_denied')
+  if (!memberIds.length || memberIds.length > 100 || memberIds.some((id) => !isUuid(id)))
+    throw new DomainError('invalid', 'invalid_member_ids')
+  const members = await ctx.db
+    .selectFrom('auth.member as m')
+    .innerJoin('auth.user as u', 'u.id', 'm.userId')
+    .select(['m.id', 'm.userId', 'u.name', 'u.emailVerified'])
+    .where('m.organizationId', '=', actor.organizationId)
+    .where('m.id', 'in', [...new Set(memberIds)])
+    .$if(actor.role === 'member', (query) => query.where('m.userId', '=', actor.userId))
+    .orderBy('m.id')
+    .execute()
+  const facts = await loadFacts(ctx.db, actor.organizationId, [], members)
+  const now = ctx.now()
+  return {
+    organizationId: actor.organizationId,
+    members: members.map((member) => {
+      const view = evaluateMember(member, facts, now)
+      return {
+        memberId: member.id,
+        displayName: memberDisplayName(member),
+        ...adminView(view),
+        health: {
+          defaultSchedule:
+            view.signals.find((signal) => signal.id === 'default_schedule')?.state ?? 'not_checked',
+          selectedCalendars: aggregate(
+            view.signals.filter(
+              (signal) =>
+                signal.id === 'conflict_calendar_selection' ||
+                signal.id === 'selected_calendar_sync',
+            ),
+            'selected_calendar_sync',
+            now,
+          ).state,
+          conferenceAccounts: memberConferenceAccounts(facts, member.userId),
+        },
+      }
+    }),
+  }
+}
+
+function memberConferenceAccounts(
+  facts: Facts,
+  userId: string,
+): z.infer<typeof MemberHealth>['conferenceAccounts'] {
+  if (!facts.conferences.ok) return 'check_failed'
+  const connections = facts.conferences.value.filter(
+    (connection) => connection.user_id === userId && connection.status !== 'disconnected',
+  )
+  if (!connections.length) return 'not_connected'
+  if (connections.some((connection) => connection.status === 'needs_reauth'))
+    return 'attention_required'
+  return 'connected'
+}
+
 function memberDisplayName(member: Member): string {
   return (member.emailVerified && cleanText(member.name, { max: 200 })) || 'Team member'
 }
 
-async function loadFacts(db: Db, organizationId: string, events: Event[], members: Member[]) {
+async function loadFacts(
+  db: Db,
+  organizationId: string,
+  events: Event[],
+  members: Member[],
+  privateDetails = false,
+) {
   const ids = events.map((event) => event.id)
   const first = await Promise.allSettled([
     ids.length
@@ -443,7 +527,8 @@ async function loadFacts(db: Db, organizationId: string, events: Event[], member
     privateUsers.length
       ? db
           .selectFrom('schedules')
-          .select(['id', 'user_id', 'is_default', 'name', 'time_zone', 'weekly_hours'])
+          .select(['id', 'user_id', 'is_default', 'time_zone', 'weekly_hours'])
+          .$if(privateDetails, (query) => query.select('name'))
           .where('user_id', 'in', privateUsers)
           .where((eb) =>
             custom.length
@@ -460,11 +545,9 @@ async function loadFacts(db: Db, organizationId: string, events: Event[], member
             'cc.user_id',
             'cc.id as connection_id',
             'cc.provider',
-            'cc.account_email',
             'cc.status',
             'cc.scopes',
             'c.id',
-            'c.name',
             'c.check_conflicts',
             'c.last_synced_at',
             'c.sync_error',
@@ -473,6 +556,7 @@ async function loadFacts(db: Db, organizationId: string, events: Event[], member
             'c.access_role',
             'c.supports_google_meet',
           ])
+          .$if(privateDetails, (query) => query.select(['cc.account_email', 'c.name']))
           .where('cc.user_id', 'in', privateUsers)
           .execute()
       : Promise.resolve([]),
@@ -948,7 +1032,7 @@ function selfView(
               .filter((s) => s.user_id === userId)
               .map((s) => ({
                 id: s.id,
-                name: s.name,
+                name: s.name ?? '',
                 timeZone: s.time_zone,
                 isDefault: s.is_default,
               }))
@@ -959,8 +1043,8 @@ function selfView(
               .filter((c) => c.user_id === userId)
               .map((c) => ({
                 id: c.id,
-                name: c.name,
-                accountEmail: c.account_email,
+                name: c.name ?? '',
+                accountEmail: c.account_email ?? null,
                 provider: c.provider,
                 checkConflicts: c.check_conflicts,
                 lastSyncedAt: c.last_synced_at?.toISOString() ?? null,

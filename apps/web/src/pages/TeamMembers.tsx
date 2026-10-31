@@ -3,6 +3,8 @@ import { Link } from 'react-router'
 import { type ListedOrganizationMember, listOrganizationMembers } from '../api/auth.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
+import { MemberReadiness } from '../components/team-members/MemberReadiness.tsx'
+import { useMemberReadiness } from '../components/team-members/member-readiness.ts'
 import {
   RemoveMemberButton,
   TeamMemberActions,
@@ -113,6 +115,12 @@ export function TeamMembers({
     [organizationId, offset],
   )
   const [state, retry, update] = useTeamPage(load)
+  const [readiness, retryReadiness] = useMemberReadiness(
+    organizationId,
+    currentUserId,
+    role,
+    state.status === 'ready' ? state.data.members : [],
+  )
   const roles = role?.split(',').map((value) => value.trim()) ?? []
   const canManage =
     roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
@@ -128,6 +136,13 @@ export function TeamMembers({
       <section className="panel" aria-labelledby="team-members-heading">
         <h2 id="team-members-heading">{t('Team members')}</h2>
         <p className="hint">{t('Pending invitations are not members or hosts.')}</p>
+        <p className="hint">
+          {t(
+            'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+          )}{' '}
+          {t('A missing default schedule is a configuration gap, not a report of no free time.')}{' '}
+          {t('An external calendar is optional for basic bookings.')}
+        </p>
         <RoleManagementNotice />
         {canManage && (
           <p>
@@ -145,6 +160,43 @@ export function TeamMembers({
         />
         {state.status === 'ready' && (
           <>
+            {state.data.members.length > 0 && currentUserId && role && (
+              <>
+                {readiness.status === 'loading' && (
+                  <p role="status">{t('Checking member configuration…')}</p>
+                )}
+                {readiness.status === 'error' && (
+                  <div role="alert" className="alert alert-error">
+                    <p>{t('Could not check member configuration.')}</p>
+                    <button type="button" className="button button-small" onClick={retryReadiness}>
+                      {t('Retry checks')}
+                    </button>
+                  </div>
+                )}
+                {readiness.status === 'ready' &&
+                  [...readiness.data.values()].some((health) =>
+                    Object.values(health).some((value) =>
+                      ['check_failed', 'not_checked'].includes(value),
+                    ),
+                  ) && (
+                    <button type="button" className="button button-small" onClick={retryReadiness}>
+                      {t('Retry checks')}
+                    </button>
+                  )}
+                {readiness.status === 'unavailable' && (
+                  <div role="alert" className="alert alert-error">
+                    <p>
+                      {t(
+                        'Your permission or team membership changed. Reload to check before trying again.',
+                      )}
+                    </p>
+                    <button type="button" className="button button-small" onClick={onReload}>
+                      {t('Reload team')}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
             <p role="status">{t('{0} joined members', { '0': state.data.total })}</p>
             {state.data.members.length === 0 && <p>{t('No team members found.')}</p>}
             <ul className="stack">
@@ -194,6 +246,14 @@ export function TeamMembers({
                       removalOpener.current = opener
                       setSelectedMember(target)
                     }}
+                  />
+                  <MemberReadiness
+                    health={
+                      readiness.status === 'ready' ? readiness.data.get(member.id) : undefined
+                    }
+                    status={readiness.status}
+                    own={member.userId === currentUserId}
+                    canManage={canManage}
                   />
                 </li>
               ))}

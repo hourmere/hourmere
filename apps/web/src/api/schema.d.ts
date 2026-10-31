@@ -5744,6 +5744,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teams/{teamId}/member-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read coarse shared health checks for visible team member rows
+         * @description Requires a current verified web session in this team. Owners and admins receive only the requested current-team membership rows; ordinary members receive only their own requested row. Missing, departed and other-team membership IDs are omitted without revealing existence. Reads the same cached configuration and sync evaluator as event-type readiness, with no slot search or provider request. No private schedule names, calendar names or IDs, account emails, events or busy maps are returned. Default-schedule health is user-owned and reused across teams. Conference account state is optional account health, not automatic-meeting eligibility or a booking promise. Pass 1–100 comma-separated membership IDs from the displayed members page in one request. X-Expected-Organization-Id binds this read to its opening team; a still-authorized member whose context changed receives 409 reload guidance, while inaccessible teams receive uniform 403. Every Authorization header is denied even with a valid session cookie.
+         */
+        get: {
+            parameters: {
+                query: {
+                    memberIds: string;
+                };
+                header?: {
+                    "x-expected-organization-id"?: string;
+                };
+                path: {
+                    teamId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Only the authorized requested member rows with coarse health checks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemberReadinessPage"];
+                    };
+                };
+                /** @description invalid_request or invalid_member_ids: provide 1–100 membership UUIDs */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires current verified team membership */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload the page before retrying */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description internal_error: subject reads or another unexpected server operation failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/readiness": {
         parameters: {
             query?: never;
@@ -6543,6 +6642,33 @@ export interface components {
                 totalCount: number;
             };
         };
+        /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
+        MemberReadinessPage: {
+            members: {
+                /** @enum {string} */
+                completeness: "complete" | "partial";
+                /** @description Verified, display-safe member name, otherwise the neutral label Team member. */
+                displayName: string;
+                /** Format: date-time */
+                evaluatedAt: string;
+                fixKinds: ("edit_event" | "ask_member" | "retry_summary")[];
+                health: {
+                    /** @enum {string} */
+                    conferenceAccounts: "connected" | "attention_required" | "not_connected" | "check_failed";
+                    /** @enum {string} */
+                    defaultSchedule: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                    /** @enum {string} */
+                    selectedCalendars: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                };
+                /** Format: uuid */
+                memberId: string;
+                reasonCodes: ("default_schedule_required" | "host_configuration_required" | "activation_required" | "calendar_attention_required" | "check_not_performed" | "check_failed" | "optional_feature_attention_required")[];
+                /** @enum {string} */
+                summary: "disabled" | "needs_activation" | "configuration_blocked" | "dependency_unavailable" | "check_failed" | "not_checked" | "checks_passed" | "partial_pool";
+            }[];
+            /** Format: uuid */
+            organizationId: string;
+        };
         MemberRemoval: {
             deactivatedEventTypeIds: string[];
             /** Format: uuid */
@@ -6636,6 +6762,8 @@ export interface components {
             durationMinutes: number;
             handle: string;
             host: {
+                /** @description An existing first-party raster image path; external profile pictures are omitted */
+                image?: string;
                 name: string;
                 /** @description The host's IANA time zone; omitted for round-robin pools */
                 timeZone?: string;
@@ -6676,6 +6804,8 @@ export interface components {
             }[];
             handle: string;
             host: {
+                /** @description An existing first-party raster image path; external profile pictures are omitted */
+                image?: string;
                 name: string;
                 /** @description The host's IANA time zone */
                 timeZone: string;

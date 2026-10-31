@@ -82,6 +82,11 @@ describe.skipIf(!serverUrl)('public single-host team booking', () => {
 
   it('serves a single-host team page and redacts private details', async () => {
     const t = await setup()
+    await db
+      .updateTable('auth.user')
+      .set({ image: '/assets/avatars/host.png' })
+      .where('id', '=', t.host.userId)
+      .execute()
     const res = await appWith().request(t.path)
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
@@ -98,6 +103,7 @@ describe.skipIf(!serverUrl)('public single-host team booking', () => {
     expect(JSON.stringify(body)).not.toContain(t.org)
     expect(JSON.stringify(body)).not.toContain('+14155550123')
     expect(JSON.stringify(body)).not.toContain('@')
+    expect(body).not.toHaveProperty('host.image')
   })
 
   it('offers and books team slots, replays a retry and manages the booking through the existing token protocol', async () => {
