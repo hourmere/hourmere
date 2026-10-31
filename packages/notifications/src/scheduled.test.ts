@@ -812,6 +812,6 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     expect(sentAt).toEqual([vector.expectedDueUtc, vector.expectedDueUtc])
     expect((await rows(bookingId))[0]).toMatchObject({ state: 'completed', attempts: 1 })
     if (vector.kind === 'follow_up')
-      expect(sent.some((m) => m.subject.startsWith('会议时间已结束：'))).toBe(true)
+      expect(sent.some((m) => m.subject.startsWith('预约时段已结束：'))).toBe(true)
   })
 })

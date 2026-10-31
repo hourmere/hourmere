@@ -68,5 +68,8 @@
   "teamInvitation.expiry": "This invitation expires at {expiry}.",
   "teamInvitation.button": "View and accept invitation",
   "teamInvitation.fallback": "If the button does not work, copy this link into your browser:",
-  "teamInvitation.footer": "If you do not recognize this team or do not want to join, you can ignore this email."
+  "teamInvitation.footer": "If you do not recognize this team or do not want to join, you can ignore this email.",
+  "followUp.subject": "Scheduled meeting time ended: {event}",
+  "followUp.introduction": "The scheduled time for your meeting with {other} has ended.",
+  "followUp.hostNote": "Note from the host"
 }

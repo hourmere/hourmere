@@ -68,5 +68,8 @@
   "teamInvitation.expiry": "Esta invitación caduca el {expiry}.",
   "teamInvitation.button": "Ver y aceptar invitación",
   "teamInvitation.fallback": "Si el botón no funciona, copie este enlace en su navegador:",
-  "teamInvitation.footer": "Si no reconoce este equipo o no desea unirse, puede ignorar este correo electrónico."
+  "teamInvitation.footer": "Si no reconoce este equipo o no desea unirse, puede ignorar este correo electrónico.",
+  "followUp.subject": "Fin del horario programado: {event}",
+  "followUp.introduction": "El horario programado para su reunión con {other} ha finalizado.",
+  "followUp.hostNote": "Nota del anfitrión"
 }

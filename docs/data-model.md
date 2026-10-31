@@ -733,6 +733,14 @@ fresh install and verifies no-op reruns. See
 [the 0049 upgrade note](../packages/db/migrations/0049_configurable_booking_messages.md)
 for the required coordinated worker rollout.
 
+Migration 0052 permits an optional plain-text `hostNote` on follow-up rules and their
+immutable booking snapshots. It replaces the existing JSON validation function without
+changing defaults or rewriting rows. Notes are limited to 2000 UTF-16 code units, with
+tabs and line endings allowed; other C0/C1 controls, bidi embedding/isolate controls and
+malformed Unicode are rejected. Reminders cannot carry a note. See
+[the 0052 upgrade note](../packages/db/migrations/0052_follow_up_host_note.md) for the
+predecessor-preservation checks and rollout constraints.
+
 ## Booking webhooks
 
 Migration 0017 adds organization-owned `webhooks` (bounded subscriptions, active flag and
