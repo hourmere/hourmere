@@ -321,6 +321,63 @@ checks advisory until reviewed baselines are committed.
   reformat code you are not changing.
 - **Tests** live next to the code as `*.test.ts`.
 
+### REST, MCP and CLI parity
+
+New capabilities must be available through REST, MCP and the CLI together. Every `/api/v1`
+write route must be registered with `app.openapi()` and appear in OpenAPI; a plain
+`app.post()` or other undocumented write is not allowed. The route-coverage check compares
+Hono's registered `POST`, `PUT`, `PATCH` and `DELETE` routes with OpenAPI paths and methods,
+including parameterized routes. Hono records middleware as `ALL`, so those middleware
+entries are outside this comparison; register write handlers with explicit OpenAPI methods.
+The write-parity guard in
+[`scripts/interface-parity.test.ts`](scripts/interface-parity.test.ts) runs in the existing
+CI `check` job. It inventories every `POST`, `PUT`, `PATCH` and `DELETE` under `/api/v1`
+from the server's generated `openApiDocument`, the tools registered by `productTools` in
+`apps/server/src/server.ts`, and the actual `COMMANDS` table in `tools/cli/src/cli.ts`.
+Read operations are outside this guard's required coverage.
+
+When adding or changing a write operation:
+
+1. Give the REST route a stable, unique OpenAPI `operationId` and implement the corresponding MCP
+   tool and CLI command using the shared service behavior.
+2. Add an entry keyed by that exact `operationId` in
+   [`scripts/interface-parity.json`](scripts/interface-parity.json). Set `mcp` to the
+   registered tool name and `cli` to the command name, for example:
+
+   ```json
+   "createPublicBooking": { "mcp": "create_booking", "cli": "book" }
+   ```
+
+3. A browser-session-only operation may instead use
+   `{ "exemption": "browser-session-only", "reason": "One-line concrete reason." }`.
+   The guard verifies its effective OpenAPI security is exactly `[{ "session": [] }]`;
+   API-key-capable, public and unspecified security cannot use this exemption.
+   Existing gaps are kept separately in
+   [`scripts/interface-parity-known-gaps.json`](scripts/interface-parity-known-gaps.json).
+   This frozen list may only shrink: CI compares it with the event's base commit and
+   rejects new or reintroduced entries, directing authors to add the MCP tool and CLI
+   command. When closing a gap, add its real mapping and remove its gap entry; stale gaps
+   fail, including operations removed, changed to reads or made browser-session-only.
+4. Update or remove the entry when the operation or either interface name changes. Run
+   `npm run api:types` and commit the regenerated API types after route changes.
+5. Run the guard locally:
+
+   ```sh
+   npm test -- scripts/interface-parity.test.ts --maxWorkers=2 --no-fsModuleCache
+   ```
+
+Locally the gap comparison defaults to `origin/main`; set `HOURMERE_PARITY_BASE` to a
+different base commit when needed. CI fetches history and sets the pull-request, merge-group
+or push base explicitly. The first introduction uses a fixed ceiling of the original
+20 gaps when the base predates the gap file; an unreadable base fails the check.
+
+The guard reports writes missing a mapping or valid exemption, nonexistent MCP tools or CLI
+commands, new gaps, stale gaps, and entries for removed operations. Negative tests inject
+undocumented routes, unmapped writes and invalid/stale entries to verify these failures.
+Keep those controls when changing the guard;
+do not resolve a failure by inventing an interface name or silently skipping an operation.
+List existing MCP/CLI gaps and their reasons in the pull request so later work can close them.
+
 ## Commits
 
 - Subject in the imperative mood, about 50 characters and at most 72, no trailing period:

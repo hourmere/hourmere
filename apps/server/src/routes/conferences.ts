@@ -94,6 +94,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/conference-connections/zoom/authorize',
+        operationId: 'authorizeZoomConnection',
         tags: ['Conferences'],
         summary: 'Begin an independent Zoom identity connection',
         description:
@@ -119,6 +120,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/conference-connections/{id}/reconnect',
+        operationId: 'reconnectConferenceConnection',
         tags: ['Conferences'],
         summary: 'Reconnect the same Zoom identity with its saved permissions',
         description:
@@ -149,6 +151,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
           path: existing
             ? '/api/v1/conference-connections/{id}/authorize-meetings'
             : '/api/v1/conference-connections/zoom/authorize-meetings',
+          operationId: existing ? 'authorizeConferenceConnectionMeetings' : 'authorizeZoomMeetings',
           tags: ['Conferences'],
           summary: 'Explicitly authorize automatic single-host Zoom meetings',
           description:
@@ -183,6 +186,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/conference-connections/{id}/refresh',
+        operationId: 'refreshConferenceConnection',
         tags: ['Conferences'],
         summary: 'Explicitly rotate Zoom credentials and refresh identity metadata',
         description:
@@ -209,6 +213,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
       createRoute({
         method: 'delete',
         path: '/api/v1/conference-connections/{id}',
+        operationId: 'disconnectConferenceConnection',
         tags: ['Conferences'],
         summary: 'Disconnect local Zoom access and invalidate pending attempts',
         description:

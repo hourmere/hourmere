@@ -69,6 +69,7 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
       createRoute({
         method: 'patch',
         path: '/api/v1/profile/name',
+        operationId: 'updateDisplayName',
         summary: "Update the caller's account display name",
         description:
           'Works before creating a booking-page profile and across acting organizations. Only changes the caller’s name. Requests are limited to 4096 bytes.',
@@ -113,6 +114,7 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
       createRoute({
         method: 'put',
         path: '/api/v1/profile',
+        operationId: 'updateProfile',
         summary: "Create or replace the caller's profile",
         description:
           'The time zone and locale are stored normalized (europe/berlin → Europe/Berlin).',
