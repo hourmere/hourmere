@@ -2,6 +2,7 @@ import type { Db } from '@hourmere/db'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
 import { displayNameRules } from './display-name.ts'
+import { invitationCancellationRules } from './invitation-cancellation.ts'
 import {
   type EnqueueInvitationEmail,
   invitationRules,
@@ -150,6 +151,8 @@ export function beforeHook(
     )
     if (invitation) return invitation
     await organizationContext(ctx, db)
+    const cancellation = await invitationCancellationRules(ctx, db)
+    if (cancellation) return cancellation
     await teamRolePolicy(ctx)
     const filter = checkListQuery(ctx.path, ctx.query)
     const empty = await emptyMemberList(ctx, db, filter)

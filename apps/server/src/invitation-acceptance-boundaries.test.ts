@@ -407,9 +407,11 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
     const transaction = adapter.transaction.bind(adapter)
     const release = Promise.withResolvers<void>()
     let waitingInserts = 0
+    let enteredTransactions = 0
     const spy = vi.spyOn(adapter, 'transaction')
-    spy.mockImplementation((callback) =>
-      transaction(async (trx) => {
+    spy.mockImplementation((callback) => {
+      enteredTransactions++
+      return transaction(async (trx) => {
         const create = trx.create.bind(trx)
         trx.create = (async (request: Parameters<typeof create>[0]) => {
           if (
@@ -423,23 +425,23 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
           return create(request)
         }) as typeof create
         return callback(trx)
-      }),
-    )
+      })
+    })
     const requests: Promise<Response>[] = []
     try {
       requests.push(
         Promise.resolve(accept(i, f.sessions[0]?.cookie as string, f.invitations[0]?.id as string)),
       )
       await vi.waitFor(() => expect(waitingInserts).toBe(1), { timeout: 3000, interval: 10 })
-      // The first invitation claim committed, while its native member/session transaction
-      // waits at the adapter boundary. Distinct invitations share no row-level selector.
+      // The claim and membership now share a transaction: the first request's accepted
+      // status remains invisible while its member INSERT waits at the adapter boundary.
       expect(
         await db
           .selectFrom('auth.invitation')
           .select('status')
           .where('id', '=', f.invitations[0]?.id as string)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ status: 'accepted' })
+      ).toEqual({ status: 'pending' })
       requests.push(
         Promise.resolve(accept(i, f.sessions[1]?.cookie as string, f.invitations[1]?.id as string)),
       )
@@ -451,12 +453,16 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
               AND wait_event='advisory') AS blocked`,
           )
           expect(
-            locks.rows[0]?.blocked || waitingInserts === 2,
-            'the second session reaches the recipient fence or its unfenced native insert',
+            locks.rows[0]?.blocked || enteredTransactions === 2,
+            'the second session reaches the recipient fence or its native transaction',
           ).toBe(true)
         },
         { timeout: 3000, interval: 10 },
       )
+      expect(
+        enteredTransactions,
+        'the recipient fence keeps a second session outside the native write transaction',
+      ).toBe(1)
       release.resolve()
       const responses = await Promise.all(requests)
       expect(
@@ -492,11 +498,11 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
     await verifyConcurrentAcceptance(await sourceCopy(false))
   })
 
-  it('detects removal of the recipient fence through a duplicate-membership assertion', async () => {
+  it('detects removal of the recipient fence through a native-transaction serialization assertion', async () => {
     await expect(verifyConcurrentAcceptance(await sourceCopy(true))).rejects.toMatchObject({
       name: 'AssertionError',
       message: expect.stringContaining(
-        'distinct-session acceptance creates exactly one recipient membership',
+        'the recipient fence keeps a second session outside the native write transaction',
       ),
     })
   })

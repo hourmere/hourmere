@@ -4,6 +4,7 @@
 import { existsSync } from 'node:fs'
 import { createDb, createPool } from '@hourmere/db'
 import { createLogMailer } from '@hourmere/mail'
+import type { BetterAuthOptions } from 'better-auth'
 import { createAuth, createAuthPool } from './index.ts'
 
 const envFile = new URL('../../../.env', import.meta.url)
@@ -15,8 +16,9 @@ const placeholder = { clientId: 'schema-generation-only', clientSecret: 'schema-
 // Does not affect the schema.
 const signup = { mode: 'closed', allowedDomains: [] } as const
 
+const pool = createAuthPool(url, signup)
 export const auth = createAuth({
-  pool: createAuthPool(url, signup),
+  pool,
   db: createDb(createPool(url)),
   baseURL: 'http://localhost:3000',
   secret: 'schema-generation-only-not-a-real-secret',
@@ -26,3 +28,8 @@ export const auth = createAuth({
   // Every optional feature on, so the generated schema covers all of them.
   socialProviders: { google: placeholder, microsoft: placeholder },
 })
+
+// The CLI introspects options.database directly; it cannot discover the Kysely
+// connection behind the runtime transaction adapter factory.
+const schemaOptions: BetterAuthOptions = auth.options
+schemaOptions.database = pool

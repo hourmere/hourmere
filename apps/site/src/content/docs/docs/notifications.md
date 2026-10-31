@@ -110,8 +110,11 @@ Every email goes to each host first (they most need to know), then the invitee, 
 guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
 booking's `booking_hosts` whose address is verified: accounts start verified, and one that
 is not (it should not exist; see [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md)) is neither emailed nor named in the
-invitation, so a booking without a verified host sends nothing (the job logs one WARN line
-naming the booking and the kind, since the invitee hears nothing either). Guests are
+invitation. Without a verified host, confirmations, reschedules and reminders send nothing
+(the job logs one WARN line naming the booking and kind). Cancellations and conference-failure
+notices still reach the invitee and guests. A removed team host receives no host notice;
+cancellation uses the saved organizer for its calendar attachment, or sends text only when
+that historical snapshot is unavailable. Guests are
 addresses an anonymous booker typed (up to 10 per booking); invitee/guest emails share
 per-recipient and instance-wide [abuse limits](#email-abuse-controls). Times are shown in the recipient's zone with its IANA display name
 (spaces instead of underscores) and the GMT offset for the meeting date: the attendee's
@@ -543,7 +546,11 @@ including worker attempts, stop at 32 generations and extend expiry by the origi
 length. The invitation sender updates `updated_at` on every delivery attempt
 so this post-delivery cooldown holds. Each delivery generation retains its existing
 maximum of four SMTP attempts.
-Expired or business-terminal invitations need a new invitation. Invitation admission
+Expired or business-terminal invitations need a new invitation. The expired-row action
+atomically cancels the expired invitation and creates a new ID with the acting administrator
+as inviter, under the usual new-invitation limits. The invite form cancels expired rows for
+that address in the creation transaction too. Old links stay unusable and signup trust
+follows the new inviter. Invitation admission
 never invokes the sign-in worker's account/sign-up eligibility decision and does not
 grant an inviter any new registration authority. Errors use fixed codes and diagnostics
 omit recipients and underlying database/provider text.
@@ -673,8 +680,16 @@ Team invitations keep their current delivery generation in `invitation_deliverie
 separate from the invitation's acceptance and expiry state. The delivery record contains
 the generation, bounded attempt count, due time, claim lease, job and resend request IDs,
 safe outcome/error code, SMTP acceptance time, creation/update times and nullable
-`last_attempt_at`. An SMTP acceptance does not mean that the recipient received, read or
-accepted the invitation. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
+`last_attempt_at`. Migration 0045 adds nullable `authorized_by_user_id`: new generations
+record the acting administrator, whose current name appears as “invited by” and whose team
+authority is checked before sending. Legacy null rows use the original inviter. Deleting
+a recorded actor does not erase the UUID or fall back to the original inviter: sending
+stops instead. The original invitation inviter remains the signup-policy identity.
+An SMTP acceptance does not mean that the recipient received, read or
+accepted the invitation. Pending, unexpired invitations retain their delivery tombstones,
+so resends cannot reset the generation cap or original validity duration. Expired pending,
+accepted, canceled and rejected invitations become eligible for seven-day delivery cleanup;
+expired IDs are never renewed. See the [storage contract](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#invitation-delivery-storage)
 and the [administrator summary](/docs/api-conventions#team-invitation-delivery-summaries).
 
 The session-only administrator summary includes the invited email address for verified
@@ -705,8 +720,8 @@ The sender rechecks invitation eligibility before each attempt: accepted, cancel
 rejected, expired or unknown-status invitations stop, and stale jobs cannot send or
 change a successor generation. An already recorded `smtp_accepted` generation is also
 terminal. Both the claim and pre-SMTP transactions use the shared team-management and
-invitation eligibility policy: the inviter must still be a current owner/admin of the
-non-personal team, the invitation role must be allowed, and the recipient must not
+invitation eligibility policy: the current generation's authorizing administrator must
+still be a current owner/admin of the non-personal team, the invitation role must be allowed, and the recipient must not
 already belong to the team. Otherwise the generation becomes terminal
 `skipped/invitation_ineligible` without SMTP or automatic retries. Template rendering
 failure is terminal `failed/transport_error`, distinct from `smtp_not_configured`.

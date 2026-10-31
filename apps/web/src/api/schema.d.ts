@@ -5105,7 +5105,7 @@ export interface paths {
         };
         /**
          * Invitation delivery summaries of the session's current team
-         * @description Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching to any other organization, including personal space or a member-role team, returns 409 organization_context_changed with reload guidance when the reader still owns or administers the expected team. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets; this read reserves no capacity and a later resend rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. The invited email address is returned only to verified owners/admins of the current team; members, other teams and API-key/OAuth callers cannot read it. No links, tokens, mail bodies, credentials, job or lease identities or raw provider errors are returned.
+         * @description Hourmere-owned protocol, independent of Better Auth response schemas. Requires a current verified team owner/admin browser session. Any Authorization header is denied before credentials are resolved, even with a valid session cookie. Optional X-Expected-Organization-Id binds the read to the team where the page opened; switching to any other organization, including personal space or a member-role team, returns 409 organization_context_changed with reload guidance when the reader still owns or administers the expected team. Invalid or inaccessible expected teams retain 403 team_management_access_denied. Omitting the header retains current-team reads for existing clients. Access denials have no WWW-Authenticate. Invitation status and expiry use the database clock; accepted/canceled/rejected statuses take precedence over expiry. Optional status filters the derived lifecycle before pagination. Delivery state is independent: queued is waiting, sending is submission to the mail server, smtp_accepted means mail server acceptance only, and unknown means no retained delivery row. Resend eligibility reuses the write path cooldown, generation, live lease, recipient membership and admission budgets. Expired pending invitations instead permit atomic cancellation and creation of a new invitation ID under the acting administrator, subject to fresh admission budgets, active duplicate and pending limits. The old ID is never renewed. This read reserves no capacity and the write rechecks eligibility. lastAttemptAt records the database time of the latest attempt; null means no attempt, an unknown legacy time or no delivery row. Ordered by invitation ID ascending. Pass nextCursor as cursor with the same current team and status filter for the next page. The invited email address is returned only to verified owners/admins of the current team; members, other teams and API-key/OAuth callers cannot read it. No links, tokens, mail bodies, credentials, job or lease identities or raw provider errors are returned.
          */
         get: {
             parameters: {
@@ -5164,6 +5164,150 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/invitations/{invitationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current state of one team invitation
+         * @description Verified current team owner/admin session only. Reads the final invitation lifecycle and current mail generation independently of list filters. Missing and other-team IDs receive the same access denial. Optional X-Expected-Organization-Id binds the page to its team; omitting it reads the current team.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "x-expected-organization-id"?: string;
+                };
+                path: {
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current invitation summary */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+                /** @description invalid_request: invalid identifier */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload before trying again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/invitations/{invitationId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a pending team invitation
+         * @description Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required for a successful write. Omitting it returns 409 organization_context_changed for an authorized manager; unauthorized callers retain 403 team_management_access_denied.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-expected-organization-id": string;
+                };
+                path: {
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Final invitation summary; accepted if joining won the race */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+                /** @description invalid_request: malformed request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload before trying again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -6969,9 +7113,13 @@ export interface components {
             email: string;
             /** Format: date-time */
             expiresAt: string;
+            generation: number;
             /** Format: uuid */
             id: string;
             resendAllowed: boolean;
+            /** @enum {string|null} */
+            resendDeniedReason: "TEAM_MANAGEMENT_ACCESS_DENIED" | "INVITATION_INELIGIBLE" | "INVITATION_RECIPIENT_ALREADY_MEMBER" | "INVITATION_GENERATION_LIMIT" | "INVITATION_DELIVERY_BUSY" | "INVITATION_RESEND_COOLDOWN" | "INVITATION_RATE_LIMITED" | "INVITATION_CONFLICT" | "INVITATION_PENDING_LIMIT" | null;
+            resendRetryAfterSeconds: number | null;
             /**
              * @description Known stored invitation lifecycle, with expired derived only for pending invitations using the database clock. Unrecognized stored statuses map to unknown, remain in pagination and are never pending or resendable.
              * @enum {string}
@@ -7113,7 +7261,10 @@ export interface operations {
     listWebhooks: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams and any different expected personal organization. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7146,7 +7297,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7164,7 +7315,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7187,7 +7338,10 @@ export interface operations {
     createWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7232,7 +7386,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7250,7 +7404,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7273,7 +7427,10 @@ export interface operations {
     deleteWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7306,7 +7463,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7324,7 +7481,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7347,7 +7504,10 @@ export interface operations {
     updateWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7389,7 +7549,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7407,7 +7567,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7432,7 +7592,10 @@ export interface operations {
             query?: {
                 after?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams and any different expected personal organization. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7470,7 +7633,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7488,7 +7651,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7511,7 +7674,10 @@ export interface operations {
     rotateWebhookSecret: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
             path: {
                 id: string;
             };
@@ -7549,7 +7715,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role; forbidden: a cookie-authenticated write from another origin */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7567,7 +7733,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhooks_disabled or webhook_limit_reached */
+            /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;

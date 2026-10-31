@@ -37,6 +37,9 @@ const INVITATION: Schemas['TeamInvitationSummary'] = {
   status: 'pending',
   createdAt: '2026-10-30T10:00:00.000Z',
   expiresAt: '2026-11-13T10:00:00.000Z',
+  generation: 1,
+  resendDeniedReason: null,
+  resendRetryAfterSeconds: null,
   resendAllowed: false,
   delivery: { state: 'queued', attempts: 0, lastAttemptAt: null, lastErrorCode: null },
 }
@@ -52,6 +55,7 @@ const QUEUED_INVITATION: QueuedInvitation = {
 }
 const INVITE_ROUTE = 'POST /api/auth/organization/invite-member'
 const PENDING_ROUTE = 'GET /api/v1/team/invitations'
+const DETAIL_ROUTE = `GET /api/v1/team/invitations/${INVITATION.id}`
 
 function server(routes: Routes = {}, role = 'owner') {
   return fakeApi({
@@ -68,6 +72,7 @@ function server(routes: Routes = {}, role = 'owner') {
     'GET /api/auth/organization/list-members': () => json(200, { members: [], total: 0 }),
     [PENDING_ROUTE]: () => json(200, { data: [], nextCursor: null }),
     [INVITE_ROUTE]: () => json(200, QUEUED_INVITATION),
+    [DETAIL_ROUTE]: () => json(200, { ...INVITATION, resendAllowed: true }),
     ...routes,
   })
 }
@@ -213,7 +218,17 @@ describe('inviting a team member in settings', () => {
           })
         },
         [PENDING_ROUTE]: () =>
-          json(200, { data: [{ ...INVITATION, resendAllowed }], nextCursor: null }),
+          json(200, {
+            data: [
+              {
+                ...INVITATION,
+                generation: submissions > 1 ? 2 : 1,
+                resendAllowed: resendAllowed && submissions < 2,
+              },
+            ],
+            nextCursor: null,
+          }),
+        [DETAIL_ROUTE]: () => json(200, { ...INVITATION, generation: 2, resendAllowed: false }),
       })
       renderApp(PATHS.settings)
       const { user, invitationForm, emailInput } = await fillAndSubmit()
@@ -224,7 +239,10 @@ describe('inviting a team member in settings', () => {
       const pending = await screen.findByRole('region', { name: 'Pending invitations' })
       await within(pending).findByRole('heading', { name: `Invitation to ${EMAIL}` })
       if (!resendAllowed) {
-        expect(within(pending).queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+        expect(
+          (within(pending).getByRole('button', { name: 'Resend invitation' }) as HTMLButtonElement)
+            .disabled,
+        ).toBe(true)
         expect(api.to(INVITE_ROUTE)).toHaveLength(1)
         return
       }
@@ -246,7 +264,9 @@ describe('inviting a team member in settings', () => {
         TEAM_ME.organization.id,
       )
       await waitFor(() => expect(api.to(PENDING_ROUTE)).toHaveLength(3))
-      expect(screen.queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+      expect(
+        (screen.getByRole('button', { name: 'Resend invitation' }) as HTMLButtonElement).disabled,
+      ).toBe(true)
     },
   )
 
@@ -285,7 +305,11 @@ describe('inviting a team member in settings', () => {
     await user.click(within(pending).getByRole('button', { name: 'Previous invitations page' }))
     await within(pending).findByRole('heading', { name: `Invitation to ${secondPage[0]?.email}` })
     expect(api.to(PENDING_ROUTE)).toHaveLength(5)
-    expect(within(pending).queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+    expect(
+      within(pending)
+        .getAllByRole('button', { name: 'Resend invitation' })
+        .every((button) => (button as HTMLButtonElement).disabled),
+    ).toBe(true)
     expect(
       within(pending).queryByText('The invitation changed. Reload before trying again.'),
     ).toBeNull()
@@ -373,11 +397,15 @@ describe('inviting a team member in settings', () => {
     expect(api.to(PENDING_ROUTE)).toHaveLength(4)
   })
 
-  it('moves keyboard focus to stable status feedback after the resend button is removed', async () => {
+  it('moves keyboard focus to stable status feedback after the resend completes', async () => {
     const api = server({
       [INVITE_ROUTE]: () => json(200, { ...QUEUED_INVITATION, existing: true }),
+      [DETAIL_ROUTE]: () => json(200, { ...INVITATION, resendAllowed: false }),
       [PENDING_ROUTE]: () =>
-        json(200, { data: [{ ...INVITATION, resendAllowed: true }], nextCursor: null }),
+        json(200, {
+          data: [{ ...INVITATION, resendAllowed: api.to(INVITE_ROUTE).length < 2 }],
+          nextCursor: null,
+        }),
     })
     renderApp(PATHS.settings)
     const { user, invitationForm } = await fillAndSubmit()
@@ -390,12 +418,18 @@ describe('inviting a team member in settings', () => {
       within(invitationForm).getByRole('button', { name: 'Invite member' }),
     )
     await user.tab()
+    expect(document.activeElement).toBe(
+      screen.getByRole('combobox', { name: 'Filter invitations' }),
+    )
+    await user.tab()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Resend invitation' }))
     await user.keyboard('{Enter}')
     const status = await screen.findByText('Invitation queued for delivery.')
     expect(status.getAttribute('role')).toBe('status')
-    expect(document.activeElement).toBe(status)
-    expect(screen.queryByRole('button', { name: 'Resend invitation' })).toBeNull()
+    expect(document.activeElement).toBe(status.parentElement)
+    expect(
+      (screen.getByRole('button', { name: 'Resend invitation' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
     expect(api.to(INVITE_ROUTE)).toHaveLength(2)
   })
 
@@ -413,6 +447,12 @@ describe('inviting a team member in settings', () => {
           },
         })
       },
+      [DETAIL_ROUTE]: () =>
+        json(200, {
+          ...INVITATION,
+          resendAllowed: false,
+          delivery: { ...INVITATION.delivery, state: 'smtp_accepted' },
+        }),
       [PENDING_ROUTE]: () =>
         json(200, {
           data: [

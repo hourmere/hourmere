@@ -69,6 +69,44 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
   }
 }
 
+/**
+ * Bind webhook reads and writes to their opening space using the shared expected-team
+ * policy. Personal webhooks remain available in their matching personal space. Writes
+ * from the caller's own stale personal space receive a recoverable context conflict;
+ * other stale expectations require management authority before reporting drift.
+ */
+export function organizationContextAccess(
+  principal: Principal,
+  expectedOrganizationId: string | undefined,
+  write = false,
+  lock: boolean | 'key share' = false,
+) {
+  return async (db: Db, organizationId: string): Promise<void> => {
+    if (principal.kind !== 'session') return
+    if (expectedOrganizationId === undefined) {
+      if (write) throw contextChanged()
+      return
+    }
+    if (!uuid(expectedOrganizationId)) throw write ? contextChanged() : denied()
+    // Only this user's personal space is recoverable after switching to a team. Keep
+    // reads and other users' personal organizations on the shared expected-team rule.
+    const ownPersonal = write
+      ? await db
+          .selectFrom('personal_organizations')
+          .select('organization_id')
+          .where('organization_id', '=', expectedOrganizationId)
+          .where('user_id', '=', principal.user.id)
+          .executeTakeFirst()
+      : undefined
+    await check(db, principal, organizationId, lock, {
+      expectedOrganizationId,
+      allowPersonal:
+        ownPersonal !== undefined ||
+        expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase(),
+    })
+  }
+}
+
 /** Share context ordering with native switches, without taking actor or team row locks. */
 export function organizationContextWriteLock(principal: Principal) {
   return async (db: Db): Promise<void> => {

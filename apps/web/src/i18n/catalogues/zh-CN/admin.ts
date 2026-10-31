@@ -28,6 +28,35 @@ export const admin = {
   'An external calendar is optional for basic bookings.': '基本预约无需连接外部日历。',
   'Checking member configuration…': '正在检查成员配置…',
   'Could not check member configuration.': '无法检查成员配置。',
+  'Filter invitations': '筛选邀请',
+  Joined: '已加入',
+  Rejected: '已拒绝',
+  'Invitation status unknown': '邀请状态未知',
+  'You do not have permission to manage invitations.': '你没有管理邀请的权限。',
+  'This invitation is no longer available for resending.': '此邀请已无法重新发送。',
+  'Wait for the resend cooldown before trying again.': '请等待重发冷却时间结束后再试。',
+  'This invitation cannot be resent. Check its status again.':
+    '此邀请无法重新发送。请再次检查其状态。',
+  'Check invitation status to see whether resending is now allowed.':
+    '请检查邀请状态，确认现在是否允许重发。',
+  'The recipient has joined. Their membership was not changed.':
+    '受邀者已加入团队。其成员身份未被更改。',
+  'Invitation cancelled. Its link can no longer be used.': '邀请已取消，其链接已无法使用。',
+  'Invitation status refreshed.': '邀请状态已刷新。',
+  'An email already being sent may still arrive. This invitation can no longer be used.':
+    '已开始发送的邮件仍可能到达，但此邀请已无法使用。',
+  'Could not confirm the invitation status. Check its status before trying another action.':
+    '无法确认邀请状态。请先检查状态，再尝试其他操作。',
+  'A new invitation may have been saved. Review Pending invitations before trying another action.':
+    '新邀请可能已保存。请先查看待接受的邀请，再尝试其他操作。',
+  'Send a new invitation': '发送新邀请',
+  'Cancel invitation': '取消邀请',
+  'Cancel this invitation?': '要取消此邀请吗？',
+  'Cancelling only voids this invitation. It never removes a member who has already joined.':
+    '取消操作仅使此邀请失效，不会移除已加入团队的成员。',
+  'Confirm cancellation': '确认取消邀请',
+  'Keep invitation': '保留邀请',
+
   'Only owners can manage admins. Ownership transfer is not available yet.':
     '只有所有者可以管理管理员。暂不支持转移所有权。',
   'Owner roles cannot be changed here. The team must retain at least one owner.':
@@ -73,6 +102,8 @@ export const admin = {
   'Enter a valid email address.': '请输入有效的邮箱地址。',
   'The invitation was saved, but delivery could not be queued. Retry with the same email address.':
     '邀请已保存，但无法加入投递队列。请使用同一邮箱地址重试。',
+  'A newer invitation exists for this address. Review the pending invitations.':
+    '此邮箱已有更新的邀请。请查看待接受的邀请。',
   'The invitation changed. Reload before trying again.': '邀请已更改。请重新加载后再试。',
   'This invitation is no longer pending. Reload before trying again.':
     '此邀请已不再处于待接受状态。请重新加载后再试。',
@@ -111,8 +142,8 @@ export const admin = {
   'Go to team': '前往团队',
   'Invited email': '受邀邮箱',
   'You are already a member of {team}.': '你已经是{team}的成员。',
-  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
-    '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请和此实例的注册规则。',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.':
+    '如果无法使用受邀邮箱登录，请联系团队所有者检查邀请，或联系此实例的管理员咨询注册权限。',
   Pending: '待接受',
   'Team members': '团队成员',
   'Pending invitations are not members or hosts.': '待接受的邀请不计入成员或主持人。',
@@ -1132,8 +1163,8 @@ export const admin = {
     '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
   'Accept invitation': '接受邀请',
   'Checking invitation…': '正在检查邀请…',
-  'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.':
-    '此邀请不可用。请团队所有者检查邀请状态，并视情况重新发送或提供新邀请。',
+  'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':
+    '此邀请不可用。请团队所有者或管理员打开“设置 → 团队成员”，检查待接受的邀请并重新发送。如果邀请已过期，请选择“已过期”并发送新邀请。',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     '请使用收到此邀请的完整邮箱地址。如果你使用了其他邮箱登录，请切换账号。',
   'Confirm your email address by signing in with an email link, then return to this invitation.':

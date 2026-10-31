@@ -532,13 +532,13 @@ describe.skipIf(!bootstrap)(
         expect(start).toBeGreaterThan(0)
         expect(end).toBeGreaterThan(start)
         const read = source.slice(start, end)
-        const unlocked = read.replace('    lock,\n', '    false,\n')
+        const unlocked = read.replace('    Boolean(lock),\n', '    false,\n')
         expect(unlocked).not.toBe(read)
         const copy = await copiedRoutes([
           [read, ''],
           [
-            '  await teamSessionUser(db, principal, lock)',
-            `${unlocked}  await teamSessionUser(db, principal, lock)`,
+            '  await teamSessionUser(db, principal, Boolean(lock))',
+            `${unlocked}  await teamSessionUser(db, principal, Boolean(lock))`,
           ],
         ])
         await expect(verifyRevocationWins(kind, copy)).rejects.toMatchObject({
@@ -554,7 +554,7 @@ describe.skipIf(!bootstrap)(
       'detects dropping authorization locks before cancellation persists during %s',
       async (kind) => {
         const copy = await copiedRoutes([
-          ['  if (lock) organizationQuery = organizationQuery.forUpdate()', ''],
+          ['  if (lock === true) organizationQuery = organizationQuery.forUpdate()', ''],
           ['  if (lock) memberQuery = memberQuery.forShare()', ''],
         ])
         await expect(verifyCancellationWins(kind, copy)).rejects.toMatchObject({

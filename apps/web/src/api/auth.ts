@@ -186,7 +186,7 @@ export function inviteMember(
 
 /** Resending retains one request ID across uncertain delivery retries. */
 export function resendInvitation(
-  invitation: QueuedInvitation,
+  invitation: Pick<Schemas['TeamInvitationSummary'], 'id' | 'email' | 'generation'>,
   organizationId: string,
   requestId: string,
   signal?: AbortSignal,
@@ -198,7 +198,7 @@ export function resendInvitation(
       role: 'member',
       resend: true,
       invitationId: invitation.id,
-      expectedGeneration: invitation.delivery.generation,
+      expectedGeneration: invitation.generation,
       requestId,
     },
     headers: { 'X-Expected-Organization-Id': organizationId },

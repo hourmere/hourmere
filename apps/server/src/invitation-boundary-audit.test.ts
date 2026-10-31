@@ -101,6 +101,29 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
   }
   type Instance = ReturnType<typeof instance>
 
+  async function interceptInvitationClaim(i: Instance, change: () => Promise<void>) {
+    const adapter = (await i.auth.$context).adapter
+    const transaction = adapter.transaction.bind(adapter)
+    let injections = 0
+    // Acceptance now obtains its adapter from the enclosing native transaction.
+    // Intercept that adapter before the policy's locked status write, preserving
+    // the independent connection's change after native preflight has read the row.
+    const spy = vi.spyOn(adapter, 'transaction').mockImplementation((callback) =>
+      transaction(async (trx) => {
+        const increment = trx.incrementOne.bind(trx)
+        trx.incrementOne = async (request) => {
+          if (request.model === 'invitation' && request.set?.status === 'accepted') {
+            await change()
+            injections++
+          }
+          return increment(request)
+        }
+        return callback(trx)
+      }),
+    )
+    return { spy, injections: () => injections }
+  }
+
   async function session(userId: string, organizationId?: string) {
     const token = randomBytes(24).toString('base64url')
     const stored = await db
@@ -562,14 +585,7 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       const i = instance()
       const f = await fixture(i)
       const r = await recipient(f)
-      const adapter = (await i.auth.$context).adapter
-      const increment = adapter.incrementOne.bind(adapter)
-      const spy = vi.spyOn(adapter, 'incrementOne').mockImplementation(async (request) => {
-        if (request.model === 'invitation' && request.set?.status === 'accepted') {
-          await terminalDelivery(f, 'failed')
-        }
-        return increment(request)
-      })
+      const claim = await interceptInvitationClaim(i, () => terminalDelivery(f, 'failed'))
       try {
         const response = direct
           ? await i.auth.api.acceptInvitation({
@@ -578,10 +594,14 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
               asResponse: true,
             })
           : await accept(i, f, r.cookie)
+        expect(
+          claim.injections(),
+          'delivery fails after native preflight and before the claim',
+        ).toBe(1)
         expect(response.status).toBe(200)
         expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
       } finally {
-        spy.mockRestore()
+        claim.spy.mockRestore()
       }
     },
   )
@@ -590,17 +610,12 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
     const i = instance(factory)
     const f = await fixture(i)
     const r = await recipient(f)
-    const adapter = (await i.auth.$context).adapter
-    const increment = adapter.incrementOne.bind(adapter)
-    const spy = vi.spyOn(adapter, 'incrementOne').mockImplementation(async (request) => {
-      if (request.model === 'invitation' && request.set?.status === 'accepted') {
-        await db
-          .updateTable('auth.invitation')
-          .set({ role: 'admin' })
-          .where('id', '=', f.invitation.id)
-          .execute()
-      }
-      return increment(request)
+    const claim = await interceptInvitationClaim(i, async () => {
+      await db
+        .updateTable('auth.invitation')
+        .set({ role: 'admin' })
+        .where('id', '=', f.invitation.id)
+        .execute()
     })
     try {
       const response = await i.auth.api.acceptInvitation({
@@ -608,6 +623,10 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
         headers: new Headers({ cookie: r.cookie }),
         asResponse: true,
       })
+      expect(
+        claim.injections(),
+        'the stored role changes after native preflight before recheck',
+      ).toBe(1)
       expect(
         await memberships(f),
         'trusted acceptance rechecks the stored member role before claiming the invitation',
@@ -622,7 +641,7 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
           .executeTakeFirstOrThrow(),
       ).toEqual({ status: 'pending', role: 'admin' })
     } finally {
-      spy.mockRestore()
+      claim.spy.mockRestore()
     }
   }
 
@@ -631,12 +650,12 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
   })
 
   it('runs an unchanged source copy through the trusted member-role recheck', async () => {
-    const guard = 'endpoint.path !== accept'
+    const guard = '  accept,\n'
     await verifyTrustedRoleRecheck(await sourceCopy(guard, guard))
   })
 
   it('detects removal of trusted acceptance context independently of delivery state', async () => {
-    const factory = await sourceCopy(' &&\n        endpoint.path !== accept', '')
+    const factory = await sourceCopy('  accept,\n', '')
     await expect(verifyTrustedRoleRecheck(factory)).rejects.toMatchObject({
       name: 'AssertionError',
       message: expect.stringContaining(

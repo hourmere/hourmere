@@ -202,6 +202,17 @@ calendar-list access.
   Owners cannot be demoted or administratively removed; only their own safe departure
   is allowed. Team deletion and ownership transfer are unavailable at launch; rejected
   deletion requests cannot cascade into booking history.
+- **Native team creation and joining commit together.** Better Auth's organization,
+  creator-owner membership and session activation use one PostgreSQL transaction.
+  Invitation acceptance likewise commits its accepted status, membership and session
+  activation together. The policy's user → organization → session → invitation locks
+  and native writes share that connection. Acceptance takes the session row
+  `FOR NO KEY UPDATE` before the invitation so concurrent trusted API calls on the
+  same session queue without a share-to-update lock upgrade. Expiry uses database wall
+  time after lock waits, and the membership limit is rechecked under the organization lock. A lost
+  connection or process death before commit publishes none of these writes. A lost
+  response after commit can still require rereading the team or invitation; these
+  operations do not add response replay or repair historical incomplete rows.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
@@ -316,6 +327,23 @@ row ID and public origin are authenticated associated data.
 
 ## Invitation delivery storage
 
+Migration 0045 adds nullable `invitation_deliveries.authorized_by_user_id` without rewriting
+existing generations. Each new generation pins the acting administrator for sender authority
+checks and the invitation mail's name. Null legacy rows fall back to the invitation's original
+inviter. The recorded UUID has no user foreign key: deleting the actor keeps its identity,
+so the sender refuses it rather than falling back to a different administrator. The original
+`auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
+Stop old web/all/worker processes before applying this migration and restart every role
+with the new code: old senders do not read the generation's authorizing administrator.
+Expired invitations never renew in place. Under the team lock, the explicit expired-row
+operation atomically cancels the old invitation, finalizes its queued or sending delivery,
+and creates a new invitation ID whose inviter is the acting administrator. New-invitation
+request budgets, active-duplicate and pending-limit checks apply. Native creation likewise
+cancels expired pending rows for the address, so neither path leaves duplicate stored-pending
+rows. Signup trust follows the new inviter and the old link stays unusable. Acceptance,
+resend and cancellation share team/invitation lock ordering. Cancellation only changes a
+pending invitation's status and never deletes a joined membership.
+
 `invitation_deliveries` retains one current generation per `auth.invitation` UUID,
 with `ON DELETE CASCADE`. Its five states are `queued`, `sending`, `smtp_accepted`,
 `failed` and `skipped`; these never change Better Auth's invitation lifecycle.
@@ -348,12 +376,12 @@ timestamp. Existing writers that increment attempts need no change. See the
 [invitation delivery design notes](https://hourmere.com/docs/notifications#team-invitation-delivery-design-notes).
 See the [API contract](https://hourmere.com/docs/api-conventions#team-invitation-delivery-summaries).
 
-Every delivery row remains while its invitation is pending and unexpired, including
-terminal delivery outcomes. Cleanup takes bounded batches, locks invitations before
-delivery records, and skips locked rows. It deletes only accepted, canceled, rejected or
-expired pending invitations' delivery records once both `expiresAt` and delivery
-`updated_at` are at least seven days old and no live lease remains. Unknown invitation
-statuses are retained. Invitation rows themselves are preserved.
+Every delivery row remains while its invitation is pending and unexpired, including terminal
+delivery outcomes, so unexpired resends retain their generation cap and original validity
+length. Cleanup takes bounded batches, locks invitations before delivery records, and skips
+locked rows. It deletes expired pending invitations' records and accepted, canceled or
+rejected invitations' records once both `expiresAt` and delivery `updated_at` are at least
+seven days old and no live lease remains. Unknown invitation statuses are retained. Invitation rows themselves are preserved.
 
 Before applying the invitation-delivery migration, stop all old web/all/worker processes.
 Existing pending, unexpired invitations are backfilled as
@@ -485,9 +513,11 @@ not prove the attendee's identity. Reschedule withdrawals retain their existing 
 attribution and do not create cancellation-operation records.
 
 Better Auth's remove-member, leave and update-member-role persistence paths record the
-actual changed membership in the same write transaction. HTTP role changes, administrative
-removal and self departure use the launch role policy's locked application transaction for
-the membership write and its attribution; other native member operations use the adapter transaction.
+actual changed membership in the same write transaction. Every native adapter transaction
+binds the launch role policy to its auth-pool connection, including `deleteMember`:
+administrative removal, dependent event deactivation and attribution join that transaction.
+Policy writes outside a native transaction, including HTTP role changes, use their own
+locked application transaction. Self departure uses the scheduling service's transaction.
 Safe departure also commits the session's personal fallback in that transaction after
 rechecking current event and booking impact. The policy wraps the native
 recorder so neither a second connection nor a second record is needed. A role no-op, rejected request

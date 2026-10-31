@@ -30,6 +30,39 @@ export const admin = {
     'An external calendar is optional for basic bookings.',
   'Checking member configuration…': 'Checking member configuration…',
   'Could not check member configuration.': 'Could not check member configuration.',
+  'Filter invitations': 'Filter invitations',
+  Joined: 'Joined',
+  Rejected: 'Rejected',
+  'Invitation status unknown': 'Invitation status unknown',
+  'You do not have permission to manage invitations.':
+    'You do not have permission to manage invitations.',
+  'This invitation is no longer available for resending.':
+    'This invitation is no longer available for resending.',
+  'Wait for the resend cooldown before trying again.':
+    'Wait for the resend cooldown before trying again.',
+  'This invitation cannot be resent. Check its status again.':
+    'This invitation cannot be resent. Check its status again.',
+  'Check invitation status to see whether resending is now allowed.':
+    'Check invitation status to see whether resending is now allowed.',
+  'The recipient has joined. Their membership was not changed.':
+    'The recipient has joined. Their membership was not changed.',
+  'Invitation cancelled. Its link can no longer be used.':
+    'Invitation cancelled. Its link can no longer be used.',
+  'Invitation status refreshed.': 'Invitation status refreshed.',
+  'An email already being sent may still arrive. This invitation can no longer be used.':
+    'An email already being sent may still arrive. This invitation can no longer be used.',
+  'Could not confirm the invitation status. Check its status before trying another action.':
+    'Could not confirm the invitation status. Check its status before trying another action.',
+  'A new invitation may have been saved. Review Pending invitations before trying another action.':
+    'A new invitation may have been saved. Review Pending invitations before trying another action.',
+  'Send a new invitation': 'Send a new invitation',
+  'Cancel invitation': 'Cancel invitation',
+  'Cancel this invitation?': 'Cancel this invitation?',
+  'Cancelling only voids this invitation. It never removes a member who has already joined.':
+    'Cancelling only voids this invitation. It never removes a member who has already joined.',
+  'Confirm cancellation': 'Confirm cancellation',
+  'Keep invitation': 'Keep invitation',
+
   'Only owners can manage admins. Ownership transfer is not available yet.':
     'Only owners can manage admins. Ownership transfer is not available yet.',
   'Owner roles cannot be changed here. The team must retain at least one owner.':
@@ -76,6 +109,8 @@ export const admin = {
   'Enter a valid email address.': 'Enter a valid email address.',
   'The invitation was saved, but delivery could not be queued. Retry with the same email address.':
     'The invitation was saved, but delivery could not be queued. Retry with the same email address.',
+  'A newer invitation exists for this address. Review the pending invitations.':
+    'A newer invitation exists for this address. Review the pending invitations.',
   'The invitation changed. Reload before trying again.':
     'The invitation changed. Reload before trying again.',
   'This invitation is no longer pending. Reload before trying again.':
@@ -117,8 +152,8 @@ export const admin = {
   'Go to team': 'Go to team',
   'Invited email': 'Invited email',
   'You are already a member of {team}.': 'You are already a member of {team}.',
-  'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.':
-    'If you cannot sign in with the invited email, ask the team owner to check the invitation and this instance’s registration rules.',
+  'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.':
+    'If you cannot sign in with the invited email, ask the team owner to check the invitation or contact this instance’s administrator about registration access.',
   Pending: 'Pending',
   'Team members': 'Team members',
   'Pending invitations are not members or hosts.': 'Pending invitations are not members or hosts.',
@@ -1197,8 +1232,8 @@ export const admin = {
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
   'Accept invitation': 'Accept invitation',
   'Checking invitation…': 'Checking invitation…',
-  'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.':
-    'This invitation is unavailable. Ask the team owner to check its status and resend or replace it as appropriate.',
+  'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':
+    'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.',
   'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
     'Use the exact email address that received this invitation. Change accounts if you signed in with another address.',
   'Confirm your email address by signing in with an email link, then return to this invitation.':

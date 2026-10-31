@@ -2355,3 +2355,14 @@ h2:lang(zh),
 h3:lang(zh) {
   text-wrap: balance;
 }
+
+/* Invitation recovery controls remain readable on narrow settings pages. */
+.invitation-row .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.invitation-row .confirm {
+  min-width: 0;
+}

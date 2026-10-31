@@ -59,6 +59,9 @@ function invitation(
     status,
     createdAt: '2026-10-27T10:00:00.000Z',
     expiresAt: '2026-11-10T10:00:00.000Z',
+    generation: 1,
+    resendDeniedReason: null,
+    resendRetryAfterSeconds: null,
     resendAllowed: false,
     delivery: { state, attempts: 1, lastAttemptAt: null, lastErrorCode: null },
   }
@@ -137,7 +140,7 @@ describe('joined team members and pending invitations in settings', () => {
       const invitedTime = rowHeading.nextElementSibling?.querySelector('time')
       expect(invitedTime?.getAttribute('datetime')).toBe(invitation(1).createdAt)
       expect(invitedTime?.textContent).toMatch(/^Invited /)
-      expect(within(invitations).getAllByText('Pending')).toHaveLength(2)
+      expect(within(invitations).getAllByText('Pending', { selector: 'dd' })).toHaveLength(2)
       expect(within(invitations).getByText('Waiting to send')).toBeDefined()
       expect(within(invitations).getByText('Accepted by the mail server')).toBeDefined()
       expect(members.contains(invitations)).toBe(false)
@@ -374,7 +377,7 @@ describe('joined team members and pending invitations in settings', () => {
     ]) {
       expect(within(invitations).getByText(label)).toBeDefined()
     }
-    expect(within(invitations).getAllByText('Pending')).toHaveLength(6)
+    expect(within(invitations).getAllByText('Pending', { selector: 'dd' })).toHaveLength(6)
     expect(invitations.textContent).not.toMatch(/delivered/i)
   })
 
@@ -549,7 +552,7 @@ describe('joined team members and pending invitations in settings', () => {
     expect(
       within(invitations).getByRole('heading', { name: '发给 invitee-1@example.com 的邀请' }),
     ).toBeDefined()
-    expect(within(invitations).getAllByText('待接受')).toHaveLength(2)
+    expect(within(invitations).getAllByText('待接受', { selector: 'dd' })).toHaveLength(2)
     expect(within(invitations).getByText('等待发送')).toBeDefined()
     expect(within(invitations).getByText('邮件服务器已接受')).toBeDefined()
     expect(
