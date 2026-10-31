@@ -7,6 +7,12 @@ import { publicLanguageName } from '../public-language.ts'
 
 async function expectMenuFits(page: Page, width: number, state: string) {
   await page.evaluate(settleAuditLayout)
+  const menuBounds = await page.getByRole('menu').evaluate((menu) => {
+    const box = menu.getBoundingClientRect()
+    return { left: box.left, right: box.right }
+  })
+  expect(menuBounds.left, `${state}: menu stays inside the left edge`).toBeGreaterThanOrEqual(0)
+  expect(menuBounds.right, `${state}: menu stays inside the right edge`).toBeLessThanOrEqual(width)
   const findings = await page.evaluate(measureLayout, { width, height: 900 })
   expect(
     findings.filter(({ code }) => /overflow|clipped|scan-error/.test(code)),
