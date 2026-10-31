@@ -787,6 +787,28 @@ and titles without current event metadata remain unchanged. Public/manage respon
 
 ## Booking readiness reads
 
+`GET /api/v1/teams/{teamId}/member-readiness?memberIds=<comma-separated UUIDs>`
+returns coarse health checks for 1–100 displayed membership IDs in one request.
+Owners and admins receive only current members of that team; ordinary members receive
+only their own requested row. Other membership IDs are omitted. The verified browser
+session must still belong to the acting team. API keys and OAuth credentials receive
+the uniform `403 team_management_access_denied`. Optional
+`X-Expected-Organization-Id` binds the read to its opening team, returning
+`409 organization_context_changed` when an authorized member switched spaces.
+
+The response is `{organizationId,members}`. Each member has the shared coarse summary
+and `health.defaultSchedule`, `health.selectedCalendars` and
+`health.conferenceAccounts`. Schedule and calendar fields use the shared readiness
+states. Conference account health is `connected`, `not_connected`,
+`attention_required` or `check_failed`; connection alone does not establish eligibility
+for automatic meetings. Owners and admins may see these coarse health fields for other
+members, including whether a conflict calendar is selected or a conference account is
+connected. Providers, calendar and connection IDs, account counts, private schedule or
+calendar names, account emails, event details and busy maps are excluded. Default
+schedules belong to the user across teams.
+These cached checks do not search slots or promise bookability, and basic bookings
+do not require an external calendar or conference account.
+
 `GET /api/v1/readiness/self` returns the current member’s own readiness detail. In their
 personal organization it also returns their personal event-type readiness; in a team it
 returns only that member’s detail. It requires a current verified web session and current
