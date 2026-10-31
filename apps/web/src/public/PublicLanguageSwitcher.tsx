@@ -50,8 +50,8 @@ export function PublicLanguageSwitcher() {
       return
     }
     const index = items.current.indexOf(document.activeElement as HTMLButtonElement)
-    if (event.key === 'Tab' && event.shiftKey && index === 0) {
-      // Shift+Tab from the first option returns to the trigger, which is still inside the picker.
+    if (event.key === 'Tab' && event.shiftKey) {
+      // Options are not tab stops, so Shift+Tab from any option returns to the trigger inside the picker.
       event.preventDefault()
       closeMenu()
       return

@@ -104,7 +104,7 @@ if (languagePicker && languageTrigger && languageMenu) {
     if (event.key === 'Escape') {
       event.preventDefault();
       closeLanguageMenu(true);
-    } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === languageOptions[0]) {
+    } else if (event.key === 'Tab' && event.shiftKey) {
       event.preventDefault();
       closeLanguageMenu(true);
     } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {

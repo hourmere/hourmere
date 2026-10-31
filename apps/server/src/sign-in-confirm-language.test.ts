@@ -26,6 +26,7 @@ it.each<Record<string, string>>([
 interface Event {
   target: Element
   key?: string
+  shiftKey?: boolean
   preventDefault(): void
 }
 
@@ -333,7 +334,7 @@ describe('server-rendered sign-in confirmation languages', () => {
       view.key('language-trigger', 'ArrowDown')
       expect(menu?.hidden).toBe(false)
       expect(view.document.activeElement).toBe(current)
-      expect(view.key('language-menu', 'Home')).toBe(true)
+      expect(view.key('language-menu', 'End')).toBe(true)
       expect(view.key('language-menu', 'Tab', true)).toBe(true)
       expect(menu?.hidden).toBe(true)
       expect(trigger?.attributes['aria-expanded']).toBe('false')
