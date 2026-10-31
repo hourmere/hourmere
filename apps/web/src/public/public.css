@@ -166,8 +166,43 @@
 
 /* Host page */
 
+.public .host-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.public .host-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.public .host-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
 .public .host-header {
   margin-bottom: var(--space-5);
+}
+
+.public .host-header > .host-avatar {
+  width: 64px;
+  height: 64px;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xl);
 }
 
 .public .event-list {
@@ -259,9 +294,20 @@
   font-weight: 600;
 }
 
+.public .host-identity > .event-host {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--text-lg);
+}
+
 .public .event-title {
   margin: var(--space-1) 0 var(--space-3);
   font-size: 1.5rem;
+}
+
+.public .event-title:has(+ .host-identity) {
+  margin-top: 0;
 }
 
 .public .event-facts {

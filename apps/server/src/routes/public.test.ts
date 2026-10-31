@@ -1,5 +1,5 @@
 // Public booking pages and invitee links over HTTP, against a throwaway database.
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
@@ -106,6 +106,42 @@ describe.skipIf(!serverUrl)('public routes', () => {
       error: 'event_type_not_found',
       message: 'No such event type',
     })
+  })
+
+  it.each([
+    { image: '/assets/avatars/host.png', expected: '/assets/avatars/host.png' },
+    { image: null, expected: undefined },
+    {
+      image: `https://www.gravatar.com/avatar/${createHash('md5').update('avatar-private@example.test').digest('hex')}.png`,
+      expected: undefined,
+    },
+    { image: '/assets/host.png?email=avatar-private@example.test', expected: undefined },
+  ])('exposes only safe personal avatar references: $expected', async ({ image, expected }) => {
+    const handle = `avatar-${randomUUID().slice(0, 8)}`
+    const host = await f.host({ handle })
+    await db
+      .updateTable('auth.user')
+      .set({ image, email: `${host.userId}@example.test` })
+      .where('id', '=', host.userId)
+      .execute()
+    await f.eventType(host.organizationId, host.userId, { slug: 'intro' })
+    const emailHash = createHash('md5').update('avatar-private@example.test').digest('hex')
+
+    for (const endpoint of [`/api/v1/public/${handle}`, `/api/v1/public/${handle}/intro`]) {
+      const res = await get(endpoint)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        host: { name: string; timeZone: string; image?: string }
+      }
+      expect(body.host).toEqual({
+        name: 'Ada Lovelace',
+        timeZone: 'Europe/Berlin',
+        ...(expected && { image: expected }),
+      })
+      expect(JSON.stringify(body)).not.toContain('@')
+      expect(JSON.stringify(body)).not.toContain(emailHash)
+      expect(JSON.stringify(body)).not.toContain('gravatar')
+    }
   })
 
   it("lists a host's bookable event types on their page", async () => {
