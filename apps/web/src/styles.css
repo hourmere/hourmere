@@ -1145,6 +1145,7 @@ input[readonly] {
   .table caption {
     display: block;
     width: 100%;
+    padding-inline: var(--space-3);
     text-align: start;
     margin-bottom: var(--space-2);
   }

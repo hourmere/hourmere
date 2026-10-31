@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EventType, Profile, Schedule } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
 import {
@@ -17,6 +17,16 @@ import {
 import { eventType, schedule } from '../../test/fixtures.ts'
 
 const GUIDE = 'Set up your booking page'
+const COMPLETE = 'Your booking page is ready'
+const OTHER_ME = { ...ME, user: { ...ME.user, id: '00000000-0000-7000-8000-000000000088' } }
+
+afterEach(() => {
+  for (const user of [ME, OTHER_ME]) {
+    for (const flag of ['calendar-skipped', 'completion-dismissed', 'inactive-dismissed']) {
+      localStorage.removeItem(`hourmere-personal-setup:${user.user.id}:${flag}`)
+    }
+  }
+})
 const USE_DEFAULT = 'Use Monday–Friday, 09:00–17:00'
 const STEPS = ['Profile', 'Default availability', 'First event type', 'View and share']
 const NO_NAME = { ...ME, user: { ...ME.user, name: '   ' } }
@@ -59,7 +69,6 @@ describe('personal booking page setup', () => {
     [{ me: NO_NAME, hostProfile: null, schedules: [], events: [] }, 'Profile'],
     [{ schedules: [], events: [] }, 'Default availability'],
     [{ events: [] }, 'First event type'],
-    [{ events: [eventType({ isActive: false })] }, 'View and share'],
   ])('marks only the first incomplete step as current: %s', async (changes, title) => {
     account(changes)
     const guide = await openGuide()
@@ -174,6 +183,10 @@ describe('personal booking page setup', () => {
     const api = account({ me: NO_NAME, hostProfile: null, schedules: [], events: [] })
     const guide = await openGuide()
     expect(
+      within(guide).getByText('Choose your display name, handle and time zone in Settings.'),
+    ).toBeDefined()
+    expect(guide.textContent).not.toContain('booking username')
+    expect(
       within(guide)
         .getAllByRole('listitem')
         .map((item) => within(item).getByRole('heading').textContent),
@@ -182,7 +195,7 @@ describe('personal booking page setup', () => {
       expect(step(guide, name).getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(
       step(guide, 'Profile').getByText(
-        'Without a display name, your booking page, emails and calendar invitations show your username instead.',
+        'Without a display name, your booking page, emails and calendar invitations show your handle instead.',
       ),
     ).toBeDefined()
     expect(
@@ -427,8 +440,8 @@ describe('personal booking page setup', () => {
     expect(step(guide, 'Default availability').getByText('Complete')).toBeDefined()
   })
 
-  it('distinguishes creating a first event from activating its public page', async () => {
-    account({ events: [eventType({ isActive: false })] })
+  it('distinguishes creating a first event from activating its public page while setup is still missing', async () => {
+    account({ me: NO_NAME, events: [eventType({ isActive: false })] })
     const guide = await openGuide()
     expect(step(guide, 'First event type').getByText('Complete')).toBeDefined()
     expect(step(guide, 'View and share').getByText(/^(To do|Next step)$/)).toBeDefined()
@@ -450,15 +463,151 @@ describe('personal booking page setup', () => {
     expect(step(guide, 'View and share').getByText(/^(To do|Next step)$/)).toBeDefined()
   })
 
-  it('hides the guide for a complete account without requiring calendar connections', async () => {
-    const api = account()
+  it.each([
+    [
+      'en',
+      COMPLETE,
+      'Copy booking link',
+      'Could not copy; select the text and copy it yourself',
+      'Dismiss',
+    ],
+    ['zh-CN', '你的预约页面已就绪', '复制预约链接', '无法复制；请选择文字并手动复制', '关闭提示'],
+  ] as const)(
+    'keeps a completed booking link visible for sharing and manual copying in %s',
+    async (language, heading, copy, fallback, dismiss) => {
+      chooseLanguage(language)
+      const user = userEvent.setup()
+      vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('Clipboard denied'))
+      const api = account()
+      renderApp('/app/event-types')
+      const complete = await screen.findByRole('region', { name: heading })
+      expect(screen.queryByRole('region', { name: GUIDE })).toBeNull()
+      const visibleLink = within(complete).getByText(`${window.location.origin}/ada/intro-call`)
+      expect(visibleLink.hidden).toBe(false)
+      expect(visibleLink.closest('[aria-hidden="true"]')).toBeNull()
+      await user.click(within(complete).getByRole('button', { name: copy }))
+      expect(await within(complete).findByText(fallback)).toBeDefined()
+      expect(within(complete).getByText(`${window.location.origin}/ada/intro-call`)).toBeDefined()
+      expect(within(complete).getByRole('button', { name: dismiss })).toBeDefined()
+      expect(api.calls.some((call) => /calendar/.test(call.path))).toBe(false)
+    },
+  )
+
+  it('remembers completion dismissal after remounting only for the same user', async () => {
+    account()
+    const first = renderApp('/app/event-types')
+    const complete = await screen.findByRole('region', { name: COMPLETE })
+    await userEvent.click(within(complete).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('region', { name: COMPLETE })).toBeNull()
+    first.unmount()
+    const second = renderApp('/app/event-types')
+    await screen.findByRole('rowheader', { name: 'Intro call' })
+    expect(screen.queryByRole('region', { name: COMPLETE })).toBeNull()
+    second.unmount()
+    account({ me: OTHER_ME, events: [eventType({ ownerUserId: OTHER_ME.user.id })] })
     renderApp('/app/event-types')
-    await screen.findByRole('rowheader', { name: 'Intro call' }, { timeout: 3000 })
+    expect(await screen.findByRole('region', { name: COMPLETE })).toBeDefined()
+  })
+
+  it('shows only a small dismissible hint after a configured account deactivates its only event', async () => {
+    account({ events: [eventType({ isActive: false })] })
+    const first = renderApp('/app/event-types')
+    const hint = await screen.findByRole('complementary', { name: 'No active event type' })
     expect(screen.queryByRole('region', { name: GUIDE })).toBeNull()
-    expect(screen.getByRole('link', { name: /\/ada\/intro-call/ }).getAttribute('href')).toBe(
-      `${window.location.origin}/ada/intro-call`,
+    expect(within(hint).queryByRole('list')).toBeNull()
+    expect(within(hint).getByRole('link', { name: 'Review event type' }).getAttribute('href')).toBe(
+      `/app/event-types/${eventType().id}`,
     )
-    expect(api.calls.some((call) => /calendar/.test(call.path))).toBe(false)
+    await userEvent.click(within(hint).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('complementary', { name: 'No active event type' })).toBeNull()
+    first.unmount()
+    const second = renderApp('/app/event-types')
+    await screen.findByRole('rowheader', { name: 'Intro call' })
+    expect(screen.queryByRole('complementary', { name: 'No active event type' })).toBeNull()
+    expect(screen.queryByRole('region', { name: GUIDE })).toBeNull()
+    second.unmount()
+    account({
+      me: OTHER_ME,
+      events: [eventType({ ownerUserId: OTHER_ME.user.id, isActive: false })],
+    })
+    renderApp('/app/event-types')
+    expect(await screen.findByRole('complementary', { name: 'No active event type' })).toBeDefined()
+  })
+
+  it('remembers the optional calendar skip across visits only for the same user', async () => {
+    account({ events: [] })
+    const first = renderApp('/app/event-types')
+    let guide = await screen.findByRole('region', { name: GUIDE })
+    await userEvent.click(within(guide).getByRole('button', { name: 'Skip for now' }))
+    first.unmount()
+    const second = renderApp('/app/event-types')
+    guide = await screen.findByRole('region', { name: GUIDE })
+    expect(
+      within(guide).getByText('Skipped for now. You can connect a calendar later.'),
+    ).toBeDefined()
+    expect(within(guide).queryByRole('button', { name: 'Skip for now' })).toBeNull()
+    second.unmount()
+    account({ me: OTHER_ME, events: [] })
+    renderApp('/app/event-types')
+    guide = await screen.findByRole('region', { name: GUIDE })
+    expect(within(guide).getByRole('button', { name: 'Skip for now' })).toBeDefined()
+  })
+
+  it('still lets the host skip calendars and dismiss completion when browser storage is blocked', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('Storage denied')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('Storage denied')
+    })
+    account({ events: [] })
+    const first = renderApp('/app/event-types')
+    const guide = await screen.findByRole('region', { name: GUIDE })
+    await userEvent.click(within(guide).getByRole('button', { name: 'Skip for now' }))
+    expect(
+      within(guide).getByText('Skipped for now. You can connect a calendar later.'),
+    ).toBeDefined()
+    first.unmount()
+    account()
+    renderApp('/app/event-types')
+    const complete = await screen.findByRole('region', { name: COMPLETE })
+    await userEvent.click(within(complete).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('region', { name: COMPLETE })).toBeNull()
+  })
+
+  it('keeps the loaded guide and list after an offline refresh and retries inline', async () => {
+    let online = true
+    account({
+      schedules: [],
+      routes: {
+        'GET /api/v1/schedules': () => {
+          if (!online) throw new TypeError('Failed to fetch')
+          return json(200, { data: [] })
+        },
+        'POST /api/v1/schedules/default': () => {
+          throw new TypeError('Failed to fetch')
+        },
+      },
+    })
+    const guide = await openGuide()
+    await userEvent.click(within(guide).getByRole('button', { name: USE_DEFAULT }))
+    const confirmationError = await within(guide).findByRole('alert')
+    online = false
+    await userEvent.click(
+      within(confirmationError).getByRole('button', { name: 'Refresh setup status' }),
+    )
+    const failure = await screen.findByText(/Could not refresh setup status\./)
+    expect(screen.getByRole('region', { name: GUIDE })).toBe(guide)
+    expect(screen.getByRole('rowheader', { name: 'Intro call' })).toBeDefined()
+    expect(screen.queryByText(/Could not load your event types\./)).toBeNull()
+    const refreshError = failure.closest('[role="alert"]') as HTMLElement
+    online = true
+    await userEvent.click(
+      within(refreshError).getByRole('button', { name: 'Refresh setup status' }),
+    )
+    await waitFor(() => expect(screen.queryByText(/Could not refresh setup status\./)).toBeNull())
+    expect(screen.getByRole('region', { name: GUIDE })).toBe(guide)
+    expect(screen.getByRole('rowheader', { name: 'Intro call' })).toBeDefined()
   })
 
   it('lets the host skip the optional calendar step while keeping the required missing step visible', async () => {

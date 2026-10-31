@@ -11,11 +11,7 @@ import * as paths from '../../paths.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { validDefault } from '../availability/valid-default.ts'
-import {
-  type TeamEventReadiness,
-  teamReadinessAllowsSharing,
-  teamReadinessBlocksSharing,
-} from './event-readiness.ts'
+import { type TeamEventReadiness, teamReadinessBlocksSharing } from './event-readiness.ts'
 
 const TEAM = { ...ME, organization: { ...ME.organization, personal: false, slug: 'Design-TEAM' } }
 const EVENT = eventType({
@@ -54,7 +50,6 @@ const common = {
   Link,
   CopyButton,
   isPublicTeamSlug,
-  teamReadinessAllowsSharing,
   teamReadinessBlocksSharing,
   useI18n: () => ({ t: (text: string) => text, uiText: (text: string) => text, locale: 'en' }),
 }
@@ -110,10 +105,12 @@ function assertHours(code: string) {
     usePageTitle: () => {},
     useSearchParams: () => [new URLSearchParams()],
     useFlash: () => '',
+    useState: react.useState,
     loadPage: () => {},
-    useLoad: () => [
+    useEventTypesLoad: () => [
       { status: 'ready', data: { eventTypes: [], schedules: [], profile: null } },
       () => {},
+      null,
     ],
     PageHeader: EmptyComponent,
     EmptyState: EmptyComponent,
@@ -142,7 +139,7 @@ describe('team list review regression source-copy controls', () => {
       const mutant = mutate(
         tableSource,
         '!teamReadinessBlocksSharing(item) &&',
-        'teamReadinessAllowsSharing(item) &&',
+        "item?.summary === 'checks_passed' &&",
       )
       expect(() => assertTable(mutant, status)).toThrowError(
         expect.objectContaining({ name: 'AssertionError' }),

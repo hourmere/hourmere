@@ -145,6 +145,44 @@ async function open() {
 }
 
 describe('event type configuration checks', () => {
+  it('rechecks list readiness after confirming default availability in the guide', async () => {
+    let confirmed = false
+    const api = server([eventType()], {
+      'GET /api/v1/schedules': () => json(200, { data: confirmed ? [schedule()] : [] }),
+      'POST /api/v1/schedules/default': () => {
+        confirmed = true
+        return json(201, schedule())
+      },
+      'GET /api/v1/readiness/self': () =>
+        json(
+          200,
+          selfPage([
+            selfCheck(
+              confirmed
+                ? {}
+                : {
+                    summary: 'configuration_blocked',
+                    signals: [
+                      signal({
+                        state: 'configuration_blocker',
+                        reasonCode: 'default_schedule_required',
+                        fixKind: 'self_availability',
+                      }),
+                    ],
+                  },
+            ),
+          ]),
+        ),
+    })
+    await open()
+    await within(configuration()).findByText('Configuration needs attention')
+    await userEvent.click(screen.getByRole('button', { name: 'Use Monday–Friday, 09:00–17:00' }))
+    await within(configuration()).findByText('Configuration checks passed')
+    expect(within(configuration()).queryByText('Working hours setup is missing.')).toBeNull()
+    expect(api.to('GET /api/v1/readiness/self')).toHaveLength(2)
+    expect(await screen.findByRole('region', { name: 'Your booking page is ready' })).toBeDefined()
+  })
+
   it.each(['en', 'zh-CN'] as const)(
     'separates enabled, unlisted and configuration state from disabled complete configuration in %s',
     async (language) => {

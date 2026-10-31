@@ -433,12 +433,15 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           error={errors.handle}
           hint={
             <>
-              {t('Your booking links start with')}{' '}
-              <span className="mono preview">
-                <BreakableText>{`/${handle || t('your-handle')}/`}</BreakableText>
-              </span>
-              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}
-              {t('.')}
+              <BreakableText>
+                {t('Your booking links start with {path}.', {
+                  path: `/${handle || t('your-handle')}/`,
+                })}
+              </BreakableText>
+              {locale === 'zh-CN' ? '' : ' '}
+              {t('Use only lowercase letters, digits and hyphens, up to {count} characters.', {
+                count: PROFILE.handleMaxLength,
+              })}
               {changingHandle && (
                 <strong className="warning">
                   {' '}

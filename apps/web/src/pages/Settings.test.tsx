@@ -79,16 +79,24 @@ describe('the profile settings', () => {
     expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: 'zh-CN' })
   })
 
-  it('ends the Chinese handle hint with a full-width sentence mark', async () => {
+  it('explains the handle and character limit naturally in English and Chinese', async () => {
     const user = userEvent.setup()
     profileServer(PROFILE)
     renderApp('/app/settings')
     const handle = await screen.findByLabelText('Handle')
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     const hint = document.getElementById(handle.getAttribute('aria-describedby') ?? '')
     expect(hint?.textContent).toBe(
-      '你的预约链接以此开头 /ada/。使用小写字母、数字和连字符，最多 40。',
+      'Your booking links start with /ada/. Use only lowercase letters, digits and hyphens, up to 40 characters.',
     )
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(hint?.textContent).toBe(
+      '你的预约链接以/ada/开头。只能用小写字母、数字和连字符，最多 40 个字符。',
+    )
+    const timeZone = screen.getByRole('combobox', { name: '时区' })
+    expect(timeZone.getAttribute('placeholder')).toBe('搜索城市（例如上海）或时差')
+    expect(
+      document.getElementById(timeZone.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toBe('预约以此时区显示。输入城市搜索，例如“上海”。')
   })
 
   it.each([false, true])(
@@ -122,7 +130,7 @@ describe('the profile settings', () => {
     expect(await screen.findByText(/Choose a handle to get booking links/)).toBeDefined()
     // From the email address ada@example.com.
     expect(input('Handle').value).toBe('ada')
-    expect(screen.getByText('/ada/')).toBeDefined()
+    expect(screen.getByText(/Your booking links start with \/ada\//)).toBeDefined()
     await chooseZone('lisbon')
     await user.selectOptions(screen.getByLabelText('Notification language'), 'zh-CN')
     await user.click(screen.getByRole('button', { name: 'Create profile' }))

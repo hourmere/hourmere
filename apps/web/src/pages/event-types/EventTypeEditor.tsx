@@ -2,7 +2,7 @@ import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
-import { errorMessage, isOrganizationContextChanged } from '../../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import {
   type EventType,
   isNotFound,
@@ -47,6 +47,7 @@ import {
   type LocationKind,
   serverErrors,
   slugify,
+  suggestedBookingSlug,
   toInput,
   toPatchInput,
   validateDraft,
@@ -196,7 +197,14 @@ function EventTypeForm({
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
     invalidateReadiness()
-    setDraft((d) => ({ ...d, [name]: value }))
+    setDraft((d) => ({
+      ...d,
+      [name]: value,
+      ...(name === 'durationMinutes' &&
+        !slugTouched && {
+          slug: suggestedBookingSlug(d.title, String(value)),
+        }),
+    }))
     setStatus('')
   }
 
@@ -241,7 +249,25 @@ function EventTypeForm({
         setStatus('Saved.')
         setShareFocusVersion((version) => version + 1)
       } else {
-        const created = await unwrap(api.POST('/api/v1/event-types', { body, headers }))
+        let created: EventType
+        try {
+          created = await unwrap(api.POST('/api/v1/event-types', { body, headers }))
+        } catch (error) {
+          // An automatically suggested non-Latin link should not require a separate
+          // naming step when another event already uses the same duration.
+          if (
+            slugTouched ||
+            slugify(draft.title) ||
+            !(error instanceof RequestError) ||
+            error.code !== 'slug_taken'
+          )
+            throw error
+          const slug = `${body.slug}-${randomHex(4)}`
+          setDraft((current) => ({ ...current, slug }))
+          created = await unwrap(
+            api.POST('/api/v1/event-types', { body: { ...body, slug }, headers }),
+          )
+        }
         // Left meanwhile: don't pull the person away from the page they are on now.
         if (!mounted.current) return
         setBaseline(draft)
@@ -400,51 +426,57 @@ function EventTypeForm({
           attempt={attempt}
         />
 
-        <section className="panel" aria-labelledby="saved-readiness-heading">
-          <h2 id="saved-readiness-heading">{t('Saved version readiness')}</h2>
-          {contextChanged ? (
-            <>
-              <p role="status">{t('Your team context changed. Reload before making changes.')}</p>
-              <p>
-                <button type="button" className="button button-small" onClick={confirmReload}>
-                  {t('Reload')}
-                </button>
-              </p>
-            </>
-          ) : dirty || !saved ? (
-            <p role="status">
-              {t(
-                'These unsaved changes have not been checked yet. Save to check the saved version.',
-              )}
-            </p>
-          ) : readiness.status === 'unavailable' ? (
-            <>
-              <p>{t('Readiness checks are unavailable for this account.')}</p>
-              {me.principal.kind === 'session' &&
-                access.status === 'ready' &&
-                access.role !== null && (
-                  <button type="button" className="button button-small" onClick={retryReadiness}>
-                    {t('Retry checks')}
+        {!saved && contextChanged && (
+          <div className="alert alert-error">
+            <p>{t('Your team context changed. Reload before making changes.')}</p>
+            <button type="button" className="button button-small" onClick={confirmReload}>
+              {t('Reload')}
+            </button>
+          </div>
+        )}
+        {saved && (
+          <section className="panel" aria-labelledby="saved-readiness-heading">
+            <h2 id="saved-readiness-heading">{t('Saved event checks')}</h2>
+            {contextChanged ? (
+              <>
+                <p role="status">{t('Your team context changed. Reload before making changes.')}</p>
+                <p>
+                  <button type="button" className="button button-small" onClick={confirmReload}>
+                    {t('Reload')}
                   </button>
-                )}
-            </>
-          ) : (
-            <>
-              <p>
-                {t(
-                  'These checks describe the saved version. Availability is confirmed when someone books.',
-                )}
-              </p>
-              <ConfigurationChecks
-                event={saved}
-                item={readiness.status === 'ready' ? readiness.item : undefined}
-                status={readiness.status === 'unchecked' ? 'ready' : readiness.status}
-                retry={retryReadiness}
-                editor
-              />
-            </>
-          )}
-        </section>
+                </p>
+              </>
+            ) : dirty ? (
+              <p role="status">{t('Save your changes to check the updated event type.')}</p>
+            ) : readiness.status === 'unavailable' ? (
+              <>
+                <p>{t('Readiness checks are unavailable for this account.')}</p>
+                {me.principal.kind === 'session' &&
+                  access.status === 'ready' &&
+                  access.role !== null && (
+                    <button type="button" className="button button-small" onClick={retryReadiness}>
+                      {t('Retry checks')}
+                    </button>
+                  )}
+              </>
+            ) : (
+              <>
+                <p>
+                  {t(
+                    'These checks describe your saved event type. Available times are confirmed when someone books.',
+                  )}
+                </p>
+                <ConfigurationChecks
+                  event={saved}
+                  item={readiness.status === 'ready' ? readiness.item : undefined}
+                  status={readiness.status === 'unchecked' ? 'ready' : readiness.status}
+                  retry={retryReadiness}
+                  editor
+                />
+              </>
+            )}
+          </section>
+        )}
 
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="basics-heading">
@@ -467,7 +499,9 @@ function EventTypeForm({
                       setDraft((d) => ({
                         ...d,
                         title: value,
-                        ...(!slugTouched && { slug: slugify(value) }),
+                        ...(!slugTouched && {
+                          slug: suggestedBookingSlug(value, d.durationMinutes),
+                        }),
                       }))
                       setStatus('')
                     }}
@@ -478,7 +512,7 @@ function EventTypeForm({
                 id="slug"
                 label={t('Booking link')}
                 error={errors.slug}
-                hint={t('Lowercase letters, digits and hyphens.')}
+                hint={t('Lowercase letters, digits and hyphens. You can change this link.')}
               >
                 {(props) => (
                   <input
@@ -496,7 +530,7 @@ function EventTypeForm({
                   />
                 )}
               </Field>
-              <div id="booking-link-status" className="hint" role="status">
+              <div id="booking-link-status" className="hint">
                 {previewUrl ? (
                   <span className="booking-link">
                     <span className="mono preview booking-link-path" title={previewUrl}>
@@ -517,7 +551,7 @@ function EventTypeForm({
                 {previewReadinessMessage && (
                   <p>
                     {t(previewReadinessMessage)}{' '}
-                    <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+                    <a href="#saved-readiness-heading">{t('Review saved event checks')}</a>
                   </p>
                 )}
               </div>

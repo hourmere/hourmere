@@ -13,11 +13,7 @@ import * as paths from '../../paths.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import type { EditorReadiness } from './editor-readiness.ts'
-import {
-  type TeamEventReadiness,
-  teamReadinessAllowsSharing,
-  teamReadinessBlocksSharing,
-} from './event-readiness.ts'
+import { type TeamEventReadiness, teamReadinessBlocksSharing } from './event-readiness.ts'
 import type { SavedEventShare } from './SavedEventShare.tsx'
 
 const TEAM = { ...ME, organization: { ...ME.organization, personal: false, slug: 'Design-TEAM' } }
@@ -70,7 +66,6 @@ const common = {
   CopyButton,
   isPublicTeamSlug,
   useI18n: () => ({ t: (text: string) => text, locale: 'en' }),
-  teamReadinessAllowsSharing,
   teamReadinessBlocksSharing,
 }
 const ConfigurationChecks = () => null
@@ -261,7 +256,7 @@ describe('team sharing production-source negative controls', () => {
       const mutant = mutate(
         shareFunction,
         'team && teamReadinessBlocksSharing(item)',
-        'team && !teamReadinessAllowsSharing(item)',
+        "team && (item?.summary !== 'checks_passed' || item?.completeness !== 'complete')",
       )
       expect(() => assertion(mutant)).toThrowError(
         expect.objectContaining({ name: 'AssertionError' }),
@@ -333,7 +328,7 @@ describe('team sharing production-source negative controls', () => {
       const view = render(<Preview />)
       try {
         expect(view.container.querySelector('#slug-hint')?.textContent).toBe(
-          'Lowercase letters, digits and hyphens.',
+          'Lowercase letters, digits and hyphens. You can change this link.',
         )
         const status = view.container.querySelector('#booking-link-status')
         expect(status?.textContent).toContain('Configuration check failed')
@@ -348,8 +343,8 @@ describe('team sharing production-source negative controls', () => {
     assertion(fragment)
     const mutant = mutate(
       fragment,
-      "hint={t('Lowercase letters, digits and hyphens.')}",
-      "hint={<>{t('Lowercase letters, digits and hyphens.')} {t(previewReadinessMessage)}</>}",
+      "hint={t('Lowercase letters, digits and hyphens. You can change this link.')}",
+      "hint={<>{t('Lowercase letters, digits and hyphens. You can change this link.')} {t(previewReadinessMessage)}</>}",
     )
     expect(() => assertion(mutant)).toThrowError(
       expect.objectContaining({ name: 'AssertionError' }),
@@ -528,10 +523,6 @@ describe('team sharing production-source negative controls', () => {
   )
 
   const readinessSource = readFileSync('apps/web/src/pages/event-types/event-readiness.ts', 'utf8')
-  const predicateSource = readinessSource.slice(
-    readinessSource.indexOf('export function teamReadinessAllowsSharing'),
-    readinessSource.indexOf('export function readinessErrorStatus'),
-  )
   const blockingSource = readinessSource.slice(
     readinessSource.indexOf('export function teamReadinessBlocksSharing'),
     readinessSource.indexOf('export function readinessErrorStatus'),
@@ -596,38 +587,5 @@ describe('team sharing production-source negative controls', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
     assertion(blockingSource)
-  })
-
-  it.each([
-    {
-      before: "item.completeness === 'complete' &&",
-      item: { ...CHECK, completeness: 'partial' as const },
-    },
-    {
-      before: "(item.summary === 'checks_passed' || item.summary === 'partial_pool') &&",
-      item: { ...CHECK, summary: 'configuration_blocked' as const },
-    },
-    {
-      before:
-        "!item.reasonCodes.some(\n      (reason) => reason === 'check_failed' || reason === 'check_not_performed',\n    )",
-      item: { ...CHECK, reasonCodes: ['check_not_performed' as const] },
-    },
-  ])('detects service observation guard removal: $before', ({ before, item }) => {
-    function assertion(source: string) {
-      const predicate = copy<typeof teamReadinessAllowsSharing>(
-        source,
-        'teamReadinessAllowsSharing',
-        {},
-      )
-      expect(predicate(item)).toBe(false)
-      expect(predicate(CHECK)).toBe(true)
-      expect(predicate({ ...CHECK, summary: 'partial_pool' })).toBe(true)
-    }
-    assertion(predicateSource)
-    const mutant = mutate(predicateSource, before, before.endsWith('&&') ? '' : 'true')
-    expect(() => assertion(mutant)).toThrowError(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
-    assertion(predicateSource)
   })
 })
