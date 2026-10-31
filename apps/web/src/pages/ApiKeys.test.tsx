@@ -428,7 +428,9 @@ describe('the API keys page', () => {
     available = true
     await user.click(screen.getByRole('button', { name: 'Try again' }))
     const config = await screen.findByRole('region', { name: 'MCP client JSON' })
-    expect(config.textContent?.includes('https://recovered.example.test/mcp')).toBe(true)
+    expect(JSON.parse(config.textContent ?? '')).toMatchObject({
+      mcpServers: { hourmere: { url: 'https://recovered.example.test/mcp' } },
+    })
     expect(screen.queryByText('Could not load MCP configuration.')).toBeNull()
   })
 
