@@ -703,6 +703,42 @@ receipt deduplication and the SMTP acceptance/failed-commit duplicate window rem
 [email abuse controls](https://hourmere.com/docs/notifications#email-abuse-controls)
 for defaults, reserve and diagnostics.
 
+## Configurable booking mail
+
+Migration 0049 adds event-type `notifications` settings and the immutable per-booking
+`notification_snapshot`. Existing types receive the previous all-recipient 24-hour reminder;
+existing bookings keep NULL, which always means that legacy default. Settings edits affect
+only new booking roots. Reschedules materialize or copy the predecessor snapshot and
+recompute offsets from the successor's UTC start and end. Internal configuration services
+serialize complete replacements with the event-type row lock; public transports are unchanged.
+
+The exact default policy retains the existing generic reminder and conference-ready outbox
+paths. Every other policy uses `booking_scheduled_messages`, uniquely identified by booking,
+kind and stable rule ID. Snapshots, message rows and initial jobs commit with booking creation.
+Cancellation and replacement fence pending and processing messages in the same transaction;
+terminal history remains. Old jobs never follow a successor.
+
+Configurable receipts add the rule ID as `message_key`; legacy and lifecycle receipts keep
+the empty key. Both modes share the existing mail-budget lock and ledger. A suppressed
+recipient is terminal for that rule and is never back-filled when capacity returns. Follow-up
+mail uses the scheduled UTC end, carries no meeting link, calendar attachment or new manage
+capability, and makes no attendance claim.
+
+Durable message rows own the maximum thirteen attempts, exponential backoff and five-minute
+claim lease. Short claims commit before network I/O; per-recipient final reads after budget
+waits check lifecycle, anchors, claim and conference revision. Reminders expire at start;
+follow-ups expire twenty-four elapsed hours after their due time. Startup and minute repair
+scan bounded fair batches without resetting attempts or reviving terminal messages. No
+booking or message row lock spans SMTP. SMTP acceptance followed by a failed commit, or a
+cancellation after the final read, retains the existing unavoidable delivery race.
+
+The populated predecessor test starts at migration 0048 (`0048_api_key_scopes.sql`) and
+verifies preservation of scoped API keys, ordered allowed duration lists and bookings whose
+actual duration differs from the event default. It also compares the upgraded schema with a
+fresh install and verifies no-op reruns. See
+[the 0049 upgrade note](../packages/db/migrations/0049_configurable_booking_messages.md)
+for the required coordinated worker rollout.
+
 ## Booking webhooks
 
 Migration 0017 adds organization-owned `webhooks` (bounded subscriptions, active flag and
