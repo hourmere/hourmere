@@ -96,6 +96,7 @@ export function MonthCalendar({
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, day: DateKey) {
     const weekStart = addDays(day, -((weekdayOf(day) - firstDayOfWeek + 7) % 7))
+    // biome-ignore-start lint/correctness/noComponentHookFactories: Keyboard callbacks return dates, not React components.
     const targets: Record<string, () => DateKey> = {
       ArrowLeft: () => addDays(day, -1),
       ArrowRight: () => addDays(day, 1),
@@ -106,6 +107,7 @@ export function MonthCalendar({
       PageUp: () => sameDayIn(day, addMonths(monthOf(day), -1)),
       PageDown: () => sameDayIn(day, addMonths(monthOf(day), 1)),
     }
+    // biome-ignore-end lint/correctness/noComponentHookFactories: Keyboard callbacks return dates, not React components.
     const target = targets[event.key]
     if (!target) return
     event.preventDefault()

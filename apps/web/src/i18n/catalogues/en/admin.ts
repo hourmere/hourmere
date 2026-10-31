@@ -11,6 +11,66 @@ export const admin = {
   'Review member setup': 'Review member setup',
   'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
     'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
+  'Set up your booking page': 'Set up your booking page',
+  'Complete these steps at your own pace. You can keep using the app as you go.':
+    'Complete these steps at your own pace. You can keep using the app as you go.',
+  'Your display name and booking address are set.':
+    'Your display name and booking address are set.',
+  'Choose your display name, booking username and time zone in Settings.':
+    'Choose your display name, booking username and time zone in Settings.',
+  'Without a display name, your booking page, emails and calendar invitations show your username instead.':
+    'Without a display name, your booking page, emails and calendar invitations show your username instead.',
+  'Complete your profile': 'Complete your profile',
+  'Default availability': 'Default availability',
+  'Your default schedule has weekly hours ready for bookings.':
+    'Your default schedule has weekly hours ready for bookings.',
+  'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.':
+    'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.',
+  'not set': 'not set',
+  'Complete your profile before confirming these hours.':
+    'Complete your profile before confirming these hours.',
+  'Use Monday–Friday, 09:00–17:00': 'Use Monday–Friday, 09:00–17:00',
+  'You can change these hours later in Availability.':
+    'You can change these hours later in Availability.',
+  'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.':
+    'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.',
+  'Review default availability': 'Review default availability',
+  'Could not confirm your default availability.': 'Could not confirm your default availability.',
+  'Refresh setup status': 'Refresh setup status',
+  'First event type': 'First event type',
+  'An event type sets the meeting length and gives invitees a booking link.':
+    'An event type sets the meeting length and gives invitees a booking link.',
+  'View and share': 'View and share',
+  'Open your booking page to check the available times, then copy its link to share.':
+    'Open your booking page to check the available times, then copy its link to share.',
+  'View booking page': 'View booking page',
+  'Copy booking link': 'Copy booking link',
+  'Activate your first event type': 'Activate your first event type',
+  'Your link will appear after you set up a profile, valid default availability and an active event type.':
+    'Your link will appear after you set up a profile, valid default availability and an active event type.',
+  'Calendar connection (optional)': 'Calendar connection (optional)',
+  'Skipped for now. You can connect a calendar later.':
+    'Skipped for now. You can connect a calendar later.',
+  'You can take bookings without connecting an external calendar.':
+    'You can take bookings without connecting an external calendar.',
+  'Connect a calendar': 'Connect a calendar',
+  'Skip for now': 'Skip for now',
+  Complete: 'Complete',
+  'Next step': 'Next step',
+  'To do': 'To do',
+  'Complete your profile and display name in Settings first.':
+    'Complete your profile and display name in Settings first.',
+  'Review your existing schedules and choose a valid default in Availability.':
+    'Review your existing schedules and choose a valid default in Availability.',
+  'Use this key with MCP': 'Use this key with MCP',
+  'Loading MCP configuration…': 'Loading MCP configuration…',
+  'Could not load MCP configuration.': 'Could not load MCP configuration.',
+  'MCP client JSON': 'MCP client JSON',
+  'Copy MCP JSON': 'Copy MCP JSON',
+  'Claude Code command': 'Claude Code command',
+  'Copy Claude command': 'Copy Claude command',
+  'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.':
+    'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.',
   'Member readiness': 'Member readiness',
   'Default schedule set': 'Default schedule set',
   'No default schedule': 'No default schedule',
@@ -659,7 +719,6 @@ export const admin = {
   'Choose an organization': 'Choose an organization',
   'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.':
     'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.',
-  'Choose your handle': 'Choose your handle',
   'Choose your handle in Settings to get booking links.':
     'Choose your handle in Settings to get booking links.',
   'Client:': 'Client:',
@@ -1058,7 +1117,6 @@ export const admin = {
     'You have no schedule yet, so no times are offered. {0}.',
   'This is your default schedule. To delete it, first make another schedule the default on the {0}.':
     'This is your default schedule. To delete it, first make another schedule the default on the {0}.',
-  '{0} to get booking links.': '{0} to get booking links.',
   '{0}, so there are times to book.': '{0}, so there are times to book.',
   Title: 'Title',
   Tue: 'Tue',

@@ -14,7 +14,7 @@
     "@hourmere/db": "*",
     "@hourmere/jobs": "*",
     "@hourmere/mail": "*",
-    "kysely": "0.29.6",
+    "kysely": "0.29.7",
     "zod": "4.6.7"
   },
   "devDependencies": {

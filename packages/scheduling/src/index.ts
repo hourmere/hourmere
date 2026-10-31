@@ -159,6 +159,7 @@ export {
   TeamReadinessPageSchema,
 } from './readiness.ts'
 export {
+  confirmDefaultSchedule,
   createSchedule,
   deleteSchedule,
   deleteScheduleOverride,

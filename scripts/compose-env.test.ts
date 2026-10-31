@@ -19,6 +19,24 @@ const reference = readFileSync(
   new URL('../apps/site/src/content/docs/docs/configuration.md', import.meta.url),
   'utf8',
 )
+const referenceRows = reference
+  .split('\n')
+  .filter((line) => line.startsWith('|'))
+  .map((line) =>
+    line
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.trim()),
+  )
+
+/** Match one complete variable cell and preserve the default and description boundaries. */
+function documentedVariable(name: string): string[] {
+  const rows = referenceRows.filter(([variable]) => variable === `\`${name}\``)
+  expect(rows, `One configuration reference row for ${name}`).toHaveLength(1)
+  const row = rows[0] ?? []
+  expect(row, `Variable, default and description cells for ${name}`).toHaveLength(3)
+  return row
+}
 
 /**
  * Parse the explicit app.environment mapping without interpolating .env or asking Docker
@@ -122,11 +140,11 @@ describe('documented Compose configuration', () => {
   })
 
   it('forwards every documented variable or explicitly documents its exclusion', () => {
-    const rows = reference.split('\n').filter((line) => /^\| `[A-Z_]+`/.test(line))
+    const rows = referenceRows.filter(([variable]) => /^`[A-Z_]+`/.test(variable ?? ''))
     const documented = new Set([
       ...Array.from(example.matchAll(/^([A-Z_]+)=/gm), (match) => match[1]),
       ...rows.flatMap((row) =>
-        Array.from(row.split('|')[1]?.matchAll(/`([A-Z_]+)`/g) ?? [], (match) => match[1]),
+        Array.from(row[0]?.matchAll(/`([A-Z_]+)`/g) ?? [], (match) => match[1]),
       ),
     ])
     const active = compose
@@ -139,10 +157,10 @@ describe('documented Compose configuration', () => {
     ])
     const excluded = new Set(
       rows
-        .filter((row) => row.includes('Not forwarded by the default Compose file'))
-        .flatMap((row) =>
-          Array.from(row.split('|')[1]?.matchAll(/`([A-Z_]+)`/g) ?? [], (match) => match[1]),
-        ),
+        .filter((row) =>
+          row.some((cell) => cell.includes('Not forwarded by the default Compose file')),
+        )
+        .flatMap((row) => Array.from(row[0]?.matchAll(/`([A-Z_]+)`/g) ?? [], (match) => match[1])),
     )
     expect([...documented].filter((name) => !forwarded.has(name) && !excluded.has(name))).toEqual(
       [],
@@ -159,8 +177,7 @@ describe('documented Compose configuration', () => {
     for (const key of ['PRIVACY_POLICY_URL', 'TERMS_URL']) {
       expect(environment.get(key)).toBe(`\${${key}:-}`)
       expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
-      const row = reference.split('\n').find((line) => line.startsWith(`| \`${key}\` |`))
-      expect(row).toContain('| Unset |')
+      expect(documentedVariable(key)[1]).toBe('Unset')
     }
   })
 
@@ -169,10 +186,7 @@ describe('documented Compose configuration', () => {
       /^\$\{ZOOM_WEBHOOK_SECRET_TOKEN:-\}$/,
     )
     expect(example).toMatch(/^ZOOM_WEBHOOK_SECRET_TOKEN=$/m)
-    const row = reference
-      .split('\n')
-      .find((line) => line.startsWith('| `ZOOM_WEBHOOK_SECRET_TOKEN` |'))
-    expect(row).toContain('| Unset |')
+    expect(documentedVariable('ZOOM_WEBHOOK_SECRET_TOKEN')[1]).toBe('Unset')
   })
 
   it('keeps private webhook destinations empty by default', () => {
@@ -180,17 +194,14 @@ describe('documented Compose configuration', () => {
       /^\$\{WEBHOOK_PRIVATE_TARGETS:-\}$/,
     )
     expect(example).toMatch(/^WEBHOOK_PRIVATE_TARGETS=$/m)
-    const row = reference
-      .split('\n')
-      .find((line) => line.startsWith('| `WEBHOOK_PRIVATE_TARGETS` |'))
-    expect(row).toContain('| Unset |')
+    expect(documentedVariable('WEBHOOK_PRIVATE_TARGETS')[1]).toBe('Unset')
     expect(reference).toContain('Hourmere Cloud MUST NEVER set')
   })
 
   it('forwards automatic migrations with the documented true default', () => {
     expect(composeAppEnvironment(compose).get('AUTO_MIGRATE')).toMatch(/^\$\{AUTO_MIGRATE:-true\}$/)
-    const row = reference.split('\n').find((line) => line.startsWith('| `AUTO_MIGRATE` |'))
-    expect(row).toContain('| `true` |')
-    expect(row).toContain('Forwarded by the default Compose file with a default of `true`')
+    const row = documentedVariable('AUTO_MIGRATE')
+    expect(row[1]).toBe('`true`')
+    expect(row[2]).toContain('Forwarded by the default Compose file with a default of `true`')
   })
 })

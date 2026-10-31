@@ -7,10 +7,66 @@ export const admin = {
   'This member does not host any team events.': '该成员未主持任何团队活动。',
   'Only team owners and admins can change host assignments.':
     '只有团队所有者和管理员可以修改主持人配置。',
-  'You are a selected host.': '您是已选主持人。',
+  'You are a selected host.': '你是已选主持人。',
   'Review member setup': '查看成员设置',
   'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
     '请该成员检查个人工作时间和日历。只有成员本人可以修改其私人时间表。',
+  'Set up your booking page': '设置你的预约页面',
+  'Complete these steps at your own pace. You can keep using the app as you go.':
+    '按自己的节奏完成这些步骤。设置过程中仍可继续使用应用。',
+  'Your display name and booking address are set.': '你的显示名称和预约地址已设置。',
+  'Choose your display name, booking username and time zone in Settings.':
+    '在设置中填写显示名称、预约用户名和时区。',
+  'Without a display name, your booking page, emails and calendar invitations show your username instead.':
+    '如果未填写显示名称，预约页面、邮件和日历邀请将显示你的用户名。',
+  'Complete your profile': '完善个人资料',
+  'Default availability': '默认可预约时间',
+  'Your default schedule has weekly hours ready for bookings.':
+    '你的默认日程已设置每周可预约时间。',
+  'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.':
+    '先用周一至周五 09:00–17:00（个人资料时区：{0}）作为默认可预约时间。',
+  'not set': '未设置',
+  'Complete your profile before confirming these hours.': '请先完善个人资料，再确认这些时间。',
+  'Use Monday–Friday, 09:00–17:00': '使用周一至周五 09:00–17:00',
+  'You can change these hours later in Availability.': '之后可在可预约时间页面调整这些时间。',
+  'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.':
+    '请选择每周时间有效的默认日程。其他日程不计入此步骤。',
+  'Review default availability': '检查默认可预约时间',
+  'Could not confirm your default availability.': '无法确认你的默认可预约时间。',
+  'Refresh setup status': '刷新设置状态',
+  'First event type': '首个活动类型',
+  'An event type sets the meeting length and gives invitees a booking link.':
+    '活动类型决定会议时长，并为受邀者提供预约链接。',
+  'View and share': '查看与分享',
+  'Open your booking page to check the available times, then copy its link to share.':
+    '打开预约页面检查可预约时间，然后复制链接进行分享。',
+  'View booking page': '查看预约页面',
+  'Copy booking link': '复制预约链接',
+  'Activate your first event type': '启用首个活动类型',
+  'Your link will appear after you set up a profile, valid default availability and an active event type.':
+    '设置个人资料、有效的默认可预约时间和启用的活动类型后，这里会显示链接。',
+  'Calendar connection (optional)': '连接日历（可选）',
+  'Skipped for now. You can connect a calendar later.': '已暂时跳过。之后随时可以连接日历。',
+  'You can take bookings without connecting an external calendar.':
+    '无需连接外部日历，也可以接受预约。',
+  'Connect a calendar': '连接日历',
+  'Skip for now': '暂时跳过',
+  Complete: '已完成',
+  'Next step': '下一步',
+  'To do': '待完成',
+  'Complete your profile and display name in Settings first.':
+    '请先在设置中完善个人资料和显示名称。',
+  'Review your existing schedules and choose a valid default in Availability.':
+    '请在可预约时间页面检查已有日程，并选择有效的默认日程。',
+  'Use this key with MCP': '使用此密钥连接 MCP',
+  'Loading MCP configuration…': '正在加载 MCP 配置……',
+  'Could not load MCP configuration.': '无法加载 MCP 配置。',
+  'MCP client JSON': 'MCP 客户端 JSON 配置',
+  'Copy MCP JSON': '复制 MCP JSON 配置',
+  'Claude Code command': 'Claude Code 命令',
+  'Copy Claude command': '复制 Claude 命令',
+  'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.':
+    '将 JSON 配置粘贴到支持通过 HTTP 请求头连接远程 MCP 服务器的客户端，或运行 Claude Code 命令。不同客户端的配置字段可能有所不同。',
   'Member readiness': '成员就绪状态',
   'Default schedule set': '已设置默认时间表',
   'No default schedule': '未设置默认时间表',
@@ -620,7 +676,6 @@ export const admin = {
   'Choose an organization': '选择组织',
   'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.':
     '选择用于检查忙闲冲突的日历，以及用于创建新预约事件的自有日历。更改目标日历后，现有会议仍保留在原日历中。',
-  'Choose your handle': '选择用户名',
   'Choose your handle in Settings to get booking links.': '请在设置中选择用户名，以获得预约链接。',
   'Client:': '客户端：',
   Confirmed: '已确认',
@@ -997,7 +1052,6 @@ export const admin = {
     '你尚无日程，因此没有可预约时间。{0}。',
   'This is your default schedule. To delete it, first make another schedule the default on the {0}.':
     '这是你的默认日程。如需删除，请先在以下页面将其他日程设为默认：{0}。',
-  '{0} to get booking links.': '{0}以获取预约链接。',
   '{0}, so there are times to book.': '{0}，这样才会有可预约时间。',
   Title: '标题',
   Tue: '周二',

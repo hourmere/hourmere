@@ -38,6 +38,7 @@ import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import {
   CreateBookingLink,
   FocusHeading,
+  HostAvatar,
   PublicLayout,
   PublicNotFound,
   PublicStatus,
@@ -169,7 +170,8 @@ function BookingFlow({
   const loadSlots = useMemo(() => eventSlots(handle, slug, team), [handle, slug, team])
 
   if (gone) return <PublicNotFound what="event" />
-  if (confirmed) return <Confirmation event={event} confirmed={confirmed} locale={locale} />
+  if (confirmed)
+    return <Confirmation event={event} confirmed={confirmed} locale={locale} team={team} />
 
   function pick(chosen: Slot) {
     // A different time starts a new intent, even if they later return to the old time.
@@ -284,8 +286,11 @@ function BookingFlow({
     <PublicLayout wide>
       <div className="booking-layout">
         <aside className="event-info" aria-label={t('About this event')}>
-          <p className="event-host">{event.team?.name ?? event.host.name}</p>
           <h1 className="event-title">{event.title}</h1>
+          <div className="host-identity">
+            {!team && <HostAvatar name={event.host.name} image={event.host.image} />}
+            <p className="event-host">{event.team?.name ?? event.host.name}</p>
+          </div>
           {event.schedulingType === 'round_robin' && (
             <p className="event-description">
               {t('An available team member will be assigned when you book.')}
@@ -404,10 +409,12 @@ function Confirmation({
   event,
   confirmed,
   locale,
+  team,
 }: {
   event: PublicEventType
   confirmed: Confirmed
   locale: string
+  team: boolean
 }) {
   const { t, text, ui, locale: language } = useI18n()
 
@@ -460,6 +467,12 @@ function Confirmation({
                     : 'You’re booked',
           )}
         </FocusHeading>
+        <div className="host-identity">
+          {!team && !event.schedulingType && (
+            <HostAvatar name={hostName} image={event.host.image} />
+          )}
+          <p className="event-host">{hostName}</p>
+        </div>
         <p className="lede">
           {text(
             booking.status === 'cancelled'

@@ -5,9 +5,15 @@ description: Connect an AI client to Hourmere's remote MCP server using an API k
 
 ## Connect a client
 
-Create an API key at `/app/api-keys` on your [instance](/docs/self-hosting). The remote endpoint
-is `{PUBLIC_URL}/mcp`, using Streamable HTTP. Choose a client that can send a custom HTTP
-header on every request:
+Create an API key at `/app/api-keys` on your [instance](/docs/self-hosting). The one-time
+key creation view provides copy buttons for the key, a curl example, a JSON client config
+and a Claude Code command. The configs include your instance's `PUBLIC_URL` and the new key;
+save them privately before dismissing the view. The full key is shown only there, never in
+the keys list, and cannot be retrieved after dismissal or leaving the page. The new key
+appears in the list immediately.
+
+The remote endpoint is `{PUBLIC_URL}/mcp`, using Streamable HTTP. Choose a client that can
+send a custom HTTP header on every request. For clients configured with JSON:
 
 ```json
 {
@@ -15,15 +21,26 @@ header on every request:
     "hourmere": {
       "type": "http",
       "url": "https://hourmere.example.com/mcp",
-      "headers": { "Authorization": "Bearer <your API key>" }
+      "headers": {
+        "Authorization": "Bearer hm_…"
+      }
     }
   }
 }
 ```
 
-This shows the connection values; client-specific configuration keys may differ. Store the
-real key privately. Hourmere's MCP server accepts API keys and, when the instance operator
-enables it, organization-bound [OAuth 2.1 connections](#connect-with-oauth); API keys keep
+For Claude Code:
+
+```sh
+claude mcp add --transport http hourmere 'https://hourmere.example.com/mcp' \
+  --header "Authorization: Bearer hm_…"
+```
+
+Replace `https://hourmere.example.com` with your instance's `PUBLIC_URL` and `hm_…` with
+your API key when using these documentation examples. The JSON shows the connection values;
+client-specific configuration keys may differ. Store the real key privately. Hourmere's
+MCP server accepts API keys and, when the instance operator enables it, organization-bound
+[OAuth 2.1 connections](#connect-with-oauth); API keys keep
 working with or without the optional OAuth 2.1 connector flow described below. Session
 cookies never authenticate MCP. A browser request from a different origin is refused;
 non-browser clients normally send no `Origin` header.
@@ -288,10 +305,15 @@ protocol tests. Connector availability and setup screens can change.
 
 ## Connecting a client
 
+The one-time key creation view at `/app/api-keys` offers both snippets below with your
+instance URL and newly created key already filled in. Copy and save them before dismissing
+the view or leaving the page. These documentation examples use placeholders: replace
+`https://hourmere.example.com` with `PUBLIC_URL` and `hm_…` with your own key.
+
 **Claude Code:**
 
 ```sh
-claude mcp add --transport http hourmere https://hourmere.example.com/mcp \
+claude mcp add --transport http hourmere 'https://hourmere.example.com/mcp' \
   --header "Authorization: Bearer hm_…"
 ```
 
@@ -305,7 +327,9 @@ with headers; the exact keys vary by client, e.g. VS Code's `.vscode/mcp.json` u
     "hourmere": {
       "type": "http",
       "url": "https://hourmere.example.com/mcp",
-      "headers": { "Authorization": "Bearer hm_…" }
+      "headers": {
+        "Authorization": "Bearer hm_…"
+      }
     }
   }
 }

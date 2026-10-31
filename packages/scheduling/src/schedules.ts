@@ -8,6 +8,7 @@ import {
   type WallClockInterval,
   type WeeklyHours,
 } from '@hourmere/core'
+import type { InterfaceLanguage } from '@hourmere/core/language'
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
 import {
@@ -131,6 +132,69 @@ export async function createSchedule(ctx: ServiceContext, input: ScheduleInput):
       .executeTakeFirstOrThrow()
   })
   return toSchedule(row)
+}
+
+/**
+ * Confirms starter working hours after personal profile setup. Repeated confirmations
+ * return the existing default unchanged; any existing schedules without a default need
+ * the user's explicit choice in the availability editor instead. The interface language
+ * at confirmation names a new schedule; later language changes do not rename it.
+ */
+export async function confirmDefaultSchedule(
+  ctx: ServiceContext,
+  language: InterfaceLanguage = 'en',
+): Promise<{ schedule: Schedule; created: boolean }> {
+  const userId = ctx.principal.user.id
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockSchedulesOf(trx, userId)
+    // Read stored identity and time zone: a caller's session/API-key name can be stale.
+    const profile = await trx
+      .selectFrom('profiles')
+      .innerJoin('auth.user', 'auth.user.id', 'profiles.user_id')
+      .select(['auth.user.name', 'profiles.time_zone'])
+      .where('profiles.user_id', '=', userId)
+      .executeTakeFirst()
+    if (!profile?.name.trim()) {
+      throw new DomainError(
+        'conflict',
+        'setup_profile_required',
+        'Complete your profile and display name before confirming working hours',
+      )
+    }
+    const schedules = await trx
+      .selectFrom('schedules')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .execute()
+    const existing = schedules.find((schedule) => schedule.is_default)
+    if (existing) return { schedule: toSchedule(existing), created: false }
+    if (schedules.length > 0) {
+      throw new DomainError(
+        'conflict',
+        'setup_default_schedule_required',
+        'Choose an existing schedule as your default in Availability',
+      )
+    }
+    const weeklyHours: WeeklyHours = {
+      monday: [{ start: '09:00', end: '17:00' }],
+      tuesday: [{ start: '09:00', end: '17:00' }],
+      wednesday: [{ start: '09:00', end: '17:00' }],
+      thursday: [{ start: '09:00', end: '17:00' }],
+      friday: [{ start: '09:00', end: '17:00' }],
+    }
+    const row = await trx
+      .insertInto('schedules')
+      .values({
+        user_id: userId,
+        name: language === 'zh-CN' ? '工作时间' : 'Working hours',
+        time_zone: validTimeZone(profile.time_zone),
+        weekly_hours: jsonb(weeklyHours),
+        is_default: true,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    return { schedule: toSchedule(row), created: true }
+  })
 }
 
 /**

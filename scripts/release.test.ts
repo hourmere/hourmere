@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 
 // Mutation probes point at a source copy; the worktree implementation stays intact.
 const script =
@@ -307,7 +308,9 @@ describe('release workflow boundaries', () => {
 
   it('permits only version tag pushes and requires reusable CI and protected approval', () => {
     const source = workflow()
-    expect(source).toMatch(/on:\n {2}push:\n {4}tags: \['v\*\.\*\.\*'\]\n\npermissions: \{\}/)
+    const config = parse(source)
+    expect(config.on).toEqual({ push: { tags: ['v*.*.*'] } })
+    expect(config.permissions).toEqual({})
     expect(source).not.toMatch(/workflow_dispatch:|pull_request:|branches:/)
     expect(source).toMatch(
       / {2}ci:\n {4}needs: prepare\n[\s\S]*?uses: \.\/\.github\/workflows\/ci.yml/,

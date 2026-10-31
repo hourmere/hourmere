@@ -282,7 +282,25 @@ describe('team event readiness access', () => {
   )
 })
 
-describe('team event setup hints', () => {
+describe('personal setup guide isolation', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps the team weekly hours hint out of personal spaces in %s',
+    async (language) => {
+      chooseLanguage(language)
+      fakeApi({
+        ...signedInAs(ME),
+        ...profile(null),
+        'GET /api/v1/schedules': () => json(200, { data: [] }),
+        'GET /api/v1/event-types': () => json(200, { data: [] }),
+      })
+      renderApp('/app/event-types')
+      await screen.findByRole('region', {
+        name: language === 'en' ? 'Set up your booking page' : '设置你的预约页面',
+      })
+      expect(screen.queryByRole('link', { name: labels[language].hours })).toBeNull()
+    },
+  )
+
   it.each(['en', 'zh-CN'] as const)(
     'retains weekly hours guidance without a personal handle hint in %s',
     async (language) => {
@@ -296,6 +314,45 @@ describe('team event setup hints', () => {
         '/app/availability/new',
       )
       expect(screen.queryByRole('link', { name: labels[language].handle })).toBeNull()
+      expect(
+        screen.queryByRole('region', {
+          name: language === 'en' ? 'Set up your booking page' : '设置你的预约页面',
+        }),
+      ).toBeNull()
+    },
+  )
+
+  it.each([
+    { kind: 'non-default-only', schedules: [schedule({ isDefault: false })] },
+    { kind: 'empty default hours', schedules: [schedule({ weeklyHours: {} })] },
+    {
+      kind: 'invalid default hours',
+      schedules: [schedule({ weeklyHours: { monday: [{ start: '17:00', end: '09:00' }] } })],
+    },
+  ])('retains weekly hours guidance for $kind', async ({ schedules }) => {
+    const api = server('member', {
+      'GET /api/v1/schedules': () => json(200, { data: schedules }),
+    })
+    await open()
+    expect(screen.getByRole('link', { name: labels.en.hours }).getAttribute('href')).toBe(
+      '/app/availability',
+    )
+    expect(screen.queryByRole('region', { name: 'Set up your booking page' })).toBeNull()
+    expect(api.to(READINESS_ROUTE)).toHaveLength(0)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'hides weekly hours guidance when a valid default exists in %s',
+    async (language) => {
+      chooseLanguage(language)
+      server('member')
+      await open()
+      expect(screen.queryByRole('link', { name: labels[language].hours })).toBeNull()
+      expect(
+        screen.queryByRole('region', {
+          name: language === 'en' ? 'Set up your booking page' : '设置你的预约页面',
+        }),
+      ).toBeNull()
     },
   )
 })

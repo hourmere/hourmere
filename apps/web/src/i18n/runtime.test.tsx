@@ -47,6 +47,29 @@ function Draft() {
   )
 }
 
+function BrowserDateNotice() {
+  const { ui, formatLocale } = useI18n()
+  return (
+    <>
+      <output data-testid="format-locale">{formatLocale}</output>
+      <p>{ui(dateMessage('2026-11-02'))}</p>
+    </>
+  )
+}
+
+function AccountDateNotice() {
+  const { ui, formatLocale } = useI18n()
+  return (
+    <>
+      <LanguageSwitcher />
+      <p data-testid="date-format-locale">{formatLocale ?? 'browser-default'}</p>
+      <p data-testid="notice-date">
+        {ui(msg('Removed the override for {0}.', { '0': dateMessage('2026-11-02') }))}
+      </p>
+    </>
+  )
+}
+
 describe('typed interface messages and language state', () => {
   it.each(['fa-IR', 'th-TH'])(
     'formats dateMessage in the Gregorian calendar for browser locale %s',
@@ -161,16 +184,7 @@ describe('typed interface messages and language state', () => {
   })
   it('formats in Chinese when it follows an unsupported browser language', () => {
     vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['qab', 'zh-CN'])
-    function DateNotice() {
-      const { ui, formatLocale } = useI18n()
-      return (
-        <>
-          <output data-testid="format-locale">{formatLocale}</output>
-          <p>{ui(dateMessage('2026-11-02'))}</p>
-        </>
-      )
-    }
-    render(<DateNotice />)
+    render(<BrowserDateNotice />)
     expect(screen.getByTestId('format-locale').textContent).toBe('zh-CN')
     expect(screen.getByText(/11月/)).toBeDefined()
   })
@@ -224,20 +238,9 @@ describe('typed interface messages and language state', () => {
   })
   it('formats dates in the active account locale before a switcher choice', async () => {
     const user = userEvent.setup()
-    const date = dateMessage('2026-11-02')
-    function DateNotice() {
-      const { ui, formatLocale } = useI18n()
-      return (
-        <>
-          <LanguageSwitcher />
-          <p data-testid="date-format-locale">{formatLocale ?? 'browser-default'}</p>
-          <p data-testid="notice-date">{ui(msg('Removed the override for {0}.', { '0': date }))}</p>
-        </>
-      )
-    }
     render(
       <AccountLanguage locale="zh-Hans-CN">
-        <DateNotice />
+        <AccountDateNotice />
       </AccountLanguage>,
     )
     expect(screen.getByTestId('date-format-locale').textContent).toBe('zh-CN')
@@ -245,7 +248,9 @@ describe('typed interface messages and language state', () => {
     await user.selectOptions(screen.getByLabelText('界面语言'), 'zh-CN')
     expect(screen.getByTestId('date-format-locale').textContent).toBe('zh-CN')
     expect(screen.getByTestId('notice-date').textContent).toContain('11月')
-    expect(translateMessage('zh-CN', date, { dateLocale: 'en-GB' })).toContain('Nov')
+    expect(translateMessage('zh-CN', dateMessage('2026-11-02'), { dateLocale: 'en-GB' })).toContain(
+      'Nov',
+    )
   })
 
   it.each(['Email', 'Settings', 'Unknown service detail', '邮箱'])(

@@ -13,6 +13,7 @@ import {
   type Slot,
   type WeeklyHours,
 } from '@hourmere/core'
+import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import type { Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
 import {
@@ -111,6 +112,7 @@ export interface PublicEventTypeRecord {
   questions: Question[]
   allowGuests: boolean
   hostName: string
+  hostImage?: string
   hostTimeZone: string
   team?: { name: string; slug: string }
 }
@@ -164,6 +166,7 @@ export async function findPublicEventType(
       'p.handle',
       'p.time_zone',
       'u.name',
+      'u.image',
     ])
     .where('p.handle', '=', h)
     .where('et.slug', '=', s)
@@ -173,6 +176,7 @@ export async function findPublicEventType(
   if (options.lock) query = query.forShare('et')
   const row = await query.executeTakeFirst()
   if (!row) return undefined
+  const image = publicAvatarImage(row.image)
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -195,6 +199,7 @@ export async function findPublicEventType(
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     hostName: row.name.trim() || row.handle,
+    ...(image && { hostImage: image }),
     hostTimeZone: row.time_zone,
   }
 }
@@ -338,7 +343,7 @@ export interface PublicEventType {
   location: { kind: LocationKind } | null
   questions: Question[]
   allowGuests: boolean
-  host: { name: string; timeZone?: string }
+  host: { name: string; timeZone?: string; image?: string }
   /** Every required host, without private identities or availability. */
   hosts?: { name: string; timeZone: string }[]
   schedulingType?: 'round_robin'
@@ -372,6 +377,7 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     allowGuests: et.allowGuests,
     host: {
       name: et.hostName,
+      ...(et.hostImage && { image: et.hostImage }),
       ...(et.schedulingType !== 'round_robin' && { timeZone: et.hostTimeZone }),
     },
     ...(et.schedulingType === 'collective' && et.hosts.length > 1 && { hosts: et.hosts }),
@@ -392,7 +398,7 @@ export interface PublicEventTypeSummary {
 /** What the host's page at /{handle} shows: who they are and what can be booked. */
 export interface PublicHost {
   handle: string
-  host: { name: string; timeZone: string }
+  host: { name: string; timeZone: string; image?: string }
   eventTypes: PublicEventTypeSummary[]
 }
 
@@ -412,10 +418,11 @@ export async function getPublicHost(
       : await ctx.db
           .selectFrom('profiles as p')
           .innerJoin('auth.user as u', 'u.id', 'p.user_id')
-          .select(['p.user_id', 'p.handle', 'p.time_zone', 'u.name'])
+          .select(['p.user_id', 'p.handle', 'p.time_zone', 'u.name', 'u.image'])
           .where('p.handle', '=', h)
           .executeTakeFirst()
   if (!profile) throw new DomainError('not_found', 'host_not_found', 'No such booking page')
+  const image = publicAvatarImage(profile.image)
   const rows = await ctx.db
     .selectFrom('event_types as et')
     .innerJoin('auth.member as m', (join) =>
@@ -433,7 +440,11 @@ export async function getPublicHost(
     .execute()
   return {
     handle: profile.handle,
-    host: { name: profile.name.trim() || profile.handle, timeZone: profile.time_zone },
+    host: {
+      name: profile.name.trim() || profile.handle,
+      timeZone: profile.time_zone,
+      ...(image && { image }),
+    },
     eventTypes: rows.map((row) => {
       const location = parseLocation(row.location)
       return {
