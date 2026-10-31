@@ -500,7 +500,8 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
             .executeTakeFirstOrThrow()
           expect(membership).toEqual({
             userId: host.id,
-            organizationId: index === 3 ? fixture.other.id : fixture.team.id,
+            organizationId:
+              index === 3 ? fixture.outsider.principal.organization.id : fixture.team.id,
           })
         }
         expect(hosts.data.map((host: Json) => host.id).sort()).toEqual(
