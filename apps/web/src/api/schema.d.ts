@@ -3325,6 +3325,8 @@ export interface components {
          */
         ErrorAlias: "zoom_operation_busy";
         EventType: {
+            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            allowedDurationsMinutes: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
             /** @description How many days ahead can be booked; null = no limit */
@@ -3340,7 +3342,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             description: string | null;
-            /** @description Length of a meeting */
+            /** @description Default length of a meeting */
             durationMinutes: number;
             hosts: {
                 /** Format: uuid */
@@ -3407,7 +3409,7 @@ export interface components {
             scheduleId: string | null;
             /** @enum {string} */
             schedulingType: "individual" | "round_robin" | "collective";
-            /** @description Distance between start times; null = the duration */
+            /** @description Distance between start times; null = the selected duration */
             slotStepMinutes: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -3422,6 +3424,8 @@ export interface components {
             zoomConnectionId?: string | null;
         };
         EventTypeInput: {
+            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            allowedDurationsMinutes?: number[];
             /**
              * @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved
              * @default false
@@ -3443,7 +3447,7 @@ export interface components {
                 userId: string;
             } | null;
             description?: string | null;
-            /** @description Length of a meeting */
+            /** @description Default length of a meeting */
             durationMinutes: number;
             hosts?: {
                 userId: string;
@@ -3511,7 +3515,7 @@ export interface components {
             scheduleId?: string | null;
             /** @enum {string} */
             schedulingType?: "individual" | "collective" | "round_robin";
-            /** @description Distance between start times; null = the duration */
+            /** @description Distance between start times; null = the selected duration */
             slotStepMinutes?: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -3527,6 +3531,8 @@ export interface components {
         };
         /** @description Omitted fields stay as they are; null clears a nullable field */
         EventTypeUpdate: {
+            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            allowedDurationsMinutes?: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests?: boolean;
             /** @description How many days ahead can be booked; null = no limit */
@@ -3539,7 +3545,7 @@ export interface components {
                 userId: string;
             } | null;
             description?: string | null;
-            /** @description Length of a meeting */
+            /** @description Default length of a meeting */
             durationMinutes?: number;
             hosts?: {
                 userId: string;
@@ -3595,7 +3601,7 @@ export interface components {
             scheduleId?: string | null;
             /** @enum {string} */
             schedulingType?: "individual" | "collective" | "round_robin";
-            /** @description Distance between start times; null = the duration */
+            /** @description Distance between start times; null = the selected duration */
             slotStepMinutes?: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
