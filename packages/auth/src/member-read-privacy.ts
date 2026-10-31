@@ -53,6 +53,31 @@ export function memberReadPrivacy(db: Db): BetterAuthPlugin {
       ],
       after: [
         {
+          matcher: (ctx) => ctx.path === '/organization/list-user-invitations',
+          handler: createAuthMiddleware(async (ctx) => {
+            const invitations = ctx.context.returned as { id: string }[] | undefined
+            if (!Array.isArray(invitations) || invitations.length === 0) return
+            // Native recipient/email-proof checks run first. Preserve its projection and
+            // stored lifecycle while omitting links whose original inviter left this team.
+            const current = await db
+              .selectFrom('auth.invitation as i')
+              .innerJoin('auth.member as m', (join) =>
+                join
+                  .onRef('m.organizationId', '=', 'i.organizationId')
+                  .onRef('m.userId', '=', 'i.inviterId'),
+              )
+              .select('i.id')
+              .where(
+                'i.id',
+                'in',
+                invitations.map((invitation) => invitation.id),
+              )
+              .execute()
+            const validIds = new Set(current.map((invitation) => invitation.id))
+            return ctx.json(invitations.filter((invitation) => validIds.has(invitation.id)))
+          }),
+        },
+        {
           matcher: (ctx) =>
             ctx.path === '/organization/list-members' ||
             ctx.path === '/organization/get-full-organization',
