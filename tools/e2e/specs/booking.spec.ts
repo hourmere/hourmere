@@ -14,7 +14,7 @@ for (const kind of ['personal', 'team'] as const)
     await slots
     // The language control stays in a compact top-right header at both project widths.
     const header = page.locator('.public-language')
-    const language = header.getByRole('combobox', { name: 'Interface language' })
+    const language = header.getByRole('button', { name: 'Language: English' })
     await expect(language).toBeVisible()
     const headerBox = await header.boundingBox()
     const languageBox = await language.boundingBox()

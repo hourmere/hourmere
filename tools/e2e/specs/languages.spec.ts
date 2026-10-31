@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
+import { selectPublicLanguage } from '../public-language.ts'
 
 type Language = 'en' | 'zh-CN'
 const text = {
@@ -140,7 +141,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
         selected === 'en' ? 'Your booking is not confirmed yet.' : '你的预约尚未确认。',
       )
       expect(committedBeforeLoss).toBe(true)
-      await language(page, switched)
+      await selectPublicLanguage(page, switched)
       await expect(page.getByRole('alert')).toContainText(
         switched === 'en' ? 'Your booking is not confirmed yet.' : '你的预约尚未确认。',
       )
@@ -174,7 +175,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
         fingerprints: 1,
         originalFingerprintPreserved: true,
       })
-      await language(page, selected)
+      await selectPublicLanguage(page, selected)
       await expect(
         page.getByRole('heading', { name: text[selected].booked, exact: true }),
       ).toBeVisible()
@@ -193,7 +194,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
       })
       await page.getByRole('button', { name: text[selected].reschedule, exact: true }).click()
       await pickSlot(page, page)
-      await language(page, switched)
+      await selectPublicLanguage(page, switched)
       const moving = page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === '/api/v1/bookings/manage/reschedule' &&
@@ -207,7 +208,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
       await page.getByRole('button', { name: text[switched].cancel, exact: true }).click()
       await expect(page.getByRole('heading', { name: text[switched].cancelHeading })).toBeVisible()
       await page.getByLabel(/^(Reason|原因)/).fill('Custom reason stays unchanged')
-      await language(page, selected)
+      await selectPublicLanguage(page, selected)
       await expect(page.getByLabel(/^(Reason|原因)/)).toHaveValue('Custom reason stays unchanged')
       await page.getByRole('button', { name: text[selected].cancel, exact: true }).click()
       await expect(
@@ -237,9 +238,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     expect(new URL((await inline.getAttribute('src')) ?? '').searchParams.get('language')).toBe(
       selected,
     )
-    await expect(
-      inlineBody.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
-    ).toHaveCount(0)
+    await expect(inlineBody.getByRole('button', { name: /^(Language:|语言：)/ })).toHaveCount(0)
     await expect(inline.contentFrame().locator('html')).toHaveAttribute('lang', selected)
     await expect
       .poll(async () =>
@@ -354,9 +353,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
       frame.setAttribute('src', url)
     }, popupUrl)
     await expect(popupBody.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
-    await expect(
-      popupBody.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
-    ).toHaveCount(0)
+    await expect(popupBody.getByRole('button', { name: /^(Language:|语言：)/ })).toHaveCount(0)
     await popupBody.evaluate(
       (_, saved) => localStorage.setItem('hourmere-language', saved),
       other(selected),
@@ -368,9 +365,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await opener.click()
     const body = page.locator('dialog iframe').contentFrame().locator('body')
     // The declared embed option wins over the stored standalone-page preference.
-    await expect(
-      body.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
-    ).toHaveCount(0)
+    await expect(body.getByRole('button', { name: /^(Language:|语言：)/ })).toHaveCount(0)
     await expect(dialog.locator('iframe').contentFrame().locator('html')).toHaveAttribute(
       'lang',
       selected,
@@ -589,7 +584,7 @@ test('zh-CN collective popup keeps language and capability-free completion for b
   await expect(
     frame.getByRole('heading', { name: 'Collective fixture call', exact: true }),
   ).toBeVisible()
-  await expect(frame.getByLabel('界面语言')).toHaveCount(0)
+  await expect(frame.getByRole('button', { name: /^(Language:|语言：)/ })).toHaveCount(0)
   await expect(frame.locator('html')).toHaveAttribute('lang', 'zh-CN')
   await expect(frame.getByText(/必选主持人：/)).toContainText('Second Required Host')
   await pickSlot(frame.locator('body'), page)

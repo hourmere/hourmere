@@ -1,12 +1,15 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { interfaceLanguages, localeRegistry, registeredLocales } from '@hourmere/core/language'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { EmbedLanguage } from '../i18n/runtime.tsx'
+import { EmbedLanguage, InterfaceScope, LanguageSwitcher } from '../i18n/runtime.tsx'
+import { resetLanguagePreference } from '../i18n/store.ts'
 import styles from '../styles.css?raw'
 import { fakeApi, renderApp } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { EmbeddedContext } from './embed-context.ts'
 import { HostAvatar, hostInitials, PublicLayout } from './PublicLayout.tsx'
 import publicStyles from './public.css?raw'
@@ -128,7 +131,7 @@ it('keeps the language control in a compact header above the booking content', a
     renderApp('/ada/intro')
     await screen.findByRole('heading', { name: 'Intro call' })
     const header = screen.getByRole('banner')
-    const language = screen.getByRole('combobox', { name: 'Interface language' })
+    const language = screen.getByRole('button', { name: 'Language: English' })
     const frame = header.parentElement as HTMLElement
     const main = screen.getByRole('main')
     expect(header.contains(language)).toBe(true)
@@ -136,12 +139,175 @@ it('keeps the language control in a compact header above the booking content', a
     expect(getComputedStyle(frame).gridTemplateRows).toBe('auto 1fr auto')
     expect(getComputedStyle(header).width).toBe('100%')
     expect(getComputedStyle(header).justifyContent).toBe('flex-end')
-    await user.selectOptions(language, 'zh-CN')
-    expect(screen.getByRole('combobox', { name: '界面语言' }).closest('header')).toBe(header)
+    await selectPublicLanguage(user, 'zh-CN')
+    expect(screen.getByRole('button', { name: '语言：简体中文' }).closest('header')).toBe(header)
     expect(screen.getByRole('heading', { name: '选择时间' })).toBeDefined()
   } finally {
     sheet.remove()
   }
+})
+
+describe('compact public language menu', () => {
+  function showPicker() {
+    fakeApi({})
+    return render(
+      <PublicLayout>
+        <button type="button">Continue booking</button>
+      </PublicLayout>,
+    )
+  }
+
+  it('names the current language and marks it visibly and for assistive technology', async () => {
+    const user = userEvent.setup()
+    showPicker()
+    const trigger = screen.getByRole('button', { name: 'Language: English' })
+    expect(trigger.textContent).toContain('English')
+    expect(trigger.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('Interface language')).toBeNull()
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('menu')).toBeNull()
+    await user.click(trigger)
+    const menu = screen.getByRole('menu', { name: 'Language: English' })
+    expect(trigger.getAttribute('aria-controls')).toBe(menu.id)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    const options = within(menu).getAllByRole('menuitemradio')
+    expect(options).toHaveLength(interfaceLanguages('public').length)
+    for (const { code, nativeName } of registeredLocales) {
+      if (!interfaceLanguages('public').includes(code)) continue
+      const option = within(menu).getByRole('menuitemradio', { name: nativeName })
+      expect(option.getAttribute('lang')).toBe(code)
+      expect(option.getAttribute('aria-checked')).toBe(code === 'en' ? 'true' : 'false')
+    }
+    const current = within(menu).getByRole('menuitemradio', { checked: true })
+    expect(current.textContent).toContain('English')
+    expect(current.querySelector('[aria-hidden="true"]')?.textContent).toContain('✓')
+    expect(document.activeElement).toBe(current)
+  })
+
+  it.each(['{Enter}', ' '])(
+    'opens with %j and Escape restores focus to the trigger',
+    async (key) => {
+      const user = userEvent.setup()
+      showPicker()
+      const trigger = screen.getByRole('button', { name: 'Language: English' })
+      trigger.focus()
+      await user.keyboard(key)
+      expect(screen.getByRole('menu')).toBeDefined()
+      expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { checked: true }))
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('menu')).toBeNull()
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(document.activeElement).toBe(trigger)
+    },
+  )
+
+  it.each(['{ArrowDown}', '{ArrowUp}'])(
+    'opens on the current language with %s and navigates all options with wrapping',
+    async (key) => {
+      const user = userEvent.setup()
+      localStorage.setItem('hourmere-language', 'zh-CN')
+      showPicker()
+      screen.getByRole('button', { name: '语言：简体中文' }).focus()
+      await user.keyboard(key)
+      expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: '简体中文' }))
+      const options = screen.getAllByRole('menuitemradio')
+      await user.keyboard('{End}')
+      expect(document.activeElement).toBe(options.at(-1))
+      await user.keyboard('{ArrowDown}')
+      expect(document.activeElement).toBe(options[0])
+      await user.keyboard('{ArrowUp}')
+      expect(document.activeElement).toBe(options.at(-1))
+      await user.keyboard('{Home}')
+      expect(document.activeElement).toBe(options[0])
+      await user.keyboard('{ArrowDown}')
+      expect(document.activeElement).toBe(options[1])
+    },
+  )
+
+  it('selects a language by keyboard, closes and returns focus to the translated trigger', async () => {
+    const user = userEvent.setup()
+    showPicker()
+    screen.getByRole('button', { name: 'Language: English' }).focus()
+    await user.keyboard('{Enter}{ArrowDown}{Enter}')
+    expect(screen.queryByRole('menu')).toBeNull()
+    const trigger = screen.getByRole('button', { name: '语言：简体中文' })
+    expect(document.activeElement).toBe(trigger)
+    expect(trigger.textContent).toContain('简体中文')
+    expect(document.documentElement.lang).toBe('zh-CN')
+    expect(document.documentElement.dir).toBe('ltr')
+  })
+
+  it.each(interfaceLanguages('public'))(
+    'selects and persists every shipped public language (%s)',
+    async (code) => {
+      const user = userEvent.setup()
+      const first = showPicker()
+      await selectPublicLanguage(user, code)
+      expect(screen.queryByRole('menu')).toBeNull()
+      const trigger = within(screen.getByRole('banner')).getByRole('button')
+      expect(trigger.textContent).toContain(localeRegistry[code].nativeName)
+      expect(document.activeElement).toBe(trigger)
+      expect(localStorage.getItem('hourmere-language')).toBe(code)
+      expect(document.cookie.split('; ').includes(`hourmere-language=${code}`)).toBe(true)
+      expect(document.documentElement.lang).toBe(code)
+      first.unmount()
+      resetLanguagePreference()
+      showPicker()
+      const restored = within(screen.getByRole('banner')).getByRole('button')
+      expect(restored.textContent).toContain(localeRegistry[code].nativeName)
+      await user.click(restored)
+      expect(
+        screen.getByRole('menuitemradio', { name: localeRegistry[code].nativeName, checked: true }),
+      ).toBeDefined()
+    },
+  )
+
+  it('lets Tab leave the menu and closes without stealing focus', async () => {
+    const user = userEvent.setup()
+    showPicker()
+    await user.click(screen.getByRole('button', { name: 'Language: English' }))
+    for (let count = 0; count < interfaceLanguages('public').length; count++) {
+      if (!screen.queryByRole('menu')) break
+      await user.tab()
+    }
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Continue booking' }))
+  })
+
+  it('closes when the trigger is tapped again or a touch starts outside', async () => {
+    const user = userEvent.setup()
+    showPicker()
+    const trigger = screen.getByRole('button', { name: 'Language: English' })
+    await user.pointer([{ keys: '[TouchA]', target: trigger }])
+    expect(screen.getByRole('menu')).toBeDefined()
+    await user.click(trigger)
+    expect(screen.queryByRole('menu')).toBeNull()
+    await user.click(trigger)
+    // A touch on non-focusable content must dismiss even without a focusin event.
+    fireEvent.pointerDown(screen.getByRole('main'), { pointerType: 'touch' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('retains the existing admin select and its permanent label', async () => {
+    const user = userEvent.setup()
+    render(
+      <InterfaceScope surface="admin">
+        <LanguageSwitcher compact />
+      </InterfaceScope>,
+    )
+    const select = screen.getByRole('combobox', { name: 'Interface language' })
+    expect(screen.getByText('Interface language')).toBeDefined()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['English', '简体中文'])
+    await user.selectOptions(select, 'zh-CN')
+    expect(screen.getByRole('combobox', { name: '界面语言' })).toBe(select)
+  })
 })
 
 it.each(['en', 'zh-CN'] as const)(
@@ -164,6 +330,8 @@ it.each(['en', 'zh-CN'] as const)(
       const footer = screen.getByRole('contentinfo')
       expect(screen.queryByRole('banner')).toBeNull()
       expect(screen.queryByRole('combobox')).toBeNull()
+      expect(screen.queryByRole('button')).toBeNull()
+      expect(screen.queryByRole('menu')).toBeNull()
       expect(main.parentElement?.classList.contains('public-embedded')).toBe(true)
       expect(main.nextElementSibling).toBe(footer)
       expect(document.documentElement.lang).toBe(language)
