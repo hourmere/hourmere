@@ -446,7 +446,10 @@ describe.skipIf(!adminUrl)('space switching across real HTTP browser sessions', 
       .select('metadata')
       .where('id', '=', key.id)
       .executeTakeFirstOrThrow()
-    expect(JSON.parse(storedKey.metadata as string)).toEqual({ organizationId: f.a.id })
+    expect(JSON.parse(storedKey.metadata as string)).toEqual({
+      organizationId: f.a.id,
+      scope: 'full',
+    })
     expect(
       await db
         .selectFrom('mcp_oauth_grants')
