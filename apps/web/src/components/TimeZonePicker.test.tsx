@@ -34,6 +34,31 @@ const box = () => screen.getByRole<HTMLInputElement>('combobox', { name: 'Time z
 const value = () => screen.getByTestId('value').textContent
 
 describe('the time zone picker', () => {
+  it('finds Chinese city aliases in the editable picker and retains the IANA value', async () => {
+    const user = userEvent.setup()
+    render(<Picker />)
+    await user.type(box(), '上海')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    await user.click(screen.getByRole('option', { name: /Asia\/Shanghai/ }))
+    expect(value()).toBe('Asia/Shanghai')
+  })
+
+  it('finds Chinese city aliases in the public picker alongside offset search', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <TimeZonePicker
+        value="Europe/Berlin"
+        onChange={onChange}
+        now={Date.parse('2026-10-19T12:00Z')}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: /Time zone/ }))
+    await user.type(screen.getByRole('combobox'), '纽约 GMT-04:00')
+    await user.click(screen.getByRole('option', { name: /America\/New York/ }))
+    expect(onChange).toHaveBeenCalledWith('America/New_York')
+  })
+
   it('opens the public list at the selected zone in a current/common group', async () => {
     const scroll = vi.fn()
     const original = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
@@ -176,6 +201,15 @@ describe('matchTimeZones', () => {
     ['berlin', ['Europe/Berlin']],
     ['new_york', ['America/New_York']],
     ['europe ber', ['Europe/Berlin']],
+    ['上海', ['Asia/Shanghai']],
+    ['北京', ['Asia/Shanghai']],
+    ['洛杉矶', ['America/Los_Angeles']],
+    ['纽约', ['America/New_York']],
+    ['伦敦', ['Europe/London']],
+    ['巴黎', ['Europe/Paris']],
+    ['东京', ['Asia/Tokyo']],
+    ['悉尼', ['Australia/Sydney']],
+    ['柏林', ['Europe/Berlin', 'Europe/Dublin']],
     ['', zones],
   ])('matches %j', (query, expected) => {
     expect(matchTimeZones(zones, query)).toEqual(expected)

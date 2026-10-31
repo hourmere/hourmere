@@ -190,6 +190,13 @@ export function slugify(title: string): string {
     .replace(/-+$/g, '')
 }
 
+/** Keep titles in any language usable without asking the host to invent a Latin link. */
+export function suggestedBookingSlug(title: string, durationMinutes: string): string {
+  if (!title.trim()) return ''
+  const duration = parseWhole(durationMinutes)
+  return slugify(title) || `${duration !== null && duration > 0 ? duration : 30}-min`
+}
+
 // Field ids, which are also the keys of FieldErrors.
 export const questionField = (q: QuestionDraft, part: 'label' | 'type' | 'options') =>
   `question-${q.key}-${part}`

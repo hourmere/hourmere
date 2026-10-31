@@ -60,13 +60,19 @@ export const admin = {
   'No longer valid': '已失效',
   'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
     '邀请人已不再是团队成员。请取消此邀请，再以你自己的名义发送一封全新邀请。',
+  'Your booking page is ready': '你的预约页面已就绪',
+  'No active event type': '暂无启用的活动类型',
+  'You have no active event type. Activate one when you are ready to accept bookings.':
+    '你目前没有启用的活动类型。准备好接受预约时，再启用即可。',
+  'Review event type': '查看活动类型',
+  'Could not refresh setup status.': '无法刷新设置状态。',
   'Set up your booking page': '设置你的预约页面',
   'Complete these steps at your own pace. You can keep using the app as you go.':
     '按自己的节奏完成这些步骤。设置过程中仍可继续使用应用。',
   'Your display name and booking address are set.': '你的显示名称和预约地址已设置。',
-  'Choose your display name, booking username and time zone in Settings.':
+  'Choose your display name, handle and time zone in Settings.':
     '在设置中填写显示名称、预约用户名和时区。',
-  'Without a display name, your booking page, emails and calendar invitations show your username instead.':
+  'Without a display name, your booking page, emails and calendar invitations show your handle instead.':
     '如果未填写显示名称，预约页面、邮件和日历邀请将显示你的用户名。',
   'Complete your profile': '完善个人资料',
   'Default availability': '默认可预约时间',
@@ -606,7 +612,8 @@ export const admin = {
   ', through {0}': '，通过{0}',
   ', until': '，至',
   ', your personal organization': '（你的个人组织）',
-  '. Lowercase letters, digits and hyphens, up to': '。使用小写字母、数字和连字符，最多',
+  'Use only lowercase letters, digits and hyphens, up to {count} characters.':
+    '只能用小写字母、数字和连字符，最多 {count} 个字符。',
   '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.':
     '。如果此邮箱可以登录，请检查收件箱中的登录链接。链接仅可使用一次，几分钟后过期。',
   '. They are saved right away.': '。更改会立即保存。',
@@ -667,7 +674,7 @@ export const admin = {
   'Booking not found': '找不到预约',
   'Booking window': '可预约范围',
   'Bookings are shown in this zone. Type to search, e.g. “Berlin”.':
-    '预约以此时区显示。输入城市搜索，例如“Berlin”。',
+    '预约以此时区显示。输入城市搜索，例如“上海”。',
   'Bookings per day, {0}–{1}. Empty: no limit.': '每天的预约数量，{0}–{1}。留空表示不限。',
   'Buffer after': '会后缓冲',
   'Buffer before': '会前缓冲',
@@ -875,7 +882,7 @@ export const admin = {
   Inactive: '未启用',
   Invitee: '受邀人',
   'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.':
-    '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多{count}。',
+    '受邀人始终需要提供姓名和邮箱。你还可以添加最多 {count} 个问题。',
   'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.':
     '此应用可在你退出登录后继续连接，最长为首次批准起的 30 天。刷新令牌不会延长此期限。离开组织或在“已连接的应用”中撤销访问会立即终止连接。',
   'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.':
@@ -1051,7 +1058,7 @@ export const admin = {
   'The booking is cancelled.': '预约已取消。',
   'the booking page': '预约页面',
   'The hours below are in this zone. Type to search, e.g. “Berlin”.':
-    '下方时间段使用此时区。输入城市搜索，例如“Berlin”。',
+    '下方时间段使用此时区。输入城市搜索，例如“上海”。',
   'The invitee can see it. Up to {0} characters.': '受邀人可见。最多{0}个字符。',
   'The key will act in': '密钥将作用于',
   'The kinds of meetings people can book with you, each with its own link.':
@@ -1158,7 +1165,7 @@ export const admin = {
   "You're no longer a member of {0}, so no key was created. Keys you create now act in {1}.":
     '你已不再是{0}的成员，因此未创建密钥。现在创建的密钥将作用于{1}。',
   'Your account could not be created. Please try again.': '无法创建账号。请重试。',
-  'Your booking links start with': '你的预约链接以此开头',
+  'Your booking links start with {path}.': '你的预约链接以 {path} 开头。',
   'Your default schedule': '你的默认日程',
   'Your email comes from how you sign in.': '你的邮箱由登录方式决定。',
   'Your first schedule is your default schedule.': '你的首个日程将作为默认日程。',
@@ -1383,11 +1390,10 @@ export const admin = {
   'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.':
     '单人及集体活动类型会被停用；轮询活动类型仅在没有其他已验证的当前团队主持人时停用。',
   'Bookings needing handling': '待处理预约',
-  'Saved version readiness': '已保存版本的就绪检查',
-  'These unsaved changes have not been checked yet. Save to check the saved version.':
-    '尚未检查这些未保存的更改。保存后可检查已保存版本。',
-  'These checks describe the saved version. Availability is confirmed when someone books.':
-    '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+  'Saved event checks': '保存后的配置检查',
+  'Save your changes to check the updated event type.': '保存更改后，即可检查更新后的活动类型。',
+  'These checks describe your saved event type. Available times are confirmed when someone books.':
+    '这些检查对应你已保存的活动类型。实际可约时间将在预约时确认。',
   'Readiness checks are unavailable for this account.': '此账号无法使用就绪检查。',
   'Review enablement': '查看启用设置',
   'Review meeting settings': '查看会议设置',
@@ -1402,11 +1408,16 @@ export const admin = {
   'Review visibility': '查看可见性设置',
   'This round-robin event type is saved, but it is not activated. Activate it separately before sharing.':
     '此轮询活动类型已保存，但尚未激活。分享前，请先单独激活。',
-  'Set a booking username in Settings before sharing this event type.':
-    '分享此活动类型前，请先在设置中填写你的预约用户名。',
+  'Set a handle in Settings before sharing this event type.':
+    '分享此活动类型前，请先在设置中填写你的用户名。',
   'Host availability needs attention before you share this event type.':
     '分享此活动类型前，请先检查主持人的可预约时间设置。',
   'This event type has no public booking link in the current space.':
     '此活动类型在当前空间中没有公开预约链接。',
-  'Review saved version readiness': '查看已保存版本的就绪检查',
+  'Review saved event checks': '查看保存后的配置检查',
+  'Lowercase letters, digits and hyphens. You can change this link.':
+    '使用小写字母、数字和连字符。你可以修改此链接。',
+  'You have no working hours yet. Use the setup guide to add a default schedule.':
+    '你尚未设置工作时间。请通过设置引导添加默认日程。',
+  'Set working hours with the setup guide': '通过设置引导添加工作时间',
 } as const

@@ -103,15 +103,17 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
     )
     const hint = document.getElementById('slug-hint')
     expect(hint?.textContent).toBe(
-      language === 'en' ? 'Lowercase letters, digits and hyphens.' : '使用小写字母、数字和连字符。',
+      language === 'en'
+        ? 'Lowercase letters, digits and hyphens. You can change this link.'
+        : '使用小写字母、数字和连字符。你可以修改此链接。',
     )
     const status = document.getElementById('booking-link-status')
     expect(status?.textContent).toMatch(/^\/ada\//)
     expect(hint?.contains(status)).toBe(false)
     expect(document.querySelector('.questions > .hint')?.textContent).toBe(
       language === 'en'
-        ? 'Invitees always give their name and email. Add questions for anything else you need to know, up to 20.'
-        : '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多 20。',
+        ? 'Invitees always give their name and email. You can add up to 20 extra questions.'
+        : '受邀人始终需要提供姓名和邮箱。你还可以添加最多 20 个问题。',
     )
   })
 
@@ -154,7 +156,7 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
     })
     expect(handle.closest('li')?.querySelector('p')?.textContent).toBe(
       language === 'en'
-        ? 'Choose your display name, booking username and time zone in Settings.'
+        ? 'Choose your display name, handle and time zone in Settings.'
         : '在设置中填写显示名称、预约用户名和时区。',
     )
     expect(handle.getAttribute('href')).toBe('/app/settings')

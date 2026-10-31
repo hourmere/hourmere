@@ -59,7 +59,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
     await expect(
       page.getByRole('region', {
-        name: zh ? '已保存版本的就绪检查' : 'Saved version readiness',
+        name: zh ? '保存后的配置检查' : 'Saved event checks',
         exact: true,
       }),
     ).toBeVisible()

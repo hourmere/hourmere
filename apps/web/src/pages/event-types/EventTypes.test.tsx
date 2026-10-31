@@ -1160,7 +1160,7 @@ describe('team booking links', () => {
     expect(screen.queryByText(/Choose your handle/)).toBeNull()
     await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
-    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
       'Configuration checks passed',
     )
     expect(document.querySelector('.booking-link .preview')?.textContent).toBe(

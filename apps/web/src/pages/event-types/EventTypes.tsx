@@ -1,5 +1,7 @@
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
+import { useCallback, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { errorMessage } from '../../api/errors.ts'
 import {
   type EventType,
   loadEventTypes,
@@ -15,6 +17,7 @@ import { useFlash } from '../../flash.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
+import type { UiText } from '../../i18n/translate.ts'
 import {
   eventTypePath,
   PATHS,
@@ -37,13 +40,40 @@ async function loadPage(signal: AbortSignal) {
   return { eventTypes, profile, schedules }
 }
 
+/** A failed refresh keeps the last loaded page available for another attempt. */
+function useEventTypesLoad() {
+  const previous = useRef<Awaited<ReturnType<typeof loadPage>> | null>(null)
+  const [refreshFailure, setRefreshFailure] = useState<UiText | null>(null)
+  const load = useCallback(async (signal: AbortSignal) => {
+    try {
+      const data = await loadPage(signal)
+      if (!signal.aborted) {
+        previous.current = data
+        setRefreshFailure(null)
+      }
+      return data
+    } catch (error) {
+      if (!previous.current) throw error
+      if (!signal.aborted) setRefreshFailure(errorMessage(error))
+      return previous.current
+    }
+  }, [])
+  const [state, reload] = useLoad(load)
+  return [state, reload, refreshFailure] as const
+}
+
 export function EventTypesPage() {
   const { t, uiText } = useI18n()
   const scheduleHint = t('{0}, so there are times to book.').split('{0}')
 
   usePageTitle('Event types')
   const me = useMe()
-  const [state, reload] = useLoad(loadPage)
+  const [state, reload, refreshFailure] = useEventTypesLoad()
+  const [readinessVersion, setReadinessVersion] = useState(0)
+  function reloadSetup() {
+    reload()
+    setReadinessVersion((version) => version + 1)
+  }
   const message = useFlash()
   const [search] = useSearchParams()
   const hostUserId = !me.organization.personal ? search.get('hostUserId') : null
@@ -83,13 +113,23 @@ export function EventTypesPage() {
       )}
       {state.status === 'ready' && (
         <>
+          {refreshFailure && (
+            <div className="alert alert-error" role="alert">
+              <p>
+                {t('Could not refresh setup status.')} {uiText(refreshFailure)}
+              </p>
+              <button type="button" className="button button-small" onClick={reloadSetup}>
+                {t('Refresh setup status')}
+              </button>
+            </div>
+          )}
           {me.organization.personal && (
             <PersonalSetupGuide
               me={me}
               profile={state.data.profile}
               schedules={state.data.schedules}
               eventTypes={state.data.eventTypes}
-              reload={reload}
+              reload={reloadSetup}
             />
           )}
           {!me.organization.personal && !state.data.schedules.some(validDefault) && (
@@ -128,7 +168,12 @@ export function EventTypesPage() {
               }
             />
           ) : (
-            <EventTypeTable eventTypes={eventTypes} me={me} profile={state.data.profile} />
+            <EventTypeTable
+              eventTypes={eventTypes}
+              me={me}
+              profile={state.data.profile}
+              readinessVersion={readinessVersion}
+            />
           )}
         </>
       )}
@@ -140,13 +185,15 @@ function EventTypeTable({
   eventTypes,
   me,
   profile,
+  readinessVersion,
 }: {
   eventTypes: EventType[]
   me: Me
   profile: Profile | null
+  readinessVersion: number
 }) {
   const { t, locale: displayLocale } = useI18n()
-  const [readiness, retryChecks] = useEventReadiness(me)
+  const [readiness, retryChecks] = useEventReadiness(me, readinessVersion)
 
   return (
     <div className="table-container">

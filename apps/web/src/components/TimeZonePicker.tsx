@@ -33,6 +33,67 @@ const COMMON_ZONES = [
 ]
 const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
 
+// Search aliases supplement IANA identifiers; the selected value remains the IANA ID.
+const CHINESE_CITY_NAMES: Readonly<Record<string, string>> = {
+  'Africa/Cairo': '开罗 開羅',
+  'Africa/Johannesburg': '约翰内斯堡 約翰內斯堡',
+  'America/Anchorage': '安克雷奇',
+  'America/Chicago': '芝加哥',
+  'America/Denver': '丹佛',
+  'America/Los_Angeles': '洛杉矶 洛杉磯',
+  'America/Mexico_City': '墨西哥城',
+  'America/New_York': '纽约 紐約',
+  'America/Phoenix': '凤凰城 鳳凰城',
+  'America/Sao_Paulo': '圣保罗 聖保羅',
+  'America/Toronto': '多伦多 多倫多',
+  'America/Vancouver': '温哥华 溫哥華',
+  'Asia/Bangkok': '曼谷',
+  'Asia/Calcutta': '加尔各答 加爾各答',
+  'Asia/Dubai': '迪拜 杜拜',
+  'Asia/Hong_Kong': '香港',
+  'Asia/Jakarta': '雅加达 雅加達',
+  'Asia/Jerusalem': '耶路撒冷',
+  'Asia/Kathmandu': '加德满都 加德滿都',
+  'Asia/Katmandu': '加德满都 加德滿都',
+  'Asia/Kolkata': '加尔各答 加爾各答',
+  'Asia/Kuala_Lumpur': '吉隆坡',
+  'Asia/Manila': '马尼拉 馬尼拉',
+  'Asia/Seoul': '首尔 首爾',
+  'Asia/Shanghai': '上海 北京',
+  'Asia/Singapore': '新加坡',
+  'Asia/Taipei': '台北 臺北',
+  'Asia/Tokyo': '东京 東京',
+  'Australia/Brisbane': '布里斯班',
+  'Australia/Melbourne': '墨尔本 墨爾本',
+  'Australia/Perth': '珀斯',
+  'Australia/Sydney': '悉尼 雪梨',
+  'Europe/Amsterdam': '阿姆斯特丹',
+  'Europe/Athens': '雅典',
+  'Europe/Berlin': '柏林',
+  'Europe/Brussels': '布鲁塞尔 布魯塞爾',
+  'Europe/Dublin': '都柏林',
+  'Europe/Helsinki': '赫尔辛基 赫爾辛基',
+  'Europe/Istanbul': '伊斯坦布尔 伊斯坦堡',
+  'Europe/Kiev': '基辅 基輔',
+  'Europe/Kyiv': '基辅 基輔',
+  'Europe/Lisbon': '里斯本',
+  'Europe/London': '伦敦 倫敦',
+  'Europe/Madrid': '马德里 馬德里',
+  'Europe/Moscow': '莫斯科',
+  'Europe/Oslo': '奥斯陆 奧斯陸',
+  'Europe/Paris': '巴黎',
+  'Europe/Prague': '布拉格',
+  'Europe/Rome': '罗马 羅馬',
+  'Europe/Stockholm': '斯德哥尔摩 斯德哥爾摩',
+  'Europe/Vienna': '维也纳 維也納',
+  'Europe/Warsaw': '华沙 華沙',
+  'Europe/Zurich': '苏黎世 蘇黎世',
+  'Pacific/Auckland': '奥克兰 奧克蘭',
+  'Pacific/Honolulu': '檀香山 火奴鲁鲁 火奴魯魯',
+}
+const cityNames = (id: string) =>
+  CHINESE_CITY_NAMES[id] ?? CHINESE_CITY_NAMES[currentZoneId(id)] ?? ''
+
 /**
  * Break opportunities after each slash; the stylesheet's `overflow-wrap: anywhere` still
  * splits a segment that is wider than a 320px option on its own, instead of overflowing.
@@ -81,7 +142,9 @@ export function matchTimeZones(zones: readonly string[], query: string): string[
   const words = normalize(query)
     .split(/[\s/]+/)
     .filter(Boolean)
-  return zones.filter((zone) => words.every((word) => normalize(zone).includes(word)))
+  return zones.filter((zone) =>
+    words.every((word) => normalize(`${zone} ${cityNames(zone)}`).includes(word)),
+  )
 }
 
 interface Zone {
@@ -103,7 +166,7 @@ function zoneInfo(id: string, now: number, referenceDate?: DateKey): Zone {
     name,
     offset,
     canonical: currentZoneId(id),
-    haystack: normalize(`${name} ${id} ${offset}`),
+    haystack: normalize(`${name} ${id} ${offset} ${cityNames(id)}`),
   }
 }
 
@@ -293,7 +356,7 @@ export function TimeZonePicker({
             aria-controls={`${id}-options`}
             aria-autocomplete="list"
             aria-activedescendant={open && shown[active] ? optionId(active) : undefined}
-            placeholder={editable ? undefined : t('Search by city or offset')}
+            placeholder={t('Search by city or offset')}
             autoComplete="off"
             spellCheck={false}
             value={text}

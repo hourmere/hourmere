@@ -58,6 +58,13 @@ function rule(selector: string, parent?: string) {
 }
 
 describe('responsive shell and shared CSS contract', () => {
+  it('insets the event list caption inside narrow table cards', () => {
+    const caption = rule('.table caption', '@container data-table not (min-width: 640px)')
+    expect(caption).toContain('padding-inline: var(--space-3);')
+    expect(caption).toContain('width: 100%;')
+    expect(rule('*,\n*::before,\n*::after')).toContain('box-sizing: border-box;')
+  })
+
   it('uses only whitelisted mobile-first viewport widths in every web stylesheet', () => {
     for (const { path, source } of sheets) {
       const media = blocks(source).filter(({ selector }) => selector.startsWith('@media'))

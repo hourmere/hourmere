@@ -226,7 +226,7 @@ export const common = {
   Reschedule: '改期',
   '{title}, {date}, {time}': '{title}，{date}，{time}',
   'Save your link to change or cancel': '保存用于更改或取消的链接',
-  'Search by city or offset': '按城市或时差搜索',
+  'Search by city or offset': '搜索城市（例如上海）或时差',
   'Search time zones': '搜索时区',
   'Show next month': '显示下个月',
   'Someone else just booked that time. Please pick another one.':
