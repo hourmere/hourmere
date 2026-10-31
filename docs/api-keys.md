@@ -127,19 +127,19 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
-| `GET /api/v1/analytics/bookings` | Session or API key | `full`, `read` |
-| `GET /api/v1/bookings` | Session or API key | `full`, `read`, `bookings` |
-| `GET /api/v1/bookings/{id}` | Session or API key | `full`, `read`, `bookings` |
-| `POST /api/v1/bookings/{id}/calendar-copy/retry` | Session or API key | `full`, `bookings` |
-| `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full`, `bookings` |
-| `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full`, `bookings` |
-| `POST /api/v1/bookings/{id}/reschedule` | Session or API key | `full`, `bookings` |
-| `GET /api/v1/bookings/{id}/slots` | Session or API key | `full`, `read`, `bookings` |
-| `GET /api/v1/bookings/manage` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
-| `POST /api/v1/bookings/manage/cancel` | Public or manage token; check a supplied key | `full`, `bookings` |
-| `POST /api/v1/bookings/manage/reschedule` | Public or manage token; check a supplied key | `full`, `bookings` |
-| `GET /api/v1/bookings/manage/slots` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
-| `GET /api/v1/calendar-connections` | Session or API key | `full`, `read` |
+| `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
+| `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
+| `POST /api/v1/bookings/{id}/calendar-copy/retry` | Session or API key | `full, bookings` |
+| `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full, bookings` |
+| `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full, bookings` |
+| `POST /api/v1/bookings/{id}/reschedule` | Session or API key | `full, bookings` |
+| `GET /api/v1/bookings/{id}/slots` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/bookings/manage` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/bookings/manage/cancel` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/bookings/manage/reschedule` | Public or manage token; check a supplied key | `full, bookings` |
+| `GET /api/v1/bookings/manage/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/calendar-connections` | Session or API key | `full, read` |
 | `DELETE /api/v1/calendar-connections/{id}` | Browser session only | — |
 | `POST /api/v1/calendar-connections/{id}/refresh` | Session or API key | `full` |
 | `POST /api/v1/calendar-connections/google/authorize` | Browser session only | — |
@@ -147,44 +147,44 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `PUT /api/v1/calendar-destination` | Session or API key | `full` |
 | `PATCH /api/v1/calendars/{id}` | Session or API key | `full` |
 | `POST /api/v1/calendars/{id}/sync` | Session or API key | `full` |
-| `GET /api/v1/conference-connections` | Session or API key | `full`, `read` |
+| `GET /api/v1/conference-connections` | Session or API key | `full, read` |
 | `DELETE /api/v1/conference-connections/{id}` | Browser session only | — |
 | `POST /api/v1/conference-connections/{id}/authorize-meetings` | Browser session only | — |
 | `POST /api/v1/conference-connections/{id}/reconnect` | Browser session only | — |
 | `POST /api/v1/conference-connections/{id}/refresh` | Browser session only | — |
 | `POST /api/v1/conference-connections/zoom/authorize` | Browser session only | — |
 | `POST /api/v1/conference-connections/zoom/authorize-meetings` | Browser session only | — |
-| `GET /api/v1/event-type-hosts` | Session or API key | `full`, `read` |
-| `GET /api/v1/event-types` | Session or API key | `full`, `read`, `bookings` |
+| `GET /api/v1/event-type-hosts` | Session or API key | `full, read` |
+| `GET /api/v1/event-types` | Session or API key | `full, read, bookings` |
 | `POST /api/v1/event-types` | Session or API key | `full` |
-| `GET /api/v1/event-types/{id}` | Session or API key | `full`, `read`, `bookings` |
+| `GET /api/v1/event-types/{id}` | Session or API key | `full, read, bookings` |
 | `DELETE /api/v1/event-types/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/event-types/{id}` | Session or API key | `full` |
 | `POST /api/v1/event-types/{id}/round-robin/activate` | Session or API key | `full` |
-| `GET /api/v1/instance` | Public; no key needed | `full`, `read`, `bookings` |
+| `GET /api/v1/instance` | Public; no key needed | `full, read, bookings` |
 | `GET /api/v1/mcp-oauth/connections` | Browser session only | — |
 | `DELETE /api/v1/mcp-oauth/connections/{id}` | Browser session only | — |
 | `POST /api/v1/mcp-oauth/consent` | Browser session only | — |
 | `POST /api/v1/mcp-oauth/request` | Browser session only | — |
 | `POST /api/v1/mcp-oauth/select` | Browser session only | — |
-| `GET /api/v1/me` | Session or API key | `full`, `read`, `bookings` |
-| `GET /api/v1/profile` | Session or API key | `full`, `read`, `bookings` |
+| `GET /api/v1/me` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/profile` | Session or API key | `full, read, bookings` |
 | `PUT /api/v1/profile` | Session or API key | `full` |
 | `PATCH /api/v1/profile/name` | Session or API key | `full` |
-| `GET /api/v1/public/{handle}` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
-| `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
-| `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full`, `bookings` |
-| `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
-| `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
-| `POST /api/v1/public/teams/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full`, `bookings` |
-| `GET /api/v1/public/teams/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full`, `read`, `bookings` |
+| `GET /api/v1/public/{handle}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
+| `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/public/teams/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
+| `GET /api/v1/public/teams/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/readiness/self` | Browser session only | — |
-| `GET /api/v1/schedules` | Session or API key | `full`, `read` |
+| `GET /api/v1/schedules` | Session or API key | `full, read` |
 | `POST /api/v1/schedules` | Session or API key | `full` |
-| `GET /api/v1/schedules/{id}` | Session or API key | `full`, `read` |
+| `GET /api/v1/schedules/{id}` | Session or API key | `full, read` |
 | `DELETE /api/v1/schedules/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/schedules/{id}` | Session or API key | `full` |
-| `GET /api/v1/schedules/{id}/overrides` | Session or API key | `full`, `read` |
+| `GET /api/v1/schedules/{id}/overrides` | Session or API key | `full, read` |
 | `PUT /api/v1/schedules/{id}/overrides/{date}` | Session or API key | `full` |
 | `DELETE /api/v1/schedules/{id}/overrides/{date}` | Session or API key | `full` |
 | `POST /api/v1/schedules/default` | Session or API key | `full` |
@@ -200,41 +200,41 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `POST /api/v1/teams/{teamId}/leave` | Browser session only | — |
 | `GET /api/v1/teams/{teamId}/member-readiness` | Browser session only | — |
 | `GET /api/v1/teams/{teamId}/readiness` | Browser session only | — |
-| `GET /api/v1/webhooks` | Session or API key | `full`, `read` |
+| `GET /api/v1/webhooks` | Session or API key | `full, read` |
 | `POST /api/v1/webhooks` | Session or API key | `full` |
 | `DELETE /api/v1/webhooks/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |
-| `GET /api/v1/webhooks/{id}/deliveries` | Session or API key | `full`, `read` |
+| `GET /api/v1/webhooks/{id}/deliveries` | Session or API key | `full, read` |
 | `POST /api/v1/webhooks/{id}/rotate-secret` | Session or API key | `full` |
-| `GET /api/v1/openapi.json` | Public; no key needed | `full`, `read`, `bookings` |
+| `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
 
 ### MCP tools and CLI commands
 
-| MCP tool / mode | CLI command | Allowed key scopes |
-| --- | --- | --- |
-| `whoami` | `whoami` | `full`, `read`, `bookings` |
-| `find_available_slots` | `slots` | `full`, `read`, `bookings` |
-| `find_available_slots` / `personal` | `slots` | `full`, `read`, `bookings` |
-| `find_available_slots` / `team` | `slots` | `full`, `read`, `bookings` |
-| `create_booking` | `book` | `full`, `bookings` |
-| `create_booking` / `personal` | `book` | `full`, `bookings` |
-| `create_booking` / `team` | `book` | `full`, `bookings` |
-| `reschedule_booking` | `reschedule` | `full`, `bookings` |
-| `reschedule_booking` / `host` | `reschedule` | `full`, `bookings` |
-| `reschedule_booking` / `manageToken` | `reschedule` | `full`, `bookings` |
-| `cancel_booking` | `cancel` | `full`, `bookings` |
-| `cancel_booking` / `host` | `cancel` | `full`, `bookings` |
-| `cancel_booking` / `manageToken` | `cancel` | `full`, `bookings` |
-| `list_bookings` | `list` | `full`, `read`, `bookings` |
-| `retry_conference` | `retry-meeting` | `full`, `bookings` |
-| `retry_calendar_copy` | `retry-calendar-copy` | `full`, `bookings` |
-| `get_profile` | `profile` | `full`, `read`, `bookings` |
-| `list_event_types` | `catalog` | `full`, `read`, `bookings` |
-| `get_event_type` | `event` | `full`, `read`, `bookings` |
-| `list_schedules` | `schedules` | `full`, `read` |
-| `get_schedule` | `schedule` | `full`, `read` |
-| `list_calendar_connections` | — | `full`, `read` |
-| `list_conference_connections` | — | `full`, `read` |
+| MCP tool | Mode | CLI command | Allowed key scopes |
+| --- | --- | --- | --- |
+| `whoami` | — | `whoami` | `full, read, bookings` |
+| `find_available_slots` | — | `slots` | `full, read, bookings` |
+| `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
+| `find_available_slots` | `team` | `slots` | `full, read, bookings` |
+| `create_booking` | — | `book` | `full, bookings` |
+| `create_booking` | `personal` | `book` | `full, bookings` |
+| `create_booking` | `team` | `book` | `full, bookings` |
+| `reschedule_booking` | — | `reschedule` | `full, bookings` |
+| `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
+| `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |
+| `cancel_booking` | — | `cancel` | `full, bookings` |
+| `cancel_booking` | `host` | `cancel` | `full, bookings` |
+| `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
+| `list_bookings` | — | `list` | `full, read, bookings` |
+| `retry_conference` | — | `retry-meeting` | `full, bookings` |
+| `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
+| `get_profile` | — | `profile` | `full, read, bookings` |
+| `list_event_types` | — | `catalog` | `full, read, bookings` |
+| `get_event_type` | — | `event` | `full, read, bookings` |
+| `list_schedules` | — | `schedules` | `full, read` |
+| `get_schedule` | — | `schedule` | `full, read` |
+| `list_calendar_connections` | — | — | `full, read` |
+| `list_conference_connections` | — | — | `full, read` |
 
 ### Native protocol boundaries
 

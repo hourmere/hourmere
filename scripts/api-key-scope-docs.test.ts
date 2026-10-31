@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { createSatteriMarkdownProcessor } from '@astrojs/markdown-satteri'
 import { describe, expect, it } from 'vitest'
 import {
   renderScopeTables,
@@ -57,7 +58,7 @@ function sourceCopy(options: { renderer?: Replacement; registry?: Replacement } 
 }
 
 function changedDocument(document: string): string {
-  const needle = '| `full`, `read`, `bookings` |'
+  const needle = '| `full, read, bookings` |'
   expect(document.includes(needle), 'published scope mutation anchor').toBe(true)
   return document.replace(needle, '| `full` |')
 }
@@ -72,6 +73,28 @@ function verifyDriftRejected(renderer: Renderer) {
   for (const { path, section, document } of documents) {
     expect(renderer.scopeDocumentationMatches(changedDocument(document), section), path).toBe(false)
   }
+}
+
+async function verifyRenderedCells(render: typeof renderScopeTables) {
+  const processor = await createSatteriMarkdownProcessor({ syntaxHighlight: false })
+  const { code: html } = await processor.render(render('mcp'))
+  const rows = [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+    .map(([, row]) => [...(row ?? '').matchAll(/<td>([\s\S]*?)<\/td>/g)].map(([, cell]) => cell))
+    .filter((cells) => cells.length > 0)
+  expect(rows).toHaveLength(23)
+  for (const cells of rows) {
+    expect(cells).toHaveLength(4)
+    expect(cells[0]).toMatch(/^<code>\w+<\/code>$/)
+    expect(cells[1]).toMatch(/^(?:<code>\w+<\/code>|—)$/)
+    expect(cells[2]).toMatch(/^(?:<code>[\w, -]+<\/code>|—)$/)
+    expect(cells[3]).toMatch(/^<code>(?:full|read|bookings)(?:, (?:full|read|bookings))*<\/code>$/)
+  }
+  expect(rows).toContainEqual([
+    '<code>reschedule_booking</code>',
+    '<code>host</code>',
+    '<code>reschedule</code>',
+    '<code>full, bookings</code>',
+  ])
 }
 
 describe('published API key scope tables', () => {
@@ -89,10 +112,14 @@ describe('published API key scope tables', () => {
 
   it('publishes every MCP mode and each native REST boundary from the registry', () => {
     const rendered = renderScopeTables('all')
-    expect(rendered).toContain('`reschedule_booking` / `host`')
-    expect(rendered).toContain('`reschedule_booking` / `manageToken`')
+    expect(rendered).toContain('`reschedule_booking` | `host`')
+    expect(rendered).toContain('`reschedule_booking` | `manageToken`')
     expect(rendered).toContain('`GET /api/health` | Public health check; no key needed')
     expect(rendered).toContain('`POST /api/conference/zoom/events` | Provider signature')
+  })
+
+  it('renders scope lists in one code span with tool modes in separate cells', async () => {
+    await verifyRenderedCells(renderScopeTables)
   })
 
   it('preserves prose outside the generated section', () => {
@@ -114,6 +141,31 @@ describe('published API key scope tables', () => {
 })
 
 describe('scope documentation source-copy mutation checks', () => {
+  it('kills splitting rendered scope lists into code spans with plain separators', async () => {
+    await verifyRenderedCells(sourceCopy().renderScopeTables)
+    await expect(
+      verifyRenderedCells(
+        sourceCopy({
+          renderer: ["code(values.join(', '))", "values.map(code).join(', ')"],
+        }).renderScopeTables,
+      ),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await verifyRenderedCells(sourceCopy().renderScopeTables)
+  })
+
+  it('kills joining a tool and mode inside one rendered cell', async () => {
+    await expect(
+      verifyRenderedCells(
+        sourceCopy({
+          renderer: [
+            'code(operation.tool),',
+            "code(operation.tool) + (operation.mode === undefined ? '' : ' / ' + code(operation.mode)),",
+          ],
+        }).renderScopeTables,
+      ),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await verifyRenderedCells(sourceCopy().renderScopeTables)
+  })
   it('accepts the unmodified copies and rejects altered document copies', () => {
     verifyPublishedTables(sourceCopy())
     verifyDriftRejected(sourceCopy())

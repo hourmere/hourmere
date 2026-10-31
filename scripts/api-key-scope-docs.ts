@@ -48,7 +48,9 @@ export const SCOPE_TABLE_START = '<!-- api-key-scope-table:start -->'
 export const SCOPE_TABLE_END = '<!-- api-key-scope-table:end -->'
 
 const code = (value: string) => `\`${value}\``
-const scopes = (operation: ApiKeyOperation) => operation.allowedScopes.map(code).join(', ') || '—'
+const codeList = (values: readonly string[]) =>
+  values.length === 0 ? '—' : code(values.join(', '))
+const scopes = (operation: ApiKeyOperation) => codeList(operation.allowedScopes)
 
 function table(headers: readonly string[], rows: readonly (readonly string[])[]): string {
   return [headers, headers.map(() => '---'), ...rows]
@@ -62,13 +64,15 @@ export function renderScopeTables(
   policy: ScopeDocumentationPolicy = SCOPE_DOCUMENTATION_POLICY,
 ): string {
   const mcp = table(
-    ['MCP tool / mode', 'CLI command', 'Allowed key scopes'],
+    ['MCP tool', 'Mode', 'CLI command', 'Allowed key scopes'],
     policy.mcp.map((operation) => [
-      code(operation.tool) + (operation.mode === undefined ? '' : ` / ${code(operation.mode)}`),
-      policy.cli
-        .filter((command) => command.tool === operation.tool)
-        .map((command) => code(command.command))
-        .join(', ') || '—',
+      code(operation.tool),
+      operation.mode === undefined ? '—' : code(operation.mode),
+      codeList(
+        policy.cli
+          .filter((command) => command.tool === operation.tool)
+          .map((command) => command.command),
+      ),
       scopes(operation),
     ]),
   )

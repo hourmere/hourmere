@@ -68,31 +68,31 @@ notifications and trigger configured integrations.
 
 <!-- api-key-scope-table:start -->
 
-| MCP tool / mode | CLI command | Allowed key scopes |
-| --- | --- | --- |
-| `whoami` | `whoami` | `full`, `read`, `bookings` |
-| `find_available_slots` | `slots` | `full`, `read`, `bookings` |
-| `find_available_slots` / `personal` | `slots` | `full`, `read`, `bookings` |
-| `find_available_slots` / `team` | `slots` | `full`, `read`, `bookings` |
-| `create_booking` | `book` | `full`, `bookings` |
-| `create_booking` / `personal` | `book` | `full`, `bookings` |
-| `create_booking` / `team` | `book` | `full`, `bookings` |
-| `reschedule_booking` | `reschedule` | `full`, `bookings` |
-| `reschedule_booking` / `host` | `reschedule` | `full`, `bookings` |
-| `reschedule_booking` / `manageToken` | `reschedule` | `full`, `bookings` |
-| `cancel_booking` | `cancel` | `full`, `bookings` |
-| `cancel_booking` / `host` | `cancel` | `full`, `bookings` |
-| `cancel_booking` / `manageToken` | `cancel` | `full`, `bookings` |
-| `list_bookings` | `list` | `full`, `read`, `bookings` |
-| `retry_conference` | `retry-meeting` | `full`, `bookings` |
-| `retry_calendar_copy` | `retry-calendar-copy` | `full`, `bookings` |
-| `get_profile` | `profile` | `full`, `read`, `bookings` |
-| `list_event_types` | `catalog` | `full`, `read`, `bookings` |
-| `get_event_type` | `event` | `full`, `read`, `bookings` |
-| `list_schedules` | `schedules` | `full`, `read` |
-| `get_schedule` | `schedule` | `full`, `read` |
-| `list_calendar_connections` | — | `full`, `read` |
-| `list_conference_connections` | — | `full`, `read` |
+| MCP tool | Mode | CLI command | Allowed key scopes |
+| --- | --- | --- | --- |
+| `whoami` | — | `whoami` | `full, read, bookings` |
+| `find_available_slots` | — | `slots` | `full, read, bookings` |
+| `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
+| `find_available_slots` | `team` | `slots` | `full, read, bookings` |
+| `create_booking` | — | `book` | `full, bookings` |
+| `create_booking` | `personal` | `book` | `full, bookings` |
+| `create_booking` | `team` | `book` | `full, bookings` |
+| `reschedule_booking` | — | `reschedule` | `full, bookings` |
+| `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
+| `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |
+| `cancel_booking` | — | `cancel` | `full, bookings` |
+| `cancel_booking` | `host` | `cancel` | `full, bookings` |
+| `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
+| `list_bookings` | — | `list` | `full, read, bookings` |
+| `retry_conference` | — | `retry-meeting` | `full, bookings` |
+| `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
+| `get_profile` | — | `profile` | `full, read, bookings` |
+| `list_event_types` | — | `catalog` | `full, read, bookings` |
+| `get_event_type` | — | `event` | `full, read, bookings` |
+| `list_schedules` | — | `schedules` | `full, read` |
+| `get_schedule` | — | `schedule` | `full, read` |
+| `list_calendar_connections` | — | — | `full, read` |
+| `list_conference_connections` | — | — | `full, read` |
 
 <!-- api-key-scope-table:end -->
 
