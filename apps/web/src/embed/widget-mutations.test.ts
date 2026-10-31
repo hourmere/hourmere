@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { explicitLanguage } from '@hourmere/core/language'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { randomHex } from '../random.ts'
 import { widgetLanguage, widgetMessages } from './language.ts'
 import type * as Widget from './widget.ts'
@@ -96,5 +96,133 @@ describe('widget source-copy mutation controls', () => {
     expect(() => verify(sourceCopy(mutate))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+  it.each([
+    {
+      name: 'bounded readiness wait',
+      mutate: (source: string) => source.replace('}, 5000)', '}, 500000)'),
+      verify: (iframe: HTMLIFrameElement) => {
+        expect(iframe.inert).toBe(false)
+        expect(iframe.hasAttribute('tabindex')).toBe(false)
+        expect(iframe.style.pointerEvents).toBe('')
+      },
+    },
+    {
+      name: 'restricted fallback sandbox',
+      mutate: (source: string) =>
+        source.replace(
+          "iframe = retiring.cloneNode(false) as HTMLIFrameElement\n        iframe.setAttribute('sandbox', sandbox)",
+          'iframe = retiring.cloneNode(false) as HTMLIFrameElement',
+        ),
+      verify: (iframe: HTMLIFrameElement) =>
+        expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation'),
+    },
+    {
+      name: 'restricted fallback marker',
+      mutate: (source: string) =>
+        source.replace(
+          "target.searchParams.set('parentRedirect', 'disabled')\n        id = randomHex(16)",
+          'id = randomHex(16)',
+        ),
+      verify: (iframe: HTMLIFrameElement) =>
+        expect(new URL(iframe.src).searchParams.get('parentRedirect')).toBe('disabled'),
+    },
+    {
+      name: 'retired privileged browsing context removal',
+      mutate: (source: string) =>
+        source.replace('retiring.replaceWith(iframe)', 'retiring.after(iframe)'),
+      verify: (iframe: HTMLIFrameElement) =>
+        expect(iframe.parentElement?.querySelectorAll('iframe')).toHaveLength(1),
+    },
+    {
+      name: 'retired downgraded browsing context removal',
+      mutate: (source: string) =>
+        source.replace('if (parentNavigation || downgraded)', 'if (parentNavigation)'),
+      verify: (iframe: HTMLIFrameElement) => expect(iframe.isConnected).toBe(false),
+    },
+    {
+      name: 'no late reload after input becomes available',
+      mutate: (source: string) => source.replace('if (ready ||', 'if (false ||'),
+      verify: (iframe: HTMLIFrameElement) => {
+        const original = iframe.src
+        const src = new URL(original)
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: src.origin,
+            source: iframe.contentWindow,
+            data: {
+              type: 'hourmere:ready',
+              id: src.searchParams.get('embedId'),
+              allowEmbedParent: true,
+            },
+          }),
+        )
+        expect(iframe.src).toBe(original)
+      },
+    },
+    {
+      name: 'destroyed frame timer cleanup',
+      mutate: (source: string) =>
+        source.replace('destroyed = true\n      clearTimeout(readyTimeout)', 'destroyed = true'),
+      verify: (_iframe: HTMLIFrameElement, destroy: () => void) => {
+        destroy()
+        expect(vi.getTimerCount()).toBe(0)
+      },
+    },
+  ])('detects removing $name with a real assertion failure', ({ name, mutate, verify }) => {
+    vi.useFakeTimers()
+    const check = (module: typeof Widget) => {
+      const element = document.createElement('div')
+      document.body.append(element)
+      const handle = module.initInline({ element, url: 'https://hourmere.test/ada/intro' })
+      const retiring = handle.iframe
+      try {
+        if (name !== 'destroyed frame timer cleanup') {
+          const src = new URL(handle.iframe.src)
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              origin: src.origin,
+              source: handle.iframe.contentWindow,
+              data: {
+                type: 'hourmere:ready',
+                id: src.searchParams.get('embedId'),
+                allowEmbedParent: true,
+              },
+            }),
+          )
+          if (name === 'retired downgraded browsing context removal') {
+            const upgraded = new URL(handle.iframe.src)
+            window.dispatchEvent(
+              new MessageEvent('message', {
+                origin: upgraded.origin,
+                source: handle.iframe.contentWindow,
+                data: {
+                  type: 'hourmere:ready',
+                  id: upgraded.searchParams.get('embedId'),
+                  allowEmbedParent: false,
+                },
+              }),
+            )
+          }
+          vi.advanceTimersByTime(5000)
+        }
+        verify(
+          name === 'retired downgraded browsing context removal' ? retiring : handle.iframe,
+          handle.destroy,
+        )
+      } finally {
+        handle.destroy()
+        element.remove()
+        vi.clearAllTimers()
+      }
+    }
+    try {
+      check(sourceCopy((source) => `${source}\n// baseline source copy`))
+      expect(() => check(sourceCopy(mutate))).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

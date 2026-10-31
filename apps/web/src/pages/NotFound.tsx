@@ -1,13 +1,19 @@
-import { Link } from 'react-router'
+import { useEffect } from 'react'
+import { Link, useLocation } from 'react-router'
 import { Logo } from '../components/Logo.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
+import { notifyEmbedReady } from '../public/embed-context.ts'
 
 export function NotFoundPage() {
   const { t } = useI18n()
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (pathname.startsWith('/embed/')) notifyEmbedReady(false)
+  }, [pathname])
 
   usePageTitle('Page not found')
   return (

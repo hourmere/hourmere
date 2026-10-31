@@ -91,7 +91,10 @@ describe('the saved booking success redirect', () => {
     )
   })
   it.each([
+    ['embedId=abcdefghijklmnop1234', '_blank', 'a new tab'],
+    ['embedId=', '_blank', 'a new tab'],
     ['parentRedirect=enabled', '_top', 'the parent page'],
+    ['embedId=abcdefghijklmnop1234&parentRedirect=enabled', '_top', 'the parent page'],
     ['parentRedirect=disabled', '_blank', 'a new tab'],
     ['parentRedirect=true', '_blank', 'a new tab'],
     ['parentRedirect=enabled&parentRedirect=enabled', '_blank', 'a new tab'],

@@ -5,7 +5,7 @@ import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
-import { useEmbedded } from './embed-context.ts'
+import { notifyEmbedReady, useEmbedded } from './embed-context.ts'
 import { PublicLanguageSwitcher } from './PublicLanguageSwitcher.tsx'
 import './public.css'
 
@@ -146,6 +146,10 @@ export function PublicStatus({ children }: { children: ReactNode }) {
 /** Unknown host or event type: say so plainly, without links into the signed-in app. */
 export function PublicNotFound({ what = 'page' }: { what?: 'page' | 'event' }) {
   const { t } = useI18n()
+  const embedded = useEmbedded()
+  useEffect(() => {
+    if (embedded) notifyEmbedReady(false)
+  }, [embedded])
 
   usePageTitle('Page not found')
   return (

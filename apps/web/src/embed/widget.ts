@@ -181,7 +181,7 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   const target = iframeUrl(url, window.location.origin, id, selectedLanguage)
   target.searchParams.set('parentRedirect', 'disabled')
   mounted.get(element)?.destroy()
-  const iframe = document.createElement('iframe')
+  let iframe = document.createElement('iframe')
   iframe.title = widgetMessages(selectedLanguage).iframe
   iframe.referrerPolicy = 'no-referrer'
   iframe.setAttribute('allow', 'clipboard-write')
@@ -205,12 +205,42 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   let ready = false
   let parentNavigation = false
   let downgraded = false
+  let readyTimeout: ReturnType<typeof setTimeout>
+  const enableInput = () => {
+    clearTimeout(readyTimeout)
+    ready = true
+    iframe.inert = false
+    iframe.removeAttribute('tabindex')
+    iframe.style.removeProperty('pointer-events')
+  }
+  const awaitReady = () => {
+    clearTimeout(readyTimeout)
+    readyTimeout = setTimeout(() => {
+      // A failed bundle or stalled request must not disable the error page's controls.
+      // Once input is available, a late opt-in must never reload away visitor input.
+      if (parentNavigation || downgraded) {
+        parentNavigation = false
+        // A sandbox change or src assignment cannot revoke the active document's
+        // permissions. Remove its browsing context before enabling the replacement.
+        const retiring = iframe
+        iframe = retiring.cloneNode(false) as HTMLIFrameElement
+        iframe.setAttribute('sandbox', sandbox)
+        target.searchParams.set('parentRedirect', 'disabled')
+        id = randomHex(16)
+        target.searchParams.set('embedId', id)
+        iframe.src = target.href
+        retiring.replaceWith(iframe)
+      }
+      enableInput()
+    }, 5000)
+  }
   const reload = () => {
     // Window identity survives navigation. Rotate the correlation ID so queued messages
     // from the retiring document cannot enable input in the new frame before it is ready.
     id = randomHex(16)
     target.searchParams.set('embedId', id)
     iframe.src = target.href
+    awaitReady()
   }
   const receive = (event: MessageEvent<unknown>) => {
     if (
@@ -246,10 +276,7 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
         reload()
         return
       }
-      ready = true
-      iframe.inert = false
-      iframe.removeAttribute('tabindex')
-      iframe.style.removeProperty('pointer-events')
+      enableInput()
       return
     }
     if (
@@ -275,10 +302,13 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
     }
   }
   const handle: EmbedHandle = {
-    iframe,
+    get iframe() {
+      return iframe
+    },
     destroy() {
       if (destroyed) return
       destroyed = true
+      clearTimeout(readyTimeout)
       window.removeEventListener('message', receive)
       iframe.remove()
       if (mounted.get(element) === handle) mounted.delete(element)
@@ -286,6 +316,7 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   }
   window.addEventListener('message', receive)
   element.append(iframe)
+  awaitReady()
   mounted.set(element, handle)
   return handle
 }

@@ -37,7 +37,12 @@ export function notifyEmbedReady(allowEmbedParent: boolean) {
 }
 /** The widget marker can only narrow saved permission, including after a policy race. */
 export function embedParentRedirectAllowed() {
-  const values = new URLSearchParams(window.location.search).getAll('parentRedirect')
-  // Manual iframe integrations have no widget marker and own their sandbox configuration.
-  return values.length === 0 || (values.length === 1 && values[0] === 'enabled')
+  const query = new URLSearchParams(window.location.search),
+    values = query.getAll('parentRedirect')
+  // Legacy widgets have an embed ID but cannot grant parent navigation. Manual iframe
+  // integrations have neither marker and own their sandbox configuration.
+  return (
+    (values.length === 0 && !query.has('embedId')) ||
+    (values.length === 1 && values[0] === 'enabled')
+  )
 }

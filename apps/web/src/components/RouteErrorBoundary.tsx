@@ -5,12 +5,17 @@ import { reloadPage } from '../browser.ts'
 import { usePageTitle } from '../hooks.ts'
 import { EmbedLanguage, useI18n } from '../i18n/runtime.tsx'
 import { PATHS } from '../paths.ts'
+import { notifyEmbedReady } from '../public/embed-context.ts'
 import { Logo } from './Logo.tsx'
 import { RouteErrorScope, ScopedRouteErrorBoundary } from './route-error-scope.tsx'
 
 function ErrorFallback() {
   const { locale, t } = useI18n()
+  const { pathname } = useLocation()
   usePageTitle('Something went wrong')
+  useEffect(() => {
+    if (pathname.startsWith('/embed/')) notifyEmbedReady(false)
+  }, [pathname])
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])

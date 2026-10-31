@@ -358,6 +358,14 @@ opt-in triggers a restrictive reload, with further upgrades disabled for that in
 Ordinary event types retain the default sandbox. A widget marker records the active
 permission, so enabling the saved opt-in after loading a restrictive frame still opens
 Continue in a new tab. Loading and server-error text remains visible during the handshake.
+Error, not-found and unavailable embedded pages signal readiness with the capability false.
+If readiness does not arrive within five seconds, the widget enables input with the
+restrictive sandbox, replacing the iframe first if a permission upgrade was in progress
+so the retiring document cannot retain navigation permission.
+Later readiness cannot trigger a reload after input becomes available. An embed instance
+ID without the permission marker identifies a legacy widget and keeps Continue in a new
+tab. The widget script is served with `Cache-Control: no-cache` and ETag validation so
+protocol upgrades reach returning visitors.
 The ready message carries only that
 capability; no redirect URL or personal data is added to the embed completion message.
 Canceling from the confirmation removes the continuation link.

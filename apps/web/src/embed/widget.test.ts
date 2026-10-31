@@ -35,11 +35,18 @@ function mount(raw = url) {
   document.body.append(element)
   const handle = initInline({ element, url: raw })
   handles.push(handle)
-  return { element, ...handle }
+  return {
+    element,
+    get iframe() {
+      return handle.iframe
+    },
+    destroy: handle.destroy,
+  }
 }
 afterEach(() => {
   closePopup()
   for (const handle of handles.splice(0)) handle.destroy()
+  vi.useRealTimers()
   document.body.replaceChildren()
   document.documentElement.removeAttribute('lang')
   document.documentElement.removeAttribute('style')
@@ -205,6 +212,104 @@ describe('standalone booking widget', () => {
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
     expect(setSrc).not.toHaveBeenCalled()
     expect(iframe.inert).toBe(true)
+  })
+  it('enables input after five seconds without ready and ignores a late opt-in', () => {
+    vi.useFakeTimers()
+    const { iframe } = mount(),
+      src = new URL(iframe.src),
+      setSrc = vi.spyOn(iframe, 'src', 'set')
+    vi.advanceTimersByTime(4999)
+    expect(iframe.inert).toBe(true)
+    expect(iframe.tabIndex).toBe(-1)
+    expect(iframe.style.pointerEvents).toBe('none')
+    vi.advanceTimersByTime(1)
+    expect(iframe.inert).toBe(false)
+    expect(iframe.hasAttribute('tabindex')).toBe(false)
+    expect(iframe.style.pointerEvents).toBe('')
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(new URL(iframe.src).searchParams.get('parentRedirect')).toBe('disabled')
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: src.origin,
+        source: iframe.contentWindow,
+        data: {
+          type: 'hourmere:ready',
+          id: src.searchParams.get('embedId'),
+          allowEmbedParent: true,
+        },
+      }),
+    )
+    expect(setSrc).not.toHaveBeenCalled()
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it.each([false, true])('replaces a stalled permission reload (downgraded: %s)', (downgrade) => {
+    vi.useFakeTimers()
+    const handle = mount(),
+      retiring = handle.iframe,
+      iframe = retiring,
+      initial = new URL(iframe.src),
+      setSrc = vi.spyOn(iframe, 'src', 'set'),
+      send = (id: string | null, allowEmbedParent = true) =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: initial.origin,
+            source: handle.iframe.contentWindow,
+            data: { type: 'hourmere:ready', id, allowEmbedParent },
+          }),
+        )
+    vi.advanceTimersByTime(4000)
+    send(initial.searchParams.get('embedId'))
+    const upgraded = new URL(iframe.src)
+    if (downgrade) send(upgraded.searchParams.get('embedId'), false)
+    const pending = new URL(iframe.src)
+    vi.advanceTimersByTime(4999)
+    expect(iframe.inert).toBe(true)
+    vi.advanceTimersByTime(1)
+    const replacement = handle.iframe,
+      fallback = new URL(replacement.src)
+    expect(replacement).not.toBe(retiring)
+    expect(retiring.isConnected).toBe(false)
+    expect(retiring.inert).toBe(true)
+    expect(retiring.style.pointerEvents).toBe('none')
+    expect(replacement.isConnected).toBe(true)
+    expect(replacement.inert).toBe(false)
+    expect(replacement.style.pointerEvents).toBe('')
+    expect(replacement.hasAttribute('tabindex')).toBe(false)
+    expect(replacement.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(fallback.searchParams.get('parentRedirect')).toBe('disabled')
+    expect(fallback.searchParams.get('embedId')).not.toBe(pending.searchParams.get('embedId'))
+    expect(fallback.origin + fallback.pathname).toBe(initial.origin + initial.pathname)
+    expect(setSrc).toHaveBeenCalledTimes(downgrade ? 2 : 1)
+    send(upgraded.searchParams.get('embedId'))
+    send(pending.searchParams.get('embedId'))
+    send(fallback.searchParams.get('embedId'))
+    expect(setSrc).toHaveBeenCalledTimes(downgrade ? 2 : 1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('cancels the fallback when ready arrives or the frame is destroyed', () => {
+    vi.useFakeTimers()
+    const first = mount(),
+      src = new URL(first.iframe.src)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: src.origin,
+        source: first.iframe.contentWindow,
+        data: {
+          type: 'hourmere:ready',
+          id: src.searchParams.get('embedId'),
+          allowEmbedParent: false,
+        },
+      }),
+    )
+    expect(vi.getTimerCount()).toBe(0)
+    const second = mount(),
+      setSrc = vi.spyOn(second.iframe, 'src', 'set')
+    second.destroy()
+    expect(vi.getTimerCount()).toBe(0)
+    vi.advanceTimersByTime(5000)
+    expect(setSrc).not.toHaveBeenCalled()
+    expect(second.iframe.inert).toBe(true)
   })
   it('uses the same saved capability handshake for popup frames', () => {
     stubDialogs()

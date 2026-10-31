@@ -16,41 +16,52 @@ afterEach(() => window.history.replaceState(null, '', '/'))
 describe('child embed message context', () => {
   it.each([
     ['', true],
+    ['?embedId=abcdefghijklmnop1234', false],
+    ['?embedId=', false],
+    ['?embedId=abcdefghijklmnop1234&embedId=abcdefghijklmnop1234', false],
     ['?parentRedirect=enabled', true],
+    ['?embedId=abcdefghijklmnop1234&parentRedirect=enabled', true],
     ['?parentRedirect=disabled', false],
     ['?parentRedirect=true', false],
     ['?parentRedirect=', false],
     ['?parentRedirect=enabled&parentRedirect=enabled', false],
-  ])('only honors an absent manual marker or one enabled widget marker (%s)', (query, allowed) => {
+  ])('only honors a manual iframe or one enabled widget marker (%s)', (query, allowed) => {
     window.history.replaceState(null, '', `/embed/ada/intro${query}`)
     expect(embedParentRedirectAllowed()).toBe(allowed)
   })
-  it('detects removal of the active-widget restriction with a real source-copy assertion failure', () => {
-    const original = readFileSync('apps/web/src/public/embed-context.ts', 'utf8')
-    const modified = original.replace(
-      "return values.length === 0 || (values.length === 1 && values[0] === 'enabled')",
-      'return true',
-    )
-    expect(modified).not.toBe(original)
-    const source = stripTypeScriptTypes(modified)
-      .replace(/^import .*\n/gm, '')
-      .replace(/^export /gm, '')
-    const copy = new Function(
-      'EMBED_ID',
-      'embedOrigin',
-      'explicitLanguage',
-      'createContext',
-      'useContext',
-      `${source}\nreturn { embedParentRedirectAllowed }`,
-    )(EMBED_ID, embedOrigin, explicitLanguage, createContext, useContext) as {
-      embedParentRedirectAllowed: typeof embedParentRedirectAllowed
-    }
-    window.history.replaceState(null, '', '/embed/ada/intro?parentRedirect=disabled')
-    expect(embedParentRedirectAllowed()).toBe(false)
-    expect(() => expect(copy.embedParentRedirectAllowed()).toBe(false)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
-  })
+  it.each([
+    [
+      "(values.length === 0 && !query.has('embedId')) ||\n    (values.length === 1 && values[0] === 'enabled')",
+      'true',
+      '?parentRedirect=disabled',
+    ],
+    [" && !query.has('embedId')", '', '?embedId=abcdefghijklmnop1234'],
+  ])(
+    'detects removal of a widget restriction with a real source-copy assertion failure (%s)',
+    (before, after, query) => {
+      const original = readFileSync('apps/web/src/public/embed-context.ts', 'utf8')
+      const modified = original.replace(before, after)
+      expect(modified).not.toBe(original)
+      const source = stripTypeScriptTypes(modified)
+        .replace(/^import .*\n/gm, '')
+        .replace(/^export /gm, '')
+      const copy = new Function(
+        'EMBED_ID',
+        'embedOrigin',
+        'explicitLanguage',
+        'createContext',
+        'useContext',
+        `${source}\nreturn { embedParentRedirectAllowed }`,
+      )(EMBED_ID, embedOrigin, explicitLanguage, createContext, useContext) as {
+        embedParentRedirectAllowed: typeof embedParentRedirectAllowed
+      }
+      window.history.replaceState(null, '', `/embed/ada/intro${query}`)
+      expect(embedParentRedirectAllowed()).toBe(false)
+      expect(() => expect(copy.embedParentRedirectAllowed()).toBe(false)).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    },
+  )
   it('discloses only the saved capability and correlation ID to the exact parent', () => {
     const postMessage = vi.fn()
     vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)

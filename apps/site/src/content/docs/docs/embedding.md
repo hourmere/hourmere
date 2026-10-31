@@ -121,8 +121,15 @@ unless the event type separately opts in to opening the parent page. The widget 
 user-activated top navigation only for that saved opt-in. It checks the capability before
 allowing input and reloads the same booking route when sandbox permissions change,
 before visitors can enter form data. Loading and server-error text remains visible.
+Error and unavailable pages signal readiness without granting parent navigation. If a page
+cannot finish loading or send readiness within five seconds, the widget enables input with
+the restricted sandbox; a stalled permission upgrade first replaces the frame with the
+restricted route, removing the old document's navigation permission.
+Late readiness never reloads a frame after input has been enabled.
 Enabling the opt-in after a restrictive frame has loaded keeps Continue in a new tab for
-that visit. Manual iframes must provide their own matching sandbox
+that visit. Older widgets that send an embed identifier without the permission marker also
+keep Continue in a new tab. The stable `hourmere-embed.js` URL is revalidated on every visit
+using `Cache-Control: no-cache` and an ETag. Manual iframes must provide their own matching sandbox
 permission to support this opt-in; the widget is recommended.
 
 If the operator tightens the redirect-host policy or changes the instance's public host,
