@@ -25,6 +25,7 @@ test.describe('successive isolated OAuth audit apps', () => {
 for (const viewport of [
   { width: 1280, height: 720 },
   { width: 390, height: 844 },
+  { width: 375, height: 812 },
   { width: 320, height: 256 },
 ]) {
   test.describe(`page preparation ${viewport.width}x${viewport.height}`, () => {
@@ -32,6 +33,8 @@ for (const viewport of [
     for (const locale of ['en-US', 'zh-CN'] as const)
       test(`prepare additional required page states ${locale}`, async ({ page, app }) => {
         const selectors = {
+          host: '.host-header > .host-avatar',
+          booking: '.event-title + .host-identity',
           'booking-form': '.details-step form input[type="email"]',
           'booking-confirmation': '.confirmation > .booking-details',
           'booking-time-zone': '.tz-panel [role="listbox"]:visible',
@@ -44,7 +47,26 @@ for (const viewport of [
           if (!(id in selectors)) continue
           const selector = selectors[id as keyof typeof selectors]
           await expect(page.locator(selector)).toBeVisible()
+          if (id === 'host')
+            await expect(page.locator('.host-header > .host-avatar + h1')).toBeVisible()
+          if (['booking', 'booking-form', 'embedded-booking'].includes(id))
+            await expect(page.locator('.event-title + .host-identity > .host-avatar')).toBeVisible()
+          if (
+            id === 'host' ||
+            ['booking', 'booking-form', 'booking-confirmation', 'embedded-booking'].includes(id)
+          ) {
+            const avatar = page.locator('.host-avatar')
+            await expect(avatar).toHaveAttribute('aria-hidden', 'true')
+            const bounds = await avatar.boundingBox()
+            const viewport = page.viewportSize()
+            if (!bounds || !viewport) throw new Error('Host avatar must have visible bounds')
+            expect(bounds.width).toBe(id === 'host' ? 64 : 48)
+            expect(bounds.height).toBe(bounds.width)
+            expect(bounds.x).toBeGreaterThanOrEqual(0)
+            expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width)
+          }
           if (id === 'booking-confirmation') {
+            await expect(page.locator('.confirmation > h1 + .host-identity')).toBeVisible()
             const supportingDetails = page.locator('.confirmation-secondary > .booking-details')
             await expect(supportingDetails).toBeVisible()
             await expect(page.locator(selector).locator('dt')).toHaveText(
@@ -76,14 +98,32 @@ for (const viewport of [
               }),
             ).toBe(true)
           }
-          if (id === 'team-booking')
+          if (id === 'team-booking') {
             await expect(page.locator(selector)).toHaveText(AUDIT_TEAM_NAME)
+            await expect(page.locator('.event-title + .host-identity > .event-host')).toBeVisible()
+            await expect(page.locator('.host-avatar')).toHaveCount(0)
+          }
           if (id === 'oauth-consent')
             await expect(page.locator(selector)).toHaveText(/^(Allow access|允许访问)$/)
           const viewport = page.viewportSize()
           if (!viewport) throw new Error('UI audit requires a CSS viewport')
           const findings = await page.evaluate(measureLayout, viewport)
           expect(findings.some((finding) => finding.code === 'scan-error')).toBe(false)
+          if (
+            [
+              'host',
+              'booking',
+              'booking-form',
+              'booking-confirmation',
+              'embedded-booking',
+              'team-booking',
+            ].includes(id)
+          )
+            expect(
+              findings.filter((finding) =>
+                ['document-overflow', 'element-overflow'].includes(finding.code),
+              ),
+            ).toEqual([])
         }
       })
   })

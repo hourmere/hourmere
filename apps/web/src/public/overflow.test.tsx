@@ -6,6 +6,7 @@ import { EVENT, eventRoutes, managed, TOKEN } from '../test/public-fixtures.ts'
 
 const publicStyles = readFileSync('apps/web/src/public/public.css', 'utf8')
 const pickerStyles = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
+const appStyles = readFileSync('apps/web/src/styles.css', 'utf8')
 
 /** Inspect the real declarations: jsdom does not calculate intrinsic sizes or scroll clipping. */
 function inspectStyles(css: string, inspect: (rules: CSSRule[]) => void) {
@@ -35,7 +36,71 @@ function declarations(rules: CSSRule[], selector: string) {
   return (rule as CSSStyleRule).style
 }
 
+function luminance(color: string) {
+  const channels = color
+    .slice(1)
+    .match(/../g)
+    ?.map((channel) => {
+      const value = Number.parseInt(channel, 16) / 255
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+    })
+  if (!/^#[\da-f]{6}$/i.test(color) || !channels) throw new Error(`Unsupported color: ${color}`)
+  return (channels[0] ?? 0) * 0.2126 + (channels[1] ?? 0) * 0.7152 + (channels[2] ?? 0) * 0.0722
+}
+
 describe('public overflow protections', () => {
+  it('keeps the avatar fixed while long host names can shrink and wrap beside it', () => {
+    inspectStyles(publicStyles, (rules) => {
+      const identity = declarations(rules, '.public .host-identity')
+      expect(identity.getPropertyValue('display')).toBe('flex')
+      const name = declarations(rules, '.public .host-identity > .event-host')
+      expect(name.getPropertyValue('min-width')).toBe('0px')
+      expect(name.getPropertyValue('overflow-wrap')).toBe('anywhere')
+      const avatar = declarations(rules, '.public .host-avatar')
+      expect(avatar.getPropertyValue('flex-shrink')).toBe('0')
+      expect(avatar.getPropertyValue('width')).toBe('48px')
+      expect(avatar.getPropertyValue('height')).toBe('48px')
+      const image = declarations(rules, '.public .host-avatar img')
+      expect(image.getPropertyValue('width')).toBe('100%')
+      expect(image.getPropertyValue('height')).toBe('100%')
+      expect(image.getPropertyValue('object-fit')).toBe('cover')
+    })
+  })
+
+  it('uses readable brand tokens for initials in both light and dark themes', () => {
+    inspectStyles(publicStyles, (rules) => {
+      const avatar = declarations(rules, '.public .host-avatar')
+      expect(avatar.getPropertyValue('background')).toBe('var(--accent-soft)')
+      expect(avatar.getPropertyValue('color')).toBe('var(--accent-soft-text)')
+      const name = declarations(rules, '.public .event-host')
+      expect(name.getPropertyValue('color')).toBe('var(--text)')
+      expect(name.getPropertyValue('font-size')).toBe('var(--text-lg)')
+    })
+    inspectStyles(appStyles, (rules) => {
+      const light = declarations(rules, ':root')
+      const dark = rules.find(
+        (rule) =>
+          'selectorText' in rule &&
+          (rule as CSSStyleRule).selectorText === ':root' &&
+          (rule.parentRule as CSSMediaRule | null)?.conditionText ===
+            '(prefers-color-scheme: dark)',
+      ) as CSSStyleRule | undefined
+      expect(dark).toBeDefined()
+      for (const theme of [light, (dark as CSSStyleRule).style]) {
+        const color = (name: string): string => {
+          const value = theme.getPropertyValue(name).trim() || light.getPropertyValue(name).trim()
+          const variable = /^var\((--[\w-]+)\)$/.exec(value)?.[1]
+          return variable ? color(variable) : value
+        }
+        const foreground = luminance(color('--accent-soft-text'))
+        const background = luminance(color('--accent-soft'))
+        expect(
+          (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05),
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+    })
+  })
+
   it('allows public action labels to wrap inside narrow cards', () => {
     inspectStyles(publicStyles, (rules) => {
       expect(declarations(rules, '.public .button').getPropertyValue('white-space')).toBe('normal')

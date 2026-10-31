@@ -1,3 +1,4 @@
+import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client.ts'
 import { LegalLinks } from '../components/LegalLinks.tsx'
@@ -8,6 +9,33 @@ import { useEmbedded } from './embed-context.ts'
 import './public.css'
 
 const HostedSignupUrl = createContext('https://hourmere.com')
+
+const nameGraphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/** Use whole graphemes so initials also work for non-Latin names and combining marks. */
+export function hostInitials(name: string): string {
+  const words = name.trim().split(/\s+/u).filter(Boolean)
+  const first = words[0]
+  if (!first) return '?'
+  const initial = (word: string) =>
+    nameGraphemes.segment(word)[Symbol.iterator]().next().value?.segment ?? ''
+  return (initial(first) + (words.length > 1 ? initial(words.at(-1) ?? '') : '')).toUpperCase()
+}
+
+/** The adjacent name labels the host; the avatar adds no repeated screen-reader content. */
+export function HostAvatar({ name, image }: { name: string; image?: string | null }) {
+  const src = publicAvatarImage(image)
+  const [failedImage, setFailedImage] = useState<string>()
+  return (
+    <span className="host-avatar" aria-hidden="true">
+      {src && failedImage !== src ? (
+        <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailedImage(src)} />
+      ) : (
+        hostInitials(name)
+      )}
+    </span>
+  )
+}
 
 /** A quiet, ordinary link: no booking details or management capability leave the page. */
 export function CreateBookingLink() {
