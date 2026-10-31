@@ -185,8 +185,10 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
       if (transcript.includes(steps[step]?.[0] ?? '\0')) {
         child.stdin.write(steps[step]?.[1])
         step++
-        if (step === steps.length) child.stdin.end()
       }
+      // BSD script can turn input EOF into Ctrl-D before cat forwards its last line.
+      // Keep input open until setup confirms that every answer was read and saved.
+      if (transcript.includes('Created private .env (mode 600).')) child.stdin.end()
     }
     child.stdout.on('data', output)
     child.stderr.on('data', output)
