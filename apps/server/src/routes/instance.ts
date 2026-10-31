@@ -3,6 +3,9 @@ import { json, type RouteModule } from '../openapi.ts'
 
 const Instance = z
   .object({
+    publicUrl: z.url().openapi({
+      description: 'The public origin of this instance, configured by its operator',
+    }),
     hostedSignupUrl: z.url().openapi({
       description: 'Hosted service destination for public attribution and sign-up links',
     }),
@@ -30,6 +33,7 @@ const Instance = z
  * secrets; the public hosted sign-up destination is safe to share.
  */
 export function instanceRoutes({
+  publicUrl,
   socialProviders,
   automaticMeet = false,
   automaticZoom = false,
@@ -37,6 +41,8 @@ export function instanceRoutes({
   privacyPolicyUrl,
   termsUrl,
 }: {
+  /** The normalized PUBLIC_URL, independent of request or forwarded host headers. */
+  publicUrl: string
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
   automaticMeet?: boolean
@@ -46,6 +52,7 @@ export function instanceRoutes({
   termsUrl?: string
 }): RouteModule {
   const body: z.infer<typeof Instance> = {
+    publicUrl,
     hostedSignupUrl,
     ...(privacyPolicyUrl && { privacyPolicyUrl }),
     ...(termsUrl && { termsUrl }),

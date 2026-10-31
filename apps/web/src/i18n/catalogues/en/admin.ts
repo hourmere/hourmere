@@ -51,6 +51,15 @@ export const admin = {
     'Complete your profile and display name in Settings first.',
   'Review your existing schedules and choose a valid default in Availability.':
     'Review your existing schedules and choose a valid default in Availability.',
+  'Use this key with MCP': 'Use this key with MCP',
+  'Loading MCP configuration…': 'Loading MCP configuration…',
+  'Could not load MCP configuration.': 'Could not load MCP configuration.',
+  'MCP client JSON': 'MCP client JSON',
+  'Copy MCP JSON': 'Copy MCP JSON',
+  'Claude Code command': 'Claude Code command',
+  'Copy Claude command': 'Copy Claude command',
+  'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.':
+    'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.',
   'Member readiness': 'Member readiness',
   'Default schedule set': 'Default schedule set',
   'No default schedule': 'No default schedule',

@@ -1,10 +1,14 @@
+import { spawnSync } from 'node:child_process'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import mcpDocs from '../../../../docs/mcp.md?raw'
 import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from '../../../../packages/auth/src/api-key-errors.ts'
+import siteMcpDocs from '../../../site/src/content/docs/docs/mcp.md?raw'
 import type { ApiKey } from '../api/auth.ts'
 import { chooseLanguage } from '../i18n/store.ts'
 import type { Me } from '../session.tsx'
+import styles from '../styles.css?raw'
 import { browserLocale } from '../test/browser-locale.ts'
 import {
   emptyTeamLists,
@@ -42,12 +46,27 @@ const TEAM = {
 const IN_TEAM: Me = { ...ME, organization: TEAM }
 
 /** Better Auth's API key endpoints over an in-memory list. */
-function keyServer(initial: ApiKey[] = [existing], me: Me = ME) {
+function keyServer(
+  initial: ApiKey[] = [existing],
+  me: Me = ME,
+  options: { publicUrl?: string; refresh?: Promise<Response> } = {},
+) {
   let keys = [...initial]
-  return fakeApi({
+  let reads = 0
+  const api = fakeApi({
     ...signedInAs(me),
     ...organizations([ME.organization, TEAM]),
-    'GET /api/auth/api-key/list': () => json(200, { apiKeys: keys, total: keys.length }),
+    ...emptyTeamLists,
+    ...profile(),
+    'GET /api/v1/instance': () =>
+      json(200, {
+        publicUrl: options.publicUrl ?? window.location.origin,
+        signIn: { email: true, google: false, microsoft: false },
+      }),
+    'GET /api/auth/api-key/list': () => {
+      if (reads++ > 0 && options.refresh) return options.refresh
+      return json(200, { apiKeys: keys, total: keys.length })
+    },
     'POST /api/auth/api-key/create': ({ body }) => {
       const { name, expiresIn, metadata } = body as {
         name: string
@@ -75,6 +94,12 @@ function keyServer(initial: ApiKey[] = [existing], me: Me = ME) {
       return json(200, { success: true })
     },
   })
+  return {
+    ...api,
+    removeExternally: (id: string) => {
+      keys = keys.filter((key) => key.id !== id)
+    },
+  }
 }
 
 const table = () => screen.findByRole('table')
@@ -194,7 +219,9 @@ describe('the API keys page', () => {
     expect(cells.getByText(ME.organization.name)).toBeDefined()
     expect(cells.getAllByText('Never')).toHaveLength(1) // expires never; it has been used
     expect(
-      screen.getByText(/curl -H "Authorization: Bearer hm_…" http:\/\/localhost:\d+\/api\/v1\/me/),
+      screen.getByText(
+        /curl -H "Authorization: Bearer hm_…" 'http:\/\/localhost:\d+\/api\/v1\/me'/,
+      ),
     ).toBeDefined()
   })
 
@@ -236,10 +263,14 @@ describe('the API keys page', () => {
       },
     ])
     const reveal = await screen.findByRole('region', { name: /Copy your new key “CI deploy bot”/ })
-    await vi.waitFor(() => expect(document.activeElement).toBe(within(reveal).getByRole('heading')))
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(within(reveal).getByRole('heading', { level: 2 })),
+    )
     expect(within(reveal).getByText(/won’t be able to see this key again/)).toBeDefined()
     expect(within(reveal).getByLabelText<HTMLInputElement>('New API key').value).toBe(SECRET)
-    expect(within(reveal).getByText(new RegExp(`Bearer ${SECRET}`))).toBeDefined()
+    expect(
+      within(reveal).getByRole('region', { name: 'New API key test command' }).textContent,
+    ).toContain(`Bearer ${SECRET}`)
 
     await user.click(within(reveal).getByRole('button', { name: 'Copy key' }))
     expect(await navigator.clipboard.readText()).toBe(SECRET)
@@ -264,6 +295,245 @@ describe('the API keys page', () => {
     expect(screen.getByRole('heading', { name: 'Create a key' })).toBeDefined()
     // Focus does not drop to the page: it goes to the list, which has the new key.
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Your keys' }))
+  })
+
+  it.each([
+    {
+      locale: 'en' as const,
+      name: 'Name',
+      create: 'Create key',
+      json: 'MCP client JSON',
+      command: 'Claude Code command',
+      copyJson: 'Copy MCP JSON',
+      copyCommand: 'Copy Claude command',
+      copied: 'Copied',
+      saved: 'I’ve saved my key',
+    },
+    {
+      locale: 'zh-CN' as const,
+      name: '名称',
+      create: '创建密钥',
+      json: 'MCP 客户端 JSON 配置',
+      command: 'Claude Code 命令',
+      copyJson: '复制 MCP JSON 配置',
+      copyCommand: '复制 Claude 命令',
+      copied: '已复制',
+      saved: '我已保存密钥',
+    },
+  ])(
+    'copies instance MCP snippets by keyboard and removes them on dismiss in $locale',
+    async (labels) => {
+      chooseLanguage(labels.locale)
+      const user = userEvent.setup()
+      const publicUrl = 'https://schedule.example.test:8443/'
+      keyServer([], ME, { publicUrl })
+      renderApp('/app/api-keys')
+      await screen.findByLabelText(labels.name)
+      await user.type(screen.getByLabelText(labels.name), 'MCP agent')
+      await user.click(screen.getByRole('button', { name: labels.create }))
+      const jsonRegion = await screen.findByRole('region', { name: labels.json })
+      const commandRegion = screen.getByRole('region', { name: labels.command })
+      expect(JSON.parse(jsonRegion.textContent ?? '')).toEqual({
+        mcpServers: {
+          hourmere: {
+            type: 'http',
+            url: 'https://schedule.example.test:8443/mcp',
+            headers: { Authorization: `Bearer ${SECRET}` },
+          },
+        },
+      })
+      expect(commandRegion.textContent).toBe(
+        `claude mcp add --transport http hourmere 'https://schedule.example.test:8443/mcp' \\\n  --header "Authorization: Bearer ${SECRET}"`,
+      )
+      for (const docs of [mcpDocs, siteMcpDocs]) {
+        for (const region of [jsonRegion, commandRegion]) {
+          const example = (region.textContent ?? '')
+            .replaceAll(SECRET, 'hm_…')
+            .replaceAll('https://schedule.example.test:8443', 'https://hourmere.example.com')
+          expect(docs.includes(example)).toBe(true)
+        }
+      }
+      for (const [region, label] of [
+        [jsonRegion, labels.copyJson],
+        [commandRegion, labels.copyCommand],
+      ] as const) {
+        expect(region.getAttribute('tabindex')).toBe('0')
+        region.focus()
+        await user.tab()
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: label }))
+        await user.keyboard('{Enter}')
+        expect(await navigator.clipboard.readText()).toBe(region.textContent)
+        expect(within(region.parentElement as HTMLElement).getByRole('status').textContent).toBe(
+          labels.copied,
+        )
+      }
+      const listed = await rowFor('MCP agent')
+      expect(listed?.innerHTML.includes(SECRET)).toBe(false)
+      expect(screen.getAllByRole('table')).toHaveLength(1)
+      await user.click(screen.getByRole('button', { name: labels.saved }))
+      expect(document.body.innerHTML.includes(SECRET)).toBe(false)
+      expect(document.body.textContent?.includes(SECRET)).toBe(false)
+      for (const field of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+        'input, textarea',
+      )) {
+        expect(field.value.includes(SECRET)).toBe(false)
+        expect(field.defaultValue.includes(SECRET)).toBe(false)
+      }
+      expect(screen.queryByRole('region', { name: labels.json })).toBeNull()
+      expect(screen.queryByRole('region', { name: labels.command })).toBeNull()
+    },
+  )
+
+  it('shows the new key immediately while the list refresh is pending', async () => {
+    const refresh = later()
+    const user = userEvent.setup()
+    const api = keyServer([], ME, { refresh: refresh.response })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Immediate key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('region', { name: /Copy your new key/ })
+    const row = await rowFor('Immediate key')
+    expect(within(row as HTMLElement).getByText('hm_New…')).toBeDefined()
+    expect(row?.innerHTML.includes(SECRET)).toBe(false)
+    expect(screen.queryByText('You have no API keys yet.')).toBeNull()
+    expect(api.to('GET /api/auth/api-key/list')).toHaveLength(2)
+    await refresh.answer(json(200, { apiKeys: [], total: 0 }))
+    expect(await rowFor('Immediate key')).not.toBeNull()
+  })
+
+  it('keeps the key available and retries when instance configuration cannot load', async () => {
+    const user = userEvent.setup()
+    let available = false
+    fakeApi({
+      ...signedInAs(ME),
+      ...organizations([ME.organization]),
+      'GET /api/v1/instance': () =>
+        available
+          ? json(200, {
+              publicUrl: 'https://recovered.example.test',
+              signIn: { email: true, google: false, microsoft: false },
+            })
+          : json(503, { error: 'unavailable', message: 'Unavailable' }),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/api-key/create': () => json(200, { ...existing, key: SECRET }),
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Recover config')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByText('Could not load MCP configuration.')
+    expect(screen.getByLabelText<HTMLInputElement>('New API key').value === SECRET).toBe(true)
+    expect(screen.queryByRole('region', { name: 'MCP client JSON' })).toBeNull()
+    available = true
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    const config = await screen.findByRole('region', { name: 'MCP client JSON' })
+    expect(JSON.parse(config.textContent ?? '')).toMatchObject({
+      mcpServers: { hourmere: { url: 'https://recovered.example.test/mcp' } },
+    })
+    expect(screen.queryByText('Could not load MCP configuration.')).toBeNull()
+  })
+
+  it('uses the refreshed list after the server has confirmed a new key', async () => {
+    const user = userEvent.setup()
+    const api = keyServer()
+    renderApp('/app/api-keys')
+    await table()
+    await user.type(screen.getByLabelText('Name'), 'Confirmed key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await waitFor(() => expect(api.to('GET /api/auth/api-key/list')).toHaveLength(2))
+    await act(async () => {})
+    await rowFor('Confirmed key')
+    api.removeExternally('00000000-0000-7000-8000-0000000000b2')
+    await user.click(screen.getByRole('button', { name: 'Revoke Claude Desktop' }))
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }))
+    await screen.findByText('You have no API keys yet.')
+    expect(screen.queryByRole('rowheader', { name: 'Confirmed key' })).toBeNull()
+  })
+
+  it.each(['http://[::1]:4318', "https://quote'$USER.example"])(
+    'pastes commands with shell-safe URL arguments for %s',
+    async (publicUrl) => {
+      const user = userEvent.setup()
+      keyServer([], ME, { publicUrl })
+      renderApp('/app/api-keys')
+      await screen.findByText('You have no API keys yet.')
+      await user.type(screen.getByLabelText('Name'), 'Shell key')
+      await user.click(screen.getByRole('button', { name: 'Create key' }))
+      const command = await screen.findByRole('region', { name: 'Claude Code command' })
+      for (const [region, program, expected] of [
+        [
+          command,
+          'claude',
+          [
+            'mcp',
+            'add',
+            '--transport',
+            'http',
+            'hourmere',
+            new URL('/mcp', publicUrl).href,
+            '--header',
+            `Authorization: Bearer ${SECRET}`,
+          ],
+        ],
+        [
+          screen.getByRole('region', { name: 'New API key test command' }),
+          'curl',
+          ['-H', `Authorization: Bearer ${SECRET}`, new URL('/api/v1/me', publicUrl).href],
+        ],
+      ] as const) {
+        // Only a shell function runs: no Claude process, network or provider call.
+        const run = spawnSync(
+          'zsh',
+          ['-f', '-c', `${program}() { printf '%s\\0' "$@"; }\n${region.textContent}`],
+          { encoding: 'utf8' },
+        )
+        expect(run.status).toBe(0)
+        expect(
+          JSON.stringify(run.stdout.split('\0').slice(0, -1)) === JSON.stringify(expected),
+        ).toBe(true)
+      }
+    },
+  )
+
+  it('forgets the one-time key when leaving and returning to the page', async () => {
+    const user = userEvent.setup()
+    keyServer([])
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Navigation key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('region', { name: 'MCP client JSON' })
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    await screen.findByRole('heading', { name: 'Settings', level: 1 })
+    expect(document.body.innerHTML.includes(SECRET)).toBe(false)
+    await user.click(screen.getByRole('link', { name: 'API keys' }))
+    await rowFor('Navigation key')
+    expect(document.body.innerHTML.includes(SECRET)).toBe(false)
+    expect(screen.queryByRole('region', { name: 'MCP client JSON' })).toBeNull()
+  })
+
+  it('constrains code blocks to the available width while keeping code scrollable', async () => {
+    const user = userEvent.setup()
+    keyServer([])
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Layout key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('region', { name: 'MCP client JSON' })
+    const sheet = document.createElement('style')
+    sheet.textContent = styles
+    document.head.append(sheet)
+    try {
+      for (const block of document.querySelectorAll('.code-block')) {
+        expect(getComputedStyle(block).gridTemplateColumns).toBe('minmax(0, 1fr)')
+        expect(getComputedStyle(block).minWidth).toBe('0px')
+        const pre = block.querySelector('pre') as HTMLElement
+        expect(getComputedStyle(pre).overflowX).toBe('auto')
+      }
+    } finally {
+      sheet.remove()
+    }
   })
 
   it('sends no expiry for a key that never expires', async () => {
