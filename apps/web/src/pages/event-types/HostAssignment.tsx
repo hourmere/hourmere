@@ -1,22 +1,43 @@
 import { useCallback, useState } from 'react'
+import { Link } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
+import { MemberReadiness } from '../../components/team-members/MemberReadiness.tsx'
+import { useMemberReadiness } from '../../components/team-members/member-readiness.ts'
 import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
+import { PATHS } from '../../paths.ts'
 import type { EventTypeDraft } from './event-type-form.ts'
 
 interface Props {
+  organizationId: string
+  currentUserId: string
+  role: string | null
   draft: EventTypeDraft
   error?: UiText | undefined
   organizerError?: UiText | undefined
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
 }
 
+interface Host {
+  id: string
+  memberId: string
+  name: string
+}
+
 /** A paged directory, never another person's private schedules or email address. */
-export function HostAssignment({ draft, error, organizerError, set }: Props) {
+export function HostAssignment({
+  organizationId,
+  currentUserId,
+  role,
+  draft,
+  error,
+  organizerError,
+  set,
+}: Props) {
   const { t, ui } = useI18n()
   const [after, setAfter] = useState<string | undefined>()
-  const [previous, setPrevious] = useState<{ id: string; name: string }[]>([])
+  const [previous, setPrevious] = useState<Host[]>([])
   const load = useCallback(
     (signal: AbortSignal) =>
       unwrap(
@@ -30,6 +51,19 @@ export function HostAssignment({ draft, error, organizerError, set }: Props) {
   const [state, reload] = useLoad(load)
   const members = state.status === 'ready' ? [...previous, ...state.data.data] : previous
   const missing = draft.hostUserIds.filter((id) => !members.some((member) => member.id === id))
+  const roles = role?.split(',').map((value) => value.trim()) ?? []
+  const canManage =
+    roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
+    (roles.includes('owner') || roles.includes('admin'))
+  const selected = canManage
+    ? members.filter((member) => member.memberId && draft.hostUserIds.includes(member.id))
+    : []
+  const [readiness, retryReadiness] = useMemberReadiness(
+    organizationId,
+    currentUserId,
+    role,
+    selected.map((member) => ({ id: member.memberId })),
+  )
   return (
     <section className="panel" aria-labelledby="hosts-heading">
       <h2 id="hosts-heading">{t('Hosts')}</h2>
@@ -66,34 +100,91 @@ export function HostAssignment({ draft, error, organizerError, set }: Props) {
             {t('Could not load team members. Only team owners and admins can assign hosts.')}{' '}
             {ui(state.message)}
           </p>
-          <button type="button" onClick={reload}>
+          <button
+            type="button"
+            onClick={() => {
+              setPrevious([])
+              setAfter(undefined)
+              reload()
+            }}
+          >
             {t('Try again')}
           </button>
         </div>
+      )}
+      {selected.length > 0 && (
+        <>
+          <p className="hint">
+            {t(
+              'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+            )}{' '}
+            {t('An external calendar is optional for basic bookings.')}
+          </p>
+          {readiness.status === 'loading' && (
+            <p role="status">{t('Checking member configuration…')}</p>
+          )}
+          {readiness.status === 'error' && (
+            <div role="alert">
+              <p>{t('Could not check member configuration.')}</p>
+              <button type="button" onClick={retryReadiness}>
+                {t('Retry checks')}
+              </button>
+            </div>
+          )}
+          {readiness.status === 'unavailable' && (
+            <p role="alert">
+              {t(
+                'Your permission or team membership changed. Reload to check before trying again.',
+              )}
+            </p>
+          )}
+        </>
       )}
       <fieldset id="hosts" aria-describedby="hosts-hint" aria-invalid={!!error}>
         <legend>
           {t(draft.schedulingType === 'round_robin' ? 'Host pool' : 'Required hosts')}
         </legend>
         {members.map((member) => (
-          <label key={member.id} className="checkbox">
-            <input
-              type="checkbox"
-              checked={draft.hostUserIds.includes(member.id)}
-              onChange={(event) => {
-                set('scheduleId', '')
-                set(
-                  'hostUserIds',
-                  event.target.checked
-                    ? draft.schedulingType === 'individual'
-                      ? [member.id]
-                      : [...draft.hostUserIds, member.id]
-                    : draft.hostUserIds.filter((id) => id !== member.id),
-                )
-              }}
-            />
-            {member.name.trim() || t('Unnamed team member')}
-          </label>
+          <div key={member.id}>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={draft.hostUserIds.includes(member.id)}
+                onChange={(event) => {
+                  set('scheduleId', '')
+                  set(
+                    'hostUserIds',
+                    event.target.checked
+                      ? draft.schedulingType === 'individual'
+                        ? [member.id]
+                        : [...draft.hostUserIds, member.id]
+                      : draft.hostUserIds.filter((id) => id !== member.id),
+                  )
+                }}
+              />
+              {member.name.trim() || t('Unnamed team member')}
+            </label>
+            {canManage && draft.hostUserIds.includes(member.id) && (
+              <>
+                <MemberReadiness
+                  health={
+                    readiness.status === 'ready' ? readiness.data.get(member.memberId) : undefined
+                  }
+                  status={readiness.status}
+                  own={member.id === currentUserId}
+                  canManage={canManage}
+                />
+                {member.id !== currentUserId && (
+                  <p className="hint">
+                    {t(
+                      'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
+                    )}{' '}
+                    <Link to={`${PATHS.settings}#team-members`}>{t('Review member setup')}</Link>
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         ))}
         {missing.length > 0 && (
           <>
@@ -158,6 +249,11 @@ export function HostAssignment({ draft, error, organizerError, set }: Props) {
             </p>
           </div>
         )}
+      {draft.locationKind === 'zoom' && draft.schedulingType !== 'individual' && (
+        <p className="hint">
+          {t('Automatic Zoom supports individual meetings with exactly one host.')}
+        </p>
+      )}
       {draft.locationKind === 'google_meet' &&
         draft.autoCreateMeet &&
         draft.schedulingType === 'round_robin' && (

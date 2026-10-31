@@ -166,7 +166,11 @@ describe('team member readiness privacy and batching', () => {
       expect(
         within(row(peer.user.name)).getByText('Conference accounts need attention'),
       ).toBeDefined()
-      expect(within(row(peer.user.name)).queryByRole('link')).toBeNull()
+      expect(
+        within(row(peer.user.name))
+          .getByRole('link', { name: 'View hosted team events' })
+          .getAttribute('href'),
+      ).toBe(`/app/event-types?hostUserId=${peer.userId}`)
       expectOnlySummaryRequests(api)
       expectNoBookingPromise(screen.getByRole('region', { name: 'Team members' }))
     },
@@ -382,7 +386,9 @@ describe.each(['en', 'zh-CN'] as const)(
       ]
       expect(ownRow.getByText(copy[language].reuse)).toBeDefined()
       expect(otherRow.queryByText(copy[language].reuse)).toBeNull()
-      expect(otherRow.queryByRole('link')).toBeNull()
+      expect(otherRow.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+        `/app/event-types?hostUserId=${peer.userId}`,
+      ])
       for (const [label, href] of links) {
         const link = ownRow.getByRole('link', { name: label })
         expect(link.getAttribute('href')).toBe(href)

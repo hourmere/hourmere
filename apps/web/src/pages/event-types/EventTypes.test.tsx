@@ -38,6 +38,8 @@ function eventTypeServer(
   return fakeApi({
     ...signedIn,
     ...profile(),
+    'GET /api/auth/organization/get-active-member': () =>
+      json(200, { organizationId: ME.organization.id, userId: ME.user.id, role: 'admin' }),
     'GET /api/v1/schedules': () =>
       json(200, {
         data: [schedule(), schedule({ id: OTHER_SCHEDULE_ID, name: 'Evenings', isDefault: false })],
