@@ -23,6 +23,7 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
+import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { useEventReadiness } from './event-readiness.ts'
 import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
@@ -38,6 +39,7 @@ async function loadPage(signal: AbortSignal) {
 
 export function EventTypesPage() {
   const { t, uiText } = useI18n()
+  const scheduleHint = t('{0}, so there are times to book.').split('{0}')
 
   usePageTitle('Event types')
   const me = useMe()
@@ -79,6 +81,19 @@ export function EventTypesPage() {
               eventTypes={state.data.eventTypes}
               reload={reload}
             />
+          )}
+          {!me.organization.personal && !state.data.schedules.some(validDefault) && (
+            <div className="alert alert-info">
+              <p>
+                {scheduleHint[0]}
+                <Link
+                  to={state.data.schedules.length === 0 ? PATHS.newSchedule : PATHS.availability}
+                >
+                  {t('Set your weekly hours')}
+                </Link>
+                {scheduleHint[1]}
+              </p>
+            </div>
           )}
           {state.data.eventTypes.length === 0 ? (
             <EmptyState

@@ -4941,7 +4941,13 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": Record<string, never>;
+                    "application/json": {
+                        /**
+                         * @description Current account interface language for the new schedule name; defaults to English. Existing schedules are never renamed.
+                         * @enum {string}
+                         */
+                        language?: "en" | "zh-CN";
+                    };
                 };
             };
             responses: {

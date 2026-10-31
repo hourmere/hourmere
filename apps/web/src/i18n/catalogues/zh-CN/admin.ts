@@ -13,7 +13,7 @@ export const admin = {
   'Your default schedule has weekly hours ready for bookings.':
     '你的默认日程已设置每周可预约时间。',
   'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.':
-    '先使用个人资料时区的周一至周五 09:00–17:00：{0}。',
+    '先用周一至周五 09:00–17:00（个人资料时区：{0}）作为默认可预约时间。',
   'not set': '未设置',
   'Complete your profile before confirming these hours.': '请先完善个人资料，再确认这些时间。',
   'Use Monday–Friday, 09:00–17:00': '使用周一至周五 09:00–17:00',
@@ -32,8 +32,8 @@ export const admin = {
   'View booking page': '查看预约页面',
   'Copy booking link': '复制预约链接',
   'Activate your first event type': '启用首个活动类型',
-  'Your link will appear after you create an active event type and a profile.':
-    '创建已启用的活动类型并完善个人资料后，链接将显示在此处。',
+  'Your link will appear after you set up a profile, valid default availability and an active event type.':
+    '设置个人资料、有效的默认可预约时间和启用的活动类型后，这里会显示链接。',
   'Calendar connection (optional)': '连接日历（可选）',
   'Skipped for now. You can connect a calendar later.': '已暂时跳过。之后随时可以连接日历。',
   'You can take bookings without connecting an external calendar.':
@@ -41,7 +41,8 @@ export const admin = {
   'Connect a calendar': '连接日历',
   'Skip for now': '暂时跳过',
   Complete: '已完成',
-  Missing: '待完成',
+  'Next step': '下一步',
+  'To do': '待完成',
   'Complete your profile and display name in Settings first.':
     '请先在设置中完善个人资料和显示名称。',
   'Review your existing schedules and choose a valid default in Availability.':
@@ -627,7 +628,6 @@ export const admin = {
   'Choose an organization': '选择组织',
   'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.':
     '选择用于检查忙闲冲突的日历，以及用于创建新预约事件的自有日历。更改目标日历后，现有会议仍保留在原日历中。',
-  'Choose your handle': '选择用户名',
   'Choose your handle in Settings to get booking links.': '请在设置中选择用户名，以获得预约链接。',
   'Client:': '客户端：',
   Confirmed: '已确认',
@@ -1004,7 +1004,6 @@ export const admin = {
     '你尚无日程，因此没有可预约时间。{0}。',
   'This is your default schedule. To delete it, first make another schedule the default on the {0}.':
     '这是你的默认日程。如需删除，请先在以下页面将其他日程设为默认：{0}。',
-  '{0} to get booking links.': '{0}以获取预约链接。',
   '{0}, so there are times to book.': '{0}，这样才会有可预约时间。',
   Title: '标题',
   Tue: '周二',

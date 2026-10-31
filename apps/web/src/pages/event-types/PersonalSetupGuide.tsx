@@ -9,27 +9,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
 import { eventTypePath, PATHS, publicPageUrl } from '../../paths.ts'
 import type { Me } from '../../session.tsx'
-import { draftFromSchedule, validateSchedule, WEEKDAYS } from '../availability/weekly-hours.ts'
-
-/** A default with usable weekly hours, rather than merely any schedule on the account. */
-function validDefault(schedule: Schedule): boolean {
-  if (!schedule.isDefault) return false
-  try {
-    const hours = schedule.weeklyHours
-    if (Object.keys(hours).some((day) => !WEEKDAYS.some((weekday) => weekday.day === day)))
-      return false
-    // The editor uses 00:00 for end-of-day; the API must store that as 24:00.
-    if (Object.values(hours).some((intervals) => intervals.some((hour) => hour.end === '00:00')))
-      return false
-    const draft = draftFromSchedule(schedule)
-    return (
-      Object.keys(validateSchedule(draft)).length === 0 &&
-      Object.values(hours).some((intervals) => intervals.length > 0)
-    )
-  } catch {
-    return false
-  }
-}
+import { validDefault } from '../availability/valid-default.ts'
 
 /** Derived from personal account data; no completed-task records or required calendar grant. */
 export function PersonalSetupGuide({
@@ -45,7 +25,7 @@ export function PersonalSetupGuide({
   eventTypes: EventType[]
   reload: () => void
 }) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale } = useI18n()
   const [saving, setSaving] = useState(false)
   const [failure, setFailure] = useState<UiText | null>(null)
   const [calendarSkipped, setCalendarSkipped] = useState(false)
@@ -55,10 +35,17 @@ export function PersonalSetupGuide({
   const availabilityDone = schedules.some(validDefault)
   const personalEvents = eventTypes.filter((event) => event.ownerUserId === me.user.id)
   const activeEvent = personalEvents.find((event) => event.isActive)
-  const shareDone = profileDone && availabilityDone && activeEvent !== undefined
-  const url = profile && activeEvent ? publicPageUrl(profile.handle, activeEvent.slug) : null
+  const eventDone = personalEvents.length > 0
+  const url =
+    profile && activeEvent && availabilityDone
+      ? publicPageUrl(profile.handle, activeEvent.slug)
+      : null
+  // The link is ready from current booking data; viewing/copying needs no stored task flag.
+  // An empty display name still needs attention, but the public page can use the username.
+  const shareDone = url !== null
+  const currentStep = [profileDone, availabilityDone, eventDone, shareDone].indexOf(false)
 
-  if (!me.organization.personal || shareDone) return null
+  if (!me.organization.personal || currentStep === -1) return null
 
   async function confirmAvailability() {
     if (submitting.current) return
@@ -66,7 +53,11 @@ export function PersonalSetupGuide({
     setSaving(true)
     setFailure(null)
     try {
-      await unwrap(api.POST('/api/v1/schedules/default', { body: {} }))
+      await unwrap(
+        api.POST('/api/v1/schedules/default', {
+          body: { language: locale === 'zh-CN' ? 'zh-CN' : 'en' },
+        }),
+      )
       if (mounted.current) reload()
     } catch (error) {
       if (mounted.current) setFailure(errorMessage(error))
@@ -81,7 +72,7 @@ export function PersonalSetupGuide({
       <h2 id="personal-setup-heading">{t('Set up your booking page')}</h2>
       <p>{t('Complete these steps at your own pace. You can keep using the app as you go.')}</p>
       <ol className="setup-steps">
-        <SetupStep title={t('Profile')} done={profileDone}>
+        <SetupStep title={t('Profile')} done={profileDone} current={currentStep === 0}>
           {profileDone ? (
             <p>{t('Your display name and booking address are set.')}</p>
           ) : (
@@ -98,7 +89,11 @@ export function PersonalSetupGuide({
             </>
           )}
         </SetupStep>
-        <SetupStep title={t('Default availability')} done={availabilityDone}>
+        <SetupStep
+          title={t('Default availability')}
+          done={availabilityDone}
+          current={currentStep === 1}
+        >
           {availabilityDone ? (
             <p>{t('Your default schedule has weekly hours ready for bookings.')}</p>
           ) : schedules.length === 0 ? (
@@ -140,7 +135,7 @@ export function PersonalSetupGuide({
             </div>
           )}
         </SetupStep>
-        <SetupStep title={t('First event type')} done={personalEvents.length > 0}>
+        <SetupStep title={t('First event type')} done={eventDone} current={currentStep === 2}>
           <p>{t('An event type sets the meeting length and gives invitees a booking link.')}</p>
           {personalEvents.length === 0 && (
             <Link to={PATHS.newEventType} className="button">
@@ -148,7 +143,7 @@ export function PersonalSetupGuide({
             </Link>
           )}
         </SetupStep>
-        <SetupStep title={t('View and share')} done={shareDone}>
+        <SetupStep title={t('View and share')} done={shareDone} current={currentStep === 3}>
           <p>
             {t('Open your booking page to check the available times, then copy its link to share.')}
           </p>
@@ -166,7 +161,9 @@ export function PersonalSetupGuide({
             </Link>
           ) : (
             <p className="hint">
-              {t('Your link will appear after you create an active event type and a profile.')}
+              {t(
+                'Your link will appear after you set up a profile, valid default availability and an active event type.',
+              )}
             </p>
           )}
         </SetupStep>
@@ -198,19 +195,21 @@ export function PersonalSetupGuide({
 function SetupStep({
   title,
   done,
+  current,
   children,
 }: {
   title: string
   done: boolean
+  current: boolean
   children: ReactNode
 }) {
   const { t } = useI18n()
   return (
-    <li>
+    <li aria-current={current ? 'step' : undefined}>
       <div className="setup-step-heading">
         <h3>{title}</h3>
         <span className={done ? 'badge badge-success' : 'badge'}>
-          {done ? t('Complete') : t('Missing')}
+          {done ? t('Complete') : current ? t('Next step') : t('To do')}
         </span>
       </div>
       {children}

@@ -102,6 +102,7 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
     expect(created).toMatchObject({
       status: 201,
       body: {
+        name: 'Working hours',
         isDefault: true,
         timeZone: 'America/Los_Angeles',
         weeklyHours: { friday: [{ start: '09:00', end: '17:00' }] },
@@ -116,6 +117,29 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
       body: { data: [created.body] },
     })
   })
+
+  it.each([
+    ['zh-CN', 'en', '工作时间'],
+    ['en', 'zh-CN', 'Working hours'],
+  ] as const)(
+    'names starter availability for the %s interface despite a %s profile',
+    async (language, locale, name) => {
+      const user = await createTestUser(t.db)
+      const client = api(user)
+      await client.put('/api/v1/profile', {
+        handle: `h-${user.id}`,
+        timeZone: 'Asia/Shanghai',
+        locale,
+      })
+      const created = await client.post('/api/v1/schedules/default', { language })
+      expect(created).toMatchObject({ status: 201, body: { name, timeZone: 'Asia/Shanghai' } })
+      expect(
+        await client.post('/api/v1/schedules/default', {
+          language: language === 'en' ? 'zh-CN' : 'en',
+        }),
+      ).toEqual({ status: 200, body: created.body })
+    },
+  )
 
   it('returns a safe conflict for schedules without a default', async () => {
     const user = await createTestUser(t.db)

@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import { interfaceLanguages } from '@hourmere/core/language'
 import {
   confirmDefaultSchedule,
   createSchedule,
@@ -164,7 +165,19 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         summary: 'Confirm starter working hours',
         description:
           'After profile and display name setup, creates a default Mon–Fri 09:00–17:00 schedule in the stored profile time zone only when the caller has no schedules. An existing default is returned unchanged. Existing non-default schedules require an explicit default choice in Availability.',
-        request: { body: { content: json(z.strictObject({})), required: true } },
+        request: {
+          body: {
+            content: json(
+              z.strictObject({
+                language: z.enum(interfaceLanguages('admin')).optional().openapi({
+                  description:
+                    'Current account interface language for the new schedule name; defaults to English. Existing schedules are never renamed.',
+                }),
+              }),
+            ),
+            required: true,
+          },
+        },
         responses: {
           200: { description: 'The existing default, unchanged', content: json(Schedule) },
           201: { description: 'The confirmed starter schedule', content: json(Schedule) },
@@ -178,6 +191,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
       async (c) => {
         const { schedule, created } = await confirmDefaultSchedule(
           serviceContext(deps, c.var.principal),
+          c.req.valid('json').language,
         )
         return created ? c.json(schedule, 201) : c.json(schedule, 200)
       },

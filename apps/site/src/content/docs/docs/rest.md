@@ -21,6 +21,11 @@ an existing schedule; schedules without a default require an explicit default ch
 `409 setup_profile_required`. An existing default still needs valid weekly hours before the
 guide counts availability as complete.
 
+Pass the current account interface language as `{ "language": "en" }` or
+`{ "language": "zh-CN" }` to name a newly created schedule in that language. Omitting it
+uses English. The profile still supplies the time zone; later language changes never
+rename an existing schedule.
+
 Open **API keys** at `/app/api-keys`, create a key for the intended organization and copy it
 once into your secret store. It acts as its creator in that organization. Keep API keys and
 booking manage tokens out of URLs, shared transcripts and source control. Set these shell

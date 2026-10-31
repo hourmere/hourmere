@@ -8,6 +8,7 @@ import {
   type WallClockInterval,
   type WeeklyHours,
 } from '@hourmere/core'
+import type { InterfaceLanguage } from '@hourmere/core/language'
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
 import {
@@ -136,10 +137,12 @@ export async function createSchedule(ctx: ServiceContext, input: ScheduleInput):
 /**
  * Confirms starter working hours after personal profile setup. Repeated confirmations
  * return the existing default unchanged; any existing schedules without a default need
- * the user's explicit choice in the availability editor instead.
+ * the user's explicit choice in the availability editor instead. The interface language
+ * at confirmation names a new schedule; later language changes do not rename it.
  */
 export async function confirmDefaultSchedule(
   ctx: ServiceContext,
+  language: InterfaceLanguage = 'en',
 ): Promise<{ schedule: Schedule; created: boolean }> {
   const userId = ctx.principal.user.id
   return ctx.db.transaction().execute(async (trx) => {
@@ -148,7 +151,7 @@ export async function confirmDefaultSchedule(
     const profile = await trx
       .selectFrom('profiles')
       .innerJoin('auth.user', 'auth.user.id', 'profiles.user_id')
-      .select(['auth.user.name', 'profiles.time_zone', 'profiles.locale'])
+      .select(['auth.user.name', 'profiles.time_zone'])
       .where('profiles.user_id', '=', userId)
       .executeTakeFirst()
     if (!profile?.name.trim()) {
@@ -183,7 +186,7 @@ export async function confirmDefaultSchedule(
       .insertInto('schedules')
       .values({
         user_id: userId,
-        name: profile.locale.toLowerCase() === 'zh-cn' ? '工作时间' : 'Working hours',
+        name: language === 'zh-CN' ? '工作时间' : 'Working hours',
         time_zone: validTimeZone(profile.time_zone),
         weekly_hours: jsonb(weeklyHours),
         is_default: true,

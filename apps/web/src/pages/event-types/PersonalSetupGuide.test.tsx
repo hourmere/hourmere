@@ -55,6 +55,77 @@ async function openGuide() {
 }
 
 describe('personal booking page setup', () => {
+  it.each<[NonNullable<Parameters<typeof account>[0]>, string]>([
+    [{ me: NO_NAME, hostProfile: null, schedules: [], events: [] }, 'Profile'],
+    [{ schedules: [], events: [] }, 'Default availability'],
+    [{ events: [] }, 'First event type'],
+    [{ events: [eventType({ isActive: false })] }, 'View and share'],
+  ])('marks only the first incomplete step as current: %s', async (changes, title) => {
+    account(changes)
+    const guide = await openGuide()
+    const current = within(guide)
+      .getAllByRole('listitem')
+      .filter((item) => item.hasAttribute('aria-current'))
+    expect(current).toHaveLength(1)
+    expect(current[0]?.getAttribute('aria-current')).toBe('step')
+    expect(within(current[0] as HTMLElement).getByRole('heading', { name: title })).toBeDefined()
+    expect(within(current[0] as HTMLElement).getByText('Next step')).toBeDefined()
+  })
+
+  it.each([
+    ['missing', []],
+    ['non-default', [schedule({ isDefault: false })]],
+    ['empty', [schedule({ weeklyHours: {} })]],
+    ['invalid', [schedule({ timeZone: 'Invalid/TimeZone' })]],
+  ])('withholds view and copy actions with %s default availability', async (_reason, schedules) => {
+    account({ schedules })
+    const guide = await openGuide()
+    const share = step(guide, 'View and share')
+    expect(share.getByText('To do')).toBeDefined()
+    expect(share.queryByRole('link', { name: /View booking page/ })).toBeNull()
+    expect(share.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+    expect(
+      share.getByText(
+        'Your link will appear after you set up a profile, valid default availability and an active event type.',
+      ),
+    ).toBeDefined()
+  })
+
+  it.each([
+    ['zh-CN', 'en', '使用周一至周五 09:00–17:00'],
+    ['en', 'zh-CN', USE_DEFAULT],
+  ])(
+    'sends the current interface language %s despite profile locale %s',
+    async (language, profileLocale, label) => {
+      chooseLanguage(language as 'en' | 'zh-CN')
+      const api = account({
+        hostProfile: { ...PROFILE, locale: profileLocale },
+        schedules: [],
+        events: [],
+        routes: { 'POST /api/v1/schedules/default': () => json(201, schedule()) },
+      })
+      renderApp('/app/event-types')
+      await userEvent.click(await screen.findByRole('button', { name: label }))
+      expect(api.to('POST /api/v1/schedules/default')[0]?.body).toEqual({ language })
+    },
+  )
+
+  it('explains the starter hours naturally in Chinese with the saved profile time zone', async () => {
+    chooseLanguage('zh-CN')
+    account({ schedules: [], events: [] })
+    renderApp('/app/event-types')
+    const guide = await screen.findByRole('region', { name: '设置你的预约页面' })
+    expect(
+      within(guide).getByText(
+        `先用周一至周五 09:00–17:00（个人资料时区：${PROFILE.timeZone}）作为默认可预约时间。`,
+      ),
+    ).toBeDefined()
+    const current = within(guide)
+      .getAllByRole('listitem')
+      .find((item) => item.getAttribute('aria-current') === 'step')
+    expect(within(current as HTMLElement).getByText('下一步')).toBeDefined()
+  })
+
   it('keeps the setup instructions and optional calendar step in Simplified Chinese', async () => {
     chooseLanguage('zh-CN')
     account({ me: NO_NAME, hostProfile: null, schedules: [], events: [] })
@@ -107,7 +178,8 @@ describe('personal booking page setup', () => {
         .getAllByRole('listitem')
         .map((item) => within(item).getByRole('heading').textContent),
     ).toEqual(STEPS)
-    for (const name of STEPS) expect(step(guide, name).getByText('Missing')).toBeDefined()
+    for (const name of STEPS)
+      expect(step(guide, name).getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(
       step(guide, 'Profile').getByText(
         'Without a display name, your booking page, emails and calendar invitations show your username instead.',
@@ -127,22 +199,30 @@ describe('personal booking page setup', () => {
     ).toBeDefined()
   })
 
-  it('keeps a whitespace-only display name missing even when profile, schedule and event exist', async () => {
+  it('marks a usable booking link complete while an empty display name still needs attention', async () => {
     account({ me: NO_NAME })
     const guide = await openGuide()
-    expect(step(guide, 'Profile').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'Profile').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(step(guide, 'Default availability').getByText('Complete')).toBeDefined()
     expect(step(guide, 'First event type').getByText('Complete')).toBeDefined()
-    expect(step(guide, 'View and share').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'View and share').getByText('Complete')).toBeDefined()
+    expect(
+      step(guide, 'View and share')
+        .getByRole('link', { name: /View booking page/ })
+        .getAttribute('href'),
+    ).toBe(`${window.location.origin}/ada/intro-call`)
+    expect(
+      step(guide, 'View and share').getByRole('button', { name: 'Copy booking link' }),
+    ).toBeDefined()
   })
 
   it('requires a saved profile even when the display name and booking prerequisites exist', async () => {
     account({ hostProfile: null })
     const guide = await openGuide()
-    expect(step(guide, 'Profile').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'Profile').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(step(guide, 'Default availability').getByText('Complete')).toBeDefined()
     expect(step(guide, 'First event type').getByText('Complete')).toBeDefined()
-    expect(step(guide, 'View and share').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'View and share').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(
       step(guide, 'View and share').queryByRole('link', { name: 'Activate your first event type' }),
     ).toBeNull()
@@ -165,7 +245,7 @@ describe('personal booking page setup', () => {
     })
     const guide = await openGuide()
     expect(step(guide, 'Profile').getByText('Complete')).toBeDefined()
-    expect(step(guide, 'Default availability').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'Default availability').getByText(/^(To do|Next step)$/)).toBeDefined()
     const useDefault = within(guide).getByRole<HTMLButtonElement>('button', { name: USE_DEFAULT })
     act(() => {
       fireEvent.click(useDefault)
@@ -173,15 +253,15 @@ describe('personal booking page setup', () => {
     })
     await waitFor(() => expect(api.to('POST /api/v1/schedules/default')).toHaveLength(1))
     expect(useDefault.disabled).toBe(true)
-    expect(step(guide, 'Default availability').getByText('Missing')).toBeDefined()
-    expect(api.to('POST /api/v1/schedules/default')[0]?.body).toEqual({})
+    expect(step(guide, 'Default availability').getByText(/^(To do|Next step)$/)).toBeDefined()
+    expect(api.to('POST /api/v1/schedules/default')[0]?.body).toEqual({ language: 'en' })
     await pending.answer(json(200, {}))
     const refreshed = await screen.findByRole('region', { name: GUIDE })
     await waitFor(() =>
       expect(step(refreshed, 'Default availability').getByText('Complete')).toBeDefined(),
     )
     expect(api.to('GET /api/v1/schedules')).toHaveLength(2)
-    expect(step(refreshed, 'First event type').getByText('Missing')).toBeDefined()
+    expect(step(refreshed, 'First event type').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(within(refreshed).queryByRole('button', { name: USE_DEFAULT })).toBeNull()
   })
 
@@ -204,7 +284,7 @@ describe('personal booking page setup', () => {
     const user = userEvent.setup()
     await user.click(within(guide).getByRole('button', { name: USE_DEFAULT }))
     expect(await within(guide).findByRole('alert')).toBeDefined()
-    expect(step(guide, 'Default availability').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'Default availability').getByText(/^(To do|Next step)$/)).toBeDefined()
     succeeds = true
     await user.click(within(guide).getByRole('button', { name: USE_DEFAULT }))
     await waitFor(() =>
@@ -234,7 +314,7 @@ describe('personal booking page setup', () => {
     )
     expect(
       step(screen.getByRole('region', { name: GUIDE }), 'Default availability').getByText(
-        'Missing',
+        /^(To do|Next step)$/,
       ),
     ).toBeDefined()
   })
@@ -266,7 +346,7 @@ describe('personal booking page setup', () => {
     const api = account({ schedules: [schedule({ isDefault: false })], events: [] })
     const guide = await openGuide()
     const availability = step(guide, 'Default availability')
-    expect(availability.getByText('Missing')).toBeDefined()
+    expect(availability.getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(
       availability.getByRole('link', { name: 'Review default availability' }).getAttribute('href'),
     ).toBe('/app/availability')
@@ -323,7 +403,7 @@ describe('personal booking page setup', () => {
   ])('rejects a default schedule with %s', async (_reason, changes) => {
     account({ schedules: [schedule(changes)], events: [] })
     const guide = await openGuide()
-    expect(step(guide, 'Default availability').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'Default availability').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(
       step(guide, 'Default availability').getByRole('link', {
         name: 'Review default availability',
@@ -351,7 +431,7 @@ describe('personal booking page setup', () => {
     account({ events: [eventType({ isActive: false })] })
     const guide = await openGuide()
     expect(step(guide, 'First event type').getByText('Complete')).toBeDefined()
-    expect(step(guide, 'View and share').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'View and share').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(within(guide).queryByRole('link', { name: 'View booking page' })).toBeNull()
   })
 
@@ -366,8 +446,8 @@ describe('personal booking page setup', () => {
       ],
     })
     const guide = await openGuide()
-    expect(step(guide, 'First event type').getByText('Missing')).toBeDefined()
-    expect(step(guide, 'View and share').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'First event type').getByText(/^(To do|Next step)$/)).toBeDefined()
+    expect(step(guide, 'View and share').getByText(/^(To do|Next step)$/)).toBeDefined()
   })
 
   it('hides the guide for a complete account without requiring calendar connections', async () => {
@@ -392,7 +472,7 @@ describe('personal booking page setup', () => {
       within(guide).getByText('Skipped for now. You can connect a calendar later.'),
     ).toBeDefined()
     expect(within(guide).queryByRole('link', { name: 'Connect a calendar' })).toBeNull()
-    expect(step(guide, 'First event type').getByText('Missing')).toBeDefined()
+    expect(step(guide, 'First event type').getByText(/^(To do|Next step)$/)).toBeDefined()
     expect(api.calls.some((call) => /calendar/.test(call.path))).toBe(false)
   })
 

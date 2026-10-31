@@ -35,8 +35,8 @@ export const admin = {
   'View booking page': 'View booking page',
   'Copy booking link': 'Copy booking link',
   'Activate your first event type': 'Activate your first event type',
-  'Your link will appear after you create an active event type and a profile.':
-    'Your link will appear after you create an active event type and a profile.',
+  'Your link will appear after you set up a profile, valid default availability and an active event type.':
+    'Your link will appear after you set up a profile, valid default availability and an active event type.',
   'Calendar connection (optional)': 'Calendar connection (optional)',
   'Skipped for now. You can connect a calendar later.':
     'Skipped for now. You can connect a calendar later.',
@@ -45,7 +45,8 @@ export const admin = {
   'Connect a calendar': 'Connect a calendar',
   'Skip for now': 'Skip for now',
   Complete: 'Complete',
-  Missing: 'Missing',
+  'Next step': 'Next step',
+  'To do': 'To do',
   'Complete your profile and display name in Settings first.':
     'Complete your profile and display name in Settings first.',
   'Review your existing schedules and choose a valid default in Availability.':
@@ -668,7 +669,6 @@ export const admin = {
   'Choose an organization': 'Choose an organization',
   'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.':
     'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.',
-  'Choose your handle': 'Choose your handle',
   'Choose your handle in Settings to get booking links.':
     'Choose your handle in Settings to get booking links.',
   'Client:': 'Client:',
@@ -1067,7 +1067,6 @@ export const admin = {
     'You have no schedule yet, so no times are offered. {0}.',
   'This is your default schedule. To delete it, first make another schedule the default on the {0}.':
     'This is your default schedule. To delete it, first make another schedule the default on the {0}.',
-  '{0} to get booking links.': '{0} to get booking links.',
   '{0}, so there are times to book.': '{0}, so there are times to book.',
   Title: 'Title',
   Tue: 'Tue',

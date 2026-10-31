@@ -85,10 +85,31 @@ describe.skipIf(!serverUrl)('schedule service', () => {
       })
     })
 
-    it('uses the Simplified Chinese schedule name for a Chinese profile', async () => {
+    it.each([
+      ['zh-CN', 'en', '工作时间'],
+      ['en', 'zh-CN', 'Working hours'],
+    ] as const)(
+      'names a new schedule in the %s interface despite a %s profile',
+      async (language, locale, name) => {
+        const user = await createTestUser(db)
+        await profile(user, 'Asia/Shanghai', locale)
+        const result = await confirmDefaultSchedule(ctx(user), language)
+        expect(result.schedule.name).toBe(name)
+        expect(result.schedule.timeZone).toBe('Asia/Shanghai')
+        // The saved name survives a later confirmation in the other interface language.
+        expect(await confirmDefaultSchedule(ctx(user), language === 'en' ? 'zh-CN' : 'en')).toEqual(
+          {
+            created: false,
+            schedule: result.schedule,
+          },
+        )
+      },
+    )
+
+    it('defaults the schedule name to English without an interface language', async () => {
       const user = await createTestUser(db)
       await profile(user, 'Asia/Shanghai', 'zh-CN')
-      expect((await confirmDefaultSchedule(ctx(user))).schedule.name).toBe('工作时间')
+      expect((await confirmDefaultSchedule(ctx(user))).schedule.name).toBe('Working hours')
     })
 
     it('requires a profile and the current stored display name, even with a stale principal', async () => {
@@ -123,7 +144,7 @@ describe.skipIf(!serverUrl)('schedule service', () => {
       await createSchedule(ctx(user), input({ name: 'Evenings' }))
       await putScheduleOverride(ctx(user), existing.id, '2026-12-24', [])
       const before = await listSchedules(ctx(user))
-      expect(await confirmDefaultSchedule(ctx(user))).toEqual({
+      expect(await confirmDefaultSchedule(ctx(user), 'zh-CN')).toEqual({
         created: false,
         schedule: existing,
       })

@@ -560,6 +560,10 @@ main {
   padding-inline-start: var(--space-2);
 }
 
+.setup-steps > li[aria-current="step"] {
+  border-inline-start: 3px solid var(--accent);
+}
+
 .setup-step-heading {
   display: flex;
   align-items: center;
