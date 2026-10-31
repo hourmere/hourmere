@@ -188,7 +188,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     await Promise.all(messages.map((m) => deliverScheduledBookingEmail(deps, m.id)))
     expect(sent).toHaveLength(24)
     expect(sent.every((m) => !m.attachments)).toBe(true)
-    const followups = sent.filter((m) => m.subject.includes('Scheduled meeting time ended'))
+    const followups = sent.filter((m) => m.subject.includes('Scheduled meeting time has ended'))
     expect(followups).toHaveLength(9)
     expect(
       followups.every((m) => !m.text.includes('#token=') && !m.text.includes('Secret detail')),

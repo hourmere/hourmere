@@ -50,13 +50,13 @@ const attachment = {
 }
 const copy = {
   en: {
-    subject: 'Scheduled meeting time ended: Intro call',
+    subject: 'Scheduled meeting time has ended: Intro call',
     intro: 'The scheduled time for your meeting with Grace Hopper has ended.',
     note: 'Note from the host',
   },
   'zh-CN': {
     subject: '预约时段已结束：Intro call',
-    intro: '你与 Grace Hopper 的会议预约时段已结束。',
+    intro: '你与 Grace Hopper 预约的会议时段已结束。',
     note: '主持人留言',
   },
   de: {

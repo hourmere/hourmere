@@ -278,7 +278,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await deliver(deps(), b.message.id)
       expect(sent).toHaveLength(1)
       expect(await current(b)).toMatchObject({ state: 'completed', attempts: 1 })
-      expect(sent[0]?.subject).toBe('Scheduled meeting time ended: Planning')
+      expect(sent[0]?.subject).toBe('Scheduled meeting time has ended: Planning')
       expect(sent[0]?.text).toContain('The scheduled time')
       expect(sent[0]?.text).not.toMatch(/zoom\.us|#token=|manage|attended|successfully/i)
       expect(sent[0]?.html).toContain('The scheduled time')
