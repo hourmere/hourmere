@@ -13,6 +13,7 @@ import {
   MAX_OPTIONS,
   MAX_QUESTION_LABEL,
   MAX_QUESTIONS,
+  NotificationSettingsSchema,
   PHONE_NUMBER_PATTERN,
   QuestionSchema,
   type EventType as ServiceEventType,
@@ -127,6 +128,54 @@ const QuestionInput = z
     description: 'A booking-form field beyond name and email, as written (see Question)',
   })
 
+// Keep the shared transport shape; bounds and normalization are service validation so
+// every interface returns invalid_notifications for the same values.
+const notificationRule = NotificationSettingsSchema.shape.reminders.element
+const notificationFields = {
+  id: z.string().openapi({
+    description: 'Stable rule ID, unique across reminders and followUps; __proto__ is reserved',
+    minLength: 1,
+    maxLength: 64,
+    pattern: '^[A-Za-z0-9_-]+$',
+  }),
+  offsetMinutes: z.number().openapi({
+    description: 'Elapsed minutes before the meeting starts or after it ends',
+    type: 'integer',
+    minimum: 5,
+    maximum: 43200,
+  }),
+  recipients: z.strictObject(notificationRule.shape.recipients.shape).openapi({
+    description: 'All flags are required; at least one must be true',
+  }),
+}
+const followUpNote = z.string().optional().openapi({
+  description:
+    'Optional plain text, follow-ups only. At most 2000 UTF-16 code units after CRLF normalization and bidi-control removal; controls other than LF are refused. Placeholders are literal. Operators can disable host notes.',
+  maxLength: 2000,
+})
+const notificationsDescription =
+  'Complete email settings for future new bookings only; existing bookings and reschedules keep their snapshot. IDs are unique across both arrays, offsets are distinct within each array. Reminders return by descending offset, follow-ups ascending. Omitted on creation = one 24-hour reminder to all roles and no follow-ups; omitted on update = unchanged. Empty arrays disable both categories.'
+const NotificationSettingsInput = z
+  .strictObject({
+    reminders: z.array(z.strictObject(notificationFields)).openapi({ maxItems: 5 }),
+    followUps: z
+      .array(z.strictObject({ ...notificationFields, hostNote: followUpNote }))
+      .openapi({ maxItems: 3 }),
+  })
+  .openapi('EventTypeNotificationsInput', { description: notificationsDescription })
+const responseNotificationFields = {
+  ...notificationFields,
+  recipients: z.object(notificationRule.shape.recipients.shape),
+}
+const NotificationSettings = z
+  .object({
+    reminders: z.array(z.object(responseNotificationFields)).openapi({ maxItems: 5 }),
+    followUps: z
+      .array(z.object({ ...responseNotificationFields, hostNote: followUpNote }))
+      .openapi({ maxItems: 3 }),
+  })
+  .openapi('EventTypeNotifications', { description: notificationsDescription })
+
 const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
 const minMax = ({ min, max }: { min: number; max: number }) => ({ minimum: min, maximum: max })
@@ -200,6 +249,7 @@ export const EventType = z
     conferenceOrganizer: z.object({ userId: z.uuid() }).nullable(),
     zoomConnectionId: z.uuid().nullable().optional(),
     questions: z.array(Question),
+    notifications: NotificationSettings,
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -226,6 +276,7 @@ const EventTypeInput = z
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
+    notifications: NotificationSettingsInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
     allowGuests: fields.allowGuests.optional().openapi({ default: false }),
@@ -256,6 +307,7 @@ const EventTypeUpdate = z
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
+    notifications: NotificationSettingsInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
     allowGuests: fields.allowGuests.optional(),
@@ -286,16 +338,17 @@ const tags = ['Event types']
 /**
  * Body limit (see routeBodyLimit in body-limit.ts) for creating and changing an event type.
  * Its largest legal request, with every string at its maximum length and every character
- * escaped as \uXXXX (6 bytes), is about 1.29 MB: 20 questions with a 64-character id, a
+ * escaped as \uXXXX (6 bytes), is about 1.33 MB: 20 questions with a 64-character id, a
  * 200-character label and 50 options of 200 characters (20 × ≈ 62 KB ≈ 1.24 MB), a
- * 5000-character description (30 KB), a 2000-character link (12 KB), a 200-character title
- * and the keys and other fields (under 5 KB). Rounded up.
+ * 5000-character description (30 KB), a 2000-character link (12 KB), a 200-character title,
+ * three 2000-code-unit follow-up notes (36 KB), and the keys and other fields (under
+ * 5 KB). Rounded up.
  */
 export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (rule values or disabled host notes), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 
@@ -306,6 +359,47 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   })
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
+
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, EVENT_TYPE_BODY_LIMIT),
+        method: 'put',
+        path: '/api/v1/event-types/{id}/notifications',
+        operationId: 'setEventTypeNotifications',
+        summary: 'Replace reminder and follow-up settings',
+        description:
+          'Replaces notifications atomically for future new bookings, without sending mail or changing existing booking snapshots. Requires full API-key scope or the same session write access as other event-type changes.',
+        request: {
+          params: IdParams,
+          headers: ExpectedOrganizationHeaders,
+          body: {
+            content: json(z.strictObject({ notifications: NotificationSettingsInput })),
+            required: true,
+          },
+        },
+        responses: {
+          200: { description: 'The changed event type', content: json(EventType) },
+          ...errorResponses({
+            400: 'invalid_request: malformed shape; invalid_notifications: rule values or disabled host notes',
+            403: forbidden,
+            404: notFound,
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          eventTypeResponse(
+            await updateEventType(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('param').id,
+              c.req.valid('json'),
+            ),
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({

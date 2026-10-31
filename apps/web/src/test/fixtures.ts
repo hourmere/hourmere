@@ -31,6 +31,16 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     hosts: [{ userId: ME.user.id }],
     location: null,
     questions: [],
+    notifications: {
+      reminders: [
+        {
+          id: 'default-24h',
+          offsetMinutes: 1440,
+          recipients: { invitee: true, guests: true, host: true },
+        },
+      ],
+      followUps: [],
+    },
     isActive: true,
     isHidden: false,
     allowGuests: false,

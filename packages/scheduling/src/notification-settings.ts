@@ -4,23 +4,20 @@ import { DomainError } from './errors.ts'
 
 const recipients = z.strictObject({ invitee: z.boolean(), guests: z.boolean(), host: z.boolean() })
 const rule = z.strictObject({ id: z.string(), offsetMinutes: z.number(), recipients })
-const followUpRule = rule.extend({
-  hostNote: z
-    .string()
-    .refine((note) => note.length <= FOLLOW_UP_HOST_NOTE_MAX_LENGTH)
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: reject forbidden plain-text controls
-    .regex(/^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]*$/)
-    .refine((note) => note.isWellFormed())
-    .optional(),
-})
+const followUpRule = rule.extend({ hostNote: z.string().optional() })
 
-/** Shape errors are Zod errors, mapped to invalid_request by a future transport. */
+/** Shape errors map to invalid_request; semantic errors are checked by the service. */
 export const NotificationSettingsSchema = z.strictObject({
   reminders: z.array(rule),
   followUps: z.array(followUpRule),
 })
-export type NotificationSettings = z.infer<typeof NotificationSettingsSchema>
-export type NotificationRule = NotificationSettings['followUps'][number]
+export type ReminderRule = z.infer<typeof rule> & { hostNote?: never }
+export type FollowUpRule = z.infer<typeof followUpRule>
+export interface NotificationSettings {
+  reminders: ReminderRule[]
+  followUps: FollowUpRule[]
+}
+export type NotificationRule = ReminderRule | FollowUpRule
 export interface NotificationSnapshot {
   version: 1
   executionMode: 'legacy_default' | 'configurable'
@@ -39,7 +36,23 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
 }
 
 /** Return a fresh canonical value; never derive a rule identity from its time or position. */
-export function validateNotifications(value: unknown): NotificationSettings {
+export function validateNotifications(
+  value: unknown,
+  options: { followUpHostNotesEnabled?: boolean | undefined } = {},
+): NotificationSettings {
+  return checkedNotifications(value, options, false)
+}
+
+/** Stored values keep the original envelope; tighter write rules do not rewrite booking history. */
+export function parseNotifications(value: unknown): NotificationSettings {
+  return checkedNotifications(value, {}, true)
+}
+
+function checkedNotifications(
+  value: unknown,
+  options: { followUpHostNotesEnabled?: boolean | undefined },
+  stored: boolean,
+): NotificationSettings {
   const parsed = NotificationSettingsSchema.parse(value)
   const invalid = () => new DomainError('invalid', 'invalid_notifications')
   if (parsed.reminders.length > 5 || parsed.followUps.length > 3) throw invalid()
@@ -62,6 +75,33 @@ export function validateNotifications(value: unknown): NotificationSettings {
       offsets.add(item.offsetMinutes)
     }
   }
+  for (const followUp of parsed.followUps) {
+    if (followUp.hostNote === undefined) continue
+    if (stored) {
+      if (
+        followUp.hostNote.length > FOLLOW_UP_HOST_NOTE_MAX_LENGTH ||
+        !followUp.hostNote.isWellFormed() ||
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: original stored-note envelope
+        /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(
+          followUp.hostNote,
+        )
+      )
+        throw invalid()
+      continue
+    }
+    if (options.followUpHostNotesEnabled === false) throw invalid()
+    const note = followUp.hostNote
+      .replace(/\r\n/g, '\n')
+      .replace(/[\u202a-\u202e\u2066-\u2069]/g, '')
+    if (
+      note.length > FOLLOW_UP_HOST_NOTE_MAX_LENGTH ||
+      !note.isWellFormed() ||
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: reject controls except LF
+      /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/.test(note)
+    )
+      throw invalid()
+    followUp.hostNote = note
+  }
   parsed.reminders.sort((a, b) => b.offsetMinutes - a.offsetMinutes)
   parsed.followUps.sort((a, b) => a.offsetMinutes - b.offsetMinutes)
   return parsed
@@ -81,7 +121,7 @@ export function isLegacyDefault(settings: NotificationSettings): boolean {
 }
 
 export function createNotificationSnapshot(value: unknown): NotificationSnapshot {
-  const notifications = validateNotifications(value)
+  const notifications = parseNotifications(value)
   return {
     version: 1,
     executionMode: isLegacyDefault(notifications) ? 'legacy_default' : 'configurable',

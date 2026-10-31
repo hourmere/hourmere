@@ -4,7 +4,12 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { listEventTypeCatalog, listScheduleCatalog, putProfile } from '@hourmere/scheduling'
+import {
+  DEFAULT_NOTIFICATIONS,
+  listEventTypeCatalog,
+  listScheduleCatalog,
+  putProfile,
+} from '@hourmere/scheduling'
 import {
   createFixtures,
   createTestTeam,
@@ -39,10 +44,14 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
   let f: Fixtures
   let ada: TestUser
   let grace: TestUser
+  let admin: TestUser
   let team: TestTeam
   let key: string
   let teamKey: string
   let graceTeamKey: string
+  let adminTeamKey: string
+  let readKey: string
+  let bookingsKey: string
   let eventId: string
   let teamEventId: string
   let graceEventId: string
@@ -50,6 +59,20 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
   let scheduleId: string
   let foreignScheduleId: string
   let app: ReturnType<typeof createApp>
+  function makeApp(followUpHostNotesEnabled = true) {
+    return createApp({
+      checkDb: async () => {},
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      publicUrl: PUBLIC_URL,
+      routes: [
+        profileRoutes({ db }),
+        scheduleRoutes({ db }),
+        eventTypeRoutes({ db, followUpHostNotesEnabled }),
+      ],
+      mcp: mcpEndpoint({ tools: [whoamiTool, ...catalogTools({ db, followUpHostNotesEnabled })] }),
+    })
+  }
   async function makeKey(user: TestUser, organizationId?: string) {
     const created = await auth.api.createApiKey({
       body: {
@@ -76,13 +99,23 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
     f = createFixtures(db)
     ada = await createTestUser(db, 'Ada')
     grace = await createTestUser(db, 'Grace')
+    admin = await createTestUser(db, 'Admin')
     team = await createTestTeam(db, [
       { user: ada, role: 'owner' },
       { user: grace, role: 'member' },
+      { user: admin, role: 'admin' },
     ])
     key = await makeKey(ada)
     teamKey = await makeKey(ada, team.id)
     graceTeamKey = await makeKey(grace, team.id)
+    adminTeamKey = await makeKey(admin, team.id)
+    for (const scope of ['read', 'bookings'] as const) {
+      const created = await auth.api.createApiKey({
+        body: { userId: ada.id, metadata: { scope } },
+      })
+      if (scope === 'read') readKey = created.key
+      else bookingsKey = created.key
+    }
     await putProfile(testContext(db, ada.principal), {
       handle: 'catalog-ada',
       timeZone: 'America/Los_Angeles',
@@ -103,31 +136,24 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
       overrides: [{ date: '2026-11-01', intervals: [] }],
     })
     foreignScheduleId = await f.schedule(grace.id)
-    app = createApp({
-      checkDb: async () => {},
-      authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
-      publicUrl: PUBLIC_URL,
-      routes: [profileRoutes({ db }), scheduleRoutes({ db }), eventTypeRoutes({ db })],
-      mcp: mcpEndpoint({ tools: [whoamiTool, ...catalogTools({ db })] }),
-    })
+    app = makeApp()
   })
   afterAll(async () => {
     await authPool?.end()
     await testDb?.drop()
   })
-  async function connect(token = key) {
+  async function connect(token = key, target = app) {
     const client = new Client({ name: 'catalog-test', version: '1.0.0' })
     await client.connect(
       new StreamableHTTPClientTransport(new URL(`${PUBLIC_URL}/mcp`), {
-        fetch: async (input, init) => app.request(input, init),
+        fetch: async (input, init) => target.request(input, init),
         requestInit: { headers: { authorization: `Bearer ${token}` } },
       }),
     )
     return client
   }
-  async function call(name: string, args: Record<string, unknown> = {}, token = key) {
-    const client = await connect(token)
+  async function call(name: string, args: Record<string, unknown> = {}, token = key, target = app) {
+    const client = await connect(token, target)
     try {
       return (await client.callTool({ name, arguments: args })) as Result
     } finally {
@@ -155,7 +181,7 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
     expect(response.status).toBe(200)
     return response.json()
   }
-  it('advertises all five read-only strict tools and bounded page output schemas', async () => {
+  it('advertises strict configuration tools and bounded page output schemas', async () => {
     const client = await connect()
     try {
       const { tools } = await client.listTools()
@@ -165,12 +191,13 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
         'get_schedule',
         'list_event_types',
         'list_schedules',
+        'set_event_type_notifications',
         'whoami',
       ])
       for (const tool of tools.filter((t) => t.name !== 'whoami')) {
         expect(tool.inputSchema.additionalProperties).toBe(false)
         expect(tool.annotations).toMatchObject({
-          readOnlyHint: true,
+          readOnlyHint: tool.name !== 'set_event_type_notifications',
           destructiveHint: false,
           idempotentHint: true,
           openWorldHint: false,
@@ -179,6 +206,10 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
           expect(tool.outputSchema).toMatchObject({ properties: { data: { maxItems: 100 } } })
           expect(tool.inputSchema.properties?.limit).toMatchObject({ minimum: 1, maximum: 100 })
         }
+        if (tool.name === 'get_event_type' || tool.name === 'set_event_type_notifications')
+          expect(tool.outputSchema).toMatchObject({
+            properties: { notifications: expect.any(Object) },
+          })
       }
     } finally {
       await client.close()
@@ -202,6 +233,7 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
       description: 'private detail',
       questions: [{ id: 'topic' }],
       location: { kind: 'link' },
+      notifications: DEFAULT_NOTIFICATIONS,
     })
     const schedule = ok<Record<string, unknown>>(await call('get_schedule', { id: scheduleId }))
     expect(schedule).toEqual(await rest(`schedules/${scheduleId}`))
@@ -210,6 +242,246 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
       weeklyHours: { sunday: [{ start: '00:00', end: '24:00' }] },
     })
     expect(schedule).not.toHaveProperty('overrides')
+  })
+  it('replaces settings through MCP and reads the exact normalized REST configuration', async () => {
+    const notifications = {
+      reminders: [
+        { id: 'soon', offsetMinutes: 5, recipients: { invitee: true, guests: false, host: true } },
+        {
+          id: 'early',
+          offsetMinutes: 43200,
+          recipients: { invitee: false, guests: true, host: false },
+        },
+      ],
+      followUps: [
+        {
+          id: 'thanks',
+          offsetMinutes: 5,
+          recipients: { invitee: true, guests: false, host: false },
+          hostNote: 'Thanks\r\n\u202e{invitee.name}<b>hello</b>',
+        },
+      ],
+    }
+    try {
+      const written = ok<Record<string, unknown>>(
+        await call('set_event_type_notifications', { id: eventId, notifications }),
+      )
+      expect(written).toMatchObject({
+        id: eventId,
+        title: 'Intro call',
+        notifications: {
+          reminders: [notifications.reminders[1], notifications.reminders[0]],
+          followUps: [
+            { ...notifications.followUps[0], hostNote: 'Thanks\n{invitee.name}<b>hello</b>' },
+          ],
+        },
+      })
+      expect(written).toEqual(await rest(`event-types/${eventId}`))
+      expect(ok(await call('get_event_type', { id: eventId }))).toEqual(written)
+      expect(
+        ok(await call('set_event_type_notifications', { id: eventId, notifications })),
+      ).toEqual(written)
+      expect(ok<Page>(await call('list_event_types')).data[0]).not.toHaveProperty('notifications')
+      expect(
+        ok(
+          await call('set_event_type_notifications', {
+            id: eventId,
+            notifications: { reminders: [], followUps: [] },
+          }),
+        ),
+      ).toMatchObject({ notifications: { reminders: [], followUps: [] } })
+    } finally {
+      await call('set_event_type_notifications', {
+        id: eventId,
+        notifications: DEFAULT_NOTIFICATIONS,
+      })
+    }
+  })
+  it('allows team owners/admins and personal owners but rejects ordinary members and invisible types', async () => {
+    const notifications = { reminders: [], followUps: [] }
+    for (const token of [teamKey, adminTeamKey])
+      expect(
+        ok(await call('set_event_type_notifications', { id: teamEventId, notifications }, token)),
+      ).toMatchObject({ id: teamEventId, notifications })
+    expect(
+      error(
+        await call(
+          'set_event_type_notifications',
+          { id: teamEventId, notifications },
+          graceTeamKey,
+        ),
+      ).error,
+    ).toBe('insufficient_role')
+    expect(
+      ok(
+        await call(
+          'set_event_type_notifications',
+          { id: graceEventId, notifications },
+          graceTeamKey,
+        ),
+      ),
+    ).toMatchObject({ id: graceEventId, notifications })
+    for (const id of [eventId, graceEventId, deletedId, randomUUID()])
+      expect(
+        error(await call('set_event_type_notifications', { id, notifications }, teamKey)).error,
+      ).toBe('event_type_not_found')
+  })
+  it('limits notification writes to full keys while retaining read access for read and bookings keys', async () => {
+    for (const token of [readKey, bookingsKey]) {
+      expect(ok(await call('get_event_type', { id: eventId }, token))).toMatchObject({
+        notifications: DEFAULT_NOTIFICATIONS,
+      })
+      const client = await connect(token)
+      try {
+        expect(
+          (await client.listTools()).tools.some(
+            (tool) => tool.name === 'set_event_type_notifications',
+          ),
+        ).toBe(false)
+      } finally {
+        await client.close()
+      }
+      expect(
+        error(
+          await call(
+            'set_event_type_notifications',
+            { id: eventId, notifications: { reminders: [], followUps: [] } },
+            token,
+          ),
+        ).error,
+      ).toBe('insufficient_scope')
+    }
+    expect(ok(await call('get_event_type', { id: eventId }))).toMatchObject({
+      notifications: DEFAULT_NOTIFICATIONS,
+    })
+  })
+  it('enforces the instance host-note switch through the MCP write context', async () => {
+    const disabled = makeApp(false)
+    const followUp = {
+      id: 'thanks',
+      offsetMinutes: 5,
+      recipients: { invitee: true, guests: false, host: false },
+    }
+    try {
+      expect(
+        error(
+          await call(
+            'set_event_type_notifications',
+            {
+              id: eventId,
+              notifications: { reminders: [], followUps: [{ ...followUp, hostNote: 'Thanks' }] },
+            },
+            key,
+            disabled,
+          ),
+        ).error,
+      ).toBe('invalid_notifications')
+      expect(ok(await call('get_event_type', { id: eventId }))).toMatchObject({
+        notifications: DEFAULT_NOTIFICATIONS,
+      })
+      expect(
+        ok(
+          await call(
+            'set_event_type_notifications',
+            { id: eventId, notifications: { reminders: [], followUps: [followUp] } },
+            key,
+            disabled,
+          ),
+        ),
+      ).toMatchObject({ notifications: { reminders: [], followUps: [followUp] } })
+    } finally {
+      await call('set_event_type_notifications', {
+        id: eventId,
+        notifications: DEFAULT_NOTIFICATIONS,
+      })
+    }
+  })
+  it('returns invalid_request for notification shapes and rejects pre-meeting host notes', async () => {
+    const rule = {
+      id: 'a',
+      offsetMinutes: 5,
+      recipients: { invitee: true, guests: false, host: false },
+    }
+    for (const notifications of [
+      null,
+      [],
+      {},
+      { reminders: [] },
+      { followUps: [] },
+      { reminders: null, followUps: [] },
+      { reminders: [], followUps: [], unknown: true },
+      { reminders: [{ ...rule, hostNote: 'forbidden' }], followUps: [] },
+      { reminders: [], followUps: [{ ...rule, hostNote: null }] },
+      { reminders: [], followUps: [{ ...rule, hostNote: 3 }] },
+      { reminders: [{ ...rule, offsetMinutes: '5' }], followUps: [] },
+      { reminders: [{ ...rule, recipients: { invitee: true, host: false } }], followUps: [] },
+      { reminders: [{ ...rule, recipients: { ...rule.recipients, other: true } }], followUps: [] },
+      { reminders: [{ ...rule, unknown: true }], followUps: [] },
+    ])
+      expect(
+        error(await call('set_event_type_notifications', { id: eventId, notifications })).error,
+      ).toBe('invalid_request')
+    for (const args of [
+      { id: eventId },
+      { notifications: DEFAULT_NOTIFICATIONS },
+      { id: 'bad', notifications: DEFAULT_NOTIFICATIONS },
+      { id: eventId, notifications: DEFAULT_NOTIFICATIONS, organizationId: team.id },
+    ])
+      expect(error(await call('set_event_type_notifications', args)).error).toBe('invalid_request')
+  })
+  it('returns shared semantic validation errors without replacing valid stored settings', async () => {
+    const rule = {
+      id: 'a',
+      offsetMinutes: 5,
+      recipients: { invitee: true, guests: false, host: false },
+    }
+    for (const notifications of [
+      {
+        reminders: Array.from({ length: 6 }, (_, i) => ({
+          ...rule,
+          id: `r${i}`,
+          offsetMinutes: 5 + i,
+        })),
+        followUps: [],
+      },
+      {
+        reminders: [],
+        followUps: Array.from({ length: 4 }, (_, i) => ({
+          ...rule,
+          id: `f${i}`,
+          offsetMinutes: 5 + i,
+        })),
+      },
+      ...[4, 43201, 5.5].map((offsetMinutes) => ({
+        reminders: [{ ...rule, offsetMinutes }],
+        followUps: [],
+      })),
+      ...[4, 43201, 5.5].map((offsetMinutes) => ({
+        reminders: [],
+        followUps: [{ ...rule, offsetMinutes }],
+      })),
+      ...['', 'bad id', '__proto__', 'x'.repeat(65)].map((id) => ({
+        reminders: [{ ...rule, id }],
+        followUps: [],
+      })),
+      { reminders: [rule, { ...rule, offsetMinutes: 6 }], followUps: [] },
+      { reminders: [rule], followUps: [{ ...rule, offsetMinutes: 6 }] },
+      { reminders: [rule, { ...rule, id: 'b' }], followUps: [] },
+      { reminders: [], followUps: [rule, { ...rule, id: 'b' }] },
+      {
+        reminders: [{ ...rule, recipients: { invitee: false, guests: false, host: false } }],
+        followUps: [],
+      },
+      { reminders: [], followUps: [{ ...rule, hostNote: 'x'.repeat(2001) }] },
+      { reminders: [], followUps: [{ ...rule, hostNote: 'bad\u0001text' }] },
+      { reminders: [], followUps: [{ ...rule, hostNote: 'bad\u007ftext' }] },
+    ])
+      expect(
+        error(await call('set_event_type_notifications', { id: eventId, notifications })).error,
+      ).toBe('invalid_notifications')
+    expect(ok(await call('get_event_type', { id: eventId }))).toMatchObject({
+      notifications: DEFAULT_NOTIFICATIONS,
+    })
   })
   it('lists only personal-organization types for a personal key, including inactive ones', async () => {
     expect(ok<Page>(await call('list_event_types'))).toEqual({

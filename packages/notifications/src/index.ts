@@ -90,6 +90,8 @@ export const BookingNotificationPayload = z.strictObject({
 
 export interface NotificationDeps extends NotificationMailLimits {
   db: Db
+  /** Omit host-written follow-up text when the instance operator disables it. */
+  followUpHostNotesEnabled?: boolean | undefined
   mailer: Mailer
   /** BETTER_AUTH_SECRET: purpose-derived key for private recipient accounting. */
   secret: string

@@ -73,6 +73,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `get_profile` | — | `profile` | `full, read, bookings` |
 | `list_event_types` | — | `catalog` | `full, read, bookings` |
 | `get_event_type` | — | `event` | `full, read, bookings` |
+| `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
 | `list_calendar_connections` | — | — | `full, read` |

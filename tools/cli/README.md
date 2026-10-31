@@ -85,12 +85,39 @@ the retained request and idempotency key; **rescheduling is not idempotent**.
 
 ## Commands
 
-`whoami`, `profile`, `catalog`, `event`, `schedules`, `schedule`, `slots`, `book`, `list`,
+`whoami`, `profile`, `catalog`, `event`, `set-event-notifications`, `schedules`, `schedule`, `slots`, `book`, `list`,
 `reschedule`, `cancel`, `retry-meeting`, `retry-calendar-copy`.
 
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.
 Exit codes: `0` success, `1` usage/input/domain/protocol error, `3` transport failure.
+
+Use `event` to read an event type's notification settings. To replace them, supply its `id`
+and both notification arrays in a JSON file and use a `full` API key:
+
+```json
+{
+  "id": "019a0000-0000-7000-8000-000000000001",
+  "notifications": {
+    "reminders": [
+      {"id": "one-hour", "offsetMinutes": 60, "recipients": {"invitee": true, "guests": false, "host": true}}
+    ],
+    "followUps": [
+      {"id": "thanks", "offsetMinutes": 60, "recipients": {"invitee": true, "guests": false, "host": false}, "hostNote": "Thank you for your time."}
+    ]
+  }
+}
+```
+
+```sh
+hourmere set-event-notifications --input notifications.json
+```
+
+Both arrays are replaced together; empty arrays turn these messages off. Settings apply to
+future bookings and send no immediate mail. Personal event types require their owner;
+team types require an owner or admin. `read` and `bookings` keys cannot change them.
+Follow-up notes are plain text, limited to 2000 UTF-16 code units, and may be disabled by
+the instance operator. They are sent from the instance's mail domain to selected recipients.
 
 Host booking fields from `list` include optional `rescheduledToId`: the immediate successor
 in the same organization that the caller also hosts, or null when none is available, even

@@ -1,4 +1,5 @@
 // CLI -> real HTTP -> MCP -> real API keys -> disposable PostgreSQL. No provider or mail delivery.
+import '@hono/zod-openapi'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,11 +8,13 @@ import { serve } from '@hono/node-server'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
+import { DEFAULT_NOTIFICATIONS } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { describe, expect, it } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp } from '../app.ts'
 import { bookingRoutes } from '../routes/bookings.ts'
+import { eventTypeRoutes } from '../routes/event-types.ts'
 import { profileRoutes } from '../routes/profile.ts'
 import { bookingTools } from './bookings.ts'
 import { catalogTools } from './catalog.ts'
@@ -61,12 +64,18 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       const otherKey = await auth.api.createApiKey({
         body: { userId: other.userId, name: 'cli-other' },
       })
+      const readKey = await auth.api.createApiKey({
+        body: { userId: host.userId, metadata: { scope: 'read' } },
+      })
+      const bookingsKey = await auth.api.createApiKey({
+        body: { userId: host.userId, metadata: { scope: 'bookings' } },
+      })
       const app = createApp({
         publicUrl: 'http://localhost:3000',
         checkDb: async () => {},
         authHandler: auth.handler,
         resolveCaller: createCallerResolver({ auth, db }),
-        routes: [bookingRoutes({ db }), profileRoutes({ db })],
+        routes: [bookingRoutes({ db }), profileRoutes({ db }), eventTypeRoutes({ db })],
         mcp: mcpEndpoint({
           tools: [
             whoamiTool,
@@ -79,7 +88,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       if (!server.listening)
         await new Promise<void>((resolve) => server?.once('listening', resolve))
       const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-      const secrets = [key.key, otherKey.key]
+      const secrets = [key.key, otherKey.key, readKey.key, bookingsKey.key]
       async function run(
         command: string,
         input: Record<string, unknown> = {},
@@ -135,7 +144,73 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(await restProfile.json()).toMatchObject({ locale: 'pt-BR' })
       const catalog = await run('catalog', { limit: 1 })
       expect(catalog.data.data[0].id).toBe(event)
-      expect((await run('event', { id: event })).code).toBe(0)
+      const defaultEvent = await run('event', { id: event })
+      expect(defaultEvent.code).toBe(0)
+      expect(defaultEvent.data.notifications).toEqual(DEFAULT_NOTIFICATIONS)
+      const notifications = {
+        reminders: [
+          {
+            id: 'soon',
+            offsetMinutes: 60,
+            recipients: { invitee: true, guests: false, host: true },
+          },
+        ],
+        followUps: [
+          {
+            id: 'thanks',
+            offsetMinutes: 5,
+            recipients: { invitee: true, guests: true, host: false },
+            hostNote: 'Thank you\r\n\u202e{invitee.name}',
+          },
+        ],
+      }
+      const updated = await run('set-event-notifications', { id: event, notifications })
+      expect(updated.code).toBe(0)
+      expect(updated.data).toMatchObject({
+        id: event,
+        title: 'CLI Test Meeting',
+        notifications: {
+          ...notifications,
+          followUps: [{ ...notifications.followUps[0], hostNote: 'Thank you\n{invitee.name}' }],
+        },
+      })
+      expect((await run('event', { id: event })).data).toEqual(updated.data)
+      const restEvent = await app.request(`/api/v1/event-types/${event}`, {
+        headers: { Authorization: `Bearer ${key.key}` },
+      })
+      expect(restEvent.status).toBe(200)
+      expect(await restEvent.json()).toEqual(updated.data)
+      for (const token of [readKey.key, bookingsKey.key]) {
+        expect((await run('event', { id: event }, { key: token })).data.notifications).toEqual(
+          updated.data.notifications,
+        )
+        const denied = await run(
+          'set-event-notifications',
+          { id: event, notifications: DEFAULT_NOTIFICATIONS },
+          { key: token },
+        )
+        expect(denied.code).toBe(1)
+        expect(denied.error.error).toBe('insufficient_scope')
+      }
+      for (const [bad, error] of [
+        [null, 'invalid_request'],
+        [
+          { reminders: [], followUps: [{ ...notifications.followUps[0], offsetMinutes: 4 }] },
+          'invalid_notifications',
+        ],
+        [
+          { reminders: [{ ...notifications.reminders[0], hostNote: 'forbidden' }], followUps: [] },
+          'invalid_request',
+        ],
+      ] as const) {
+        const failed = await run('set-event-notifications', { id: event, notifications: bad })
+        expect(failed.code).toBe(1)
+        expect(failed.error.error).toBe(error)
+      }
+      expect(
+        (await run('set-event-notifications', { id: event, notifications: DEFAULT_NOTIFICATIONS }))
+          .code,
+      ).toBe(0)
       const schedules = await run('schedules', { limit: 1 })
       expect(schedules.data.data).toHaveLength(1)
       expect((await run('schedule', { id: schedules.data.data[0].id })).code).toBe(0)

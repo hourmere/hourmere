@@ -7,6 +7,7 @@ export const COMMANDS = {
   profile: 'get_profile',
   catalog: 'list_event_types',
   event: 'get_event_type',
+  'set-event-notifications': 'set_event_type_notifications',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
   slots: 'find_available_slots',
@@ -21,7 +22,7 @@ export const COMMANDS = {
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere --help | --version
 
-Commands: whoami, profile, catalog, event, schedules, schedule, slots,
+Commands: whoami, profile, catalog, event, set-event-notifications, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.

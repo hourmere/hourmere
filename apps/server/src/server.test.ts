@@ -111,6 +111,9 @@ describe.skipIf(!serverUrl)('startServer', () => {
     const db = createDb(testDb.pool)
     const f = createFixtures(db)
     const host = await f.host()
+    const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+      hosts: [{ userId: host.userId }],
+    })
     const secret = randomBytes(32).toString('base64')
     const signup = { mode: 'open', allowedDomains: [] } as const
     const authPool = createAuthPool(testDb.url, signup)
@@ -135,6 +138,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
         PUBLIC_URL: 'http://localhost',
         BETTER_AUTH_SECRET: secret,
         HOURMERE_ROLE: 'web',
+        FOLLOW_UP_HOST_NOTES_ENABLED: 'false',
       })
       const client = new Client({ name: 'catalog-registration-test', version: '1.0.0' })
       try {
@@ -149,6 +153,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
             'get_profile',
             'list_event_types',
             'get_event_type',
+            'set_event_type_notifications',
             'list_schedules',
             'get_schedule',
           ]),
@@ -156,6 +161,33 @@ describe.skipIf(!serverUrl)('startServer', () => {
         const profile = await client.callTool({ name: 'get_profile', arguments: {} })
         expect(profile.isError).toBeFalsy()
         expect(profile.structuredContent).toMatchObject({ handle: host.handle })
+        const notifications = {
+          reminders: [],
+          followUps: [
+            {
+              id: 'after',
+              offsetMinutes: 60,
+              recipients: { host: false, invitee: true, guests: false },
+              hostNote: 'Disabled by this operator',
+            },
+          ],
+        }
+        const noteWrite = await client.callTool({
+          name: 'set_event_type_notifications',
+          arguments: { id: eventTypeId, notifications },
+        })
+        expect(noteWrite.isError).toBe(true)
+        expect(JSON.stringify(noteWrite.content)).toContain('invalid_notifications')
+        const restWrite = await fetch(
+          `http://127.0.0.1:${server.port}/api/v1/event-types/${eventTypeId}/notifications`,
+          {
+            method: 'PUT',
+            headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ notifications }),
+          },
+        )
+        expect(restWrite.status).toBe(400)
+        expect(await restWrite.json()).toMatchObject({ error: 'invalid_notifications' })
       } finally {
         await client.close()
         await server.close()

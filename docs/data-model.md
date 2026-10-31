@@ -785,7 +785,8 @@ Migration 0049 adds event-type `notifications` settings and the immutable per-bo
 existing bookings keep NULL, which always means that legacy default. Settings edits affect
 only new booking roots. Reschedules materialize or copy the predecessor snapshot and
 recompute offsets from the successor's UTC start and end. Internal configuration services
-serialize complete replacements with the event-type row lock; public transports are unchanged.
+serialize complete replacements with the event-type row lock. Protected REST event types
+expose these settings; REST, MCP and CLI writes share service validation and permissions.
 
 The exact default policy retains the existing generic reminder and conference-ready outbox
 paths. Every other policy uses `booking_scheduled_messages`, uniquely identified by booking,
@@ -821,6 +822,14 @@ tabs and line endings allowed; other C0/C1 controls, bidi embedding/isolate cont
 malformed Unicode are rejected. Reminders cannot carry a note. See
 [the 0052 upgrade note](../packages/db/migrations/0052_follow_up_host_note.md) for the
 predecessor-preservation checks and rollout constraints.
+
+Public writes apply the 2026-10-31 note contract before storage: CRLF becomes LF, bidi
+embedding/isolate controls are removed, and the normalized value must be well-formed,
+at most 2000 UTF-16 code units and free of other controls (including tabs). This is stricter
+than migration 0052's storage envelope; published migration SQL stays unchanged and
+legacy saved snapshots remain readable. `FOLLOW_UP_HOST_NOTES_ENABLED=false` rejects
+explicit note writes and omits even saved snapshot notes when sending, without rewriting
+stored settings or changing default reminders.
 
 ## Booking webhooks
 

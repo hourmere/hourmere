@@ -1,4 +1,4 @@
-// Read-only owner configuration discovery, using the REST services and detail schemas.
+// Owner configuration discovery and notification settings, using shared REST services and schemas.
 import { z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
@@ -10,8 +10,10 @@ import {
   listEventTypeCatalog,
   listScheduleCatalog,
   MAX_CATALOG_PAGE_SIZE,
+  NotificationSettingsSchema,
   SCHEDULE_NAME_MAX_LENGTH,
   type ServiceContext,
+  updateEventType,
 } from '@hourmere/scheduling'
 import { EventType } from '../routes/event-types.ts'
 import { Profile } from '../routes/profile.ts'
@@ -66,11 +68,18 @@ const annotations = {
   openWorldHint: false,
 }
 
-export function catalogTools({ db }: { db: Db }): Tool[] {
+export function catalogTools({
+  db,
+  followUpHostNotesEnabled,
+}: {
+  db: Db
+  followUpHostNotesEnabled?: boolean | undefined
+}): Tool[] {
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
     now: () => Temporal.Now.instant(),
+    followUpHostNotesEnabled,
   })
   return [
     defineTool({
@@ -100,12 +109,26 @@ export function catalogTools({ db }: { db: Db }): Tool[] {
       name: 'get_event_type',
       title: 'Get an event type',
       description:
-        "Reads a visible event type's full configuration (questions, location, schedule and booking rules) by id from list_event_types, with the same ownership and organization boundaries as GET /api/v1/event-types/{id}.",
+        "Reads a visible event type's full configuration (questions, location, schedule, booking rules and notification settings) by id from list_event_types, with the same ownership and organization boundaries as GET /api/v1/event-types/{id}.",
       input: IdInput,
       output: EventType,
       annotations,
       async run(args, call) {
         return getEventType(context(call.caller), args.id)
+      },
+    }),
+    defineTool({
+      name: 'set_event_type_notifications',
+      title: 'Set event type notifications',
+      description:
+        'Replaces reminders and follow-ups for future bookings and returns the full event type, as PUT /api/v1/event-types/{id}/notifications does. Supply both arrays; empty arrays disable these messages. At most 5 reminders and 3 follow-ups, each 5 to 43200 integer minutes before the start or after the end. IDs are unique across both arrays; offsets are unique within each. Select at least one recipient class. Only follow-ups accept an optional plain-text hostNote (at most 2000 UTF-16 code units, normalized); an operator may disable host notes. Personal types require their owner; team types require an owner or admin. Requires a full API key or an authorized MCP OAuth grant. Sends no immediate email and leaves existing bookings unchanged.',
+      input: z.strictObject({ ...IdInput.shape, notifications: NotificationSettingsSchema }),
+      output: EventType,
+      annotations: { ...annotations, readOnlyHint: false },
+      async run(args, call) {
+        return updateEventType(context(call.caller), args.id, {
+          notifications: args.notifications,
+        })
       },
     }),
     defineTool({

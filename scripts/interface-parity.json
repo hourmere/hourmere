@@ -95,6 +95,10 @@
     "exemption": "browser-session-only",
     "reason": "Selecting an MCP OAuth grant's organization requires the user's browser consent flow."
   },
+  "setEventTypeNotifications": {
+    "mcp": "set_event_type_notifications",
+    "cli": "set-event-notifications"
+  },
   "submitMcpOAuthConsent": {
     "exemption": "browser-session-only",
     "reason": "Approving or denying MCP OAuth access requires the user's browser consent flow."
