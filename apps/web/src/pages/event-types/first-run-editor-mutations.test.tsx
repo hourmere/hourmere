@@ -255,7 +255,7 @@ describe('first-run editor production-source negative controls', () => {
     const expected =
       locale === 'en'
         ? 'Invitees always give their name and email. You can add up to {count} extra questions.'
-        : '受邀人始终需要提供姓名和邮箱。你还可以添加最多 {count} 个问题。'
+        : '受邀人始终需要提供姓名和邮箱。你还可以添加最多{count}个问题。'
     detects(source, `    '${expected}',`, "    '最多 {count}。',", (code) => {
       const admin = copy<Record<string, string>>(code, 'admin')
       expect(

@@ -90,7 +90,7 @@ describe('the profile settings', () => {
     )
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(hint?.textContent).toBe(
-      '你的预约链接以 /ada/ 开头。只能用小写字母、数字和连字符，最多 40 个字符。',
+      '你的预约链接以/ada/开头。只能用小写字母、数字和连字符，最多 40 个字符。',
     )
     const timeZone = screen.getByRole('combobox', { name: '时区' })
     expect(timeZone.getAttribute('placeholder')).toBe('搜索城市（例如上海）或时差')

@@ -613,7 +613,7 @@ export const admin = {
   ', until': '，至',
   ', your personal organization': '（你的个人组织）',
   'Use only lowercase letters, digits and hyphens, up to {count} characters.':
-    '只能用小写字母、数字和连字符，最多 {count} 个字符。',
+    '只能用小写字母、数字和连字符，最多{count}个字符。',
   '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.':
     '。如果此邮箱可以登录，请检查收件箱中的登录链接。链接仅可使用一次，几分钟后过期。',
   '. They are saved right away.': '。更改会立即保存。',
@@ -882,7 +882,7 @@ export const admin = {
   Inactive: '未启用',
   Invitee: '受邀人',
   'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.':
-    '受邀人始终需要提供姓名和邮箱。你还可以添加最多 {count} 个问题。',
+    '受邀人始终需要提供姓名和邮箱。你还可以添加最多{count}个问题。',
   'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.':
     '此应用可在你退出登录后继续连接，最长为首次批准起的 30 天。刷新令牌不会延长此期限。离开组织或在“已连接的应用”中撤销访问会立即终止连接。',
   'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.':
@@ -1165,7 +1165,7 @@ export const admin = {
   "You're no longer a member of {0}, so no key was created. Keys you create now act in {1}.":
     '你已不再是{0}的成员，因此未创建密钥。现在创建的密钥将作用于{1}。',
   'Your account could not be created. Please try again.': '无法创建账号。请重试。',
-  'Your booking links start with {path}.': '你的预约链接以 {path} 开头。',
+  'Your booking links start with {path}.': '你的预约链接以{path}开头。',
   'Your default schedule': '你的默认日程',
   'Your email comes from how you sign in.': '你的邮箱由登录方式决定。',
   'Your first schedule is your default schedule.': '你的首个日程将作为默认日程。',
