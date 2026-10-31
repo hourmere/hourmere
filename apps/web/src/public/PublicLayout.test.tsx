@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { EmbedLanguage } from '../i18n/runtime.tsx'
 import styles from '../styles.css?raw'
 import { fakeApi, renderApp } from '../test/fake-api.tsx'
@@ -33,6 +33,49 @@ describe('host avatars', () => {
     expect(avatar?.getAttribute('aria-hidden')).toBe('true')
     expect(avatar?.querySelector('img')).toBeNull()
     expect(screen.queryByRole('img')).toBeNull()
+  })
+
+  it('creates and reuses the grapheme segmenter only when initials need it', async () => {
+    const segmenter = vi.spyOn(Intl, 'Segmenter')
+    vi.resetModules()
+    const { hostInitials: initials } = await import('./PublicLayout.tsx')
+    expect(segmenter).not.toHaveBeenCalled()
+    expect(initials('')).toBe('?')
+    expect(segmenter).not.toHaveBeenCalled()
+    expect(initials('e\u0301lodie 👩🏽‍💻')).toBe('E\u0301👩🏽‍💻')
+    expect(segmenter).toHaveBeenCalledExactlyOnceWith(undefined, { granularity: 'grapheme' })
+    expect(initials('Ada Lovelace')).toBe('AL')
+    expect(segmenter).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads and renders public content with code-point initials without Intl.Segmenter', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined })
+    vi.resetModules()
+    try {
+      const imported = import('./PublicLayout.tsx')
+      await expect(imported).resolves.toHaveProperty('PublicLayout')
+      const { hostInitials: initials, HostAvatar: Avatar, PublicLayout: Layout } = await imported
+      expect(() => initials('Ada Lovelace')).not.toThrow()
+      expect(initials('Ada Lovelace')).toBe('AL')
+      expect(initials('e\u0301lodie dubois')).toBe('ED')
+      expect(initials('👩🏽‍💻 Rivera')).toBe('👩R')
+      expect(initials('王 小明')).toBe('王小')
+      expect(initials(' \t\n ')).toBe('?')
+      fakeApi({})
+      render(
+        <Layout>
+          <h1>Booking content</h1>
+          <Avatar name="👩🏽‍💻 Rivera" />
+        </Layout>,
+      )
+      const main = screen.getByRole('main')
+      expect(main.contains(screen.getByRole('heading', { name: 'Booking content' }))).toBe(true)
+      expect(main.querySelector('.host-avatar')?.textContent).toBe('👩R')
+      expect(screen.getByRole('link', { name: 'Powered by Hourmere' })).toBeDefined()
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor)
+    }
   })
 
   it('uses an existing same-origin image without duplicating the visible host name', () => {

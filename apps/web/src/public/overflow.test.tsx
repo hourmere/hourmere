@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes, managed, TOKEN } from '../test/public-fixtures.ts'
@@ -49,6 +49,34 @@ function luminance(color: string) {
 }
 
 describe('public overflow protections', () => {
+  it('removes title top spacing only when the host identity follows it', () => {
+    render(
+      <div className="public">
+        <aside>
+          <h1 className="event-title">Intro call</h1>
+          <div className="host-identity">
+            <p className="event-host">Ada Lovelace</p>
+          </div>
+        </aside>
+        <aside>
+          <h1 className="event-title">Another event</h1>
+        </aside>
+      </div>,
+    )
+    // jsdom needs concrete tokens to expand shorthand margins.
+    const css = publicStyles
+      .replaceAll('var(--space-1)', '4px')
+      .replaceAll('var(--space-3)', '12px')
+    inspectStyles(css, () => {
+      expect(getComputedStyle(screen.getByRole('heading', { name: 'Intro call' })).marginTop).toBe(
+        '0px',
+      )
+      expect(
+        getComputedStyle(screen.getByRole('heading', { name: 'Another event' })).marginTop,
+      ).toBe('4px')
+    })
+  })
+
   it('keeps the avatar fixed while long host names can shrink and wrap beside it', () => {
     inspectStyles(publicStyles, (rules) => {
       const identity = declarations(rules, '.public .host-identity')
@@ -72,7 +100,7 @@ describe('public overflow protections', () => {
       const avatar = declarations(rules, '.public .host-avatar')
       expect(avatar.getPropertyValue('background')).toBe('var(--accent-soft)')
       expect(avatar.getPropertyValue('color')).toBe('var(--accent-soft-text)')
-      const name = declarations(rules, '.public .event-host')
+      const name = declarations(rules, '.public .host-identity > .event-host')
       expect(name.getPropertyValue('color')).toBe('var(--text)')
       expect(name.getPropertyValue('font-size')).toBe('var(--text-lg)')
     })

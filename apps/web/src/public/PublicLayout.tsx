@@ -10,15 +10,20 @@ import './public.css'
 
 const HostedSignupUrl = createContext('https://hourmere.com')
 
-const nameGraphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+let nameGraphemes: Intl.Segmenter | undefined
 
-/** Use whole graphemes so initials also work for non-Latin names and combining marks. */
+/** Prefer whole graphemes, or code points when the browser lacks Intl.Segmenter. */
 export function hostInitials(name: string): string {
   const words = name.trim().split(/\s+/u).filter(Boolean)
   const first = words[0]
   if (!first) return '?'
+  if (!nameGraphemes && typeof Intl.Segmenter === 'function') {
+    nameGraphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  }
   const initial = (word: string) =>
-    nameGraphemes.segment(word)[Symbol.iterator]().next().value?.segment ?? ''
+    nameGraphemes
+      ? (nameGraphemes.segment(word)[Symbol.iterator]().next().value?.segment ?? '')
+      : (Array.from(word)[0] ?? '')
   return (initial(first) + (words.length > 1 ? initial(words.at(-1) ?? '') : '')).toUpperCase()
 }
 
