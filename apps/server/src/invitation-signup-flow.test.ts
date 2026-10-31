@@ -454,6 +454,8 @@ describe.skipIf(!serverUrl)(
             expect((await join(i, f, session)).status).toBe(400)
             expect(await membership(f)).toHaveLength(1)
           },
+          // Allow four real queue drains while preserving each drain's own deadline.
+          30_000,
         )
 
         it('keeps existing-account signin separate from joining and rejects an already-used link', async () => {

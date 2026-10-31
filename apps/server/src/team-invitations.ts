@@ -15,6 +15,7 @@ export const TeamInvitationSummarySchema = z.strictObject({
   id: z.uuid(),
   email: z.string(),
   status: z.enum(['pending', 'accepted', 'canceled', 'rejected', 'expired', 'unknown']),
+  invalidReason: z.enum(['inviter_left']).nullable(),
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   delivery: z.strictObject({
@@ -42,6 +43,7 @@ export const TeamInvitationSummarySchema = z.strictObject({
     .enum([
       'TEAM_MANAGEMENT_ACCESS_DENIED',
       'INVITATION_INELIGIBLE',
+      'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
       'INVITATION_RECIPIENT_ALREADY_MEMBER',
       'INVITATION_GENERATION_LIMIT',
       'INVITATION_DELIVERY_BUSY',
@@ -100,6 +102,7 @@ export async function listTeamInvitationSummaries(
     role: string | null
     status: string
     storedStatus: string
+    invalidReason: 'inviter_left' | null
     createdAt: Date
     expiresAt: Date
     databaseNow: Date
@@ -119,6 +122,11 @@ export async function listTeamInvitationSummaries(
         THEN 'expired'
         WHEN i.status IN ('pending', 'accepted', 'canceled', 'rejected') THEN i.status
         ELSE 'unknown' END AS status,
+      CASE WHEN i.status = 'pending' AND NOT EXISTS (
+        SELECT 1 FROM auth.member AS inviter
+        WHERE inviter."organizationId" = i."organizationId"
+          AND inviter."userId" = i."inviterId"
+      ) THEN 'inviter_left' ELSE NULL END AS "invalidReason",
       invitation_clock.now AS "databaseNow",
       d.generation, d.state, d.attempts, d.last_attempt_at AS "lastAttemptAt",
       d.last_error_code AS "lastErrorCode",
@@ -155,6 +163,8 @@ export async function listTeamInvitationSummaries(
       row.databaseNow,
       await invitationRecipientIsMember(db, actor.organizationId, row.email),
     )
+    if (row.invalidReason === 'inviter_left')
+      resendDeniedReason = 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION'
     if (resendDeniedReason === null && row.status === 'expired') {
       const duplicate = await db
         .selectFrom('auth.invitation')
@@ -213,6 +223,7 @@ export async function listTeamInvitationSummaries(
         id: row.id,
         email: row.email,
         status: row.status,
+        invalidReason: row.invalidReason,
         createdAt: row.createdAt.toISOString(),
         expiresAt: row.expiresAt.toISOString(),
         delivery: {

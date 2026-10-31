@@ -555,6 +555,18 @@ never invokes the sign-in worker's account/sign-up eligibility decision and does
 grant an inviter any new registration authority. Errors use fixed codes and diagnostics
 omit recipients and underlying database/provider text.
 
+If the original inviter leaves or is removed from the team, their pending invitations are
+no longer valid. Neither resend nor the expired-row replacement action can reuse them:
+both refuse with `INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION`.
+Acceptance uses the same error code.
+Native recipient invitation discovery omits these rows. They grant no signup exception:
+an otherwise ineligible address receives no sign-in email and cannot create an account.
+A current owner/admin must cancel any old pending invitation and send a fresh invitation
+in their own name through the invite form.
+The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
+cancellation remains allowed. Demotion while the inviter remains a member leaves validity
+unchanged. These checks do not rewrite the invitation's stored lifecycle.
+
 Invitation admission commits the invitation and queued delivery intent together, then
 waits for durable pg-boss enqueueing before returning success. It never waits for SMTP.
 If enqueueing fails or cannot confirm the exclusive job, the request returns HTTP 503
@@ -684,7 +696,9 @@ safe outcome/error code, SMTP acceptance time, creation/update times and nullabl
 record the acting administrator, whose current name appears as “invited by” and whose team
 authority is checked before sending. Legacy null rows use the original inviter. Deleting
 a recorded actor does not erase the UUID or fall back to the original inviter: sending
-stops instead. The original invitation inviter remains the signup-policy identity.
+stops instead. The original invitation inviter remains the signup-policy identity and must
+independently remain a member of the invitation's team, even if another administrator
+authorized the latest delivery generation.
 An SMTP acceptance does not mean that the recipient received, read or
 accepted the invitation. Pending, unexpired invitations retain their delivery tombstones,
 so resends cannot reset the generation cap or original validity duration. Expired pending,
@@ -721,7 +735,8 @@ rejected, expired or unknown-status invitations stop, and stale jobs cannot send
 change a successor generation. An already recorded `smtp_accepted` generation is also
 terminal. Both the claim and pre-SMTP transactions use the shared team-management and
 invitation eligibility policy: the current generation's authorizing administrator must
-still be a current owner/admin of the non-personal team, the invitation role must be allowed, and the recipient must not
+still be a current owner/admin of the non-personal team, the original inviter must still
+belong to that team (any role), the invitation role must be allowed, and the recipient must not
 already belong to the team. Otherwise the generation becomes terminal
 `skipped/invitation_ineligible` without SMTP or automatic retries. Template rendering
 failure is terminal `failed/transport_error`, distinct from `smtp_not_configured`.

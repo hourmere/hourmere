@@ -103,12 +103,29 @@ async function terminal(
     .execute()
 }
 
+async function originalInviterIsMember(
+  db: Db,
+  invitation: { organizationId: string; inviterId: string },
+) {
+  return Boolean(
+    await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', invitation.organizationId)
+      .where('userId', '=', invitation.inviterId)
+      .executeTakeFirst(),
+  )
+}
+
 async function invitationAuthorizationIsCurrent(
   db: Db,
   invitation: NonNullable<Awaited<ReturnType<typeof lockedDelivery>>>['invitation'],
   authorizedByUserId: string,
 ) {
   if (!invitationRoleAllowed(invitation.role)) return false
+  // A resend's authorizing administrator cannot revive a departed inviter's link.
+  // Current membership is sufficient for the original inviter after a demotion.
+  if (!(await originalInviterIsMember(db, invitation))) return false
   const actor = await db
     .selectFrom('auth.user')
     .select('id')
@@ -138,6 +155,10 @@ async function claimAttempt(deps: InvitationEmailSenderDeps, request: Invitation
     if (delivery.state !== 'queued') return
     const initialNow = await databaseTime(trx)
     if (invitation.status !== 'pending' || invitation.expiresAt <= initialNow) {
+      await terminal(trx, request, 'skipped', 'invitation_ineligible', initialNow)
+      return
+    }
+    if (!(await originalInviterIsMember(trx, invitation))) {
       await terminal(trx, request, 'skipped', 'invitation_ineligible', initialNow)
       return
     }
