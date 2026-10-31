@@ -278,10 +278,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await deliver(deps(), b.message.id)
       expect(sent).toHaveLength(1)
       expect(await current(b)).toMatchObject({ state: 'completed', attempts: 1 })
-      expect(sent[0]?.subject).toBe('Scheduled meeting time ended: Planning')
+      expect(sent[0]?.subject).toBe('Scheduled meeting time has ended: Planning')
       expect(sent[0]?.text).toContain('The scheduled time')
       expect(sent[0]?.text).not.toMatch(/zoom\.us|#token=|manage|attended|successfully/i)
-      expect(sent[0]?.html).toBeUndefined()
+      expect(sent[0]?.html).toContain('The scheduled time')
+      expect(sent[0]?.html).not.toMatch(/zoom\.us|#token=/)
       expect(sent[0]?.attachments).toBeUndefined()
       const saved = await receipts(b)
       expect(saved).toHaveLength(1)
@@ -295,6 +296,88 @@ describe.skipIf(!process.env.DATABASE_URL)(
       'neutral follow-up ignores %s conference and unavailable pin, without join URL, management token or ICS',
       (state) => verifyNeutralFollowUp(state),
     )
+
+    async function verifyFollowUpNote(deliver: Deliver = deliverScheduledBookingEmail) {
+      const hostNote =
+        '<b>Review & reply</b>\r\nhttps://notes.example.com\r\nBcc: literal body text'
+      const b = await booked({
+        reminders: [],
+        followUps: [{ id: 'after', offsetMinutes: 5, recipients: onlyInvitee, hostNote }],
+      })
+      // Subsequent event edits must not change the immutable note selected at booking time.
+      await db
+        .updateTable('event_types')
+        .set({ notifications: JSON.stringify(followUp) })
+        .where('id', '=', b.eventTypeId)
+        .execute()
+      atDue(b)
+      await deliver(deps(), b.message.id)
+      expect(sent).toHaveLength(1)
+      const email = sent[0]
+      if (!email) throw new Error('Missing follow-up email')
+      expect(email.text).toContain(hostNote.replaceAll('\r\n', '\n'))
+      expect(email.html).toContain('&lt;b&gt;Review &amp; reply&lt;/b&gt;')
+      expect(email.html).not.toContain('href="https://notes.example.com')
+      expect(email.subject).not.toMatch(/Review|Bcc:|[\r\n]/)
+      expect(email.attachments).toBeUndefined()
+      expect((await receipts(b))[0]?.manage_token_hash).toBeNull()
+      expect(await ledger()).toHaveLength(1)
+      await deliver(deps(), b.message.id)
+      expect(sent).toHaveLength(1)
+      expect(await ledger()).toHaveLength(1)
+    }
+    it('renders the immutable follow-up note while retaining budget and idempotency', () =>
+      verifyFollowUpNote())
+    it('detects dropping the stored host note with a real assertion failure', async () => {
+      const copy = await scheduledCopy([['hostNote: rule.hostNote,', 'hostNote: undefined,']])
+      await expect(verifyFollowUpNote(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+
+    it('uses the host locale and stored booker locale for follow-up copies', async () => {
+      const b = await booked({
+        reminders: [],
+        followUps: [
+          {
+            id: 'after',
+            offsetMinutes: 5,
+            recipients: { host: true, invitee: true, guests: true },
+            hostNote: 'Shared plain text',
+          },
+        ],
+      })
+      await db
+        .updateTable('profiles')
+        .set({ locale: 'de' })
+        .where('user_id', '=', b.host.userId)
+        .execute()
+      await db
+        .updateTable('booking_attendees')
+        .set({ locale: 'zh-CN' })
+        .where('booking_id', '=', b.result.booking.id)
+        .execute()
+      await db
+        .insertInto('booking_attendees')
+        .values({
+          booking_id: b.result.booking.id,
+          name: 'Guest',
+          email: 'guest-locale@example.com',
+          is_booker: false,
+          time_zone: 'UTC',
+          locale: 'fr',
+        })
+        .execute()
+      atDue(b)
+      await deliverScheduledBookingEmail(deps(), b.message.id)
+      expect(sent).toHaveLength(3)
+      expect(sent[0]?.html).toContain('<html lang="de">')
+      expect(sent[1]?.html).toContain('<html lang="zh-CN">')
+      expect(sent[2]?.html).toContain('<html lang="zh-CN">')
+      expect(sent.every((email) => email.text.includes('Shared plain text'))).toBe(true)
+      expect(sent[0]?.text).toContain(`/app/bookings/${b.result.booking.id}`)
+      expect(sent.slice(1).every((email) => !email.text.includes('/app/bookings/'))).toBe(true)
+      expect((await receipts(b)).every((receipt) => receipt.manage_token_hash === null)).toBe(true)
+      expect(await ledger()).toHaveLength(3)
+    })
 
     async function waitForBudgetLock() {
       for (let i = 0; i < 500; i++) {

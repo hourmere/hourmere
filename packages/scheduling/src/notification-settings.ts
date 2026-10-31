@@ -1,16 +1,26 @@
+import { FOLLOW_UP_HOST_NOTE_MAX_LENGTH } from '@hourmere/core/follow-up-note'
 import { z } from 'zod'
 import { DomainError } from './errors.ts'
 
 const recipients = z.strictObject({ invitee: z.boolean(), guests: z.boolean(), host: z.boolean() })
 const rule = z.strictObject({ id: z.string(), offsetMinutes: z.number(), recipients })
+const followUpRule = rule.extend({
+  hostNote: z
+    .string()
+    .refine((note) => note.length <= FOLLOW_UP_HOST_NOTE_MAX_LENGTH)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: reject forbidden plain-text controls
+    .regex(/^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]*$/)
+    .refine((note) => note.isWellFormed())
+    .optional(),
+})
 
 /** Shape errors are Zod errors, mapped to invalid_request by a future transport. */
 export const NotificationSettingsSchema = z.strictObject({
   reminders: z.array(rule),
-  followUps: z.array(rule),
+  followUps: z.array(followUpRule),
 })
 export type NotificationSettings = z.infer<typeof NotificationSettingsSchema>
-export type NotificationRule = NotificationSettings['reminders'][number]
+export type NotificationRule = NotificationSettings['followUps'][number]
 export interface NotificationSnapshot {
   version: 1
   executionMode: 'legacy_default' | 'configurable'

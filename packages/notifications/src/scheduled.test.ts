@@ -188,7 +188,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     await Promise.all(messages.map((m) => deliverScheduledBookingEmail(deps, m.id)))
     expect(sent).toHaveLength(24)
     expect(sent.every((m) => !m.attachments)).toBe(true)
-    const followups = sent.filter((m) => m.subject.includes('Scheduled meeting time ended'))
+    const followups = sent.filter((m) => m.subject.includes('Scheduled meeting time has ended'))
     expect(followups).toHaveLength(9)
     expect(
       followups.every((m) => !m.text.includes('#token=') && !m.text.includes('Secret detail')),
@@ -812,6 +812,6 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     expect(sentAt).toEqual([vector.expectedDueUtc, vector.expectedDueUtc])
     expect((await rows(bookingId))[0]).toMatchObject({ state: 'completed', attempts: 1 })
     if (vector.kind === 'follow_up')
-      expect(sent.some((m) => m.subject.startsWith('会议时间已结束：'))).toBe(true)
+      expect(sent.some((m) => m.subject.startsWith('预约时段已结束：'))).toBe(true)
   })
 })

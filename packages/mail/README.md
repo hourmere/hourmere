@@ -81,3 +81,21 @@ Invitation business states such as `pending`, `accepted` and `canceled` remain s
 from future delivery states. Rendering proves neither delivery nor acceptance; SMTP
 acceptance would not establish inbox receipt. Durable delivery, retry/reconciliation,
 Better Auth `sendInvitationEmail` wiring and delivery status are later work.
+
+## Booking follow-ups
+
+`followUpEmail(meeting, recipient, { hostNote?, bookingUrl? })` renders a follow-up in every
+public booking language listed above, using the booking email layout and the recipient's
+time zone. Its wording says the scheduled time has ended; it makes no claim about attendance.
+Both alternatives include the same booking facts and optional host note.
+
+The note is plain text, bounded to 2000 UTF-16 code units through the shared core helper.
+Rendering normalizes line breaks, removes unsafe control characters, repairs malformed
+Unicode and escapes HTML. URLs and markup in the note remain text. The note never supplies
+email headers or transport addresses. Empty notes render no heading.
+
+Follow-ups omit meeting locations, join links, management capabilities, booking answers,
+guest details and calendar attachments. Only a host recipient may receive the optional
+authenticated HTTP(S) booking URL. Every follow-up is marked `sensitive: true`, so the
+development log mailer redacts its private content. Pre-meeting reminder rendering is
+unchanged.
