@@ -1,0 +1,355 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`event-type notification OpenAPI contract > publishes additive open responses and strict inputs with follow-up-only notes 1`] = `
+{
+  "input": {
+    "additionalProperties": false,
+    "description": "Complete email settings for future new bookings only; existing bookings and reschedules keep their snapshot. IDs are unique across both arrays, offsets are distinct within each array. Reminders return by descending offset, follow-ups ascending. Omitted on creation = one 24-hour reminder to all roles and no follow-ups; omitted on update = unchanged. Empty arrays disable both categories.",
+    "properties": {
+      "followUps": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "hostNote": {
+              "description": "Optional plain text, follow-ups only. At most 2000 UTF-16 code units after CRLF normalization and bidi-control removal; controls other than LF are refused. Placeholders are literal. Operators can disable host notes.",
+              "maxLength": 2000,
+              "type": "string",
+            },
+            "id": {
+              "description": "Stable rule ID, unique across reminders and followUps; __proto__ is reserved",
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string",
+            },
+            "offsetMinutes": {
+              "description": "Elapsed minutes before the meeting starts or after it ends",
+              "maximum": 43200,
+              "minimum": 5,
+              "type": "integer",
+            },
+            "recipients": {
+              "additionalProperties": false,
+              "description": "All flags are required; at least one must be true",
+              "properties": {
+                "guests": {
+                  "type": "boolean",
+                },
+                "host": {
+                  "type": "boolean",
+                },
+                "invitee": {
+                  "type": "boolean",
+                },
+              },
+              "required": [
+                "invitee",
+                "guests",
+                "host",
+              ],
+              "type": "object",
+            },
+          },
+          "required": [
+            "id",
+            "offsetMinutes",
+            "recipients",
+          ],
+          "type": "object",
+        },
+        "maxItems": 3,
+        "type": "array",
+      },
+      "reminders": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "Stable rule ID, unique across reminders and followUps; __proto__ is reserved",
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string",
+            },
+            "offsetMinutes": {
+              "description": "Elapsed minutes before the meeting starts or after it ends",
+              "maximum": 43200,
+              "minimum": 5,
+              "type": "integer",
+            },
+            "recipients": {
+              "additionalProperties": false,
+              "description": "All flags are required; at least one must be true",
+              "properties": {
+                "guests": {
+                  "type": "boolean",
+                },
+                "host": {
+                  "type": "boolean",
+                },
+                "invitee": {
+                  "type": "boolean",
+                },
+              },
+              "required": [
+                "invitee",
+                "guests",
+                "host",
+              ],
+              "type": "object",
+            },
+          },
+          "required": [
+            "id",
+            "offsetMinutes",
+            "recipients",
+          ],
+          "type": "object",
+        },
+        "maxItems": 5,
+        "type": "array",
+      },
+    },
+    "required": [
+      "reminders",
+      "followUps",
+    ],
+    "type": "object",
+  },
+  "put": {
+    "description": "Replaces notifications atomically for future new bookings, without sending mail or changing existing booking snapshots. Requires full API-key scope or the same session write access as other event-type changes.",
+    "operationId": "setEventTypeNotifications",
+    "parameters": [
+      {
+        "in": "path",
+        "name": "id",
+        "required": true,
+        "schema": {
+          "format": "uuid",
+          "type": "string",
+        },
+      },
+      {
+        "description": "The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying.",
+        "in": "header",
+        "name": "x-expected-organization-id",
+        "required": false,
+        "schema": {
+          "description": "The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying.",
+          "type": "string",
+        },
+      },
+    ],
+    "requestBody": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "additionalProperties": false,
+            "properties": {
+              "notifications": {
+                "$ref": "#/components/schemas/EventTypeNotificationsInput",
+              },
+            },
+            "required": [
+              "notifications",
+            ],
+            "type": "object",
+          },
+        },
+      },
+      "required": true,
+    },
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/EventType",
+            },
+          },
+        },
+        "description": "The changed event type",
+      },
+      "400": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error",
+            },
+          },
+        },
+        "description": "invalid_request: malformed shape; invalid_notifications: rule values or disabled host notes",
+      },
+      "401": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error",
+            },
+          },
+        },
+        "description": "No valid session or API key",
+      },
+      "403": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error",
+            },
+          },
+        },
+        "description": "insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation.",
+      },
+      "404": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error",
+            },
+          },
+        },
+        "description": "event_type_not_found: no such event type in the organization, or one the caller cannot see",
+      },
+      "409": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error",
+            },
+          },
+        },
+        "description": "organization_context_changed: reload the page before trying this team write again",
+      },
+      "429": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error",
+            },
+          },
+        },
+        "description": "The API key's rate limit is used up",
+      },
+    },
+    "security": [
+      {
+        "apiKey": [],
+      },
+      {
+        "session": [],
+      },
+    ],
+    "summary": "Replace reminder and follow-up settings",
+    "tags": [
+      "Event types",
+    ],
+  },
+  "settings": {
+    "description": "Complete email settings for future new bookings only; existing bookings and reschedules keep their snapshot. IDs are unique across both arrays, offsets are distinct within each array. Reminders return by descending offset, follow-ups ascending. Omitted on creation = one 24-hour reminder to all roles and no follow-ups; omitted on update = unchanged. Empty arrays disable both categories.",
+    "properties": {
+      "followUps": {
+        "items": {
+          "properties": {
+            "hostNote": {
+              "description": "Optional plain text, follow-ups only. At most 2000 UTF-16 code units after CRLF normalization and bidi-control removal; controls other than LF are refused. Placeholders are literal. Operators can disable host notes.",
+              "maxLength": 2000,
+              "type": "string",
+            },
+            "id": {
+              "description": "Stable rule ID, unique across reminders and followUps; __proto__ is reserved",
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string",
+            },
+            "offsetMinutes": {
+              "description": "Elapsed minutes before the meeting starts or after it ends",
+              "maximum": 43200,
+              "minimum": 5,
+              "type": "integer",
+            },
+            "recipients": {
+              "properties": {
+                "guests": {
+                  "type": "boolean",
+                },
+                "host": {
+                  "type": "boolean",
+                },
+                "invitee": {
+                  "type": "boolean",
+                },
+              },
+              "required": [
+                "invitee",
+                "guests",
+                "host",
+              ],
+              "type": "object",
+            },
+          },
+          "required": [
+            "id",
+            "offsetMinutes",
+            "recipients",
+          ],
+          "type": "object",
+        },
+        "maxItems": 3,
+        "type": "array",
+      },
+      "reminders": {
+        "items": {
+          "properties": {
+            "id": {
+              "description": "Stable rule ID, unique across reminders and followUps; __proto__ is reserved",
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string",
+            },
+            "offsetMinutes": {
+              "description": "Elapsed minutes before the meeting starts or after it ends",
+              "maximum": 43200,
+              "minimum": 5,
+              "type": "integer",
+            },
+            "recipients": {
+              "properties": {
+                "guests": {
+                  "type": "boolean",
+                },
+                "host": {
+                  "type": "boolean",
+                },
+                "invitee": {
+                  "type": "boolean",
+                },
+              },
+              "required": [
+                "invitee",
+                "guests",
+                "host",
+              ],
+              "type": "object",
+            },
+          },
+          "required": [
+            "id",
+            "offsetMinutes",
+            "recipients",
+          ],
+          "type": "object",
+        },
+        "maxItems": 5,
+        "type": "array",
+      },
+    },
+    "required": [
+      "reminders",
+      "followUps",
+    ],
+    "type": "object",
+  },
+}
+`;

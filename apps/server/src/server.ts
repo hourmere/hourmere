@@ -105,6 +105,7 @@ export function productRoutes({
   webhooks = { enabled: false },
   automaticMeet = false,
   automaticZoom = false,
+  followUpHostNotesEnabled = true,
   successRedirectAllowIpHosts = false,
   bookingMaxInviteeReschedules,
   hostedSignupUrl,
@@ -115,6 +116,7 @@ export function productRoutes({
   db: Db
   automaticMeet?: boolean
   automaticZoom?: boolean
+  followUpHostNotesEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
   bookingMaxInviteeReschedules?: number | undefined
   hostedSignupUrl?: string
@@ -164,6 +166,7 @@ export function productRoutes({
     webhookRoutes({ db, ...webhooks }),
     eventTypeRoutes({
       db,
+      followUpHostNotesEnabled,
       automaticMeet,
       automaticZoom,
       successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
@@ -189,6 +192,7 @@ export function productRoutes({
 /** The same tool registry is used by the running server and capability contract tests. */
 export function productTools({
   db,
+  followUpHostNotesEnabled,
   notify,
   automaticMeet,
   automaticZoom,
@@ -197,6 +201,7 @@ export function productTools({
   zoomConference,
 }: {
   db: Db
+  followUpHostNotesEnabled?: boolean | undefined
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -207,7 +212,7 @@ export function productTools({
   return [
     whoamiTool,
     ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
-    ...catalogTools({ db }),
+    ...catalogTools({ db, followUpHostNotesEnabled }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
@@ -360,6 +365,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   // Background jobs: every role queues them, `all` and `worker` run them.
   const notificationDeps = {
     db,
+    followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
     mailer,
     publicUrl: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
@@ -535,6 +541,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+        followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
         successRedirectAllowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
@@ -567,6 +574,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           : {}),
         tools: productTools({
           db,
+          followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
           notify,
           automaticMeet: config.GOOGLE_MEET_ENABLED,
           automaticZoom: config.ZOOM_MEETINGS_ENABLED,

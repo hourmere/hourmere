@@ -706,6 +706,44 @@ cannot. Read-only MCP `list_calendar_connections` and `list_conference_connectio
 reuse the REST services with the same ownership checks, including for MCP OAuth grants.
 Settings mutations use REST with a `full` API key; MCP OAuth grants remain limited to MCP tools.
 
+### Event-type notification settings
+
+Protected `EventType` responses include `notifications: {reminders, followUps}`. Creation
+accepts this optional field; omission uses one 1440-minute reminder for invitee, guests
+and host, with no follow-ups. `PATCH /api/v1/event-types/{id}` preserves it when omitted
+and replaces it atomically when supplied. Both arrays are required for a replacement;
+`null` is invalid and two empty arrays disable all scheduled messages.
+
+`PUT /api/v1/event-types/{id}/notifications` accepts only `{notifications}` and returns the
+full protected `EventType`. MCP `set_event_type_notifications` and CLI
+`set-event-notifications` accept `{id, notifications}` and return that same representation.
+All use the same service, personal-owner/team-owner-or-admin permissions and organization
+boundary. Browser writes retain same-origin and `X-Expected-Organization-Id` checks.
+API keys require `full`; `read` and `bookings` cannot change settings. MCP OAuth retains
+its existing grant and organization boundary. Public event metadata omits these settings,
+and public booking requests cannot override them.
+
+Each rule requires `id`, `offsetMinutes`, and `recipients: {invitee, guests, host}` with
+three booleans and at least one `true`. IDs are 1–64 ASCII letters, digits, `_` or `-`,
+except `__proto__`, and unique across both arrays. Retain a logical rule's ID across edits
+and retries. Each category requires distinct offsets: whole elapsed minutes from 5 to
+43200 inclusive, at most five reminders and three follow-ups. Responses sort reminders by
+descending offset and follow-ups by ascending offset.
+
+Follow-ups alone accept optional `hostNote`: plain text of at most 2000 UTF-16 code units
+after CRLF-to-LF normalization and bidi embedding/isolate-control removal. Controls other
+than LF, including tabs, are rejected. Notes are escaped body text; placeholders remain
+literal and no subject, header or generated link uses the text. An instance with
+`FOLLOW_UP_HOST_NOTES_ENABLED=false` rejects explicit notes, including empty strings, and
+omits saved notes when sending. See [host-note policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls).
+
+Wrong types, missing or unknown fields, `null`, or a note on a reminder return
+`400 invalid_request`. Counts, bounds, fractional offsets, ID format/duplicates, duplicate
+offsets, empty recipient selections and invalid/disabled notes return
+`400 invalid_notifications`. The shared NUL/malformed-Unicode request guard still returns
+`invalid_request`. Saves never send mail or alter existing booking snapshots; reschedules
+inherit the original snapshot. No new booking fingerprint fields are introduced.
+
 ## Validation
 
 Input is checked in two layers:

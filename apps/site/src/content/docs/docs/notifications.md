@@ -3,7 +3,7 @@ title: Notifications and background jobs
 description: Understand booking and sign-in email delivery, calendar invitations and background workers.
 ---
 
-Booking emails (confirmed, rescheduled, cancelled, reminder) are sent by a background job,
+Booking emails (confirmed, rescheduled, cancelled, reminder and follow-up) are sent by a background job,
 never from the request that changed the booking: a slow or broken mail server must not slow
 down or fail a booking, and a failed send must be retried.
 
@@ -12,6 +12,60 @@ templates and calendar invitations (`@hourmere/mail`), the notification job and 
 helper (`@hourmere/notifications`), the `booking_notifications` table, and the booking
 services ([`packages/scheduling/src/bookings.ts`](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/bookings.ts)), which queue the jobs in the transaction of
 every booking change, whether it came over REST or MCP (last section).
+
+## Configure reminders and follow-ups
+
+Protected event-type reads include `notifications`. Set it through event-type creation or
+update, `PUT /api/v1/event-types/{id}/notifications`, MCP `set_event_type_notifications`, or
+CLI `set-event-notifications`. Personal types require their owner; team types require an
+owner or admin. API keys need `full` scope. A save changes only future new bookings and
+never sends mail immediately. Existing bookings retain their saved settings, including
+when rescheduled.
+
+Each complete value contains `reminders` and `followUps`. Reminders allow up to five rules
+before the scheduled start; follow-ups allow up to three after the scheduled end. Offsets
+are whole elapsed minutes from 5 to 43200 inclusive. Each rule has a stable `id`, a distinct
+offset within its category, and all three recipient flags (`invitee`, `guests`, `host`),
+with at least one enabled. Hosts mean the booking's actual assigned hosts. An empty array
+disables that category. Omitted settings on creation retain the all-recipient 24-hour
+reminder and no follow-ups; omitted settings on update preserve the saved value.
+
+Custom reminders still require their due time to be strictly more than an hour after
+booking or rescheduling; a missed or too-close reminder is skipped. UTC elapsed offsets
+do not move with daylight saving or display time zones. Follow-ups say only that the
+scheduled meeting time has ended, carry no meeting link or calendar attachment, and do
+not claim attendance. Declining in a calendar does not cancel an Hourmere booking. There
+is currently no invitee stop-follow-ups action after the meeting starts; explain this
+before enabling follow-ups.
+
+### Host notes and hosted email abuse controls
+
+Only follow-ups may include optional `hostNote` plain text. New writes normalize CRLF to
+LF and strip bidi embedding/isolate controls before checking the 2000 UTF-16 code-unit
+limit. Other control characters, including tabs, are refused; LF is allowed. Notes appear
+only in the body, HTML-escaped and without generated links. Placeholders such as
+`{inviteeName}` remain literal text. Notes never become a subject or mail header.
+
+**Host-written text is sent from the instance's mail domain to invitee and guest addresses
+that Hourmere has not verified.** This can expose the operator's sending reputation to
+spam or phishing abuse. Notes share the existing booking-mail limits: by default five
+messages per recipient per rolling hour, twenty per rolling day, and one hundred
+instance-wide per rolling hour for invitee/guest mail. Each role recipient and each rule
+counts separately; suppressed mail is never caught up later. These budgets bound volume,
+not the trustworthiness of the host's words.
+
+Self-hosted instances default `FOLLOW_UP_HOST_NOTES_ENABLED=true`. Operators can set it to
+`false` on every web and worker process and recreate them together. New writes containing
+any `hostNote` then fail with `invalid_notifications`; writes without notes remain valid.
+The sender also omits notes already saved in booking snapshots, while still delivering the
+built-in follow-up. Saved notes are retained, so enabling the switch again permits them
+in future unsent follow-ups. No mail is backfilled by changing the switch.
+
+Hourmere Cloud must explicitly set `FOLLOW_UP_HOST_NOTES_ENABLED=false` before exposing
+notification writes to tenants. Enabling host-written mail there needs a separate reviewed
+abuse policy for host eligibility, recipient consent and complaints, in addition to the
+shared limits above. There is no automatic hosted-mode detection; attribution URLs do not
+select this policy. See [configuration](/docs/configuration#email-and-registration).
 
 ## Jobs
 
@@ -89,7 +143,7 @@ default of 10 seconds cuts long jobs short (they are retried, so nothing is lost
 
 ## Events and their jobs
 
-All notifications go through one job, `booking-notification`, with payload
+Lifecycle notifications and the unchanged default reminder go through `booking-notification`, with payload
 `{ bookingId, kind }` (queue policy `exclusive`, singleton key `<bookingId>:<kind>`).
 
 | Event (service) | Jobs queued in its transaction |
@@ -105,6 +159,12 @@ agent makes, moves or cancels sends exactly the emails a person's would.
 outside a transaction. The reminder offset is an absolute 24 hours, so across a daylight
 saving change it arrives an hour earlier or later on the recipient's clock; a booking made
 less than 25 hours ahead gets no reminder, as it would come right after the confirmation.
+
+Other notification settings use durable `booking_scheduled_messages` and the
+`scheduled-booking-email` job, keyed by booking version, category and rule ID. Booking
+snapshots, messages and initial jobs commit together. Each message has at most thirteen
+attempts; reminders stop at the start and follow-ups stop twenty-four hours after their
+due time. Cancellation or rescheduling prevents pending predecessor messages from sending.
 
 Every email goes to each host first (they most need to know), then the invitee, then the
 guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
@@ -605,8 +665,8 @@ rescheduling. At the cap, invitee slot lookup and rescheduling return HTTP 409
 contact the host. Cancelling remains possible, and authenticated hosts may still move it.
 Existing chains count their earlier invitee moves too.
 
-Before every booking notification send (confirmed, rescheduled, cancelled, reminder and
-conference-failure notices), the worker enforces two rolling windows for invitees and
+Before every booking notification send (confirmed, rescheduled, cancelled, reminder,
+follow-up and conference-failure notices), the worker enforces two rolling windows for invitees and
 guests: `MAIL_RECIPIENT_MAX_PER_HOUR` (default 5) and `MAIL_RECIPIENT_MAX_PER_DAY` (default
 20, over 24 hours). These counters are shared across bookings and organizations. Host mail
 does not consume the booking recipient budget. Changing IPs, cancelling and rebooking, or

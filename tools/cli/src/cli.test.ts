@@ -76,6 +76,7 @@ describe('CLI transport and arguments', () => {
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
     ['event', 'get_event_type'],
+    ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
     ['slots', 'find_available_slots'],

@@ -61,6 +61,7 @@ export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware 
 export interface ServiceDeps {
   db: Db
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
+  followUpHostNotesEnabled?: ServiceContext['followUpHostNotesEnabled']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
   /** The clock; defaults to the real one. */
@@ -75,10 +76,19 @@ export function serviceContext(
     automaticMeet,
     automaticZoom,
     successRedirectPolicy,
+    followUpHostNotesEnabled,
   }: ServiceDeps,
   principal: Principal,
 ): ServiceContext {
-  return { db, principal, now, automaticMeet, automaticZoom, successRedirectPolicy }
+  return {
+    db,
+    principal,
+    now,
+    automaticMeet,
+    automaticZoom,
+    successRedirectPolicy,
+    followUpHostNotesEnabled,
+  }
 }
 
 type ErrorStatus = 400 | 403 | 404 | 409

@@ -314,6 +314,14 @@ operation table and the required stop-before-upgrade procedure.
 For terminal scripts, the dependency-free [CLI](https://hourmere.com/docs/cli) supports configuration discovery,
 slots, booking, host history, rescheduling and cancellation with the same API key.
 
+Configure event-type reminders and follow-ups through REST, MCP
+`set_event_type_notifications` or CLI `set-event-notifications` with `full` scope.
+Follow-up rules may carry bounded plain-text host notes. These are sent from the instance's
+mail domain to unverified invitee addresses; operators can disable writes and sending of
+notes with `FOLLOW_UP_HOST_NOTES_ENABLED=false` (self-hosting default: `true`). Configure
+web and worker identically. Hourmere Cloud must disable notes until its text-abuse policy
+is approved. See [notification settings and host-note policy](https://hourmere.com/docs/notifications#configure-reminders-and-follow-ups).
+
 Organization owners can view first-party [booking activity](https://hourmere.com/docs/analytics) at
 `/app/analytics`: daily creations, reschedules and actual cancellations, without visitor
 tracking or attendee details.

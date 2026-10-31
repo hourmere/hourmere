@@ -8,6 +8,23 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('allows operators to disable follow-up host notes in every process role', () => {
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const env = { ...base, HOURMERE_ROLE }
+      for (const value of [undefined, '', 'true'])
+        expect(
+          loadConfig({ ...env, FOLLOW_UP_HOST_NOTES_ENABLED: value }).FOLLOW_UP_HOST_NOTES_ENABLED,
+        ).toBe(true)
+      expect(
+        loadConfig({ ...env, FOLLOW_UP_HOST_NOTES_ENABLED: 'false' }).FOLLOW_UP_HOST_NOTES_ENABLED,
+      ).toBe(false)
+      for (const value of ['yes', '1', 'TRUE', ' '])
+        expect(() => loadConfig({ ...env, FOLLOW_UP_HOST_NOTES_ENABLED: value })).toThrow(
+          /FOLLOW_UP_HOST_NOTES_ENABLED/,
+        )
+    }
+  })
+
   it('requires an explicit instance opt-in for IP-host booking continuations in every role', () => {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
       const env = { ...base, HOURMERE_ROLE }

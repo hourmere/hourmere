@@ -29,7 +29,7 @@ The CLI cannot create or revoke API keys. Sign in to the web app, open `/app/api
 choose the intended organization and a scope, then create and privately copy the key.
 **Bookings** (`bookings`, the web default) is recommended for AI booking agents;
 **Read** (`read`) suits analytics/reporting and cannot book, move, cancel or retry bookings.
-**Full account access** (`full`) also permits account configuration changes through REST;
+**Full account access** (`full`) also permits notification configuration changes;
 choose it only for trusted software. Legacy keys retain `full`. Scope cannot be edited:
 use **Create replacement**, update the client and revoke the old key. `whoami` returns
 `apiKeyScope`; [API keys](/docs/api-keys#operation-reference) lists each command's allowed
@@ -57,6 +57,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
 | `event` | `get_event_type` | `id` from `catalog` |
+| `set-event-notifications` | `set_event_type_notifications` | `id`, complete `notifications` (`reminders` and `followUps`); `full` scope required |
 | `schedules` | `list_schedules` | optional `limit`, `after` |
 | `schedule` | `get_schedule` | `id` from `schedules` |
 | `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `maxSlots`, `after` |
@@ -92,6 +93,34 @@ For a team link such as `/team/Cobaltmere/interview`, replace `"handle": "ada"`
 with `"teamSlug": "Cobaltmere"` and use `"slug": "interview"` in both the slots
 and booking JSON. Do not provide both namespace fields. The CLI forwards the same JSON
 without a separate team command.
+
+Read notifications with `event --input event.json`, where the file contains
+`{"id":"<event-type-id>"}`. Replace them with
+`npm run --silent cli -- set-event-notifications --input notifications.json`:
+
+```json
+{
+  "id": "<event-type-id>",
+  "notifications": {
+    "reminders": [],
+    "followUps": [
+      {
+        "id": "one-hour-later",
+        "offsetMinutes": 60,
+        "recipients": { "invitee": true, "guests": false, "host": false },
+        "hostNote": "Thank you for your time."
+      }
+    ]
+  }
+}
+```
+
+The command returns the full event type and changes only future new bookings, without
+immediate email. Both arrays are required; two empty arrays disable scheduled messages.
+Use a `full` key with personal-owner or team-owner/admin permissions. The server applies
+the same [validation rules](/docs/api-conventions#event-type-notification-settings)
+as REST and MCP; failure retains the error code and exits 1. Follow-up notes also require
+the operator's [host-note setting](/docs/notifications#host-notes-and-hosted-email-abuse-controls).
 
 Keep all filters unchanged when continuing a page. Catalogs and slots return `nextAfter`;
 pass it as `after` until null. Booking lists return `nextCursor`; pass it as `cursor` until

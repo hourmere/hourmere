@@ -1,14 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { FOLLOW_UP_HOST_NOTE_MAX_LENGTH } from '@hourmere/core/follow-up-note'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { DomainError } from './errors.ts'
 import {
   createNotificationSnapshot,
   DEFAULT_NOTIFICATIONS,
+  type FollowUpRule,
   isLegacyDefault,
   notificationSnapshot,
+  parseNotifications,
+  type ReminderRule,
   validateNotifications,
 } from './notification-settings.ts'
 
@@ -18,6 +21,7 @@ type SettingsModule = Pick<
   | 'createNotificationSnapshot'
   | 'notificationSnapshot'
   | 'isLegacyDefault'
+  | 'parseNotifications'
 >
 type Replacement = readonly [string, string]
 
@@ -32,7 +36,7 @@ function sourceCopy(replacement?: Replacement): SettingsModule {
     'z',
     'DomainError',
     'FOLLOW_UP_HOST_NOTE_MAX_LENGTH',
-    `${source}; return { validateNotifications, createNotificationSnapshot, notificationSnapshot, isLegacyDefault }`,
+    `${source}; return { validateNotifications, createNotificationSnapshot, notificationSnapshot, isLegacyDefault, parseNotifications }`,
   )(z, DomainError, FOLLOW_UP_HOST_NOTE_MAX_LENGTH) as SettingsModule
 }
 
@@ -175,7 +179,7 @@ function verifyModes(copy: SettingsModule) {
 function verifyHostNotes(copy: SettingsModule) {
   for (const hostNote of [
     '',
-    '<script>A & B</script>\r\nNext\tline',
+    '<script>A & B</script>\nNext line',
     'a'.repeat(2000),
     '😀'.repeat(1000),
   ]) {
@@ -183,41 +187,105 @@ function verifyHostNotes(copy: SettingsModule) {
     expect(copy.validateNotifications(input)).toEqual(input)
     const snapshot = copy.createNotificationSnapshot(input)
     expect(copy.notificationSnapshot(snapshot).notifications).toEqual(input)
+    expect(() => copy.validateNotifications(input, { followUpHostNotesEnabled: false })).toThrow(
+      expect.objectContaining({ code: 'invalid_notifications' }),
+    )
   }
+  const raw = `${'a'.repeat(1998)}\r\n\u202aX\u202e\u2066\u2069`
+  let canonical: ReturnType<SettingsModule['validateNotifications']> | undefined
+  expect(() => {
+    canonical = copy.validateNotifications({
+      reminders: [],
+      followUps: [{ ...rule('f'), hostNote: raw }],
+    })
+  }).not.toThrow()
+  expect(canonical?.followUps[0]?.hostNote).toBe(`${'a'.repeat(1998)}\nX`)
+  for (const hostNote of [null, 42, {}])
+    expect(() =>
+      copy.validateNotifications({ reminders: [], followUps: [{ ...rule('f'), hostNote }] }),
+    ).toThrow(z.ZodError)
   for (const hostNote of [
-    null,
-    42,
-    {},
     'a'.repeat(2001),
     '😀'.repeat(1001),
     '\ud800',
     '\udc00',
     '\u0000',
+    '\t',
+    '\r',
     '\u000b',
     '\u007f',
     '\u0085',
-    '\u202a',
-    '\u2066',
-  ]) {
+  ])
     expect(() =>
       copy.validateNotifications({ reminders: [], followUps: [{ ...rule('f'), hostNote }] }),
-    ).toThrow(z.ZodError)
-  }
+    ).toThrow(expect.objectContaining({ code: 'invalid_notifications' }))
   expect(() =>
     copy.validateNotifications({ reminders: [{ ...rule(), hostNote: '' }], followUps: [] }),
   ).toThrow(z.ZodError)
   expect(() =>
     copy.validateNotifications({ reminders: [], followUps: [{ ...rule('f'), unexpected: true }] }),
   ).toThrow(z.ZodError)
+  expect(copy.validateNotifications(settings(), { followUpHostNotesEnabled: false })).toEqual(
+    settings(),
+  )
+}
+
+function verifyStoredHostNotes(
+  copy: Pick<
+    SettingsModule,
+    'parseNotifications' | 'createNotificationSnapshot' | 'notificationSnapshot'
+  >,
+) {
+  const legacy = {
+    reminders: [],
+    followUps: [{ ...rule('f'), hostNote: 'Stored\ttext\r\nPreserved\rtoo' }],
+  }
+  expect(() => copy.parseNotifications(legacy)).not.toThrow()
+  expect(copy.parseNotifications(legacy)).toEqual(legacy)
+  expect(() => copy.createNotificationSnapshot(legacy)).not.toThrow()
+  const snapshot = copy.createNotificationSnapshot(legacy)
+  expect(snapshot.notifications).toEqual(legacy)
+  expect(copy.notificationSnapshot(snapshot)).toEqual(snapshot)
 }
 
 describe('notification settings contract', () => {
+  it('excludes follow-up notes from reminder rules structurally at the type level', () => {
+    expectTypeOf<FollowUpRule>().not.toMatchTypeOf<ReminderRule>()
+    expectTypeOf<{
+      id: string
+      offsetMinutes: number
+      recipients: FollowUpRule['recipients']
+      hostNote: string
+    }>().not.toMatchTypeOf<ReminderRule>()
+  })
+
+  it('preserves historical tab and CRLF notes when parsing stored settings and immutable snapshots', () => {
+    verifyStoredHostNotes({ parseNotifications, createNotificationSnapshot, notificationSnapshot })
+    verifyStoredHostNotes(sourceCopy())
+  })
+
+  it.each<Replacement>([
+    [
+      'return checkedNotifications(value, {}, true)',
+      'return checkedNotifications(value, {}, false)',
+    ],
+    [
+      'const notifications = parseNotifications(value)',
+      'const notifications = validateNotifications(value)',
+    ],
+  ])('detects revalidating historical notes on read with a real assertion failure', (from, to) => {
+    expect(() => verifyStoredHostNotes(sourceCopy([from, to]))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
   it('stores optional plain-text follow-up notes with bounded well-formed Unicode, rejects notes on reminders', () => {
     verifyHostNotes({
       validateNotifications,
       createNotificationSnapshot,
       notificationSnapshot,
       isLegacyDefault,
+      parseNotifications,
     })
     verifyHostNotes(sourceCopy())
     expect(DEFAULT_NOTIFICATIONS).toEqual({
@@ -233,18 +301,15 @@ describe('notification settings contract', () => {
   })
 
   it.each<[string, Replacement]>([
-    [
-      'host note length bound',
-      ['.refine((note) => note.length <= FOLLOW_UP_HOST_NOTE_MAX_LENGTH)', ''],
-    ],
+    ['host note length bound', ['note.length > FOLLOW_UP_HOST_NOTE_MAX_LENGTH', 'false']],
     [
       'host note control exclusion',
-      [
-        '/^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$/',
-        '/^[\\s\\S]*$/',
-      ],
+      ['/[' + '\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f' + ']/.test(note)', 'false'],
     ],
-    ['host note Unicode validation', ['.refine((note) => note.isWellFormed())', '']],
+    ['host note Unicode validation', ['!note.isWellFormed()', 'false']],
+    ['line-ending normalization', [".replace(/\\r\\n/g, '\\n')", '']],
+    ['bidi control normalization', [".replace(/[\\u202a-\\u202e\\u2066-\\u2069]/g, '')", '']],
+    ['operator host-note switch', ['options.followUpHostNotesEnabled === false', 'false']],
     ['follow-up-only host note', ['reminders: z.array(rule)', 'reminders: z.array(followUpRule)']],
     ['strict follow-up fields', ['const rule = z.strictObject(', 'const rule = z.object(']],
   ])('detects broken %s using host note assertions', (_, replacement) => {
@@ -280,6 +345,7 @@ describe('notification settings contract', () => {
       createNotificationSnapshot,
       notificationSnapshot,
       isLegacyDefault,
+      parseNotifications,
     })
     const edited = rule('persistent-id', 120)
     expect(validateNotifications(settings([edited])).reminders[0]?.id).toBe('persistent-id')
@@ -293,6 +359,7 @@ describe('notification settings contract', () => {
       createNotificationSnapshot,
       notificationSnapshot,
       isLegacyDefault,
+      parseNotifications,
     }))
 
   it('validates stored snapshot version, shape and execution mode', () => {
