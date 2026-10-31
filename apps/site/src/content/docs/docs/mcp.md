@@ -459,6 +459,16 @@ An activated round-robin type offers the union and assigns one available host. I
 result includes safe `assignedHost` name/time zone; retries and rescheduling retain that
 selection. See [round-robin scheduling](/docs/round-robin-scheduling).
 
+`find_available_slots`, `create_booking` and `reschedule_booking` accept optional
+`durationMinutes`. Select a whole-minute length from the event type's
+`allowedDurationsMinutes` (also returned by `get_event_type`). Slots and new bookings use
+the default when it is omitted. Keep the selection unchanged when continuing slot pages
+and pass the same length when booking. Unsupported lengths fail with `invalid_duration`;
+malformed selections fail with `invalid_request`. Rescheduling without a new selection
+preserves the booking's actual elapsed length, including an option the host has removed.
+An explicit new length must belong to the current allowed list. Booking and reschedule
+results, notifications and calendar invitations use the selected end time.
+
 Both catalog lists accept `limit` (default 20, maximum 100) and `after`. Results are
 `{ data, nextAfter }`, sorted by ID. Set `after` to the previous `nextAfter`, keep the same key
 and acting organization, and stop at `nextAfter: null`. The cursor is exclusive and remains

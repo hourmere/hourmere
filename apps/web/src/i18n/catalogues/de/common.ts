@@ -120,6 +120,7 @@ export const common = {
   ' ({zone}, {offset})': ' ({zone}, {offset})',
   ' ({offset})': ' ({offset})',
   '{date}, {time}': '{date}, {time}',
+  'Meeting length': 'Termindauer',
   'About this event': 'Über diesen Termin',
   'Add a guest': 'Gast hinzufügen',
   'Add at most {0} guests.': 'Fügen Sie höchstens {0} Gäste hinzu.',
@@ -246,6 +247,8 @@ export const common = {
     'Der Link enthält möglicherweise einen Tippfehler oder die gastgebende Person hat diesen Termin entfernt oder umbenannt.',
   'The questions on this page have changed. Reload the page and try again.':
     'Die Fragen auf dieser Seite haben sich geändert. Laden Sie die Seite neu und versuchen Sie es erneut.',
+  'The available meeting lengths have changed. Please choose a length again.':
+    'Die verfügbaren Optionen für die Termindauer haben sich geändert. Bitte wählen Sie die Dauer erneut.',
   'There is nothing at this address. Check the link you were given.':
     'Unter dieser Adresse ist nichts zu finden. Prüfen Sie den Link, den Sie erhalten haben.',
   'This answer is required.': 'Diese Antwort ist erforderlich.',

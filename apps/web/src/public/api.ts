@@ -101,17 +101,22 @@ export async function getEventType(
 /** Loads the slots that lie fully inside [start, end] (ISO instants). */
 export type SlotLoader = (start: string, end: string, signal: AbortSignal) => Promise<Slot[]>
 
-export function eventSlots(handle: string, slug: string, team = false): SlotLoader {
+export function eventSlots(
+  handle: string,
+  slug: string,
+  team = false,
+  durationMinutes?: number,
+): SlotLoader {
   return async (start, end, signal) => {
     const { data } = await call(
       () =>
         team
           ? api.GET('/api/v1/public/teams/{handle}/{slug}/slots', {
-              params: { path: { handle, slug }, query: { start, end } },
+              params: { path: { handle, slug }, query: { start, end, durationMinutes } },
               signal,
             })
           : api.GET('/api/v1/public/{handle}/{slug}/slots', {
-              params: { path: { handle, slug }, query: { start, end } },
+              params: { path: { handle, slug }, query: { start, end, durationMinutes } },
               signal,
             }),
       signal,

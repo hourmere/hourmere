@@ -21,7 +21,7 @@ import { bookingHostIds } from './hosts.ts'
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
   /** The event type as it is now; null once it is deleted (or for a booking without one). */
-  eventType: { title: string; durationMinutes: number } | null
+  eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
   hosts: { name: string }[]
 }
@@ -37,7 +37,7 @@ export async function getManagedBookingDetails(
       ? undefined
       : ctx.db
           .selectFrom('event_types')
-          .select(['title', 'duration_minutes'])
+          .select(['title', 'duration_minutes', 'allowed_durations_minutes'])
           .where('id', '=', booking.eventTypeId)
           .where('deleted_at', 'is', null)
           .executeTakeFirst(),
@@ -53,7 +53,13 @@ export async function getManagedBookingDetails(
   return {
     ...booking,
     eventType: eventType
-      ? { title: eventType.title, durationMinutes: eventType.duration_minutes }
+      ? {
+          title: eventType.title,
+          durationMinutes: eventType.duration_minutes,
+          ...(eventType.allowed_durations_minutes.length > 1 && {
+            allowedDurationsMinutes: [...eventType.allowed_durations_minutes],
+          }),
+        }
       : null,
     hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
   }

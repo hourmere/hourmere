@@ -17,7 +17,14 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
-import { BookingWithToken, Instant, LocationKind, Responses, Slot } from './bookings.ts'
+import {
+  BookingWithToken,
+  Instant,
+  LocationKind,
+  Responses,
+  SelectedDurationMinutes,
+  Slot,
+} from './bookings.ts'
 
 /** Only creation can offer a continuation; manage, cancel and reschedule never do. */
 export const PublicBookingResult = BookingWithToken.extend({
@@ -46,6 +53,10 @@ export const PublicEventType = z
     title: z.string(),
     description: z.string().nullable(),
     durationMinutes: z.number().int(),
+    allowedDurationsMinutes: z.array(SelectedDurationMinutes).min(1).max(12).optional().openapi({
+      description:
+        'Allowed meeting lengths, in display order. Present when invitees have a choice; omitted means only durationMinutes is offered.',
+    }),
     location: z.object({ kind: LocationKind }).nullable().openapi({
       description: 'Only the kind; details such as a phone number come with the booking',
     }),
@@ -115,6 +126,7 @@ const email = z.email().max(254)
 export const CreateBooking = z
   .strictObject({
     start: Instant.openapi({ description: 'The start of an offered slot' }),
+    durationMinutes: SelectedDurationMinutes.optional(),
     invitee: z.strictObject({
       name,
       email,
@@ -273,7 +285,11 @@ export function publicRoutes({
                   }),
                 })
               : PageParams,
-            query: z.object({ start: Instant, end: Instant }),
+            query: z.object({
+              start: Instant,
+              end: Instant,
+              durationMinutes: z.coerce.number().pipe(SelectedDurationMinutes).optional(),
+            }),
           },
           responses: {
             200: {
@@ -281,18 +297,19 @@ export function publicRoutes({
               content: json(z.object({ data: z.array(Slot) })),
             },
             400: error(
-              "Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part)",
+              "Invalid parameters (`invalid_request`), a length outside the allowed list (`invalid_duration`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part)",
             ),
             404: eventTypeNotFound,
             429: rateLimited,
           },
         }),
         async (c) => {
-          const { start, end } = c.req.valid('query')
+          const { start, end, durationMinutes } = c.req.valid('query')
           const slots = await target.slots(ctx, {
             ...c.req.valid('param'),
             start: Temporal.Instant.from(start),
             end: Temporal.Instant.from(end),
+            durationMinutes,
           })
           return c.json({ data: slots }, 200)
         },
@@ -330,7 +347,7 @@ export function publicRoutes({
               content: json(PublicBookingResult),
             },
             400: error(
-              'Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`)',
+              'Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`)',
             ),
             404: eventTypeNotFound,
             409: error(
@@ -346,6 +363,7 @@ export function publicRoutes({
             {
               ...c.req.valid('param'),
               start: Temporal.Instant.from(body.start),
+              durationMinutes: body.durationMinutes,
               invitee: body.invitee,
               guests: body.guests,
               responses: body.responses,

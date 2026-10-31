@@ -59,10 +59,10 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `event` | `get_event_type` | `id` from `catalog` |
 | `schedules` | `list_schedules` | optional `limit`, `after` |
 | `schedule` | `get_schedule` | `id` from `schedules` |
-| `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `maxSlots`, `after` |
-| `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `responses`, `guests` |
+| `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `durationMinutes`, `maxSlots`, `after` |
+| `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `durationMinutes`, `responses`, `guests` |
 | `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
-| `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken` |
+| `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
@@ -73,6 +73,19 @@ round-robin types offer the union and assign one available host; `book` returns 
 [round-robin scheduling](/docs/round-robin-scheduling) for explicit activation and fairness. `reschedule` and `cancel` by ID require hosting that booking in the key's
 organization. A management token instead acts as the invitee. These operations can send
 the same notification emails and calendar updates as the booking page.
+
+Choose a meeting length from the event type's `allowedDurationsMinutes`, returned by
+`event` or `slots`. Pass it as JSON `durationMinutes` or use `--duration-minutes 60` on
+`slots`, `book` and `reschedule`. The option accepts whole minutes from 1 to 1440; the
+server also checks the event type's allowed list. If both JSON and the option supply a
+length, they must agree. Keep the same selection when paging through slots and booking.
+Omitting it uses the default for slots and new bookings. Rescheduling without a selection
+keeps the booking's actual length, even if the host has since removed that option;
+an explicit new length must be in the current list.
+
+For example, `hourmere slots --input slots.json --duration-minutes 60` finds hour-long
+slots, and `hourmere book --input booking-request.json --duration-minutes 60 --output booking-result.json`
+books the chosen slot with that length.
 
 For example, put this JSON into a local request file, then run
 `npm run --silent cli -- slots --input slots.json`:

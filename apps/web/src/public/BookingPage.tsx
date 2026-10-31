@@ -23,6 +23,7 @@ import {
   PublicRequestError,
   randomKey,
   type Slot,
+  type SlotLoader,
 } from './api.ts'
 import {
   DetailList,
@@ -144,7 +145,7 @@ interface Confirmed extends PublicBookingResult {
 }
 
 function BookingFlow({
-  event,
+  event: initialEvent,
   handle,
   slug,
   team,
@@ -161,6 +162,14 @@ function BookingFlow({
   const locale = formatLocale ?? browserFormatLocale
   const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
+  const [event, setEvent] = useState(initialEvent)
+  const [durationMinutes, setDurationMinutes] = useState(event.durationMinutes)
+  const [durationRefresh, setDurationRefresh] = useState<
+    { status: 'loading' } | { status: 'error'; message: UiText } | null
+  >(null)
+  const refreshController = useRef<AbortController | null>(null)
+  useEffect(() => () => refreshController.current?.abort(), [])
+  const hasDurationChoices = (event.allowedDurationsMinutes?.length ?? 0) > 1
   const [slot, setSlot] = useState<Slot | null>(null)
   const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const [version, setVersion] = useState(0)
@@ -178,7 +187,47 @@ function BookingFlow({
   // have made instead of booking twice. Language changes preserve that attempt; changing
   // booking details starts a new attempt in the interface language selected at submission.
   const attempt = useRef<{ key: string; details: string; body: CreateBooking } | null>(null)
-  const loadSlots = useMemo(() => eventSlots(handle, slug, team), [handle, slug, team])
+  const refreshDurations = useCallback(async () => {
+    attempt.current = null
+    setSlot(null)
+    setBackToPicker(true)
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
+    setDurationRefresh({ status: 'loading' })
+    try {
+      const updated = await getEventType(handle, slug, controller.signal, team)
+      if (controller.signal.aborted) return
+      // Keep the invitee's draft in this flow while replacing stale choices and slots.
+      setEvent(updated)
+      setDurationMinutes(updated.durationMinutes)
+      setNow(currentTime())
+      setVersion((v) => v + 1)
+      setDurationRefresh(null)
+    } catch (err) {
+      if (controller.signal.aborted) return
+      if (codeOf(err) === 'event_type_not_found') setGone(true)
+      else setDurationRefresh({ status: 'error', message: failureMessage(err) })
+    }
+  }, [handle, slug, team])
+  const loadSlots = useMemo<SlotLoader>(() => {
+    const load = eventSlots(handle, slug, team, hasDurationChoices ? durationMinutes : undefined)
+    return async (start, end, signal) => {
+      try {
+        return await load(start, end, signal)
+      } catch (err) {
+        if (
+          signal.aborted ||
+          !(err instanceof PublicRequestError) ||
+          codeOf(err) !== 'invalid_duration'
+        )
+          throw err
+        setNotice(bookingErrors(err, event.questions).form)
+        await refreshDurations()
+        return []
+      }
+    }
+  }, [handle, slug, team, durationMinutes, hasDurationChoices, event.questions, refreshDurations])
 
   if (gone) return <PublicNotFound what="event" />
   if (confirmed)
@@ -205,6 +254,7 @@ function BookingFlow({
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
+      ...(hasDurationChoices && { durationMinutes }),
       invitee: {
         name: values.name.trim(),
         email: values.email.trim(),
@@ -259,6 +309,9 @@ function BookingFlow({
         )
         setNow(currentTime())
         setVersion((v) => v + 1)
+      } else if (code === 'invalid_duration') {
+        setNotice(bookingErrors(err, event.questions, values.guests).form)
+        await refreshDurations()
       } else if (code === 'event_type_not_found') {
         setGone(true)
       } else if (code === 'idempotency_key_reused') {
@@ -320,7 +373,7 @@ function BookingFlow({
             </p>
           )}
           <ul className="event-facts">
-            <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
+            <li>{formatDuration(durationMinutes, displayLocale)}</li>
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
             {hostTimeZone && (
               <li className="user-content">
@@ -371,7 +424,24 @@ function BookingFlow({
           )}
         </aside>
         <div className="booking-main">
-          {slot ? (
+          {durationRefresh ? (
+            <section className="details-step" aria-labelledby="duration-refresh-heading">
+              <FocusHeading level={2} id="duration-refresh-heading" className="step-title">
+                {t('Pick a time')}
+              </FocusHeading>
+              <p role="status">{ui(notice)}</p>
+              {durationRefresh.status === 'loading' ? (
+                <PublicStatus>{t('Loading…')}</PublicStatus>
+              ) : (
+                <>
+                  <p role="alert">{ui(durationRefresh.message)}</p>
+                  <button type="button" className="button" onClick={refreshDurations}>
+                    {t('Try again')}
+                  </button>
+                </>
+              )}
+            </section>
+          ) : slot ? (
             <section className="details-step" aria-labelledby="details-heading">
               <FocusHeading level={2} id="details-heading" className="step-title">
                 {t('Your details')}
@@ -393,7 +463,33 @@ function BookingFlow({
           ) : (
             <SlotPicker
               load={loadSlots}
-              durationMinutes={event.durationMinutes}
+              durationMinutes={durationMinutes}
+              afterTitle={
+                hasDurationChoices ? (
+                  <fieldset className="duration-picker">
+                    <legend>{t('Meeting length')}</legend>
+                    <div className="duration-options">
+                      {event.allowedDurationsMinutes?.map((minutes) => (
+                        <label key={minutes} className="duration-option">
+                          <input
+                            type="radio"
+                            name="durationMinutes"
+                            value={minutes}
+                            checked={durationMinutes === minutes}
+                            onChange={() => {
+                              attempt.current = null
+                              setDurationMinutes(minutes)
+                              setNotice(null)
+                              setFormError(null)
+                            }}
+                          />
+                          <span>{formatDuration(minutes, displayLocale)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : undefined
+              }
               timeZone={timeZone}
               onTimeZoneChange={(zone) => {
                 rememberVisitorTimeZone(zone)
@@ -501,6 +597,17 @@ function Confirmation({
         <DetailList
           items={[
             ['What', event.title],
+            ...((event.allowedDurationsMinutes?.length ?? 0) > 1
+              ? ([
+                  [
+                    'Meeting length',
+                    formatDuration(
+                      Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000),
+                      language,
+                    ),
+                  ],
+                ] as [string, string][])
+              : []),
             [
               'When',
               <When
