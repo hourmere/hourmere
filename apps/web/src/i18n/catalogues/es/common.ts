@@ -249,6 +249,8 @@ export const common = {
     'Es posible que el enlace contenga un error o que el anfitrión haya eliminado este evento o cambiado su nombre.',
   'The questions on this page have changed. Reload the page and try again.':
     'Las preguntas de esta página han cambiado. Vuelva a cargar la página e inténtelo de nuevo.',
+  'The available meeting lengths have changed. Please choose a length again.':
+    'Las opciones de duración de la reunión han cambiado. Vuelva a elegir una duración.',
   'There is nothing at this address. Check the link you were given.':
     'No hay nada en esta dirección. Revise el enlace que ha recibido.',
   'This answer is required.': 'Esta respuesta es obligatoria.',

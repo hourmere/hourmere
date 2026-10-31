@@ -246,6 +246,8 @@ export const common = {
     'The link may be mistyped, or the host may have removed or renamed this event.',
   'The questions on this page have changed. Reload the page and try again.':
     'The questions on this page have changed. Reload the page and try again.',
+  'The available meeting lengths have changed. Please choose a length again.':
+    'The available meeting lengths have changed. Please choose a length again.',
   'There is nothing at this address. Check the link you were given.':
     'There is nothing at this address. Check the link you were given.',
   'This answer is required.': 'This answer is required.',

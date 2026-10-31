@@ -66,7 +66,7 @@ function parse(argv: readonly string[]): Options {
       if (!['slots', 'book', 'reschedule'].includes(command)) throw new CliError('invalid_options')
       const durationMinutes = Number(value)
       if (!/^[0-9]+$/.test(value) || durationMinutes < 1 || durationMinutes > 1440)
-        throw new CliError('invalid_duration')
+        throw new CliError('invalid_request')
       options.durationMinutes = durationMinutes
     }
   }

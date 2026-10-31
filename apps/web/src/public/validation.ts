@@ -233,6 +233,11 @@ export function bookingErrors(
     case 'invalid_time_zone':
       fields.timeZone = 'Choose a time zone from the list.'
       return { fields, form: null }
+    case 'invalid_duration':
+      return {
+        fields,
+        form: 'The available meeting lengths have changed. Please choose a length again.',
+      }
     default:
       return { fields, form: literal(message) }
   }

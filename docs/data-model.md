@@ -250,6 +250,9 @@ bookings. The CLI exposes the same selection as `--duration-minutes`. Public per
 team and embedded booking pages offer a labelled duration choice when multiple lengths are
 available, with the default preselected. Changing the selection refreshes availability
 before the invitee chooses a time. Single-duration pages retain their existing flow.
+If the host changes the available lengths while the page is open, an `invalid_duration`
+booking or slots response refreshes the choices and availability in place, asks the invitee
+to choose again, and preserves their entered details, guests and answers.
 
 Every candidate's end is its start plus the selected elapsed minutes. The same before/after
 buffers apply around that interval; minimum notice and the booking window constrain its

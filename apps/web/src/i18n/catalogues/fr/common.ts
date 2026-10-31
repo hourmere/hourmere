@@ -246,6 +246,8 @@ export const common = {
     'Le lien comporte peut-être une erreur de saisie, ou l’hôte a peut-être supprimé ou renommé cet événement.',
   'The questions on this page have changed. Reload the page and try again.':
     'Les questions de cette page ont changé. Rechargez la page et réessayez.',
+  'The available meeting lengths have changed. Please choose a length again.':
+    'Les durées de réunion disponibles ont changé. Choisissez à nouveau une durée.',
   'There is nothing at this address. Check the link you were given.':
     'Il n’y a rien à cette adresse. Vérifiez le lien qui vous a été communiqué.',
   'This answer is required.': 'Cette réponse est obligatoire.',

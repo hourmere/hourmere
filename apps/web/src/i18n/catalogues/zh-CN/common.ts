@@ -242,6 +242,8 @@ export const common = {
     '链接可能有误，或主持人已移除或重命名此活动。',
   'The questions on this page have changed. Reload the page and try again.':
     '此页面的问题已更改。请刷新页面后重试。',
+  'The available meeting lengths have changed. Please choose a length again.':
+    '可选的会议时长已更改。请重新选择时长。',
   'There is nothing at this address. Check the link you were given.':
     '此地址没有内容。请检查收到的链接。',
   'This answer is required.': '此问题为必答项。',

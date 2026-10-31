@@ -99,12 +99,20 @@ describe('CLI transport and arguments', () => {
     command: string,
     value: string,
     input: Record<string, unknown> = {},
+    error?: string,
   ) {
     const result = await run([command, '--input', '-', '--duration-minutes', value], input, {
       runner,
     })
     expect(result.code).toBe(1)
     expect(result.fetcher).not.toHaveBeenCalled()
+    if (error) expect(JSON.parse(result.stderr).error).toBe(error)
+  }
+
+  async function verifyInvalidDurationRequest(runner = runCli, value = '1441') {
+    for (const command of ['slots', 'book', 'reschedule']) {
+      await verifyDurationRejection(runner, command, value, {}, 'invalid_request')
+    }
   }
 
   it('forwards the duration option on slots, booking and rescheduling', async () => {
@@ -112,9 +120,33 @@ describe('CLI transport and arguments', () => {
   })
 
   it.each(['0', '1441', '1.5', '30min', '1e2', 'Infinity', 'NaN', ' 30', '999999999999999999'])(
-    'refuses an invalid duration option %s before a request',
+    'reports invalid_request for duration option %s before a request',
     async (value) => {
-      await verifyDurationRejection(runCli, 'slots', value)
+      await verifyInvalidDurationRequest(runCli, value)
+    },
+  )
+
+  it.each(['slots', 'book', 'reschedule'])(
+    'preserves invalid_duration from the server for a disallowed %s length',
+    async (command) => {
+      const fetcher = vi.fn<typeof fetch>(async () =>
+        Response.json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: JSON.stringify({ error: 'invalid_duration' }) }],
+          },
+        }),
+      )
+      const result = await run(
+        [command, '--input', '-', '--duration-minutes', '60'],
+        { idempotencyKey: 'duration-test-key' },
+        { fetch: fetcher },
+      )
+      expect(result.code).toBe(1)
+      expect(JSON.parse(result.stderr).error).toBe('invalid_duration')
+      expect(fetcher).toHaveBeenCalledTimes(1)
     },
   )
 
@@ -138,6 +170,7 @@ describe('CLI transport and arguments', () => {
   it('exercises an unchanged CLI source copy before its negative controls', async () => {
     const runner = sourceCopy()
     await verifyDurationForwarding(runner)
+    await verifyInvalidDurationRequest(runner)
     await verifyDurationRejection(runner, 'slots', '1441')
     await verifyDurationRejection(runner, 'cancel', '30')
     await verifyDurationRejection(runner, 'slots', '30', { durationMinutes: 15 })
@@ -148,6 +181,11 @@ describe('CLI transport and arguments', () => {
       'duration option forwarding',
       ['      input.durationMinutes = args.durationMinutes', ''],
       verifyDurationForwarding,
+    ],
+    [
+      'invalid duration request error code',
+      ["throw new CliError('invalid_request')", "throw new CliError('invalid_duration')"],
+      verifyInvalidDurationRequest,
     ],
     [
       'duration lower bound',
