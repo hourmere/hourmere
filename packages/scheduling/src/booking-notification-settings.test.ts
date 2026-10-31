@@ -42,7 +42,14 @@ const CUSTOM: NotificationSettings = {
     { id: 'early', offsetMinutes: 180, recipients },
     { id: 'near', offsetMinutes: 120, recipients },
   ],
-  followUps: [{ id: 'after', offsetMinutes: 60, recipients }],
+  followUps: [
+    {
+      id: 'after',
+      offsetMinutes: 60,
+      recipients,
+      hostNote: '<a href="https://example.test">Host & invitee</a>\r\n后续资料\t😀',
+    },
+  ],
 }
 const CHANGED: NotificationSettings = {
   reminders: [{ id: 'other', offsetMinutes: 5, recipients }],

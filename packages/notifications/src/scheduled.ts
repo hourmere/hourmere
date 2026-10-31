@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
-import { bookingEmail, type MailMessage, MailRejectedError, singleLine } from '@hourmere/mail'
+import { bookingEmail, followUpEmail, type MailMessage, MailRejectedError } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -28,6 +28,7 @@ interface Rule {
   id: string
   offsetMinutes: number
   recipients: { host: boolean; invitee: boolean; guests: boolean }
+  hostNote?: string | undefined
 }
 interface Snapshot {
   executionMode: 'legacy_default' | 'configurable'
@@ -400,24 +401,24 @@ export async function deliverScheduledBookingEmail(
                     : undefined
                   : { name: organizer.name, email: organizer.email },
               }
-            const title = singleLine(data.booking.eventName)
-            const chinese = recipient.locale === 'zh-CN'
-            const when = data.booking.end
-              .toZonedDateTimeISO(recipient.zone)
-              .toLocaleString(chinese ? 'zh-CN' : 'en', { dateStyle: 'full', timeStyle: 'short' })
-            const bookingLink = recipient.host
-              ? new URL(`/app/bookings/${encodeURIComponent(claim.booking_id)}`, deps.publicUrl)
-                  .href
-              : undefined
-            return {
-              to: recipient.email,
-              subject: chinese
-                ? `会议时间已结束：${title}`
-                : `Scheduled meeting time ended: ${title}`,
-              text: chinese
-                ? `「${title}」的预定会议时间已于 ${when}（${recipient.zone}）结束。\n${bookingLink ? `\n查看预约：${bookingLink}\n` : ''}`
-                : `The scheduled time for “${title}” ended at ${when} (${recipient.zone}).\n${bookingLink ? `\nView booking: ${bookingLink}\n` : ''}`,
-            }
+            return followUpEmail(
+              meeting,
+              {
+                ...(recipient.host
+                  ? { role: 'host' as const, answers: [] }
+                  : { role: 'attendee' as const }),
+                email: recipient.email,
+                timeZone: recipient.zone,
+                locale: recipient.locale,
+              },
+              {
+                hostNote: rule.hostNote,
+                bookingUrl: recipient.host
+                  ? new URL(`/app/bookings/${encodeURIComponent(claim.booking_id)}`, deps.publicUrl)
+                      .href
+                  : undefined,
+              },
+            )
           },
           () => clock(deps),
           sendSignal,
