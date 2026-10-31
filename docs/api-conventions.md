@@ -1,5 +1,41 @@
 [API conventions](https://hourmere.com/docs/api-conventions).
 
+### API key scopes
+
+Keys have one immutable scope: `full`, `read` or `bookings`. The web creation form defaults
+to `bookings` for AI agents; `read` suits analytics/reporting, and **Full account access**
+(`full`) also permits account configuration changes. Existing roles, ownership and host
+visibility still apply. Neither `read` nor `bookings` removes existing visible attendee
+details or meeting links, and `bookings` can manage previously created bookings you host.
+
+Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
+`full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
+Top-level `scope`/`scopes`, arrays, combinations and unknown values get
+`400 INVALID_METADATA`. Updates containing `metadata.scope`, even the same value, get
+`400 API_KEY_SCOPE_IMMUTABLE`. Create a replacement, update clients, then revoke the old key.
+Owner-authorized organization updates preserve the original scope. `/api/v1/me` and MCP
+`whoami` include `apiKeyScope` for API key callers.
+
+A valid key used for a disallowed operation gets REST `403 insufficient_scope`; invalid,
+expired or revoked keys get 401. Public booking/manage-token endpoints remain available
+without a key; a supplied bearer must additionally be valid and allow the operation,
+without fallback to cookies or anonymous access. Public metadata needs no key. MCP filters
+`tools/list` and returns `isError: true` with `insufficient_scope` for direct calls to known
+disallowed tools. Reconnect or refresh discovery after replacing a cached client's key.
+MCP OAuth retains its existing `mcp:tools` permission.
+
+Native `/api/auth/api-key/create`, `get`, `list`, `update` and `delete` retain their owner
+session/trusted-server boundary. Any Authorization header gets `403 SESSION_REQUIRED`,
+even with a valid cookie; no key scope authorizes key administration. See
+[API keys](https://hourmere.com/docs/api-keys) for operation tables generated from the shared code registry and
+the creation contract. New operations need explicit classification; GET/read-only hints
+do not grant scoped access.
+
+Stop every old web/all/worker and other old key-authenticating process before migrating,
+then restart all roles with the new code before using scoped keys. Never run old and new
+servers side by side once scoped keys exist: old code treats them as full access. Use the
+supported backup/restore procedure for rollback.
+
 The original inviter must still belong to the invitation's team. If they have left or
 been removed, explicit resend (including exact replay) and expired-row replacement return
 HTTP 409 `INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION` without renewing or replacing

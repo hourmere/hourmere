@@ -38,7 +38,7 @@ const KEY: ApiKey = {
   createdAt: '2026-10-01T09:00:00.000Z',
   expiresAt: null,
   lastRequest: null,
-  metadata: { organizationId: TEAM_A.id },
+  metadata: { organizationId: TEAM_A.id, scope: 'bookings' },
 }
 
 function switchable(extra: Routes = {}) {
@@ -199,7 +199,7 @@ describe('team context isolation across page remounts', () => {
       expect(api.to('POST /api/auth/api-key/create')).toHaveLength(1)
       expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
         name: 'Team A agent',
-        metadata: { organizationId: TEAM_A.id },
+        metadata: { organizationId: TEAM_A.id, scope: 'bookings' },
       })
     } finally {
       watch.stop()

@@ -297,9 +297,15 @@ Validated by the application (zod), not by the database:
   `invalid_questions`), `parseQuestions` and `validateResponses`, in
   `packages/scheduling/src/questions.ts`; writes of either go through them.
 - `calendars.sync_state`: provider sync token / delta link and push channel id + expiry.
-- `auth.apikey.metadata`: `{ "organizationId": "<uuid>" }`, the organization the key acts
-  in; set when the key is created (the owner's personal organization unless they name
-  another one they belong to) and re-checked against membership on every request.
+- `auth.apikey.metadata`: `{ "organizationId": "<uuid>", "scope": "full" | "read" | "bookings" }`.
+  The organization defaults to the owner's personal organization and is rechecked against
+  membership on every request. Scope is immutable after creation, including direct storage
+  updates; native owner-authorized organization changes preserve it. Migration 0048 backfills
+  legacy scopes as `full`, preserving other metadata, and rejects malformed legacy metadata
+  atomically. New API creations that omit `metadata.scope` default to `full` for compatibility;
+  the web form explicitly defaults to `bookings`. Malformed stored scopes fail closed.
+  See [API keys](api-keys.md) for the generated operation tables and the requirement to stop
+  all old key-authenticating processes before scoped keys are used.
 
 ## Booking continuation contract
 
@@ -813,6 +819,14 @@ actual duration differs from the event default. It also compares the upgraded sc
 fresh install and verifies no-op reruns. See
 [the 0049 upgrade note](../packages/db/migrations/0049_configurable_booking_messages.md)
 for the required coordinated worker rollout.
+
+Migration 0052 permits an optional plain-text `hostNote` on follow-up rules and their
+immutable booking snapshots. It replaces the existing JSON validation function without
+changing defaults or rewriting rows. Notes are limited to 2000 UTF-16 code units, with
+tabs and line endings allowed; other C0/C1 controls, bidi embedding/isolate controls and
+malformed Unicode are rejected. Reminders cannot carry a note. See
+[the 0052 upgrade note](../packages/db/migrations/0052_follow_up_host_note.md) for the
+predecessor-preservation checks and rollout constraints.
 
 ## Booking webhooks
 

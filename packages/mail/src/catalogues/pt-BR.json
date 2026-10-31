@@ -68,5 +68,8 @@
   "teamInvitation.expiry": "Este convite expira em {expiry}.",
   "teamInvitation.button": "Ver e aceitar convite",
   "teamInvitation.fallback": "Se o botão não funcionar, copie este link e cole no seu navegador:",
-  "teamInvitation.footer": "Se você não reconhece esta equipe ou não quer participar dela, pode ignorar este e-mail."
+  "teamInvitation.footer": "Se você não reconhece esta equipe ou não quer participar dela, pode ignorar este e-mail.",
+  "followUp.subject": "Fim do horário agendado: {event}",
+  "followUp.introduction": "O horário agendado para sua reunião com {other} terminou.",
+  "followUp.hostNote": "Mensagem do anfitrião"
 }

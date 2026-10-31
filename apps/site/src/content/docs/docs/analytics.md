@@ -15,7 +15,11 @@ Ordinary team members, even hosts of some team bookings, receive `403 insufficie
 The page explains that permission requirement. Membership and roles are checked from the
 database in the same statement that aggregates the counts.
 
-The authenticated REST endpoint accepts session cookies or an API key:
+The authenticated REST endpoint accepts session cookies or an API key with `read` or
+`full` scope. `read` is recommended for analytics and reporting; a `bookings` key receives
+`403 insufficient_scope`. See [API key scopes](/docs/api-keys) for the generated operation table.
+
+For example:
 
 ```http
 GET /api/v1/analytics/bookings?startDate=2026-10-01&endDate=2026-10-03&timeZone=Europe%2FBerlin

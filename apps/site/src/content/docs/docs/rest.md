@@ -21,13 +21,22 @@ an existing schedule; schedules without a default require an explicit default ch
 `409 setup_profile_required`. An existing default still needs valid weekly hours before the
 guide counts availability as complete.
 
+API-key setup/configuration writes require `full` scope. The booking examples below work
+with the recommended `bookings` scope after setup is complete.
+
 Pass the current account interface language as `{ "language": "en" }` or
 `{ "language": "zh-CN" }` to name a newly created schedule in that language. Omitting it
 uses English. The profile still supplies the time zone; later language changes never
 rename an existing schedule.
 
-Open **API keys** at `/app/api-keys`, create a key for the intended organization and copy it
-once into your secret store. It acts as its creator in that organization. Keep API keys and
+Open **API keys** at `/app/api-keys`, choose the intended organization and scope, create a key
+and copy it once into your secret store. **Bookings** (`bookings`, the default) is recommended
+for AI booking agents; **Read** (`read`) suits analytics/reporting and cannot mutate bookings.
+**Full account access** (`full`) also permits account configuration changes; grant it only to
+trusted software. Scope is immutable: create a replacement and revoke the old key to change
+it. Legacy keys and API creations omitting `metadata.scope` retain `full`. See
+[API keys](/docs/api-keys) for creation details and the generated operation table.
+It acts as its creator in that organization. Keep API keys and
 booking manage tokens out of URLs, shared transcripts and source control. Set these shell
 variables privately (placeholders below are not working credentials):
 
@@ -94,8 +103,12 @@ Save the returned `manageToken` privately. Only its hash is stored; it is return
 same-key retry returns HTTP 200 (rather than 201) with the original booking and
 `manageToken: null`. Reusing the key with different arguments fails with `idempotency_key_reused`; use a new key for a genuinely new booking.
 
-The public booking and invitee management endpoints do not require an API key; the examples
-include it for consistency with the authenticated calls above. A public create request's
+The public booking and invitee management endpoints do not require an API key; when one is
+supplied, it must be valid and allow the operation, in addition to the independent manage
+token where required. Invalid keys get 401 and disallowed scopes get `403 insufficient_scope`,
+without falling back to anonymous access or a session cookie. A credential-free public
+request retains its existing capabilities. The examples include a key for consistency with
+the authenticated calls above. A public create request's
 idempotency key uses the shared anonymous namespace for that organization, so make it random.
 For invitee management send the manage token in a header. Choose a new
 available slot for rescheduling; it returns a replacement booking and a new manage token:

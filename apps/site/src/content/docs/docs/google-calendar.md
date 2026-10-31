@@ -128,10 +128,12 @@ zone, depending on the viewer's Google Calendar time-zone setting.
 **Review availability time zone** opens your availability settings if you want to change
 the schedule zone; the difference alone does not indicate a synchronization failure.
 
-The user's own API keys can list calendar connections/status, refresh the calendar list,
+The user's own `full` API keys can list calendar connections/status, refresh the calendar list,
 choose conflict calendars and the writeback destination, and sync now through the public
 REST API with the same ownership checks. Read-only MCP `list_calendar_connections` accepts
-API keys and enabled MCP OAuth grants. OAuth authorization, code exchange and disconnect
+`read`/`full` API keys and enabled MCP OAuth grants. `read` can inspect metadata but cannot
+change settings; `bookings` cannot access connection metadata. See [API key scopes](/docs/api-keys).
+OAuth authorization, code exchange and disconnect
 require a live browser session. Cookie-authenticated writes require the app's own origin.
 
 External event titles/descriptions are not fetched or stored; synchronization retains IDs
@@ -209,13 +211,13 @@ request/integration before retrying. The known event remains pinned.
 | `GET /api/v1/calendar-connections` | Own connection/calendar metadata and whether Google is configured; no credentials |
 | `POST /api/v1/calendar-connections/google/authorize` with `{access?}` | Same-origin browser session; returns a Google authorization URL |
 | `GET /api/calendar/google/callback` | Google OAuth protocol callback; immediately redirects to `/app/calendars` with a fixed result code |
-| `POST /api/v1/calendar-connections/{id}/refresh` with `{}` | Session or own API key; refresh own calendar list, obtaining a fresh access token when needed |
+| `POST /api/v1/calendar-connections/{id}/refresh` with `{}` | Session or own `full` API key; refresh own calendar list, obtaining a fresh access token when needed |
 | `PATCH /api/v1/calendars/{id}` with `{checkConflicts}` | Select up to 20 owned/accessible readable calendars for conflict checks; queues an initial sync transactionally |
 | `POST /api/v1/calendars/{id}/sync` with `{}` | Synchronize a selected calendar now |
 | `PUT /api/v1/calendar-destination` with `{calendarId}` | Set/clear the profile's owned default destination for new bookings |
 | `DELETE /api/v1/calendar-connections/{id}` | Browser session; remove own local connection, credentials and calendars |
 
-Non-credential settings accept the user's own API keys with the same ownership checks.
+Non-credential settings writes accept the user's own `full` API keys with the same ownership checks.
 Cookie-authenticated writes require the app's origin. OAuth authorization, code exchange
 and disconnect remain session-only. Missing/foreign connections return
 404 `calendar_connection_not_found`. Disabled Google configuration returns 409

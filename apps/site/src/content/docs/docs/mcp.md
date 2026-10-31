@@ -5,8 +5,11 @@ description: Connect an AI client to Hourmere's remote MCP server using an API k
 
 ## Connect a client
 
-Create an API key at `/app/api-keys` on your [instance](/docs/self-hosting). The one-time
-key creation view provides copy buttons for the key, a curl example, a JSON client config
+Create an API key at `/app/api-keys` on your [instance](/docs/self-hosting). Choose
+**Bookings** (`bookings`, the default) for AI booking agents, **Read** (`read`) for analytics
+and reporting, or **Full account access** (`full`) only for software you trust with account
+configuration changes. The one-time view explains the key's scope and what the agent can do,
+and provides copy buttons for the key, a curl example, a JSON client config
 and a Claude Code command. The configs include your instance's `PUBLIC_URL` and the new key;
 save them privately before dismissing the view. The full key is shown only there, never in
 the keys list, and cannot be retrieved after dismissal or leaving the page. The new key
@@ -49,6 +52,62 @@ Ask the client to list tools, then call `whoami` to verify the user and organiza
 changing bookings. The endpoint is stateless: it does not issue a session ID or maintain a
 standing GET event stream. Authentication failures return HTTP 401; rate limits return 429.
 
+## API key scopes
+
+`tools/list` includes only tools allowed by the key's scope. `whoami` returns `apiKeyScope`
+alongside the user and organization. Calling a known disallowed tool directly returns
+`isError: true` with `insufficient_scope`; unknown tools remain protocol errors. Clients may
+cache discovery: reconnect or refresh the tool list after switching keys.
+
+The table is generated from the shared authorization registry, including each mode and CLI
+equivalent. Your current role, organization, ownership and host restrictions still apply.
+`bookings` can manage bookings you already host, including ones created by other keys;
+`read` sees broader account data but cannot change bookings. Neither removes existing
+visible attendee details, answers or ready meeting links. Normal booking actions can send
+notifications and trigger configured integrations.
+
+<!-- api-key-scope-table:start -->
+
+| MCP tool | Mode | CLI command | Allowed key scopes |
+| --- | --- | --- | --- |
+| `whoami` | — | `whoami` | `full, read, bookings` |
+| `find_available_slots` | — | `slots` | `full, read, bookings` |
+| `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
+| `find_available_slots` | `team` | `slots` | `full, read, bookings` |
+| `create_booking` | — | `book` | `full, bookings` |
+| `create_booking` | `personal` | `book` | `full, bookings` |
+| `create_booking` | `team` | `book` | `full, bookings` |
+| `reschedule_booking` | — | `reschedule` | `full, bookings` |
+| `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
+| `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |
+| `cancel_booking` | — | `cancel` | `full, bookings` |
+| `cancel_booking` | `host` | `cancel` | `full, bookings` |
+| `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
+| `list_bookings` | — | `list` | `full, read, bookings` |
+| `retry_conference` | — | `retry-meeting` | `full, bookings` |
+| `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
+| `get_profile` | — | `profile` | `full, read, bookings` |
+| `list_event_types` | — | `catalog` | `full, read, bookings` |
+| `get_event_type` | — | `event` | `full, read, bookings` |
+| `list_schedules` | — | `schedules` | `full, read` |
+| `get_schedule` | — | `schedule` | `full, read` |
+| `list_calendar_connections` | — | — | `full, read` |
+| `list_conference_connections` | — | — | `full, read` |
+
+<!-- api-key-scope-table:end -->
+
+Scope is immutable: use **Create replacement** on `/app/api-keys`, update the client and
+revoke the old key. Legacy keys and native API creations that omit `metadata.scope` retain
+`full` compatibility; the web form explicitly sends `bookings` by default. `full` still
+cannot authorize browser-only operations or key management. MCP OAuth retains its existing
+`mcp:tools` access rather than adopting API key scopes. See [API keys](/docs/api-keys) for the
+generated REST table, native boundaries and complete replacement/creation contract.
+
+When upgrading, stop every old web/all/worker and other old key-authenticating process,
+apply migrations, then restart all roles with the new code before using scoped keys.
+**Do not run old and new servers side by side once scoped keys exist:** old code treats
+them as full access. Follow the supported backup/restore procedure for rollback.
+
 ## Discover your configuration
 
 Call `whoami` to check the key's organization and `get_profile` for your booking-page handle,
@@ -72,20 +131,20 @@ detail fields; use the corresponding detail tool when needed. Configuration writ
 overrides remain available through REST and the web app. Always check public availability
 with `find_available_slots` before booking an event found in the catalog.
 
-Connection discovery accepts API keys and enabled MCP OAuth grants and reads only your own
-metadata, without credentials or provider calls. The user's own API keys can change calendar
+Connection discovery accepts `read`/`full` API keys and enabled MCP OAuth grants and reads only
+your own metadata, without credentials or provider calls. The user's own `full` API keys can change calendar
 conflict selection, the writeback destination, refresh the calendar list and sync now through
 REST, and select their own meeting-mode Zoom connection on event types they actually host.
 The same organization and ownership checks apply as for browser sessions.
 OAuth authorization, code exchange and disconnect require a live browser session;
-explicit Zoom credential refresh remains session-only. Settings mutations use REST with an
-API key; MCP OAuth grants do not authenticate REST requests.
+explicit Zoom credential refresh remains session-only. Settings mutations use REST with a
+`full` API key; MCP OAuth grants do not authenticate REST requests.
 
 ## Book and manage time
 
 | Tool | Input and result |
 |---|---|
-| `whoami` | No arguments; shows the key's user, organization and key ID. |
+| `whoami` | No arguments; shows the key's user, organization, key ID and `apiKeyScope`. |
 | `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive. |
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
 | `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
@@ -382,8 +441,8 @@ not date overrides. Configuration changes and date overrides use the REST API or
 
 The two connection tools take `{}` and call the same services as
 `GET /api/v1/calendar-connections` and `GET /api/v1/conference-connections`. They read only
-the caller's own connections across organizations and make no provider requests. API keys
-and enabled MCP OAuth grants can use both tools. The user's own API keys can change calendar
+the caller's own connections across organizations and make no provider requests. `read`/`full`
+API keys and enabled MCP OAuth grants can use both tools. The user's own `full` API keys can change calendar
 conflict selection, the writeback destination, refresh the calendar list and sync now through
 REST. They can also select their own meeting-mode Zoom connection on event types they
 actually host, subject to the same organization permissions as browser sessions.
@@ -523,7 +582,7 @@ See [Automatic Google Meet](/docs/automatic-google-meet) for optional copies and
 
 Personal and individual single-host team events may opt into automatic Zoom using the actual
 host's private meeting-mode connection. Enabling or changing that configuration accepts the
-actual host's session or own API key through REST, with the same organization checks.
+actual host's session or own `full` API key through REST, with the same organization checks.
 Another team administrator cannot select a host's private connection. MCP OAuth grants can
 list their own connections but do not authenticate REST settings mutations.
 Passive Zoom labels remain unchanged; collective/round-robin

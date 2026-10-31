@@ -25,7 +25,18 @@ use the source commands above. Install with `npm install --global @hourmere/cli`
 [npm README](https://github.com/hourmere/hourmere/blob/main/tools/cli/README.md) and [release procedure](https://github.com/hourmere/hourmere/blob/main/docs/releasing.md) for the tarball
 checks and owner approval requirements.
 
-Create an API key on `/app/api-keys` in the intended organization. The CLI reads only
+The CLI cannot create or revoke API keys. Sign in to the web app, open `/app/api-keys`,
+choose the intended organization and a scope, then create and privately copy the key.
+**Bookings** (`bookings`, the web default) is recommended for AI booking agents;
+**Read** (`read`) suits analytics/reporting and cannot book, move, cancel or retry bookings.
+**Full account access** (`full`) also permits account configuration changes through REST;
+choose it only for trusted software. Legacy keys retain `full`. Scope cannot be edited:
+use **Create replacement**, update the client and revoke the old key. `whoami` returns
+`apiKeyScope`; [API keys](/docs/api-keys#operation-reference) lists each command's allowed
+scopes in a table generated from the authorization code. MCP discovery is filtered by scope;
+a disallowed command reports `insufficient_scope` on stderr and exits **1**.
+
+The CLI reads only
 `HOURMERE_URL` and `HOURMERE_API_KEY`; it does not load `.env`, browser sessions or stored
 credentials. Do not put a key into shell history. `--url ORIGIN` overrides `HOURMERE_URL`.
 Use an HTTPS origin with no credentials, path, query or fragment. HTTP is accepted only for
@@ -211,7 +222,7 @@ Automatic single-host Zoom uses the existing `retry-meeting` command and MCP
 `retry_conference` authority. Supply `{"bookingId":"<id>"}` through `--input`; an API key
 may retry an already authorized booking for its current verified pinned organizer. Browser
 consent is required to authorize Zoom permissions. Account selection uses REST with the
-actual host's own API key; the CLI has no account-selection tool. A claimed create
+actual host's own `full` API key; the CLI has no account-selection tool. A claimed create
 with no validated ID remains ambiguous: retry does not issue another POST or adopt a guessed
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
