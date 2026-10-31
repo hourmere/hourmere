@@ -1,5 +1,14 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Use this key with MCP': '使用此密钥连接 MCP',
+  'Loading MCP configuration…': '正在加载 MCP 配置……',
+  'Could not load MCP configuration.': '无法加载 MCP 配置。',
+  'MCP client JSON': 'MCP 客户端 JSON 配置',
+  'Copy MCP JSON': '复制 MCP JSON 配置',
+  'Claude Code command': 'Claude Code 命令',
+  'Copy Claude command': '复制 Claude 命令',
+  'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.':
+    '将 JSON 配置粘贴到支持通过 HTTP 请求头连接远程 MCP 服务器的客户端，或运行 Claude Code 命令。不同客户端的配置字段可能有所不同。',
   'Member readiness': '成员就绪状态',
   'Default schedule set': '已设置默认时间表',
   'No default schedule': '未设置默认时间表',

@@ -132,6 +132,7 @@ export function productRoutes({
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
     instanceRoutes({
+      publicUrl,
       socialProviders,
       automaticMeet,
       automaticZoom,
