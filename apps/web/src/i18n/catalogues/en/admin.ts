@@ -661,6 +661,9 @@ export const admin = {
   Actions: 'Actions',
   Active: 'Active',
   'Active: invitees can book it': 'Active: invitees can book it',
+  'Enable this event type': 'Enable this event type',
+  'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.':
+    'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.',
   'Add a date override': 'Add a date override',
   'Add a question': 'Add a question',
   'Add an option': 'Add an option',
@@ -945,6 +948,7 @@ export const admin = {
   'Long text': 'Long text',
   'Lower numbers come first on your booking page.':
     'Lower numbers come first on your booking page.',
+  'Lowercase letters, digits and hyphens.': 'Lowercase letters, digits and hyphens.',
   'Lowercase letters, digits and hyphens. {0}': 'Lowercase letters, digits and hyphens. {0}',
   'Make default': 'Make default',
   'Make default: {0}': 'Make default: {0}',
