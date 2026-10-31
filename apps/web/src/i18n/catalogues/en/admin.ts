@@ -1,5 +1,42 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  Scope: 'Scope',
+  'Bookings (read/write)': 'Bookings (read/write)',
+  'Read only': 'Read only',
+  'Bookings — recommended for AI agents': 'Bookings — recommended for AI agents',
+  'Read — analytics and reporting': 'Read — analytics and reporting',
+  'Full account access': 'Full account access',
+  'Unknown scope': 'Unknown scope',
+  'View event types, available times and bookings you can access. Create, reschedule or cancel bookings, and retry their conference or your calendar copy. Cannot change settings or read analytics, raw schedules or integration accounts.':
+    'View event types, available times and bookings you can access. Create, reschedule or cancel bookings, and retry their conference or your calendar copy. Cannot change settings or read analytics, raw schedules or integration accounts.',
+  'Read data you can access, including bookings and attendee details, schedules, analytics and integration metadata. Cannot create, change or cancel bookings, or change settings.':
+    'Read data you can access, including bookings and attendee details, schedules, analytics and integration metadata. Cannot create, change or cancel bookings, or change settings.',
+  'Use all operations available to API keys with your permissions. This includes changing settings and cancelling bookings. Only choose this for a client you trust with full account access.':
+    'Use all operations available to API keys with your permissions. This includes changing settings and cancelling bookings. Only choose this for a client you trust with full account access.',
+  'Your agent can view event types, available times and bookings you can access, including attendee details and answers. It can create, reschedule or cancel bookings and retry their conference or your calendar copy. It cannot change settings or read analytics, raw schedules or integration accounts.':
+    'Your agent can view event types, available times and bookings you can access, including attendee details and answers. It can create, reschedule or cancel bookings and retry their conference or your calendar copy. It cannot change settings or read analytics, raw schedules or integration accounts.',
+  'Your agent can read data you can access, including bookings, attendee details, schedules and analytics through the API. MCP offers the permitted read tools. It cannot create, change or cancel bookings, or change settings.':
+    'Your agent can read data you can access, including bookings, attendee details, schedules and analytics through the API. MCP offers the permitted read tools. It cannot create, change or cancel bookings, or change settings.',
+  'Your agent can use every MCP tool and all API operations available to API keys with your permissions, including changing settings and cancelling bookings. Browser-only actions, including managing API keys, still require you to sign in.':
+    'Your agent can use every MCP tool and all API operations available to API keys with your permissions, including changing settings and cancelling bookings. Browser-only actions, including managing API keys, still require you to sign in.',
+  'API keys let AI agents and scripts use Hourmere for you. Each key acts in one organization, limited by its scope and your permissions. Treat it like a password.':
+    'API keys let AI agents and scripts use Hourmere for you. Each key acts in one organization, limited by its scope and your permissions. Treat it like a password.',
+  'Scope cannot be changed after creation. To change it, create a new key and revoke the old one.':
+    'Scope cannot be changed after creation. To change it, create a new key and revoke the old one.',
+  'Review the scope and expiration, create and test the new key, then revoke the old one.':
+    'Review the scope and expiration, create and test the new key, then revoke the old one.',
+  'Create replacement': 'Create replacement',
+  'Create a replacement for {0}': 'Create a replacement for {0}',
+  'Cancel replacement': 'Cancel replacement',
+  'Switch to this key’s organization to create a replacement.':
+    'Switch to this key’s organization to create a replacement.',
+  'Save your new key before creating another replacement.':
+    'Save your new key before creating another replacement.',
+  'Wait until key creation finishes before creating a replacement.':
+    'Wait until key creation finishes before creating a replacement.',
+  'This key’s scope is unavailable. Revoke it and create a new key.':
+    'This key’s scope is unavailable. Revoke it and create a new key.',
+  'Scope: {scope}': 'Scope: {scope}',
   'This API key does not allow this operation.': 'This API key does not allow this operation.',
   'API key scope cannot be changed; create a replacement key.':
     'API key scope cannot be changed; create a replacement key.',

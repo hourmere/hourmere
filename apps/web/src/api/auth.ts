@@ -78,6 +78,12 @@ export function getInvitationSession(signal?: AbortSignal): Promise<{
   return authRequest('/get-session', signal ? { signal } : {})
 }
 
+/** One immutable authority level per key. */
+export type ApiKeyScope = 'full' | 'read' | 'bookings'
+
+export const isApiKeyScope = (value: unknown): value is ApiKeyScope =>
+  value === 'full' || value === 'read' || value === 'bookings'
+
 /** An API key as Better Auth lists it; the secret itself is never stored or listed. */
 export interface ApiKey {
   id: string
@@ -89,8 +95,8 @@ export interface ApiKey {
   expiresAt: string | null
   /** When the key was last used, if ever. */
   lastRequest: string | null
-  /** The organization the key acts in; the server stores it on every key it creates. */
-  metadata: { organizationId?: string } | null
+  /** Organization binding and scope. The migration gives legacy keys full; no UI fallback. */
+  metadata: { organizationId?: string; scope?: ApiKeyScope } | null
 }
 
 /** A key just created: the only time its secret is returned. */
@@ -118,12 +124,13 @@ export function createApiKey(
   name: string,
   expiresInSeconds: number | null,
   organizationId: string,
+  scope: ApiKeyScope,
 ): Promise<CreatedApiKey> {
   return authRequest('/api-key/create', {
     body: {
       name,
       ...(expiresInSeconds !== null && { expiresIn: expiresInSeconds }),
-      metadata: { organizationId },
+      metadata: { organizationId, scope },
     },
   })
 }

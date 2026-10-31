@@ -291,9 +291,15 @@ Validated by the application (zod), not by the database:
   `invalid_questions`), `parseQuestions` and `validateResponses`, in
   `packages/scheduling/src/questions.ts`; writes of either go through them.
 - `calendars.sync_state`: provider sync token / delta link and push channel id + expiry.
-- `auth.apikey.metadata`: `{ "organizationId": "<uuid>" }`, the organization the key acts
-  in; set when the key is created (the owner's personal organization unless they name
-  another one they belong to) and re-checked against membership on every request.
+- `auth.apikey.metadata`: `{ "organizationId": "<uuid>", "scope": "full" | "read" | "bookings" }`.
+  The organization defaults to the owner's personal organization and is rechecked against
+  membership on every request. Scope is immutable after creation, including direct storage
+  updates; native owner-authorized organization changes preserve it. Migration 0048 backfills
+  legacy scopes as `full`, preserving other metadata, and rejects malformed legacy metadata
+  atomically. New API creations that omit `metadata.scope` default to `full` for compatibility;
+  the web form explicitly defaults to `bookings`. Malformed stored scopes fail closed.
+  See [API keys](api-keys.md) for the generated operation tables and the requirement to stop
+  all old key-authenticating processes before scoped keys are used.
 
 ## Planned additions (each a new migration)
 

@@ -25,7 +25,16 @@ npm run --silent cli -- --version
 ## Connect
 
 Create an API key in your instance at **App → API keys** (`/app/api-keys`), selecting the
-organization you want to use. Set `HOURMERE_URL` to the instance origin, without `/mcp`.
+organization you want to use. The CLI cannot create or revoke keys. Choose **Bookings**
+(`bookings`, the web default) for an AI booking agent, **Read** (`read`) for analytics and
+reporting, or **Full account access** (`full`) only for software you trust with account
+configuration changes. Read keys cannot create, move, cancel or repair bookings. Legacy
+keys retain `full`. Scope cannot be edited: create a replacement in the web UI, update the
+client and revoke the old key. `whoami` returns `apiKeyScope`; a disallowed command reports
+`insufficient_scope` on stderr and exits **1**. The [API key guide](https://hourmere.com/docs/api-keys#operation-reference)
+publishes command scopes generated from the authorization registry.
+
+Set `HOURMERE_URL` to the instance origin, without `/mcp`.
 Provide `HOURMERE_API_KEY` through your shell's secret environment or a secret manager.
 The CLI never reads `.env` files or accepts keys as command-line flags.
 

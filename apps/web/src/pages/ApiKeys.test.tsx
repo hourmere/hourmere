@@ -33,7 +33,7 @@ const existing: ApiKey = {
   createdAt: '2026-10-01T09:00:00.000Z',
   expiresAt: null,
   lastRequest: '2026-10-15T17:30:00.000Z',
-  metadata: { organizationId: ME.organization.id },
+  metadata: { organizationId: ME.organization.id, scope: 'full' },
 }
 
 const TEAM = {
@@ -71,7 +71,7 @@ function keyServer(
       const { name, expiresIn, metadata } = body as {
         name: string
         expiresIn?: number
-        metadata: { organizationId: string }
+        metadata: { organizationId: string; scope: 'full' | 'read' | 'bookings' }
       }
       const created = {
         id: '00000000-0000-7000-8000-0000000000b2',
@@ -107,6 +107,301 @@ const rowFor = async (name: string) =>
   (await within(await table()).findByRole('rowheader', { name: new RegExp(name) })).closest('tr')
 
 describe('the API keys page', () => {
+  it.each([
+    { locale: 'en' as const, legend: 'Scope', name: 'Name' },
+    { locale: 'zh-CN' as const, legend: '权限范围', name: '名称' },
+  ])('defaults to bookings with labelled keyboard choices in $locale', async (labels) => {
+    chooseLanguage(labels.locale)
+    const user = userEvent.setup()
+    keyServer([])
+    renderApp('/app/api-keys')
+    await screen.findByLabelText(labels.name)
+    const group = screen.getByRole('group', { name: labels.legend })
+    const choices = within(group).getAllByRole<HTMLInputElement>('radio')
+    expect(choices.map((choice) => choice.value)).toEqual(['bookings', 'read', 'full'])
+    expect(choices.map((choice) => choice.checked)).toEqual([true, false, false])
+    for (const choice of choices) {
+      expect(choice.labels?.length).toBe(1)
+      const description = document.getElementById(choice.getAttribute('aria-describedby') ?? '')
+      expect(description?.textContent?.trim().length).toBeGreaterThan(20)
+      if (labels.locale === 'zh-CN') expect(description?.textContent).toMatch(/。$/)
+    }
+    expect(group.textContent).toContain(
+      labels.locale === 'en'
+        ? 'Scope cannot be changed after creation. To change it, create a new key and revoke the old one.'
+        : '密钥创建后无法修改权限范围。如需更改，请创建新密钥并撤销旧密钥。',
+    )
+    expect(choices[0]?.labels?.[0]?.textContent).toContain(
+      labels.locale === 'en' ? 'recommended for AI agents' : '推荐用于 AI 智能体',
+    )
+    expect(choices[1]?.labels?.[0]?.textContent).toContain(
+      labels.locale === 'en' ? 'analytics and reporting' : '分析和报表',
+    )
+    expect(
+      document.getElementById(choices[2]?.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toContain(
+      labels.locale === 'en'
+        ? 'Only choose this for a client you trust with full account access.'
+        : '请仅为你信任、可以授予账户完整访问权限的客户端选择此范围。',
+    )
+    choices[0]?.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(choices[1]?.checked).toBe(true)
+    expect(document.activeElement).toBe(choices[1])
+    await user.keyboard('{ArrowRight}')
+    expect(choices[2]?.checked).toBe(true)
+    expect(document.activeElement).toBe(choices[2])
+  })
+
+  it.each(
+    (['en', 'zh-CN'] as const).flatMap((locale) =>
+      (['bookings', 'read', 'full'] as const).map((scope) => ({ locale, scope })),
+    ),
+  )(
+    'creates an explicit $scope key and explains its MCP access in $locale',
+    async ({ locale, scope }) => {
+      chooseLanguage(locale)
+      const user = userEvent.setup()
+      const api = keyServer([], IN_TEAM)
+      renderApp('/app/api-keys')
+      await screen.findByLabelText(locale === 'en' ? 'Name' : '名称')
+      const group = screen.getByRole('group', { name: locale === 'en' ? 'Scope' : '权限范围' })
+      const choice = within(group)
+        .getAllByRole<HTMLInputElement>('radio')
+        .find((radio) => radio.value === scope)
+      await user.click(choice as HTMLInputElement)
+      await user.type(screen.getByLabelText(locale === 'en' ? 'Name' : '名称'), 'Scoped agent')
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Create key' : '创建密钥' }),
+      )
+      const reveal = await screen.findByRole('region', {
+        name: locale === 'en' ? /Copy your new key/ : /复制新密钥/,
+      })
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+        name: 'Scoped agent',
+        metadata: { organizationId: TEAM.id, scope },
+      })
+      expect(reveal.textContent).toContain('Acme')
+      const expected = {
+        en: { bookings: 'Bookings', read: 'Read', full: 'Full account access' },
+        'zh-CN': { bookings: '预约读写', read: '只读', full: '账户完整访问权限' },
+      }[locale][scope]
+      expect(reveal.textContent).toContain(expected)
+      const abilities = {
+        en: {
+          bookings:
+            'It can create, reschedule or cancel bookings and retry their conference or your calendar copy.',
+          read: 'It cannot create, change or cancel bookings, or change settings.',
+          full: 'Browser-only actions, including managing API keys, still require you to sign in.',
+        },
+        'zh-CN': {
+          bookings: '它可以创建、改期或取消预约，以及重试预约的会议或你自己的日历副本。',
+          read: '它无法创建、修改或取消预约，也无法修改设置。',
+          full: '管理 API 密钥等仅限浏览器的操作仍需你登录后进行。',
+        },
+      }[locale][scope]
+      expect(reveal.textContent).toContain(abilities)
+      const scopeText = within(reveal).getByText(
+        new RegExp(locale === 'en' ? '^Scope:' : '^权限范围：'),
+      )
+      const secretField = within(reveal).getByLabelText(
+        locale === 'en' ? 'New API key' : '新 API 密钥',
+      )
+      expect(
+        Boolean(scopeText.compareDocumentPosition(secretField) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).toBe(true)
+      const mcp = within(reveal).getByRole('region', {
+        name: locale === 'en' ? 'MCP client JSON' : 'MCP 客户端 JSON 配置',
+      })
+      // Scope is bound to the key on the server, never a client-controlled config property.
+      expect(JSON.parse(mcp.textContent ?? '')).toEqual({
+        mcpServers: {
+          hourmere: {
+            type: 'http',
+            url: new URL('/mcp', window.location.origin).href,
+            headers: { Authorization: `Bearer ${SECRET}` },
+          },
+        },
+      })
+      const row = await rowFor('Scoped agent')
+      expect(
+        row?.querySelector(`[data-label="${locale === 'en' ? 'Scope' : '权限范围'}"]`)?.textContent,
+      ).toContain(expected)
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'shows every stored scope, including migrated legacy full, in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      keyServer([
+        { ...existing, name: 'Legacy full', metadata: { scope: 'full' } },
+        {
+          ...existing,
+          id: 'read',
+          name: 'Reports',
+          metadata: { organizationId: ME.organization.id, scope: 'read' },
+        },
+        {
+          ...existing,
+          id: 'bookings',
+          name: 'Scheduler',
+          metadata: { organizationId: ME.organization.id, scope: 'bookings' },
+        },
+        { ...existing, id: 'missing', name: 'Missing scope', metadata: null },
+        {
+          ...existing,
+          id: 'invalid',
+          name: 'Invalid scope',
+          metadata: { scope: 'unexpected' } as unknown as ApiKey['metadata'],
+        },
+      ])
+      renderApp('/app/api-keys')
+      const scopeIn = async (name: string) =>
+        (await rowFor(name))?.querySelector(
+          `[data-label="${locale === 'en' ? 'Scope' : '权限范围'}"]`,
+        )?.textContent
+      expect(await scopeIn('Legacy full')).toContain(
+        locale === 'en' ? 'Full account access' : '账户完整访问权限',
+      )
+      expect(await scopeIn('Reports')).toContain(locale === 'en' ? 'Read' : '只读')
+      expect(await scopeIn('Scheduler')).toContain(locale === 'en' ? 'Bookings' : '预约读写')
+      for (const name of ['Missing scope', 'Invalid scope']) {
+        expect(await scopeIn(name)).toBe(locale === 'en' ? 'Unknown scope' : '权限范围未知')
+        const row = await rowFor(name)
+        const replace = within(row as HTMLElement).getByRole<HTMLButtonElement>('button', {
+          name: locale === 'en' ? `Create a replacement for ${name}` : `为 ${name} 创建替代密钥`,
+        })
+        expect(replace.disabled).toBe(true)
+      }
+    },
+  )
+
+  it('prefills a replacement, lets its scope change and leaves the old key for explicit revocation', async () => {
+    const user = userEvent.setup()
+    const api = keyServer()
+    renderApp('/app/api-keys')
+    const row = await rowFor('Claude Desktop')
+    await user.click(
+      within(row as HTMLElement).getByRole('button', {
+        name: 'Create a replacement for Claude Desktop',
+      }),
+    )
+    const name = screen.getByLabelText<HTMLInputElement>('Name')
+    expect(name.value).toBe('Claude Desktop')
+    expect(document.activeElement).toBe(name)
+    const group = screen.getByRole('group', { name: 'Scope' })
+    const choices = within(group).getAllByRole<HTMLInputElement>('radio')
+    expect(choices.find((choice) => choice.checked)?.value).toBe('full')
+    expect(screen.getByText(/Review the scope and expiration/)).toBeDefined()
+    expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
+    await user.click(choices.find((choice) => choice.value === 'read') as HTMLInputElement)
+    await user.selectOptions(screen.getByLabelText('Expires'), 'In 30 days')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('region', { name: /Copy your new key/ })
+    expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+      name: 'Claude Desktop',
+      expiresIn: 30 * 24 * 60 * 60,
+      metadata: { organizationId: ME.organization.id, scope: 'read' },
+    })
+    expect(api.to('POST /api/auth/api-key/update')).toHaveLength(0)
+    expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
+    const rows = within(await table()).getAllByRole('row')
+    expect(rows).toHaveLength(3)
+    await user.click(screen.getByRole('button', { name: 'I’ve saved my key' }))
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('')
+    expect(
+      screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+    ).toBe('bookings')
+  })
+
+  it('keeps replacement shortcuts unavailable while a new key request is pending', async () => {
+    const pending = later()
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...signedInAs(ME),
+      ...organizations([ME.organization]),
+      'GET /api/v1/instance': () =>
+        json(200, {
+          publicUrl: window.location.origin,
+          signIn: { email: true, google: false, microsoft: false },
+        }),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [existing], total: 1 }),
+      'POST /api/auth/api-key/create': () => pending.response,
+    })
+    renderApp('/app/api-keys')
+    await table()
+    await user.type(screen.getByLabelText('Name'), 'Pending agent')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    const replace = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'Create a replacement for Claude Desktop',
+    })
+    expect(replace.disabled).toBe(true)
+    await user.click(replace)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Pending agent')
+    await pending.answer(
+      json(200, {
+        ...existing,
+        name: 'Pending agent',
+        metadata: { organizationId: ME.organization.id, scope: 'bookings' },
+        key: SECRET,
+      }),
+    )
+    await screen.findByRole('region', { name: /Copy your new key/ })
+    expect(replace.disabled).toBe(true)
+    expect(api.to('POST /api/auth/api-key/create')).toHaveLength(1)
+  })
+
+  it('returns focus to the fresh name field when cancelling a replacement', async () => {
+    const user = userEvent.setup()
+    const api = keyServer()
+    renderApp('/app/api-keys')
+    await table()
+    await user.click(
+      screen.getByRole('button', { name: 'Create a replacement for Claude Desktop' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Cancel replacement' }))
+    const name = screen.getByLabelText<HTMLInputElement>('Name')
+    expect(name.value).toBe('')
+    expect(document.activeElement).toBe(name)
+    expect(
+      screen.getAllByRole<HTMLInputElement>('radio').find((choice) => choice.checked)?.value,
+    ).toBe('bookings')
+    expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
+    expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
+  })
+
+  it('requires switching to the source organization before replacing its key', async () => {
+    const user = userEvent.setup()
+    const api = keyServer([{ ...existing, metadata: { organizationId: TEAM.id, scope: 'read' } }])
+    renderApp('/app/api-keys')
+    const row = await rowFor('Claude Desktop')
+    const replacement = within(row as HTMLElement).getByRole<HTMLButtonElement>('button', {
+      name: 'Create a replacement for Claude Desktop',
+    })
+    expect(replacement.disabled).toBe(true)
+    expect(row?.textContent).toContain('Switch to this key’s organization to create a replacement.')
+    await user.click(replacement)
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('')
+    expect(api.to('POST /api/auth/api-key/create')).toHaveLength(0)
+  })
+
+  it('treats a scope-only selection as an unsaved draft', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    keyServer([])
+    renderApp('/app/api-keys')
+    await screen.findByLabelText('Name')
+    const full = screen
+      .getAllByRole<HTMLInputElement>('radio')
+      .find((radio) => radio.value === 'full')
+    await user.click(full as HTMLInputElement)
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
+    expect(screen.getByRole('heading', { name: 'API keys', level: 1 })).toBeDefined()
+    expect(full?.checked).toBe(true)
+  })
+
   it.each([
     {
       locale: 'en' as const,
@@ -259,7 +554,7 @@ describe('the API keys page', () => {
       {
         name: 'CI deploy bot',
         expiresIn: 90 * 24 * 60 * 60,
-        metadata: { organizationId: ME.organization.id },
+        metadata: { organizationId: ME.organization.id, scope: 'bookings' },
       },
     ])
     const reveal = await screen.findByRole('region', { name: /Copy your new key “CI deploy bot”/ })
@@ -546,7 +841,7 @@ describe('the API keys page', () => {
     await screen.findByRole('region', { name: /Copy your new key/ })
     expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
       name: 'Laptop',
-      metadata: { organizationId: ME.organization.id },
+      metadata: { organizationId: ME.organization.id, scope: 'bookings' },
     })
   })
 
@@ -563,7 +858,7 @@ describe('the API keys page', () => {
     await screen.findByRole('region', { name: /Copy your new key/ })
     expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
       name: 'Team agent',
-      metadata: { organizationId: TEAM.id },
+      metadata: { organizationId: TEAM.id, scope: 'bookings' },
     })
     const row = await rowFor('Team agent')
     expect(within(row as HTMLElement).getByText('Acme')).toBeDefined()
@@ -576,19 +871,19 @@ describe('the API keys page', () => {
         ...existing,
         id: '00000000-0000-7000-8000-0000000000a2',
         name: 'Team bot',
-        metadata: { organizationId: TEAM.id },
+        metadata: { organizationId: TEAM.id, scope: 'bookings' },
       },
       {
         ...existing,
         id: '00000000-0000-7000-8000-0000000000a3',
         name: 'Old bot',
-        metadata: { organizationId: '00000000-0000-7000-8000-0000000000ff' },
+        metadata: { organizationId: '00000000-0000-7000-8000-0000000000ff', scope: 'full' },
       },
       {
         ...existing,
         id: '00000000-0000-7000-8000-0000000000a4',
         name: 'Legacy bot',
-        metadata: null,
+        metadata: { scope: 'full' },
       },
     ])
     renderApp('/app/api-keys')
@@ -750,7 +1045,7 @@ describe('the API keys page', () => {
         String(90 * 24 * 60 * 60),
       )
       expect(api.to('POST /api/auth/api-key/create')[0]?.body).toMatchObject({
-        metadata: { organizationId: TEAM.id },
+        metadata: { organizationId: TEAM.id, scope: 'bookings' },
       })
       expect(api.to('GET /api/v1/me')).toHaveLength(1)
       expect(
@@ -793,7 +1088,7 @@ describe('the API keys page', () => {
     await screen.findByRole('region', { name: /Copy your new key/ })
     expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
       name: 'Original team agent',
-      metadata: { organizationId: TEAM.id },
+      metadata: { organizationId: TEAM.id, scope: 'bookings' },
     })
   })
 

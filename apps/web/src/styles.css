@@ -650,6 +650,53 @@ input[readonly] {
   align-items: start;
 }
 
+.api-key-scopes {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.api-key-scopes legend {
+  padding: 0 0 var(--space-2);
+  font-weight: 600;
+}
+
+.api-key-scope {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.api-key-scope:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--surface-muted);
+}
+
+.api-key-scope label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.api-key-scope .hint {
+  margin-left: calc(1.2rem + var(--space-2));
+}
+
+.api-key-replacement {
+  margin-bottom: var(--space-2);
+  white-space: normal;
+}
+
+.api-key-replacement .hint {
+  margin-top: var(--space-1);
+}
+
 @media (min-width: 640px) {
   .form-row {
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
