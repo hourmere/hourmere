@@ -72,6 +72,32 @@ describe('deployment paste tool prerequisites', () => {
   })
 })
 
+describe('paced deployment paste', () => {
+  it('preserves long unbracketed zsh blocks without overflowing the terminal input queue', (context) => {
+    const env = { PATH: process.env.PATH }
+    const skipReason = deploymentPasteSkipReason(env)
+    if (skipReason) context.skip(skipReason)
+    const directory = mkdtempSync(join(tmpdir(), 'hourmere-long-paste-'))
+    directories.push(directory)
+    const input = [
+      'zsh -f -i',
+      '[[ -t 0 && -o interactive && ! -o interactivecomments ]] || exit 7',
+      `python3 -c 'import select, sys; print("PASTE_QUEUE_CLEAR" if not select.select([sys.stdin], [], [], 0)[0] else "PASTE_QUEUE_EARLY")'`,
+      '(',
+      ...Array.from({ length: 64 }, () => `  value=synthetic-${'x'.repeat(80)} &&`),
+      `  printf 'LONG_PASTE_COMPLETE\\n'`,
+      ')',
+      'exit 0',
+      'exit 0',
+      '',
+    ].join('\n')
+    const result = pasteIntoZshPty(input, directory, env)
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toContain('\nPASTE_QUEUE_CLEAR\n')
+    expect(result.stdout).toContain('\nLONG_PASTE_COMPLETE\n')
+  })
+})
+
 describe('deployment paste skip wiring', () => {
   it.each([
     { missing: 'zsh', CI: '' },
@@ -123,7 +149,7 @@ describe('deployment paste skip wiring', () => {
       const ptyTests = json.testResults
         .flatMap((suite) => suite.assertionResults)
         .filter((test) => /zsh PTY paste|pastes a plain-mode/.test(test.fullName))
-      expect(ptyTests).toHaveLength(20)
+      expect(ptyTests).toHaveLength(28)
       expect(
         ptyTests.every((test) => test.status === 'skipped'),
         output,

@@ -85,3 +85,83 @@ describe('self-hosting documentation follow-ups', () => {
     expect(source).not.toContain('at release, align that advertised server version')
   })
 })
+
+describe('published image configuration reference', () => {
+  const source = read(`${siteDocs}/configuration.md`)
+  const tableRow = (variable: string) =>
+    source.split('\n').find((line) => line.startsWith(`| \`${variable}\` |`)) ?? ''
+
+  it('removes the unpublished-image claim and scopes APP_IMAGE to source builds', () => {
+    expect(source).not.toMatch(/no prebuilt public image is published/i)
+    const row = tableRow('APP_IMAGE')
+    expect(row).toContain('Source builds only')
+    expect(row).toContain('The image overlay ignores this setting')
+    expect(row).toContain('ghcr.io/hourmere/hourmere:<HOURMERE_VERSION>')
+  })
+
+  it('pins the image version without a v prefix or floating tags', () => {
+    const row = tableRow('HOURMERE_VERSION')
+    expect(row).toContain('Not forwarded by the default Compose file: consumed by the Compose CLI')
+    expect(row).toContain('Exact published release version')
+    expect(row).toContain('without a leading `v`')
+    expect(row).toContain('never `latest` or a floating minor tag')
+    expect(row).toContain('pins the same image for app and worker')
+    expect(row).toContain('Omit it for source builds')
+  })
+
+  it('preserves the image overlay in both setup selections and manual worker examples', () => {
+    const row = tableRow('COMPOSE_FILE')
+    for (const selection of [
+      'docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml',
+      'docker-compose.yml:docker-compose.image.yml',
+    ]) {
+      expect(row).toContain(`\`${selection}\``)
+    }
+    expect(row).toContain('Source setup omits `docker-compose.image.yml`')
+    const manual = source.split('If editing manually, replace the whole quoted line')[1]
+    expect(manual).toBeDefined()
+    const selections = [...(manual ?? '').matchAll(/^COMPOSE_FILE='([^']+)'$/gm)].map(
+      (match) => match[1],
+    )
+    expect(selections).toEqual([
+      'docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml',
+      'docker-compose.yml:docker-compose.image.yml:docker-compose.worker.yml',
+    ])
+    expect(normalize(manual ?? '')).toContain(
+      'Source installations omit `docker-compose.image.yml` from either example',
+    )
+  })
+})
+
+describe('release-day documentation flip list', () => {
+  const checklist =
+    read('docs/releasing.md')
+      .split('| File / preparation lines |')[1]
+      ?.split('\n- Replace the no-stable-release/public-image sentences')[0] ?? ''
+
+  it.each([
+    {
+      area: 'configuration reference',
+      targets: [
+        'apps/site/src/content/docs/docs/configuration.md:259',
+        ':265',
+        ':267',
+        ':296',
+        'HOURMERE_VERSION',
+      ],
+    },
+    { area: 'Caddy migration', targets: [':174–220', '(Caddy migration)'] },
+  ])('includes $area', ({ targets }) => {
+    for (const target of targets) expect(checklist).toContain(target)
+  })
+
+  it.each([
+    '.env.example',
+    'docker-compose.yml',
+    'docker-compose.worker.yml',
+    'scripts/enable-worker.sh',
+  ])('keeps completed setup preparation out of the release-day map (%s)', (file) => {
+    expect(checklist).not.toContain(`\`${file}\``)
+    expect(checklist).not.toContain(`\`${file}:`)
+  })
+})

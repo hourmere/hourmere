@@ -6,10 +6,10 @@ description: Deploy and operate Hourmere with Docker Compose and optional automa
 ## Prepare the host
 
 Use Git, OpenSSL, curl, Docker Engine and Docker Compose **2.24.4 or newer** on Linux.
-The production setup targets Ubuntu 24.04 LTS, x86_64, with 2 vCPU and 4 GB RAM. Compose
-builds the application from source: **no prebuilt public image is published yet**. The
-release workflow is being prepared separately. Allow disk space for the source, image
-builds, PostgreSQL data and backups. Choose a dedicated deployment directory and volumes.
+The production setup targets Ubuntu 24.04 LTS with 2 vCPU and 4 GB RAM. Published images
+support amd64 and arm64. The primary path pulls the published
+`ghcr.io/hourmere/hourmere` image, pinned to an exact release version. Building from source
+is an alternative below. Allow disk space for images, PostgreSQL data and backups. Choose a dedicated deployment directory and volumes.
 
 For the bundled HTTPS proxy, point your hostname's DNS A record at the VPS, for example
 `hourmere.example.com`. **Publish only an A record with the bundled configuration.** Its
@@ -26,14 +26,15 @@ keep SSH available on TCP 22. PostgreSQL and the application port must stay priv
 Run this sequence from a directory where you want the checkout:
 
 ```sh
-git clone https://github.com/hourmere/hourmere.git
+git clone --branch v1.0.0 --depth 1 https://github.com/hourmere/hourmere.git
 cd hourmere
-./scripts/setup.sh --source
-docker compose up -d --build --wait
+./scripts/setup.sh --image
+docker compose pull
+docker compose up -d --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
 
-In setup, accept the default `proxy` mode, explicitly enter your exact HTTPS origin (the example is
+In setup, accept the default image installation and `proxy` mode, explicitly enter your exact HTTPS origin (the example is
 `https://hourmere.example.com`), then enter your SMTP URL and sender. Use your own hostname in
 all commands. Every deployment must serve Hourmere at the root of its own host name,
 without a path prefix. The bundled proxy additionally requires an HTTPS host name without
@@ -61,18 +62,22 @@ and out of Git; do not paste a rendered `docker compose config` into an issue. T
 existing deployment, edit its `.env` rather than rerunning setup. The development example
 `DATABASE_URL` is omitted: Compose supplies its own container database URL and password.
 
-Setup selects both Compose files using
-`COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml'`, persists
+Setup infers `HOURMERE_VERSION=1.0.0` from the checked-out `v1.0.0` release tag; away
+from an exact release tag, enter an exact version at the prompt or pass `--version 1.0.0`.
+The version must omit `v` and include major, minor and patch numbers. Never use `latest`
+or a floating minor tag. Setup selects the image and proxy overlays using
+`COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml'`, persists
 `COMPOSE_PROJECT_NAME=hourmere`, and sets `SIGNUP=first-user`
-and `AUTO_MIGRATE=true`. `docker compose up` then builds the checked-out application,
-starts PostgreSQL 18, and applies application and job migrations before serving requests.
+and `AUTO_MIGRATE=true`. `docker compose pull` downloads the pinned application image,
+PostgreSQL and Caddy; `docker compose up` starts PostgreSQL 18 and the application,
+and applies application and job migrations before serving requests.
 `--wait` waits for the app and database health checks; the curl command also checks the
 public TLS/proxy path. A health response checks the process/database, not SMTP delivery or
 external calendar access. For an independent installation, choose a unique lowercase project
-name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --source`.
+name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --image`.
 Run every later Compose command from that checkout so it reads the persisted project and
-file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME` or `COMPOSE_FILE` in
-your shell, which would override `.env`.
+file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` or
+`HOURMERE_VERSION` in your shell, which would override `.env`.
 
 Open `https://hourmere.example.com/sign-in` and sign in immediately with your own email. There
 is no separate sign-up page and no initial password: proving an eligible email address
@@ -103,6 +108,28 @@ In the app, set a profile handle and time zone, create working hours, then creat
 event type. Its public booking page is `/{handle}/{slug}`. Configure calendars explicitly
 through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest) or
 [MCP](/docs/mcp) guides for agent access. Test one booking before inviting others.
+
+## Build from source instead
+
+For a local build, use the same reviewed release and setup security settings, selecting
+`--source` instead of the default image installation:
+
+```sh
+git clone --branch v1.0.0 --depth 1 https://github.com/hourmere/hourmere.git hourmere-source
+cd hourmere-source
+./scripts/setup.sh --source
+docker compose up -d --build --wait
+```
+
+This keeps the original source-build Compose behavior: the base app builds the checked-out
+source, uses `APP_IMAGE=hourmere:local` by default and never pulls that application image.
+The optional proxy and worker overlays work with either path. Source setup omits the
+image overlay and does not need `HOURMERE_VERSION`. When switching from an image
+installation, edit the existing `.env`: remove `docker-compose.image.yml` from
+`COMPOSE_FILE`, remove `HOURMERE_VERSION`, and unset `HOURMERE_VERSION` in your shell too.
+Preserve proxy, worker and custom overlays. Setup refuses an existing `.env`, so do not
+rerun it for this switch. Keep using the source upgrade
+procedures below for a source deployment.
 
 ## Google sign-in and calendar publishing
 
@@ -144,8 +171,8 @@ certificates and state persist in `caddy-data` and `caddy-config` volumes. Caddy
 filter replaces query strings with `?REDACTED` and deletes request headers, including on
 upstream errors; retain this filter when customizing the Caddyfile.
 
-If you already operate a proxy, select `plain` during setup. This selects only
-[`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml), which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
+If you already operate a proxy, select `plain` during setup. This keeps the base and image overlay without the proxy overlay. The base
+[`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
 unpublished. Supply the exact public HTTPS origin and SMTP settings, then configure your
 proxy to preserve the Host, set `X-Forwarded-Proto: https`, and replace untrusted incoming
 `X-Forwarded-For` with the actual visitor address. Forward every path unchanged, including
@@ -161,7 +188,7 @@ For a private local trial, select `plain`, accept `http://localhost:3000`, leave
 and explicitly acknowledge the private trial prompt. Then use:
 
 ```sh
-docker compose up -d --build --wait
+docker compose up -d --wait
 curl --fail http://127.0.0.1:3000/api/health
 ```
 
@@ -187,7 +214,7 @@ point only DNS A at the host, and allow the ports listed above.
 Older `.env` files may lack every deployment setting below. This sequence replaces or adds
 the keys, rather than silently relying on `sed` matching an existing key. Set the project
 name to the original one and select a free subnet before running it. It preserves the
-separate-worker overlay when selected in `.env`:
+image and separate-worker overlays when selected in `.env`:
 
 ```sh
 umask 077
@@ -196,11 +223,13 @@ awk '
   /^COMPOSE_FILE=/ {
     selection = $0
     sub(/[[:space:]]+#.*$/, "", selection)
+    if (selection ~ /[=:"\047]docker-compose\.image\.yml([:"\047[:space:]]|$)/)
+      image = ":docker-compose.image.yml"
     if (selection ~ /[=:"\047]docker-compose\.worker\.yml([:"\047[:space:]]|$)/)
       worker = ":docker-compose.worker.yml"
   }
   !/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/ { print }
-  END { print "COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml" worker }
+  END { print "COMPOSE_FILE=docker-compose.yml" image ":docker-compose.proxy.yml" worker }
 ' .env > "$env_update"
 cat >> "$env_update" <<'EOF'
 COMPOSE_PROJECT_NAME=hourmere
@@ -211,9 +240,12 @@ PROXY_DYNAMIC_RANGE=172.30.62.8/29
 EOF
 chmod 600 "$env_update"
 mv "$env_update" .env
+unset COMPOSE_FILE HOURMERE_VERSION
 ```
 
-Review the private file locally, then run `docker compose build`, `docker compose pull proxy db`
+Review the private file locally. For an image deployment, retain its exact
+`HOURMERE_VERSION`, run `docker compose pull`, then `docker compose up -d --wait`.
+For a source deployment, run `docker compose build`, `docker compose pull proxy db`
 and `docker compose up -d --wait`. Verify HTTPS health, sign-in and a booking before
 reopening traffic. Do not recreate or delete the database volume. If the old installation
 used a custom Compose override, carry its settings over deliberately; `.env` entries alone
@@ -231,24 +263,24 @@ pasting:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  docker compose up -d --wait
 )
 ```
 
 The helper rewrites only
 `COMPOSE_FILE` in your private `.env`, keeps its mode `600`, and preserves the existing
-proxy selection. It accepts quoted, unquoted and `export COMPOSE_FILE=` assignments, adds
+image and proxy selections. It accepts quoted, unquoted and `export COMPOSE_FILE=` assignments, adds
 the setting if missing, and can be run again safely. It refuses a symlink `.env`.
-A shell-exported `COMPOSE_FILE` overrides `.env`. Each guarded block unsets it only inside
-its own subshell; standalone Compose commands need their own `unset COMPOSE_FILE` so they
-read `.env` too.
+Shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION` override `.env`. Each guarded block
+unsets them only inside its own subshell; standalone Compose commands need their own
+`unset COMPOSE_FILE HOURMERE_VERSION` so they read `.env` too.
 
 Unsupported or ambiguous `COMPOSE_FILE` syntax, including YAML-style `COMPOSE_FILE: ...`,
 is refused without changes. A leading UTF-8 BOM is also refused: save `.env` as UTF-8
@@ -258,16 +290,18 @@ missing setting. If old instructions left a suffix outside the quotes, such as
 move `:docker-compose.worker.yml` inside the closing quote, retaining every existing file.
 Use the complete HTTPS or plain-mode line below and keep any custom overlays inside the quotes.
 
-For a manual edit, replace the **whole line**, including its quotes. Bundled HTTPS uses:
+For a manual edit, replace the **whole line**, including its quotes. The following
+selections use published images; source builds omit `docker-compose.image.yml` and leave
+`HOURMERE_VERSION` unset. Bundled HTTPS uses:
 
 ```dotenv
-COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
 ```
 
 Plain mode uses:
 
 ```dotenv
-COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.worker.yml'
 ```
 
 Run the verification command above after any manual edit. The tracked overlay
@@ -288,21 +322,21 @@ If moving from the old commented worker block, follow
 Remove the worker container while the overlay is still selected:
 
 ```sh
-unset COMPOSE_FILE && docker compose rm -sf worker
+unset COMPOSE_FILE HOURMERE_VERSION && docker compose rm -sf worker
 ```
 
 Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overlay with the helper:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/disable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is still enabled; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  docker compose up -d --wait
 )
 ```
 
@@ -352,10 +386,11 @@ volumes:
 ```
 
 Set these entries in your private `.env`, retaining the proxy overlay only when you use
-the bundled HTTPS proxy. Keep the custom override after the worker overlay:
+the bundled HTTPS proxy. Source builds omit `docker-compose.image.yml` and leave
+`HOURMERE_VERSION` unset. Keep the custom override after the worker overlay:
 
 ```dotenv
-COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml:docker-compose.webhooks.yml'
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml:docker-compose.webhooks.yml'
 WEBHOOKS_ENABLED=true
 WEBHOOK_PRIVATE_TARGETS=n8n:5678
 ```
@@ -367,13 +402,13 @@ n8n port. Verify the worker selection and recreate both app and worker:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  docker compose up -d --wait
 )
 ```
 
@@ -404,7 +439,7 @@ Back up the full database (`auth`, `public` and `pgboss` schemas), `.env`, the c
 commit, and Caddy's data/configuration. Protect backups as sensitive data. Preserve all
 signing/encryption keys: for example, losing `CALENDAR_ENCRYPTION_KEY` makes saved calendar
 tokens unreadable. The saved `.env` includes `COMPOSE_FILE`, so the backup also records
-whether the tracked worker overlay is enabled. Do not generate replacement secrets during
+the image/version and whether the tracked worker overlay is enabled. Do not generate replacement secrets during
 a restore.
 
 For the default HTTPS deployment, stop the app before taking a logical custom-format dump.
@@ -414,7 +449,7 @@ volumes. Store the backup outside the checkout:
 ```sh
 (
   umask 077 &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   backup_dir="$HOME/hourmere-backups/$(date -u +%Y%m%dT%H%M%SZ)" &&
   mkdir -p "$backup_dir" &&
   compose_services=$(docker compose config --services) &&
@@ -446,7 +481,7 @@ Inspect the failed command and partial backup, fix the cause, then resume the ex
 deployment from its checkout:
 
 ```sh
-unset COMPOSE_FILE && docker compose up -d --wait
+unset COMPOSE_FILE HOURMERE_VERSION && docker compose up -d --wait
 ```
 
 Treat the partial backup as incomplete and take a new successful backup before continuing.
@@ -473,11 +508,13 @@ awk '
   /^COMPOSE_FILE=/ {
     selection = $0
     sub(/[[:space:]]+#.*$/, "", selection)
+    if (selection ~ /[=:"\047]docker-compose\.image\.yml([:"\047[:space:]]|$)/)
+      image = ":docker-compose.image.yml"
     if (selection ~ /[=:"\047]docker-compose\.worker\.yml([:"\047[:space:]]|$)/)
       worker = ":docker-compose.worker.yml"
   }
   !/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/ { print }
-  END { print "COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml" worker }
+  END { print "COMPOSE_FILE=docker-compose.yml" image ":docker-compose.proxy.yml" worker }
 ' .env > "$env_update"
 cat >> "$env_update" <<'EOF'
 COMPOSE_PROJECT_NAME=hourmere-restore
@@ -488,7 +525,7 @@ PROXY_DYNAMIC_RANGE=172.30.63.8/29
 EOF
 chmod 600 "$env_update"
 mv "$env_update" .env
-unset COMPOSE_FILE
+unset COMPOSE_FILE HOURMERE_VERSION
 docker compose up -d --wait db
 docker compose exec -T db \
   pg_restore -U hourmere -d hourmere --exit-on-error --single-transaction < "$backup_dir/hourmere.dump"
@@ -496,18 +533,19 @@ docker compose exec -T db \
   psql -U hourmere -d hourmere -Atc 'SELECT count(*) FROM auth."user";'
 ```
 
-The separate `APP_IMAGE` tag also prevents restore builds from replacing the original deployment's
-local image tag. Compare the count with your expected account data, and inspect other
+The separate `APP_IMAGE` tag prevents source restore builds from replacing the original deployment's
+local image tag. Image deployments keep the backed-up `HOURMERE_VERSION` and image
+overlay, so recovery uses the same published version. Compare the count with your expected account data, and inspect other
 expected records privately. Persisting `COMPOSE_PROJECT_NAME=hourmere-restore` ensures later
 backup, upgrade and log commands in this checkout target the restored project too. These
 assignments also work with backups from before the deployment settings existed, provided
 the selected source revision contains [`Caddyfile`](https://github.com/hourmere/hourmere/blob/main/Caddyfile) and [`docker-compose.proxy.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.proxy.yml). If the
 backup commit predates this kit, select a reviewed newer revision containing these files
 instead of that old commit before using the HTTPS commands; startup will apply its pending
-migrations, so retain the original dump for rollback. The rewrite preserves only the exact
-`docker-compose.worker.yml` filename in a `COMPOSE_FILE=` assignment, including setup's
+migrations, so retain the original dump for rollback. The rewrite preserves the exact
+`docker-compose.image.yml` and `docker-compose.worker.yml` filenames in a `COMPOSE_FILE=` assignment, including setup's
 quoted values. It does not recognise `./docker-compose.worker.yml` or
-`export COMPOSE_FILE=` forms. Before running the rewrite, replace those forms with the
+`export COMPOSE_FILE=` forms (nor the corresponding relative image-overlay path). Before running the rewrite, replace those forms with the
 complete quoted line for your deployment shown under [Run workers separately](#run-workers-separately).
 For backups with a separate worker, verify the rewritten selection before starting any app
 or worker. For plain mode, remove both proxy-verification lines and the trailing `&&` on
@@ -516,7 +554,7 @@ command:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
@@ -526,9 +564,10 @@ command:
 ```
 
 Continue only if verification succeeds. For a plain-mode restore, replace the whole line
-with `COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'` when a separate worker
-was selected, or `COMPOSE_FILE='docker-compose.yml'` otherwise, and omit the Caddy steps.
-Keep any additional custom overlays within the quotes. Do not start the restored app or
+with `COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.worker.yml'` when a separate worker
+was selected, or `COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'` otherwise, and omit the Caddy steps.
+Source restores omit `docker-compose.image.yml` from those selections. Keep any additional
+custom overlays within the quotes. Do not start the restored app or
 workers for a drill until SMTP, provider credentials and outbound webhooks
 have been isolated: restored queued jobs can otherwise send duplicate messages or modify
 real calendars. Never restore over a running app, and never delete a production `db-data`
@@ -540,8 +579,8 @@ do not overwrite the prepared `.env` again. Restore the database as above, then 
 proxy container and copy its saved state into the new volumes before starting it:
 
 ```sh
-unset COMPOSE_FILE
-docker compose build
+unset COMPOSE_FILE HOURMERE_VERSION
+docker compose pull
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
 docker compose cp "$backup_dir/caddy-config/." proxy:/config
@@ -550,24 +589,209 @@ docker compose up -d --wait
 
 Keep the free `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` selected before the
 database restore; overlapping ingress networks cannot coexist. Plain mode omits the proxy
-restoration. Verify health, expected data, sign-in and a booking before
+restoration. For a source restore, replace `docker compose pull` above with
+`docker compose build` followed by `docker compose pull proxy db` (plain mode pulls only
+`db`). Verify health, expected data, sign-in and a booking before
 reopening traffic. Keep the old volumes and backup until recovery is accepted.
 
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record the current
 branch name or tag before upgrading, alongside the backup's saved commit, and preserve
-its `.env` and Caddy state. Use
+its `.env`, pinned `HOURMERE_VERSION` and Caddy state. Use
 `git branch --show-current` for a branch, or `git describe --tags --exact-match` for a tag,
 so a checkout-only rollback can return to that named revision without relying on a bare commit.
 For 1.0 and later, check out the intended release tag
 rather than following `main`: replace `vX.Y.Z` in the commands below with the reviewed tag.
-No stable release has been published yet; these are the upgrade steps for future releases.
 Keep tracked Compose files unchanged and preserve the worker selection in `.env` so the
-upgrade rebuilds/recreates any separate worker. If starting from a pre-1.0 checkout, read
+upgrade recreates any separate worker on the same pinned image. If starting from a
+pre-1.0 checkout, read
 [its migration notes](#upgrading-from-a-pre-10-checkout) before either sequence.
 
+### Switch a source installation to the published image
+
+Existing source deployments must select the image overlay before using either image
+upgrade below. Edit the existing private `.env`: insert `docker-compose.image.yml`
+immediately after `docker-compose.yml` in `COMPOSE_FILE`, and set `HOURMERE_VERSION` to
+the exact reviewed release without `v` (for example, `1.0.0`), never `latest`. Preserve
+proxy, worker and custom overlays in their existing order. For a plain single-container
+installation, the selection becomes:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'
+HOURMERE_VERSION='1.0.0'
+```
+
+For an existing bundled-proxy deployment with a separate worker, it becomes:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+HOURMERE_VERSION='1.0.0'
+```
+
+Do not rerun setup: it refuses an existing `.env`. Unset shell-exported `COMPOSE_FILE`
+and `HOURMERE_VERSION` before standalone Compose commands, then run the matching image
+upgrade below. Its guards check the app's exact image before pulling or stopping services,
+and check the worker's image too when selected. Setting `HOURMERE_VERSION` alone does
+not select the app image overlay and can leave a source app paired with an image worker.
+
 ### Single-container upgrade
+
+The app keeps the default `all` role. First edit `.env` to set `HOURMERE_VERSION` to the
+exact reviewed release (for example,
+`HOURMERE_VERSION='1.0.1'`). Replace `X.Y.Z` below with that same version. From the
+deployment checkout:
+
+```sh
+(
+  git fetch --tags &&
+  git checkout vX.Y.Z &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
+  compose_services=$(docker compose config --services) &&
+  { ! printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }; } &&
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  compose_app_images=$(docker compose config --images app) &&
+  { printf '%s\n' "$compose_app_images" | grep -Fxq 'ghcr.io/hourmere/hourmere:X.Y.Z' ||
+    { echo "Image overlay or HOURMERE_VERSION is not selected; check .env before continuing."; exit 1; }; } &&
+  docker compose pull &&
+  docker compose stop app &&
+  docker compose up -d --wait &&
+  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
+)
+```
+
+Before the new-version `up`, restore the previous `HOURMERE_VERSION` from the backup
+if the upgrade fails; a Git checkout does not undo this private `.env` edit.
+
+If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
+return with `git checkout <previous branch or tag>` using the recorded name **only before
+the new-version `docker compose up` command runs**. If the app or worker was already stopped,
+use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
+it fails: a new app or worker may already have applied migrations; old code against the
+new schema is unsafe.
+
+### Separate-worker upgrade
+
+First edit `.env` to set `HOURMERE_VERSION` to the exact reviewed release (for example,
+`HOURMERE_VERSION='1.0.1'`). Replace `X.Y.Z` below with that same version. From the
+deployment checkout, verify both the worker and the bundled HTTPS proxy before
+stopping the old app and worker:
+
+```sh
+(
+  git fetch --tags &&
+  git checkout vX.Y.Z &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
+  ./scripts/enable-worker.sh &&
+  compose_services=$(docker compose config --services) &&
+  { printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  compose_app_images=$(docker compose config --images app) &&
+  { printf '%s\n' "$compose_app_images" | grep -Fxq 'ghcr.io/hourmere/hourmere:X.Y.Z' ||
+    { echo "Image overlay or HOURMERE_VERSION is not selected; check .env before continuing."; exit 1; }; } &&
+  compose_worker_images=$(docker compose config --images worker) &&
+  { printf '%s\n' "$compose_worker_images" | grep -Fxq 'ghcr.io/hourmere/hourmere:X.Y.Z' ||
+    { echo "Worker image does not match the release; check .env before continuing."; exit 1; }; } &&
+  docker compose pull &&
+  docker compose stop app worker &&
+  docker compose up -d --wait &&
+  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
+)
+```
+
+Before the new-version `up`, restore the previous `HOURMERE_VERSION` from the backup
+if the upgrade fails; a Git checkout does not undo this private `.env` edit.
+
+If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
+return with `git checkout <previous branch or tag>` using the recorded name **only before
+the new-version `docker compose up` command runs**. If the app or worker was already stopped,
+use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
+it fails: a new app or worker may already have applied migrations; old code against the
+new schema is unsafe.
+
+Git does not undo [`enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh)'s private `.env` edit. Before checking out the prior
+revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
+`.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
+and other current settings. If a worker was already selected before the upgrade, keep
+that selection.
+
+### Checkout-only recovery before startup
+
+In the supplied Compose files, `AUTO_MIGRATE=true` runs application and pg-boss migrations
+at process startup for every role (`all`, `web` and `worker`), not during `pull` or `stop`;
+there is no separate migrate service. The separate worker uses the same server entry point
+and can migrate as soon as it starts, including before the web app during `up`. A separately
+started new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
+if any has started, use [Back up and restore](#back-up-and-restore) even before this Compose `up`.
+
+For a pre-start failure, if the app or worker was already stopped (including a partial
+`stop` failure), bring the old version back with the block below after restoring the
+pre-upgrade `HOURMERE_VERSION` and `COMPOSE_FILE` selections as described above.
+Replace `PREVIOUS_BRANCH_OR_TAG`
+with the recorded name. If no service was stopped, only the checkout is needed. The block
+uses the previous application image; do not build during this recovery. For an image
+deployment, pulling the old exact version is safe after restoring its version and overlay.
+The subshell clears inherited `COMPOSE_FILE` and `HOURMERE_VERSION` values so Compose reads
+the restored selection from `.env`, and a failed checkout prevents startup.
+
+```sh
+(
+  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
+  docker compose up -d --wait
+)
+```
+
+For plain mode, remove both lines of the proxy verification before pasting either
+sequence and use your deployment's health URL. Image deployments still run
+`docker compose pull` to fetch the app and any worker; source deployments pull only `db`.
+
+The image overlay disables builds for the app and worker and uses the exact
+`HOURMERE_VERSION` tag from `.env`. `docker compose pull` fetches all selected images; it
+does not apply migrations. Caddy is pinned to the `2.11` minor line (`caddy:2.11-alpine`),
+and PostgreSQL to major 18 (`postgres:18-alpine`): pulling refreshes their patch/security
+updates, then `up` recreates affected containers. Review Caddy releases and deliberately
+test newer minor versions before updating that pin; review PostgreSQL release notes before
+patch updates, and plan a separate database migration for a future major upgrade. Container
+image updates are separate from host apt updates. Recreate any separate worker too.
+
+**Before starting a version whose migrations drop columns, stop every old app and worker
+process**, including processes on other hosts or outside this Compose project. The sequences
+above stop the Compose roles before new startup migrations; stop separately managed
+processes explicitly before the new app or a manual migration runs. Restart every role with
+the same upgraded code after migration; do not run old and new versions together across a
+column drop.
+
+Future column removals use two phases: release N stops writing the column, and release N+1
+drops it. Review each release's migration and upgrade notes even with this policy; schema
+downgrade remains unsupported.
+
+`AUTO_MIGRATE=true` applies pending application and job migrations on startup; applied
+migrations have checksums and must not be edited. Keep the same secrets across upgrades.
+PostgreSQL password changes in `.env` do not change an already-initialized database role's
+password.
+
+Schema downgrade is not automatic. An old application image may not work against the new
+schema. After new-version startup or an earlier migration, stop all app/worker processes
+and restore the pre-upgrade database
+into a fresh volume, restore its original revision and configuration, then verify the result
+before switching traffic back. Recovery loses writes made after that backup; decide your
+maintenance window and recovery plan before upgrading.
+
+### Source-build upgrades
+
+These alternatives are for deployments configured with `./scripts/setup.sh --source`.
+Keep `docker-compose.image.yml` out of `COMPOSE_FILE`, remove `HOURMERE_VERSION` from
+`.env` and unset it in your shell; no image-version edit is needed.
+They build the checked-out source after stopping all old application roles.
+
+### Source single-container upgrade
 
 The app keeps the default `all` role. From the deployment checkout:
 
@@ -575,7 +799,7 @@ The app keeps the default `all` role. From the deployment checkout:
 (
   git fetch --tags &&
   git checkout vX.Y.Z &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }; } &&
@@ -596,7 +820,7 @@ Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore),
 it fails: a new app or worker may already have applied migrations; old code against the
 new schema is unsafe.
 
-### Separate-worker upgrade
+### Source separate-worker upgrade
 
 From the deployment checkout, verify both the worker and the bundled HTTPS proxy before
 stopping the old app and worker:
@@ -605,7 +829,7 @@ stopping the old app and worker:
 (
   git fetch --tags &&
   git checkout vX.Y.Z &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
@@ -633,70 +857,12 @@ revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved 
 and other current settings. If a worker was already selected before the upgrade, keep
 that selection.
 
-### Checkout-only recovery before startup
-
-In the supplied Compose files, `AUTO_MIGRATE=true` runs application and pg-boss migrations
-at process startup for every role (`all`, `web` and `worker`), not during `pull` or `stop`;
-there is no separate migrate service. The separate worker uses the same server entry point
-and can migrate as soon as it starts, including before the web app during `up`. A separately
-started new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
-if any has started, use [Back up and restore](#back-up-and-restore) even before this Compose `up`.
-
-For a pre-start failure, if the app or worker was already stopped (including a partial
-`stop` failure), bring the old version back with the block below after restoring the
-pre-upgrade `COMPOSE_FILE` selection as described above. Replace `PREVIOUS_BRANCH_OR_TAG`
-with the recorded name. If no service was stopped, only the checkout is needed. The block
-uses the existing old application image; do not add `--build` or pull an application image
-during this recovery. The subshell clears an inherited `COMPOSE_FILE` so Compose reads the
-restored selection from `.env`, and a failed checkout prevents startup.
-
-```sh
-(
-  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
-  unset COMPOSE_FILE &&
-  docker compose up -d --wait
-)
-```
-
-For plain mode, remove both lines of the proxy verification before pasting either
-sequence, pull only `db`, and use your deployment's health URL.
-
-No public image can currently be pulled as a substitute for building the source.
-Plain mode pulls only `db`. Caddy is pinned to the `2.11` minor line (`caddy:2.11-alpine`),
-and PostgreSQL to major 18 (`postgres:18-alpine`): pulling refreshes their patch/security
-updates, then `up` recreates affected containers. Review Caddy releases and deliberately
-test newer minor versions before updating that pin; review PostgreSQL release notes before
-patch updates, and plan a separate database migration for a future major upgrade. Container
-image updates are separate from host apt updates. Rebuild any separate worker too.
-
-**Before starting a version whose migrations drop columns, stop every old app and worker
-process**, including processes on other hosts or outside this Compose project. The sequences
-above stop the Compose roles before new startup migrations; stop separately managed
-processes explicitly before the new app or a manual migration runs. Restart every role with
-the same upgraded code after migration; do not run old and new versions together across a
-column drop.
-
-Future column removals use two phases: release N stops writing the column, and release N+1
-drops it. Review each release's migration and upgrade notes even with this policy; schema
-downgrade remains unsupported.
-
-`AUTO_MIGRATE=true` applies pending application and job migrations on startup; applied
-migrations have checksums and must not be edited. Keep the same secrets across upgrades.
-PostgreSQL password changes in `.env` do not change an already-initialized database role's
-password.
-
-Schema downgrade is not automatic. An old application image may not work against the new
-schema. After new-version startup or an earlier migration, stop all app/worker processes
-and restore the pre-upgrade database
-into a fresh volume, restore its original revision and configuration, then verify the result
-before switching traffic back. Recovery loses writes made after that backup; decide your
-maintenance window and recovery plan before upgrading.
-
 ### Upgrading from a pre-1.0 checkout
 
-Before moving an early `main` checkout to a release tag, check the historical migration
-notes below. To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
-`git checkout vX.Y.Z` in the appropriate guarded sequence with `git pull --ff-only`;
+Pre-1.0 deployments are source deployments. Before moving an early `main` checkout to a
+release tag, check the historical migration notes below, then either follow the source-build
+upgrade or [switch to the published image](#switch-a-source-installation-to-the-published-image). To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
+`git checkout vX.Y.Z` in the appropriate **source-build** guarded sequence with `git pull --ff-only`;
 retain the remaining verification, stop, build and health steps.
 For a failed main-tracking update, the backup's saved commit identifies the exact pre-upgrade
 revision: `git pull` advances `main`, so its branch name alone does not undo the update.

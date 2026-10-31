@@ -28,9 +28,17 @@ const changelog = readFileSync(
 )
 const updates = [...guide.matchAll(/env_update=\$\(mktemp[\s\S]*?mv "\$env_update" \.env/g)]
 const base = 'docker-compose.yml'
+const image = 'docker-compose.image.yml'
 const proxy = 'docker-compose.proxy.yml'
 const worker = 'docker-compose.worker.yml'
 const selections = [
+  { name: 'image', file: `${base}:${image}:${proxy}`, worker: false, image: true },
+  {
+    name: 'image worker',
+    file: `'${base}:${image}:${proxy}:${worker}'`,
+    worker: true,
+    image: true,
+  },
   { name: 'legacy', file: undefined, worker: false },
   { name: 'current', file: 'old.yml', worker: false },
   { name: 'plain', file: base, worker: false },
@@ -140,11 +148,17 @@ async function executePastedCommands(
     proxy: hasProxy,
     failCommand = '',
     zshPty = false,
+    appImage = 'ghcr.io/hourmere/hourmere:X.Y.Z',
+    workerImage = 'ghcr.io/hourmere/hourmere:X.Y.Z',
+    shellVersion,
   }: {
     worker: boolean
     proxy: boolean
     failCommand?: string
     zshPty?: boolean
+    appImage?: string
+    workerImage?: string
+    shellVersion?: string
   },
 ) {
   if (!commands) throw new Error('Labelled instructions must include runnable commands')
@@ -158,7 +172,7 @@ async function executePastedCommands(
     writeFileSync(join(directory, '.env'), 'synthetic-backup-settings\n')
     const log = `printf '%s\\n' "$command" >> "$CALL_LOG"
 `
-    const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
+    const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ] || [ "\${HOURMERE_VERSION+x}" = x ]; then exit 9; fi\n`
     const fail = '[ "$command" != "$FAIL_COMMAND" ] || exit 7\n'
     for (const mode of ['enable', 'disable']) {
       writeFileSync(
@@ -176,9 +190,11 @@ case "$command" in
   'compose cp proxy:/config '*) command='compose cp proxy:/config' ;;
 esac
 ${rejectShellOverride}${log}case "$command" in
+  'compose config --images app') printf '%s\\n' postgres:18-alpine "\${HOURMERE_VERSION:+ghcr.io/hourmere/hourmere:}\${HOURMERE_VERSION:-$APP_IMAGE_OUTPUT}" ;;
+  'compose config --images worker') printf '%s\\n' postgres:18-alpine "\${HOURMERE_VERSION:+ghcr.io/hourmere/hourmere:}\${HOURMERE_VERSION:-$WORKER_IMAGE_OUTPUT}" ;;
   'compose config --services') printf '%s\\n' app db${hasProxy ? ' proxy' : ''}${enabled ? ' worker' : ''} ;;
   'compose exec -T db pg_dump -U hourmere -d hourmere -Fc') printf '%s\\n' synthetic-dump ;;
-  'compose pull proxy db'|'compose pull db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
+  'compose pull'|'compose pull proxy db'|'compose pull db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
   *) exit 1 ;;
 esac
 ${fail}`,
@@ -213,6 +229,9 @@ ${log}${fail}exec /usr/bin/install "$@"
         BACKUP_DIRECTORY: backupDirectory,
         COMPOSE_FILE: 'conflicting-shell-selection.yml',
         FAIL_COMMAND: failCommand,
+        APP_IMAGE_OUTPUT: appImage,
+        WORKER_IMAGE_OUTPUT: workerImage,
+        ...(shellVersion === undefined ? {} : { HOURMERE_VERSION: shellVersion }),
       },
       zshPty,
     )
@@ -229,6 +248,51 @@ ${log}${fail}exec /usr/bin/install "$@"
 }
 
 describe('documented deployment operations', () => {
+  it.each([
+    [
+      'README',
+      readFileSync(
+        process.env.HOURMERE_DEPLOY_README ?? new URL('../README.md', import.meta.url),
+        'utf8',
+      ),
+    ],
+    ['self-hosting guide', guide],
+  ])(
+    'makes a pinned published image primary and retains the source alternative in the %s',
+    (_name, source) => {
+      const blocks = [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)].map((match) => match[1])
+      const install = blocks.find((block) => block?.includes('git clone --branch v1.0.0'))
+      expect(install).toContain('./scripts/setup.sh --image')
+      expect(install).toContain('docker compose pull\ndocker compose up -d --wait')
+      expect(install).not.toContain('--build')
+      expect(source).toContain('HOURMERE_VERSION=1.0.0')
+      expect(source).toContain('docker-compose.image.yml')
+      expect(source).toContain('./scripts/setup.sh --source')
+      expect(source).toContain('docker compose up -d --build --wait')
+      expect(source).not.toMatch(/no prebuilt public image is published/i)
+      expect(source.replace(/\s+/g, ' ')).toMatch(/restore the previous `HOURMERE_VERSION`/i)
+    },
+  )
+
+  it('uses image setup for the independent-install example', () => {
+    expect(guide).toContain('COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --image')
+  })
+
+  it.each(['Single-container', 'Separate-worker'])(
+    'pins the %s image upgrade and restores the private version before startup rollback',
+    (title) => {
+      const section = guide.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0]
+      expect(section).toContain("HOURMERE_VERSION='1.0.1'")
+      expect(section).toMatch(
+        /docker compose pull &&[\s\S]*?docker compose stop app(?: worker)? &&\n {2}docker compose up -d --wait/,
+      )
+      expect(section).not.toContain('--build')
+      expect(section?.replace(/\s+/g, ' ')).toContain(
+        'Before the new-version `up`, restore the previous `HOURMERE_VERSION` from the backup',
+      )
+    },
+  )
+
   it('requires a root host in every deployment and a portless HTTPS host for bundled Caddy', () => {
     expect(guide).toMatch(
       /Every deployment must serve Hourmere at the root of its own host name,\s+without a path prefix/,
@@ -253,13 +317,13 @@ describe('documented deployment operations', () => {
 
   it.each(selections)(
     'persists migration and restore settings from $name backups',
-    ({ file, worker: enabled }) => {
+    ({ file, worker: enabled, image: published }) => {
       expect(updates).toHaveLength(2)
       for (const [index, update] of updates.entries()) {
         const directory = mkdtempSync(join(tmpdir(), 'hourmere-deploy-docs-'))
         try {
           const previous = file
-            ? `COMPOSE_PROJECT_NAME=old\nCOMPOSE_FILE=${file}\nAPP_IMAGE=old:tag\nPROXY_SUBNET=old\nPROXY_IP=old\nPROXY_DYNAMIC_RANGE=old\n`
+            ? `COMPOSE_PROJECT_NAME=old\nCOMPOSE_FILE=${file}\nAPP_IMAGE=old:tag\n${published ? "HOURMERE_VERSION='1.0.0'\n" : ''}PROXY_SUBNET=old\nPROXY_IP=old\nPROXY_DYNAMIC_RANGE=old\n`
             : ''
           const preserved =
             "BETTER_AUTH_SECRET='synthetic-preserved-value'\nPOSTGRES_PASSWORD='synthetic-password'\n"
@@ -275,7 +339,10 @@ describe('documented deployment operations', () => {
           expect(text.match(/^COMPOSE_PROJECT_NAME=/gm)).toHaveLength(1)
           expect(text).toContain(`COMPOSE_PROJECT_NAME=hourmere${index === 1 ? '-restore' : ''}\n`)
           expect(text.match(/^COMPOSE_FILE=/gm)).toHaveLength(1)
-          expect(text).toContain(`COMPOSE_FILE=${base}:${proxy}${enabled ? `:${worker}` : ''}\n`)
+          expect(text).toContain(
+            `COMPOSE_FILE=${base}${published ? `:${image}` : ''}:${proxy}${enabled ? `:${worker}` : ''}\n`,
+          )
+          if (published) expect(text).toContain("HOURMERE_VERSION='1.0.0'\n")
           expect(text).toContain(`APP_IMAGE=hourmere:${index === 1 ? 'restore' : 'local'}\n`)
           const octet = index === 1 ? 63 : 62
           expect(text).toContain(`PROXY_SUBNET=172.30.${octet}.0/28\n`)
@@ -299,10 +366,14 @@ describe('documented deployment operations', () => {
       /Do not start the\s+restored app or\s+workers for a drill until SMTP, provider credentials and outbound webhooks\s+have been isolated/,
     )
     expect(drill).toMatch(
-      /For a plain-mode restore, replace the whole line\s+with `COMPOSE_FILE='docker-compose\.yml:docker-compose\.worker\.yml'`/,
+      /For a plain-mode restore, replace the whole line\s+with `COMPOSE_FILE='docker-compose\.yml:docker-compose\.image\.yml:docker-compose\.worker\.yml'`/,
     )
-    expect(drill).toContain("`COMPOSE_FILE='docker-compose.yml'` otherwise")
-    expect(drill).toContain('preserves only the exact\n`docker-compose.worker.yml` filename')
+    expect(drill).toContain(
+      "`COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'` otherwise",
+    )
+    expect(drill).toContain(
+      'preserves the exact\n`docker-compose.image.yml` and `docker-compose.worker.yml` filenames',
+    )
     expect(drill).toContain(
       'does not recognise `./docker-compose.worker.yml` or\n`export COMPOSE_FILE=` forms',
     )
@@ -314,8 +385,8 @@ describe('documented deployment operations', () => {
     )
   })
 
-  it('builds the app before creating the stopped proxy and restoring its state', () => {
-    expect(guide).toContain(`docker compose build
+  it('pulls the pinned image before creating the stopped proxy and restoring its state', () => {
+    expect(guide).toContain(`docker compose pull
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
 docker compose cp "$backup_dir/caddy-config/." proxy:/config
@@ -412,6 +483,21 @@ docker compose up -d --wait`)
       worker: true,
       helper: 'enable',
     },
+    {
+      name: 'Source single-container',
+      commands: upgradeCommands('Source single-container'),
+      upgrade: true,
+      sourceBuild: true,
+      worker: false,
+    },
+    {
+      name: 'Source separate-worker',
+      commands: upgradeCommands('Source separate-worker'),
+      upgrade: true,
+      sourceBuild: true,
+      worker: true,
+      helper: 'enable',
+    },
   ]
 
   const backupCommands = verificationCommands(
@@ -437,16 +523,29 @@ docker compose up -d --wait`)
 
   describe.each(procedures)(
     '$name commands',
-    ({ commands, upgrade, worker: needsWorker, helper, verificationOnly }) => {
+    ({ commands, upgrade, worker: needsWorker, helper, verificationOnly, sourceBuild }) => {
       const prefix = [
         ...(upgrade ? ['git fetch --tags', 'git checkout vX.Y.Z'] : []),
         ...(helper ? [`${helper}-worker`] : []),
       ]
+      const imageChecks =
+        upgrade && !sourceBuild
+          ? [
+              'compose config --images app',
+              ...(needsWorker ? ['compose config --images worker'] : []),
+            ]
+          : []
       const startup = [
+        ...imageChecks,
         ...(upgrade
-          ? ['compose pull proxy db', `compose stop app${needsWorker ? ' worker' : ''}`]
+          ? [
+              sourceBuild ? 'compose pull proxy db' : 'compose pull',
+              `compose stop app${needsWorker ? ' worker' : ''}`,
+            ]
           : []),
-        ...(verificationOnly ? [] : ['compose up -d --build --wait']),
+        ...(verificationOnly
+          ? []
+          : [sourceBuild ? 'compose up -d --build --wait' : 'compose up -d --wait']),
         ...(upgrade ? ['health'] : []),
       ]
       it.for([
@@ -520,6 +619,16 @@ docker compose up -d --wait`)
           )
       })
 
+      it('reads the private image version despite an exported shell override', async () => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          shellVersion: '9.9.9',
+        })
+        expectInteractiveShells(result, 0)
+        expect(calls).toEqual([...prefix, 'compose config --services', ...startup])
+      })
+
       it('rejects a Compose error even when it prints the expected services', async () => {
         const { result, calls } = await executePastedCommands(commands, {
           worker: needsWorker,
@@ -543,7 +652,7 @@ docker compose up -d --wait`)
         },
       )
 
-      it.each(upgrade ? startup.slice(0, 2) : [])(
+      it.each(upgrade ? startup.filter((call) => /^compose (pull|stop) /.test(`${call} `)) : [])(
         'stops before startup when %s fails',
         async (failCommand) => {
           const { result, calls } = await executePastedCommands(commands, {
@@ -562,6 +671,104 @@ docker compose up -d --wait`)
     },
   )
 
+  describe.each(['Single-container', 'Separate-worker'])('%s image selection', (title) => {
+    const needsWorker = title === 'Separate-worker'
+    const commands = upgradeCommands(title)
+    const prefix = [
+      'git fetch --tags',
+      'git checkout vX.Y.Z',
+      ...(needsWorker ? ['enable-worker'] : []),
+      'compose config --services',
+    ]
+    it.each([
+      { name: 'source app', appImage: 'hourmere:local' },
+      { name: 'wrong exact version', appImage: 'ghcr.io/hourmere/hourmere:9.9.9' },
+      { name: 'floating tag', appImage: 'ghcr.io/hourmere/hourmere:latest' },
+      { name: 'lookalike registry', appImage: 'ghcrXio/hourmere/hourmere:X.Y.Z' },
+    ])('rejects $name before pulling or stopping', async ({ appImage }) => {
+      const { result, calls } = await executePastedCommands(commands, {
+        worker: needsWorker,
+        proxy: true,
+        appImage,
+      })
+      expectInteractiveShells(result, 1)
+      expect(result.stdout).toContain('Image overlay or HOURMERE_VERSION is not selected')
+      expect(calls).toEqual([...prefix, 'compose config --images app'])
+    })
+
+    it.each(needsWorker ? ['hourmere:local', 'ghcr.io/hourmere/hourmere:9.9.9'] : [])(
+      'rejects a mismatched worker (%s) before pulling or stopping',
+      async (workerImage) => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          workerImage,
+        })
+        expectInteractiveShells(result, 1)
+        expect(result.stdout).toContain('Worker image does not match the release')
+        expect(calls).toEqual([
+          ...prefix,
+          'compose config --images app',
+          'compose config --images worker',
+        ])
+      },
+    )
+
+    it.each(['app', ...(needsWorker ? ['worker'] : [])])(
+      'rejects a config error even with the expected %s image output',
+      async (service) => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          failCommand: `compose config --images ${service}`,
+        })
+        expectInteractiveShells(result, 7)
+        expect(calls).toEqual([
+          ...prefix,
+          'compose config --images app',
+          ...(service === 'worker' ? ['compose config --images worker'] : []),
+        ])
+      },
+    )
+
+    it.for([false, true])(
+      'uses the private version despite an exported shell override (zsh PTY: %s)',
+      async (zshPty, context) => {
+        if (zshPty && zshPtySkipReason) context.skip(zshPtySkipReason)
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          shellVersion: '9.9.9',
+          zshPty,
+        })
+        expectInteractiveShells(result, 0)
+        expect(calls).toContain(`compose stop app${needsWorker ? ' worker' : ''}`)
+        expect(calls).toContain('compose up -d --wait')
+      },
+    )
+  })
+
+  it.each([
+    ['README', readme],
+    ['self-hosting guide', guide],
+  ])('documents the source-to-image switch in the %s', (_name, source) => {
+    const section = source
+      .split('### Switch a source installation to the published image\n')[1]
+      ?.split('\n### ')[0]
+    expect(section).toBeDefined()
+    expect(section?.replace(/\s+/g, ' ')).toMatch(
+      /insert `docker-compose.image.yml` immediately after `docker-compose.yml` in `COMPOSE_FILE`/,
+    )
+    expect(section).toContain("COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'")
+    expect(section).toContain("HOURMERE_VERSION='1.0.0'")
+    expect(section).not.toContain('1.0.1')
+    expect(section).toContain('never `latest`')
+    expect(section?.replace(/\s+/g, ' ')).toMatch(
+      /(?:Preserve|preserving) proxy, worker and custom overlays/,
+    )
+    expect(section).toMatch(/(?:run the matching image|image upgrade)/)
+  })
+
   const backupCalls = (enabled: boolean) => [
     'compose config --services',
     ...(enabled ? ['compose stop worker'] : []),
@@ -579,6 +786,7 @@ docker compose up -d --wait`)
       const { result, calls, dump, backupDirectory } = await executePastedCommands(backupCommands, {
         worker: enabled,
         proxy: true,
+        shellVersion: '9.9.9',
       })
       expectInteractiveShells(result, 0)
       expect(calls).toEqual(backupCalls(enabled))
@@ -607,13 +815,21 @@ docker compose up -d --wait`)
     if (!upgrade) throw new Error('Upgrade instructions must exist')
     const [releases, legacy] = upgrade.split('### Upgrading from a pre-1.0 checkout\n')
     expect(releases).toContain('For 1.0 and later, check out the intended release tag')
-    expect(releases).toContain('No stable release has been published yet')
+    expect(releases).not.toContain('No stable release has been published yet')
+    expect(releases).toContain("HOURMERE_VERSION='1.0.1'")
+    expect(releases).toContain('### Source-build upgrades')
     expect(releases).not.toContain('git pull --ff-only')
-    for (const title of ['Single-container', 'Separate-worker']) {
+    for (const title of [
+      'Single-container',
+      'Separate-worker',
+      'Source single-container',
+      'Source separate-worker',
+    ]) {
       expect(upgradeCommands(title)).toMatch(
         /^\(\n {2}git fetch --tags &&\n {2}git checkout vX\.Y\.Z &&\n/,
       )
     }
+    expect(legacy).toContain('Pre-1.0 deployments are source deployments.')
     expect(legacy).toContain('replace `git fetch --tags` and')
     expect(legacy).toContain('with `git pull --ff-only`')
     expect(legacy).toContain('0037_conference_pending_timeout.sql')
@@ -634,10 +850,15 @@ docker compose up -d --wait`)
     expect(readme).toContain('record the current branch name or tag')
     expect(upgrade).not.toContain('<previous commit or tag>')
     expect(upgrade).not.toMatch(/Record the current\s+commit or tag/)
-    for (const title of ['Single-container', 'Separate-worker']) {
+    for (const title of [
+      'Single-container',
+      'Separate-worker',
+      'Source single-container',
+      'Source separate-worker',
+    ]) {
       const section = upgrade?.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0]
       expect(section, title).toMatch(
-        /git checkout vX\.Y\.Z &&[\s\S]*?\n```\n\nIf a guard, `docker compose pull` or `docker compose stop` fails after checkout,\nreturn with `git checkout <previous branch or tag>`/,
+        /git checkout vX\.Y\.Z &&[\s\S]*?\n```[\s\S]*?If a guard, `docker compose pull` or `docker compose stop` fails after checkout,\nreturn with `git checkout <previous branch or tag>`/,
       )
     }
   })
@@ -648,7 +869,12 @@ docker compose up -d --wait`)
       source: readme,
       restoreLink: 'https://hourmere.com/docs/self-hosting#back-up-and-restore',
     },
-    ...['Single-container', 'Separate-worker'].map((title) => ({
+    ...[
+      'Single-container',
+      'Separate-worker',
+      'Source single-container',
+      'Source separate-worker',
+    ].map((title) => ({
       name: `${title} upgrade`,
       source: guide.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0],
       restoreLink: '#back-up-and-restore',
@@ -687,7 +913,10 @@ docker compose up -d --wait`)
     expect(text).toMatch(/even before this Compose `up`/)
     expect(text).toMatch(/including a partial `stop` failure/)
     expect(text).toMatch(/If no service was stopped, only the checkout is needed/)
-    expect(text).toMatch(/do not add `--build` or pull an application image during this recovery/)
+    expect(text).toMatch(/do not build during this recovery/)
+    expect(text).toMatch(
+      /pulling the old exact version is safe after restoring its version and overlay/,
+    )
   })
 
   const rollbackProcedures = [
@@ -704,7 +933,7 @@ docker compose up -d --wait`)
     it('chains checkout, Compose selection reset and old-image startup in one subshell', () => {
       expect(commands).toBe(`(
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   docker compose up -d --wait
 )`)
     })
@@ -808,14 +1037,14 @@ docker compose up -d --wait`)
       /while the overlay is still selected:[\s\S]*?docker compose rm -sf worker[\s\S]*?Then deselect the overlay with the helper:[\s\S]*?\.\/scripts\/disable-worker\.sh/,
     )
     expect(single).toContain('Remove any old `HOURMERE_ROLE=web`')
-    expect(single).toContain('docker compose up -d --build --wait')
+    expect(single).toContain('docker compose up -d --wait')
     expect(single).toContain('default `all` role')
     const command = single.match(/```sh\n([^`]*docker compose rm[^`]*)\n```/)?.[1]
     const directory = mkdtempSync(join(tmpdir(), 'hourmere-single-container-docs-'))
     try {
       writeFileSync(
         join(directory, 'docker'),
-        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" > "$CALL_LOG"\n`,
+        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] && [ "\${HOURMERE_VERSION+x}" != x ] || exit 9\nprintf "%s\\n" "$*" > "$CALL_LOG"\n`,
         { mode: 0o755 },
       )
       const callLog = join(directory, 'calls')
@@ -826,6 +1055,7 @@ docker compose up -d --wait`)
           PATH: `${directory}:${process.env.PATH}`,
           CALL_LOG: callLog,
           COMPOSE_FILE: 'conflicting-shell-selection.yml',
+          HOURMERE_VERSION: '9.9.9',
         },
       })
       expect(result.status).toBe(0)
@@ -836,6 +1066,12 @@ docker compose up -d --wait`)
   })
 
   it.each([
+    {
+      name: 'Caddy migration',
+      section: guide.split('## Migrate an existing installation to Caddy\n')[1]?.split('\n## ')[0],
+      calls: ['compose config --images app'],
+      caddyMigration: true,
+    },
     {
       name: 'backup failure recovery',
       section: guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0],
@@ -855,47 +1091,56 @@ docker compose up -d --wait`)
       name: 'actual recovery',
       section: guide.split('For actual recovery,')[1]?.split('## Upgrade and roll back')[0],
       calls: [
-        'compose build',
+        'compose pull',
         'compose create proxy',
         'compose cp BACKUP/caddy-data/. proxy:/data',
         'compose cp BACKUP/caddy-config/. proxy:/config',
         'compose up -d --wait',
       ],
     },
-  ])('reads .env for standalone $name commands', ({ section, calls, databaseOnly }) => {
-    const block = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
-    if (!block) throw new Error('Standalone Compose instructions must exist')
-    // The drill's checkout and .env preparation are covered above; run its database
-    // commands after the documented reset of an inherited Compose selection.
-    const commands = databaseOnly ? block.split('mv "$env_update" .env\n')[1] : block
-    if (!commands) throw new Error('Database commands must follow restore configuration')
-    const directory = mkdtempSync(join(tmpdir(), 'hourmere-standalone-docs-'))
-    try {
-      writeFileSync(join(directory, 'hourmere.dump'), 'synthetic-dump\n')
-      writeFileSync(
-        join(directory, 'docker'),
-        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n`,
-        { mode: 0o755 },
-      )
-      const callLog = join(directory, 'calls')
-      const result = spawnSync('sh', ['-eu', '-c', commands], {
-        cwd: directory,
-        encoding: 'utf8',
-        env: {
-          PATH: `${directory}:${process.env.PATH}`,
-          CALL_LOG: callLog,
-          COMPOSE_FILE: 'conflicting-shell-selection.yml',
-          backup_dir: directory,
-        },
-      })
-      expect(result.status, result.stderr).toBe(0)
-      expect(
-        readFileSync(callLog, 'utf8').replaceAll(directory, 'BACKUP').trim().split('\n'),
-      ).toEqual(calls)
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
-    }
-  })
+  ])(
+    'reads .env for standalone $name commands',
+    ({ section, calls, databaseOnly, caddyMigration }) => {
+      const block = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+      if (!block) throw new Error('Standalone Compose instructions must exist')
+      // The drill's checkout and .env preparation are covered above; run its database
+      // commands after the documented reset of an inherited Compose selection.
+      const commands = databaseOnly
+        ? block.split('mv "$env_update" .env\n')[1]
+        : caddyMigration
+          ? `${block}\ndocker compose config --images app`
+          : block
+      if (!commands) throw new Error('Database commands must follow restore configuration')
+      const directory = mkdtempSync(join(tmpdir(), 'hourmere-standalone-docs-'))
+      try {
+        writeFileSync(join(directory, 'hourmere.dump'), 'synthetic-dump\n')
+        writeFileSync(join(directory, '.env'), 'HOURMERE_VERSION=1.0.0\n')
+        writeFileSync(
+          join(directory, 'docker'),
+          `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] && [ "\${HOURMERE_VERSION+x}" != x ] || exit 9\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n`,
+          { mode: 0o755 },
+        )
+        const callLog = join(directory, 'calls')
+        const result = spawnSync('sh', ['-eu', '-c', commands], {
+          cwd: directory,
+          encoding: 'utf8',
+          env: {
+            PATH: `${directory}:${process.env.PATH}`,
+            CALL_LOG: callLog,
+            COMPOSE_FILE: 'conflicting-shell-selection.yml',
+            HOURMERE_VERSION: '9.9.9',
+            backup_dir: directory,
+          },
+        })
+        expect(result.status, result.stderr).toBe(0)
+        expect(
+          readFileSync(callLog, 'utf8').replaceAll(directory, 'BACKUP').trim().split('\n'),
+        ).toEqual(calls)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('explains inspection and an incomplete backup before resuming a failed backup', () => {
     const recovery = guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0]

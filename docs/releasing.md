@@ -369,14 +369,16 @@ Make the documentation changes in a separate follow-up after verifying public ac
   | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative. |
   | `README.md:135–169` (upgrade/recovery) | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup. |
   | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker. |
+  | Same guide `:174–220` (Caddy migration) | Preserve `docker-compose.image.yml` when switching proxy modes; pull the pinned image before recreating app/worker without `--build`, keeping Caddy state and the guarded migration sequence. |
   | Same guide `:122–173`, `:221–397` (plain / worker / webhook) | Preserve the image overlay in every file list and remove image-path builds. |
   | Same guide `:454–551` (restore) | Preserve the backed-up image selection/version and pull instead of building; keep drill isolation and fresh-volume restore. |
   | Same guide `:553–745` (Upgrade and roll back) | Make version edit → `docker compose pull` → stop all old roles → `docker compose up -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives. |
+  | `apps/site/src/content/docs/docs/configuration.md:259`, `:265`, `:267`, `:296` (Compose-only reference and manual edits) | Describe image-aware setup and `COMPOSE_FILE` selections, published `APP_IMAGE` behavior and exact `HOURMERE_VERSION`; preserve the image overlay in worker examples and explain that source omits it. |
   | `apps/site/src/legal-content.test.ts:80` (comparison introduction guard) | Replace the unpublished-image assertion with a published-image link assertion alongside the comparison copy in card 213; add install/version/rollback guards for README and self-hosting without weakening provider-acceptance guards. |
   | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts` | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling. |
 
 - Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
-  the site's self-hosting, comparison and index guides, homepage, site description and
+  the site's self-hosting, configuration, comparison and index guides, homepage, site description and
   legal pages. Update `apps/site/src/legal-content.test.ts` (currently line 80, asserting
   `no prebuilt public image is published`) together with the corresponding docs sentences.
   The draft PR above is the prepared revision of the source-build install instructions;

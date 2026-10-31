@@ -67,10 +67,11 @@ describe('reviewed homepage and comparison disclosures', () => {
     )
   })
 
-  it('keeps the comparison source-build and public-image limitations visible', () => {
+  it('keeps the comparison pinned public image and source alternative visible', () => {
     expect(intro).toContain(
-      'Its [self-hosting guide](/docs/self-hosting) requires a source build; no prebuilt public image is published.',
+      'Its [self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version; building from source remains an alternative.',
     )
+    expect(intro).not.toMatch(/no prebuilt public image is published/i)
   })
 
   it('explains scheduling and agent access in the homepage description alongside preview availability', () => {

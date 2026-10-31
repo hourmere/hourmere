@@ -1,5 +1,5 @@
 # Hourmere
-Open-source scheduling for people and AI agents. Self-host from source; Hourmere Cloud is coming.
+Open-source scheduling for people and AI agents. Self-host from the published container image; Hourmere Cloud is coming.
 
 > Early development. Nothing here is ready to use yet.
 
@@ -82,21 +82,24 @@ Requires Git, OpenSSL, Docker Engine and Docker Compose 2.24.4 or newer. Point y
 at the host with an A record only and allow TCP 80/443 and UDP 443 (plus SSH) before using automatic HTTPS:
 
 ```sh
-git clone https://github.com/hourmere/hourmere.git
+git clone --branch v1.0.0 --depth 1 https://github.com/hourmere/hourmere.git
 cd hourmere
-./scripts/setup.sh --source
-docker compose up -d --build --wait
+./scripts/setup.sh --image
+docker compose pull
+docker compose up -d --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
 
-Accept `proxy`, enter your HTTPS origin (replace `hourmere.example.com` with your hostname),
+Accept the default image installation and `proxy`, enter your HTTPS origin (replace `hourmere.example.com` with your hostname),
 and configure SMTP and its sender. Setup generates separate secrets directly into a mode
 `600` `.env`, refuses to overwrite an existing file, and selects the optional Caddy override.
 Caddy obtains/renews TLS certificates; only TCP 80/443 and UDP 443 are published, and the app trusts only
 the proxy's dedicated address for forwarded client IPs. If its network overlaps an existing
 network or another instance, change `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` together
-in `.env` before starting. **No prebuilt public image is
-published yet**; Compose builds the checked-out source. Application and job migrations run
+in `.env` before starting. Setup pins `HOURMERE_VERSION=1.0.0` from the release tag and
+selects `docker-compose.image.yml`, which pulls `ghcr.io/hourmere/hourmere:1.0.0` for
+the app and any separate worker without building. Use an exact release version, never
+`latest` or a floating minor tag. Application and job migrations run
 automatically (`AUTO_MIGRATE=true`). Open `/sign-in` and claim the first account immediately;
 `SIGNUP=first-user` restricts later registration as described below.
 
@@ -109,14 +112,14 @@ background jobs; to split them after setup, run:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  docker compose up -d --wait
 )
 ```
 
@@ -124,16 +127,22 @@ For plain mode, remove both lines of the proxy verification (the `grep -qx proxy
 and its following failure-message line) before pasting the block.
 
 The helper safely updates `COMPOSE_FILE`
-in the private `.env`, preserving the proxy selection. The tracked overlay automatically
+in the private `.env`, preserving the image and proxy selections. The tracked overlay automatically
 selects `web` for the app and `worker` for the separate worker, using the same image and
 secrets.
-The block unsets a shell-exported `COMPOSE_FILE` only inside its subshell; unset it
-separately before standalone Compose commands so they read `.env` too.
+The block unsets shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION` only inside its
+subshell; unset them separately before standalone Compose commands so they read `.env` too.
 The `.env` backup preserves this choice, and upgrades need no tracked Compose edits.
 Give containers at least 35 seconds to stop.
 
 Before upgrading, take a full backup and record the current branch name or tag alongside
-the backup's saved commit. A checkout-only rollback with
+the backup's saved commit and pinned `HOURMERE_VERSION`. Change `HOURMERE_VERSION` in
+`.env` to the exact reviewed release (for example, `1.0.1`), check out its matching `v1.0.1`
+tag, and use the guide's guarded image upgrade to verify the app and any worker select
+`ghcr.io/hourmere/hourmere:1.0.1` before `docker compose pull` or stopping services. Then run
+`docker compose up -d --wait`. Follow the guide's guarded upgrade blocks. Before `up`,
+restore the previous `HOURMERE_VERSION` and `COMPOSE_FILE` from the backup if an upgrade
+fails. A checkout-only rollback with
 `git checkout <previous branch or tag>` is safe if a guard, `docker compose pull` or
 `docker compose stop` fails before the new-version `docker compose up` command runs.
 Once that `up` is attempted, follow [Back up and restore](https://hourmere.com/docs/self-hosting#back-up-and-restore),
@@ -156,16 +165,44 @@ and other current settings. See the [guarded upgrade procedures](https://hourmer
 For a pre-start failure, if the app or worker was already stopped (including a partial
 `stop` failure), bring the old version back with the block below after restoring that
 selection. Replace `PREVIOUS_BRANCH_OR_TAG` with the recorded name. If no service was
-stopped, only the checkout is needed. The block uses the existing old application image;
-do not add `--build` or pull an application image during this recovery.
+stopped, only the checkout is needed. The block uses the previous application image;
+do not build during this recovery. For an image deployment, pulling the old exact version
+is safe after restoring its version and overlay.
 
 ```sh
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   docker compose up -d --wait
 )
 ```
+
+### Switch a source installation to the published image
+
+Pre-1.0 deployments are source deployments. In the existing private `.env`, insert
+`docker-compose.image.yml` immediately after `docker-compose.yml` in `COMPOSE_FILE`,
+preserving proxy, worker and custom overlays, and set `HOURMERE_VERSION` to the exact
+reviewed release without `v`, never `latest`. For a plain single-container installation:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'
+HOURMERE_VERSION='1.0.0'
+```
+
+Unset shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION`, then run the guide's
+[image upgrade](https://hourmere.com/docs/self-hosting#single-container-upgrade), or its
+[separate-worker upgrade](https://hourmere.com/docs/self-hosting#separate-worker-upgrade).
+The guards verify the app's exact image and any worker's image before pulling or stopping
+services. Setting the version alone can leave a source app paired with an image worker.
+
+### Build from source
+
+To build from source instead, clone the reviewed release tag, run
+`./scripts/setup.sh --source`, then `docker compose up -d --build --wait`. The source path
+uses the checked-out code and local application image; see the guide's source-build
+alternative and source upgrade procedures. To switch an existing image deployment, edit
+`.env` to remove `docker-compose.image.yml` from `COMPOSE_FILE`, remove `HOURMERE_VERSION`,
+and unset `HOURMERE_VERSION` in your shell; preserve proxy, worker and custom overlays.
 
 The application image retains small public attribution and booking-confirmation links to the
 hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);
