@@ -57,6 +57,11 @@ npm run dev --workspace @hourmere/web
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
 `/team/{teamSlug}/{slug}` for individual, collective and activated round-robin team types). After signing in, people only return to pages under `/app`.
 
+Saving an event type opens its saved version's **View and share** actions. Open the public
+booking page or copy its full link there; unsaved address changes cannot be copied as a
+published link. When setup or enablement needs attention, the panel links to the relevant
+settings. Round-robin pools still require a separate explicit activation after saving.
+
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.

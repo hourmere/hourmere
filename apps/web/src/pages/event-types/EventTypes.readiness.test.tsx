@@ -767,7 +767,7 @@ describe('team event type configuration checks', () => {
       `/app/event-types/${EVENT_TYPE_ID}`,
     )
     expect(checks.getByRole('link', { name: 'Review hosts' }).getAttribute('href')).toBe(
-      `/app/event-types/${EVENT_TYPE_ID}#hosts`,
+      `/app/event-types/${EVENT_TYPE_ID}#hosts-heading`,
     )
     expect(checks.queryByRole('link', { name: /calendar|availability/i })).toBeNull()
     expect(configuration().textContent).toContain('Calendar sync needs attention')

@@ -1428,4 +1428,22 @@ export const admin = {
   'Review enablement': 'Review enablement',
   'Review meeting settings': 'Review meeting settings',
   'Review round-robin activation': 'Review round-robin activation',
+  'Save your changes before sharing this address.':
+    'Save your changes before sharing this address.',
+  'This booking link uses the saved version. Unsaved changes are not included.':
+    'This booking link uses the saved version. Unsaved changes are not included.',
+  'This event type is inactive. Enable it and save before sharing.':
+    'This event type is inactive. Enable it and save before sharing.',
+  'This event type is unlisted. Anyone with its direct link can still book it. Review visibility before sharing.':
+    'This event type is unlisted. Anyone with its direct link can still book it. Review visibility before sharing.',
+  'Review visibility': 'Review visibility',
+  'This round-robin event type is saved, but it is not activated. Activate it separately before sharing.':
+    'This round-robin event type is saved, but it is not activated. Activate it separately before sharing.',
+  'Set a booking username in Settings before sharing this event type.':
+    'Set a booking username in Settings before sharing this event type.',
+  'Host availability needs attention before you share this event type.':
+    'Host availability needs attention before you share this event type.',
+  'This event type has no public booking link in the current space.':
+    'This event type has no public booking link in the current space.',
+  'Review saved version readiness': 'Review saved version readiness',
 } as const

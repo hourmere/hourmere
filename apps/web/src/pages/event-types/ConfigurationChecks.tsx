@@ -138,7 +138,7 @@ export function ConfigurationChecks({
     event.ownerUserId === null &&
     result.issues.some((issue) => issue.label === 'Host settings need attention.')
   )
-    eventTargets.push({ path: '#hosts', label: 'Review event settings' })
+    eventTargets.push({ path: '#hosts-heading', label: 'Review event settings' })
   if (result.issues.some((issue) => issue.label === 'Automatic meeting settings need attention.'))
     eventTargets.push({ path: '#location-heading', label: 'Review meeting settings' })
   if (!eventTargets.length)
@@ -185,9 +185,9 @@ export function ConfigurationChecks({
         <>
           <span>{t('Ask the hosts to review their personal working hours and calendars.')}</span>
           {editor ? (
-            <a href="#hosts">{t('Review hosts')}</a>
+            <a href="#hosts-heading">{t('Review hosts')}</a>
           ) : (
-            <Link to={`${eventTypePath(event.id)}#hosts`}>{t('Review hosts')}</Link>
+            <Link to={`${eventTypePath(event.id)}#hosts-heading`}>{t('Review hosts')}</Link>
           )}
         </>
       )}
