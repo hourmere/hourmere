@@ -29,6 +29,11 @@ import {
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, lockOrganization } from './hosts.ts'
+import {
+  createNotificationSnapshot,
+  type NotificationSnapshot,
+  notificationSnapshot,
+} from './notification-settings.ts'
 import { type Responses, validateResponses } from './questions.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import { cleanText } from './text.ts'
@@ -322,6 +327,7 @@ const RESCHEDULE_COLUMNS = [
   'required_host_user_ids',
   'hosts_use_default_schedule',
   'manage_token_hash',
+  'notification_snapshot',
 ] as const
 
 /**
@@ -661,6 +667,7 @@ interface NewBooking {
   hostUserIds: readonly string[]
   hostsUseDefaultSchedule: boolean
   attendees: readonly Attendee[]
+  notificationSnapshot: NotificationSnapshot
   /** Present only on a host move: transfer the invitee's hash without minting a token. */
   manageTokenHash?: Buffer | null | undefined
 }
@@ -691,6 +698,7 @@ async function insertBooking(
       rescheduled_from_id: b.rescheduledFromId ?? null,
       required_host_user_ids: [...b.hostUserIds].sort(),
       hosts_use_default_schedule: b.hostsUseDefaultSchedule,
+      notification_snapshot: JSON.stringify(b.notificationSnapshot),
     })
     .returning('id')
     .executeTakeFirstOrThrow()
@@ -785,9 +793,30 @@ async function cancelLocked(
     })
     .execute()
   await cancelBookingConference(db, row.id, now)
+  await skipScheduledMessages(db, row.id, 'booking_cancelled')
   // In this transaction: the cancellation email exists exactly when the cancellation does.
   await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
+}
+
+/** Fence queued and claimed work without deleting terminal recipient history. */
+async function skipScheduledMessages(
+  db: Db,
+  bookingId: string,
+  reason: 'booking_cancelled' | 'booking_replaced',
+): Promise<void> {
+  await db
+    .updateTable('booking_scheduled_messages')
+    .set({
+      state: 'skipped',
+      skip_reason: reason,
+      claim_token: null,
+      lease_until: null,
+      updated_at: sql`clock_timestamp()`,
+    })
+    .where('booking_id', '=', bookingId)
+    .where('state', 'in', ['pending', 'processing'])
+    .execute()
 }
 
 // --- Public booking -----------------------------------------------------------------------
@@ -922,6 +951,14 @@ async function publicBooking(
         )
       }
       const now = ctx.now()
+      // resolve(...lock:true) holds the event row until commit. This read sees exactly
+      // the policy serialized with a concurrent full configuration replacement.
+      const policy = await trx
+        .selectFrom('event_types')
+        .select('notifications')
+        .where('id', '=', current.id)
+        .executeTakeFirstOrThrow()
+      const snapshot = createNotificationSnapshot(policy.notifications)
       const responses = validateResponses(current.questions, input.responses ?? {})
       const end = input.start.add({ minutes: current.durationMinutes })
       let selectedHostIds = current.hostUserIds
@@ -983,6 +1020,7 @@ async function publicBooking(
         hostUserIds: selectedHostIds,
         hostsUseDefaultSchedule: current.schedulingType !== 'individual',
         attendees: [invitee, ...guests],
+        notificationSnapshot: snapshot,
       })
       // In this transaction, and never on the replay paths: one set of emails per booking,
       // queued only if the booking commits.
@@ -1113,10 +1151,6 @@ async function rescheduleLocked(
     : hosts.map((h) => h.user_id).sort()
   await lockHosts(trx, hostUserIds)
   await bookingHostIds(trx, old.id, old.organization_id, old.required_host_user_ids, true)
-  // Read after the locks: waiting for them takes time, and the rules may have changed.
-  const now = ctx.now()
-  assertChangeable(old, now)
-
   const eventType =
     old.event_type_id === null
       ? undefined
@@ -1128,6 +1162,10 @@ async function rescheduleLocked(
           .where('deleted_at', 'is', null)
           .forShare()
           .executeTakeFirst()
+  // Settings saves can hold the event row while we wait. Sample the decision clock
+  // after that lock too, for both the lifecycle cutoff and reminder minimum gap.
+  const now = ctx.now()
+  assertChangeable(old, now)
   if (!eventType) {
     throw new DomainError(
       'conflict',
@@ -1176,6 +1214,7 @@ async function rescheduleLocked(
     manageTokenHash: carryManageToken ? old.manage_token_hash : undefined,
     hostUserIds,
     hostsUseDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
+    notificationSnapshot: notificationSnapshot(old.notification_snapshot),
     attendees: attendees.map((a) => ({
       name: a.name,
       email: a.email,
@@ -1184,6 +1223,7 @@ async function rescheduleLocked(
       isBooker: a.is_booker,
     })),
   })
+  await skipScheduledMessages(trx, old.id, 'booking_replaced')
   // In this transaction: the new booking's emails. The old booking's queued ones find it
   // cancelled and replaced when they run, and send nothing.
   await prepareBookingConference(ctx, trx, id)

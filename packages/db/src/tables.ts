@@ -357,6 +357,7 @@ export interface BookingNotifications {
   created_at: Generated<Timestamp>;
   kind: string;
   manage_token_hash: Buffer | null;
+  message_key: Generated<string>;
   outcome: Generated<string>;
   recipient: string;
   suppression_reason: string | null;
@@ -381,6 +382,7 @@ export interface Bookings {
   idempotency_key: string | null;
   location: Json | null;
   manage_token_hash: Buffer | null;
+  notification_snapshot: Json | null;
   oauth_consent_id: string | null;
   organization_id: string;
   required_host_user_ids: Generated<string[]>;
@@ -390,6 +392,28 @@ export interface Bookings {
   start_at: Timestamp;
   status: Generated<string>;
   title: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface BookingScheduledMessages {
+  anchor_end_at: Timestamp;
+  anchor_start_at: Timestamp;
+  attempts: Generated<number>;
+  booking_id: string;
+  claim_token: string | null;
+  created_at: Generated<Timestamp>;
+  due_at: Timestamp;
+  error_code: string | null;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  kind: string;
+  last_job_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Timestamp;
+  organization_id: string;
+  rule_id: string;
+  skip_reason: string | null;
+  state: Generated<string>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -504,6 +528,7 @@ export interface EventTypes {
   location: Json | null;
   max_bookings_per_day: number | null;
   minimum_notice_minutes: Generated<number>;
+  notifications: Generated<Json>;
   organization_id: string;
   owner_user_id: string | null;
   position: Generated<number>;
@@ -687,6 +712,7 @@ export interface DB {
   booking_conferences: BookingConferences;
   booking_hosts: BookingHosts;
   booking_notifications: BookingNotifications;
+  booking_scheduled_messages: BookingScheduledMessages;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;

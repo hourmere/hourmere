@@ -33,6 +33,7 @@ import {
   SQLSTATE,
   timestamp,
 } from './internal.ts'
+import { type NotificationSettings, validateNotifications } from './notification-settings.ts'
 import { parseQuestions, type Question, validateQuestions } from './questions.ts'
 import { cleanText } from './text.ts'
 
@@ -221,6 +222,40 @@ export async function listEventTypes(ctx: ServiceContext): Promise<EventType[]> 
 export async function getEventType(ctx: ServiceContext, id: string): Promise<EventType> {
   const row = await visibleRow(ctx.db, ctx, id)
   return toEventType(await loadEventType(ctx.db, row.id))
+}
+
+/** Internal configuration service; public transports deliberately remain unchanged. */
+export async function getEventTypeNotifications(
+  ctx: ServiceContext,
+  id: string,
+): Promise<NotificationSettings> {
+  const row = await visibleRow(ctx.db, ctx, id)
+  return validateNotifications(row.notifications)
+}
+
+/** Replace the whole policy under the same write lock used by event type updates. */
+export async function setEventTypeNotifications(
+  ctx: ServiceContext,
+  id: string,
+  value: unknown,
+): Promise<NotificationSettings> {
+  const notifications = validateNotifications(value)
+  return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id, { lock: true })
+    await assertCanWrite(trx, ctx, row, true)
+    if (
+      JSON.stringify(validateNotifications(row.notifications)) !== JSON.stringify(notifications)
+    ) {
+      await trx
+        .updateTable('event_types')
+        .set({ notifications: jsonb(notifications) })
+        .where('id', '=', row.id)
+        .execute()
+    }
+    return notifications
+  })
 }
 
 /** Compact metadata for discovery; details are read explicitly with getEventType. */

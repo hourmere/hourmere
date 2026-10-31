@@ -137,6 +137,14 @@ export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
     identity: InvitationEmailJobIdentity,
     transaction?: KyselyTransactionLike,
   ): Promise<boolean>
+  hasLiveScheduledBookingEmailJob(
+    identity: { id: string; messageId: string },
+    transaction?: KyselyTransactionLike,
+  ): Promise<boolean>
+  retireExpiredScheduledBookingEmailJobs(
+    identity: { messageId: string },
+    transaction: KyselyTransactionLike,
+  ): Promise<void>
   /** Retires only expired matching jobs, preserving history while releasing exclusive keys. */
   retireExpiredInvitationEmailJobs(
     identity: Pick<InvitationEmailJobIdentity, 'invitationId' | 'generation'>,
@@ -362,6 +370,38 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
         [
           `invitation-email:v1:${identity.invitationId}:${identity.generation}`,
           JSON.stringify({ invitationId: identity.invitationId, generation: identity.generation }),
+        ],
+      )
+    },
+
+    async hasLiveScheduledBookingEmailJob(identity, transaction) {
+      if (state !== 'running') throw new Error(`jobs are not running (${state})`)
+      const connection = transaction ? fromKysely(transaction) : boss.getDb()
+      const result = await connection.executeSql(
+        `SELECT 1 FROM pgboss.job WHERE id=$1::uuid AND name='scheduled-booking-email'
+          AND singleton_key=$2 AND data=$3::jsonb AND (
+            (state IN ('created','retry') AND keep_until > pgboss.job_now())
+            OR (state='active' AND started_on IS NOT NULL AND started_on + expire_seconds * INTERVAL '1 second' > pgboss.job_now())
+          ) LIMIT 1`,
+        [
+          identity.id,
+          `scheduled-booking-email:${identity.messageId}`,
+          JSON.stringify({ messageId: identity.messageId }),
+        ],
+      )
+      return result.rows.length === 1
+    },
+
+    async retireExpiredScheduledBookingEmailJobs(identity, transaction) {
+      if (state !== 'running') throw new Error(`jobs are not running (${state})`)
+      await fromKysely(transaction).executeSql(
+        `UPDATE pgboss.job SET state='cancelled',completed_on=pgboss.job_now()
+          WHERE name='scheduled-booking-email' AND singleton_key=$1 AND data=$2::jsonb AND policy='exclusive'
+          AND ((state IN ('created','retry') AND keep_until <= pgboss.job_now())
+            OR (state='active' AND started_on IS NOT NULL AND started_on + expire_seconds * INTERVAL '1 second' <= pgboss.job_now()))`,
+        [
+          `scheduled-booking-email:${identity.messageId}`,
+          JSON.stringify({ messageId: identity.messageId }),
         ],
       )
     },

@@ -34,6 +34,7 @@ import {
   notificationRecipientHash,
   type SuppressionReason,
 } from './mail-limits.ts'
+import { enqueueScheduledBookingEmails, type ScheduledEmailQueue } from './scheduled.ts'
 
 export {
   createInvitationEmailDispatcher,
@@ -161,6 +162,15 @@ export async function enqueueBookingNotifications(
     return
   }
   await send(event.type === 'created' ? 'confirmed' : 'rescheduled')
+  if (
+    await enqueueScheduledBookingEmails(
+      queue as unknown as Partial<ScheduledEmailQueue>,
+      transaction,
+      event.bookingId,
+      now,
+    )
+  )
+    return
   const remindAt = event.start.subtract(REMINDER_LEAD)
   if (Temporal.Instant.compare(remindAt, now.add(REMINDER_MIN_GAP)) > 0) {
     await send('reminder', remindAt)
@@ -238,7 +248,7 @@ function meetingLocation(value: Json | null): MeetingLocation | null {
 }
 
 /** Answers in question order, labelled; answers to removed questions keep their id. */
-function answersOf(
+export function answersOf(
   questions: Json | null,
   responses: Json,
   language: InterfaceLanguage,
@@ -259,7 +269,7 @@ function answersOf(
   return answers
 }
 
-interface NotificationData {
+export interface NotificationData {
   booking: {
     id: string
     status: string
@@ -308,7 +318,10 @@ interface NotificationData {
  * query at a time on one connection: a running job holds at most this one and its send
  * transaction's.
  */
-function loadNotificationData(db: Db, bookingId: string): Promise<NotificationData | undefined> {
+export function loadNotificationData(
+  db: Db,
+  bookingId: string,
+): Promise<NotificationData | undefined> {
   return db.connection().execute(async (conn) => {
     const b = await conn
       .selectFrom('bookings as b')
@@ -501,11 +514,13 @@ interface ConferenceNotificationClaim {
  * fails after the server accepted the email, the retry sends it again (and the first copy's
  * manage link does not work: its hash was rolled back).
  */
-async function sendOnce(
+export async function sendOnce(
   deps: NotificationDeps,
   key: {
     bookingId: string
-    kind: NotificationKind
+    kind: NotificationKind | 'follow_up'
+    messageKey?: string
+    finalCheck?: (db: Db) => Promise<void>
     recipient: string
     email: string
     verifiedHost?: { id: string; email: string } | undefined
@@ -549,6 +564,7 @@ async function sendOnce(
         .values({
           booking_id: key.bookingId,
           kind: key.kind,
+          message_key: key.messageKey ?? '',
           recipient: key.recipient,
           manage_token_hash: token === undefined ? null : sha256(token),
         })
@@ -558,7 +574,8 @@ async function sendOnce(
       if (!claimed) return 'sent before'
       // Identity/member locks can wait behind an account edit after the host send. Read
       // the lifecycle only after those waits, without holding a booking lock over SMTP.
-      await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
+      if (key.kind !== 'follow_up')
+        await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
       await lockNotificationEmailBudget(trx)
       // Read the booking and the clock again: it may have been cancelled, or have started,
       // while an earlier recipient's email went out. Without a lock, which would hold up
@@ -571,15 +588,28 @@ async function sendOnce(
         .executeTakeFirst()
       if (
         !current ||
-        !stillTrue(key.kind, { status: current.status, start: instant(current.start_at) }, clock())
+        (key.kind === 'follow_up'
+          ? current.status !== 'confirmed'
+          : !stillTrue(
+              key.kind,
+              { status: current.status, start: instant(current.start_at) },
+              clock(),
+            ))
       ) {
         throw new Overtaken()
       }
-      if ((current.conference_revision ?? undefined) !== key.conferenceRevision)
+      if (
+        key.kind !== 'follow_up' &&
+        (current.conference_revision ?? undefined) !== key.conferenceRevision
+      )
         throw new NotificationRetryError(
           'The meeting changed before delivery; retry with its current details',
         )
-      if (!(await conferenceNotificationAllowed(trx, key.bookingId, key.kind)))
+      if (
+        !key.finalCheck &&
+        key.kind !== 'follow_up' &&
+        !(await conferenceNotificationAllowed(trx, key.bookingId, key.kind))
+      )
         throw new Overtaken()
       if (
         conferenceClaim &&
@@ -597,6 +627,7 @@ async function sendOnce(
           .executeTakeFirst())
       )
         throw new Overtaken()
+      await key.finalCheck?.(trx)
       const recipientHash = notificationRecipientHash(key.email, deps.secret)
       const inviteeFacing = key.verifiedHost === undefined
       const reason = await notificationEmailBudget(
@@ -612,6 +643,7 @@ async function sendOnce(
           .set({ outcome: 'suppressed', suppression_reason: reason, manage_token_hash: null })
           .where('booking_id', '=', key.bookingId)
           .where('kind', '=', key.kind)
+          .where('message_key', '=', key.messageKey ?? '')
           .where('recipient', '=', key.recipient)
           .execute()
         suppression = { reason, recipientHash: recipientHash.toString('hex') }
@@ -988,15 +1020,29 @@ export async function conferenceNotificationAllowed(
   db: Db,
   bookingId: string,
   kind: NotificationKind,
+  configurable = false,
 ) {
   if (kind === 'cancelled') return true
   const row = await db
     .selectFrom('bookings as b')
     .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
-    .select(['b.location', 'c.state', 'c.revision', 'c.applied_revision'])
+    .select([
+      'b.location',
+      'b.notification_snapshot',
+      'c.state',
+      'c.revision',
+      'c.applied_revision',
+    ])
     .where('b.id', '=', bookingId)
     .executeTakeFirst()
   if (!row) return false
+  if (
+    !configurable &&
+    kind === 'reminder' &&
+    isRecord(row.notification_snapshot) &&
+    row.notification_snapshot.executionMode === 'configurable'
+  )
+    return false
   const automatic = isRecord(row.location) && row.location.autoCreate === true
   if (!automatic) return kind !== 'conference_failed'
   if (kind === 'conference_failed') return row.state === 'failed'
@@ -1231,3 +1277,12 @@ export {
   listPendingInvitationDeliveries,
   type PendingInvitationDelivery,
 } from './invitation-deliveries.ts'
+
+export {
+  deliverScheduledBookingEmail,
+  enqueueScheduledBookingEmails,
+  repairScheduledBookingEmails,
+  type ScheduledEmailQueue,
+  scheduledBookingEmailJob,
+  scheduledBookingEmailRepairJob,
+} from './scheduled.ts'
