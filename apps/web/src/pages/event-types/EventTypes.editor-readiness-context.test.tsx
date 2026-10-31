@@ -71,7 +71,7 @@ describe('saved event readiness access and context', () => {
       expect(api.to(route)).toHaveLength(1)
       if (unavailable) {
         expect(copy.queryByText('Configuration check failed')).toBeNull()
-        expect(copy.queryByRole('button', { name: 'Retry checks' })).toBeNull()
+        expect(copy.getByRole('button', { name: 'Retry checks' })).toBeDefined()
       } else {
         expect(copy.queryByText('Readiness checks are unavailable for this account.')).toBeNull()
         expect(copy.getByRole('button', { name: 'Retry checks' })).toBeDefined()

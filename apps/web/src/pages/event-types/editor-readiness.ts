@@ -3,7 +3,7 @@ import type { EventType } from '../../api/resources.ts'
 import type { Me } from '../../session.tsx'
 import { type EventReadiness, loadEventReadiness, readinessErrorStatus } from './event-readiness.ts'
 
-type EditorReadiness =
+export type EditorReadiness =
   | { status: 'unchecked' | 'loading' | 'error' | 'unavailable' }
   | { status: 'ready'; item: EventReadiness | undefined }
 
@@ -13,6 +13,9 @@ export function useEditorReadiness(me: Me, saved: EventType | null, contextChang
     version: EventType | null
     state: EditorReadiness
   }>({ version: saved, state: { status: 'unchecked' } })
+  // Draft edits invalidate the editor's checks, but cannot change the saved link's
+  // eligibility. Keep that observation until a new saved version or explicit retry.
+  const [shareObservation, setShareObservation] = useState(observation)
   const [attempt, setAttempt] = useState(0)
   const revision = useRef(0)
   const request = useRef<AbortController | null>(null)
@@ -21,33 +24,46 @@ export function useEditorReadiness(me: Me, saved: EventType | null, contextChang
     revision.current += 1
     request.current?.abort()
     setObservation({ version: saved, state: { status: 'unchecked' } })
+    setShareObservation((current) =>
+      current.state.status === 'loading'
+        ? { version: saved, state: { status: 'unchecked' } }
+        : current,
+    )
   }
 
   // A save replaces the observed version; a retry explicitly checks that version again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: attempt explicitly requests another observation
   useEffect(() => {
     if (!saved || contextChanged) {
-      setObservation({
+      const next: typeof observation = {
         version: saved,
         state: { status: contextChanged ? 'unavailable' : 'unchecked' },
-      })
+      }
+      setObservation(next)
+      setShareObservation(next)
       return
     }
     const controller = new AbortController()
     request.current = controller
     const observedRevision = ++revision.current
-    setObservation({ version: saved, state: { status: 'loading' } })
+    const loading: typeof observation = { version: saved, state: { status: 'loading' } }
+    setObservation(loading)
+    setShareObservation(loading)
     loadEventReadiness(me, controller.signal).then(
       (items) => {
         if (controller.signal.aborted || observedRevision !== revision.current) return
-        setObservation({
+        const next: typeof observation = {
           version: saved,
           state: items ? { status: 'ready', item: items.get(saved.id) } : { status: 'unavailable' },
-        })
+        }
+        setObservation(next)
+        setShareObservation(next)
       },
       (err: unknown) => {
         if (controller.signal.aborted || observedRevision !== revision.current) return
-        setObservation({ version: saved, state: { status: readinessErrorStatus(me, err) } })
+        const next = { version: saved, state: { status: readinessErrorStatus(me, err) } }
+        setObservation(next)
+        setShareObservation(next)
       },
     )
     return () => controller.abort()
@@ -61,5 +77,7 @@ export function useEditorReadiness(me: Me, saved: EventType | null, contextChang
   // Hide the previous saved version immediately, before the next effect starts its read.
   const state: EditorReadiness =
     observation.version === saved ? observation.state : { status: 'loading' }
-  return [state, retry, invalidate] as const
+  const shareState: EditorReadiness =
+    shareObservation.version === saved ? shareObservation.state : { status: 'loading' }
+  return [state, retry, invalidate, shareState] as const
 }

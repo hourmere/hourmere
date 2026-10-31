@@ -529,7 +529,9 @@ describe('saved event type readiness in the editor', () => {
       'Ask the hosts to review their personal working hours and calendars.',
     )
     const checks = within(readiness())
-    expect(checks.getByRole('link', { name: 'Review hosts' }).getAttribute('href')).toBe('#hosts')
+    expect(checks.getByRole('link', { name: 'Review hosts' }).getAttribute('href')).toBe(
+      '#hosts-heading',
+    )
     for (const value of [
       privateSchedule,
       privateCalendar,
@@ -579,7 +581,7 @@ describe('saved event type readiness in the editor', () => {
     for (const [name, hash] of [
       ['Review enablement', 'event-enablement'],
       ['Review round-robin activation', 'round-robin-heading'],
-      ['Review hosts', 'hosts'],
+      ['Review hosts', 'hosts-heading'],
     ]) {
       expect((await checks.findByRole('link', { name })).getAttribute('href')).toBe(`#${hash}`)
     }
@@ -619,7 +621,7 @@ describe('saved event type readiness in the editor', () => {
       if (hasHostProblem) {
         expect(
           checks.getByRole('link', { name: 'Review event settings' }).getAttribute('href'),
-        ).toBe('#hosts')
+        ).toBe('#hosts-heading')
       } else {
         expect(checks.queryByRole('link', { name: 'Review event settings' })).toBeNull()
       }
