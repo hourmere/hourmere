@@ -1,4 +1,5 @@
 ---
+
 title: Booking webhooks
 description: Configure signed outbound booking webhooks and their delivery limits.
 ---
@@ -37,14 +38,14 @@ same 409 as event-type writes; malformed read context returns 403. The service c
 context again inside its locked transaction. API keys ignore this header and keep their
 stored organization. See [browser organization context](/docs/api-conventions#browser-organization-context).
 
-| Method and path under `/api/v1` | Purpose |
-|---|---|
-| `POST /webhooks` | Create `{ url, events, isActive? }`; returns `{ webhook, secret }` |
-| `GET /webhooks` | List up to ten endpoints; never returns secrets |
-| `PATCH /webhooks/{id}` | Change `events` and/or `isActive` |
-| `POST /webhooks/{id}/rotate-secret` | Replace the signing secret; returns `{ secret }` once |
-| `DELETE /webhooks/{id}` | Delete the endpoint and all retained deliveries |
-| `GET /webhooks/{id}/deliveries?after=…` | At most fifty delivery metadata rows, newest first |
+| Method and path under `/api/v1`         | Purpose                                                            |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `POST /webhooks`                        | Create `{ url, events, isActive? }`; returns `{ webhook, secret }` |
+| `GET /webhooks`                         | List up to ten endpoints; never returns secrets                    |
+| `PATCH /webhooks/{id}`                  | Change `events` and/or `isActive`                                  |
+| `POST /webhooks/{id}/rotate-secret`     | Replace the signing secret; returns `{ secret }` once              |
+| `DELETE /webhooks/{id}`                 | Delete the endpoint and all retained deliveries                    |
+| `GET /webhooks/{id}/deliveries?after=…` | At most fifty delivery metadata rows, newest first                 |
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`. There are at most ten endpoints per organization.
@@ -148,12 +149,12 @@ predecessor ID; it does not emit a second cancellation event for the old booking
 cancellation has its own snapshot. Old events are still delivered even when a newer state
 exists: receivers must reconcile by event time/booking chain rather than arrival order.
 
-| Header | Meaning |
-|---|---|
-| `Webhook-Id` | Stable delivery UUID; deduplicate using this ID |
-| `Webhook-Event-Id` | Stable event UUID shared by subscribed endpoints for this change |
-| `Webhook-Timestamp` | Unix seconds at this actual delivery attempt |
-| `Webhook-Signature` | `v1=` plus lowercase hex HMAC-SHA256 |
+| Header              | Meaning                                                          |
+| ------------------- | ---------------------------------------------------------------- |
+| `Webhook-Id`        | Stable delivery UUID; deduplicate using this ID                  |
+| `Webhook-Event-Id`  | Stable event UUID shared by subscribed endpoints for this change |
+| `Webhook-Timestamp` | Unix seconds at this actual delivery attempt                     |
+| `Webhook-Signature` | `v1=` plus lowercase hex HMAC-SHA256                             |
 
 Compute the HMAC using the entire UTF-8 signing secret (including `whsec_`) as the key and
 `<Webhook-Timestamp>.<exact raw request body>` as the message. Compare the decoded digest in
@@ -280,28 +281,28 @@ root plan's block totals, not sums of inclusive child counters; ranges show the 
 and maximum across samples. These observations depend on hardware, cache, statistics and PostgreSQL
 settings, and are not timing assertions or a dispatch-latency guarantee.
 
-| Pending deliveries | Layout | Current wall ms | Current temp read/write blocks |
-| ---: | --- | ---: | ---: |
-| 1,000 | mixed | 130.683 | 0 / 0 |
-| 50,000 | mixed | 287.583 | 0 / 0 |
-| 200,000 | mixed | 733.770 | 11,433 / 14,547 |
-| 1,000 | webhook | 175.217 | 0 / 0 |
-| 50,000 | webhook | 349.443 | 0–468 / 0–468 |
-| 200,000 | webhook | 833.583 | 14,354 / 18,062 |
+| Pending deliveries | Layout  | Current wall ms | Current temp read/write blocks |
+| -----------------: | ------- | --------------: | -----------------------------: |
+|              1,000 | mixed   |         130.683 |                          0 / 0 |
+|             50,000 | mixed   |         287.583 |                          0 / 0 |
+|            200,000 | mixed   |         733.770 |                11,433 / 14,547 |
+|              1,000 | webhook |         175.217 |                          0 / 0 |
+|             50,000 | webhook |         349.443 |                  0–468 / 0–468 |
+|            200,000 | webhook |         833.583 |                14,354 / 18,062 |
 
 Only two alternative query shapes were evaluated: the pre-#41 query (`NOT EXISTS` for
 live jobs, then aggregate attempts for the selected orphan batch), and the current query
 with `job_history AS NOT MATERIALIZED` so the planner may inline it. Each cell below lists
 wall milliseconds followed by temp read/write blocks.
 
-| Pending deliveries | Layout | Pre-#41 `NOT EXISTS`: ms; temp R/W | Inline history: ms; temp R/W |
-| ---: | --- | ---: | ---: |
-| 1,000 | mixed | 342.012; 4,620 / 4,620 | 132.583; 0 / 0 |
-| 50,000 | mixed | 383.949; 4,761 / 4,761 | 280.291; 0 / 0 |
-| 200,000 | mixed | 480.728; 6,050 / 6,061 | 689.387; 11,433 / 13,394 |
-| 1,000 | webhook | 456.038; 8,246 / 8,246 | 174.353; 0 / 0 |
-| 50,000 | webhook | 495.281; 8,237 / 8,237 | 342.373; 0–468 / 0–468 |
-| 200,000 | webhook | 584.691; 9,609 / 9,620 | 782.470; 14,354 / 16,909 |
+| Pending deliveries | Layout  | Pre-#41 `NOT EXISTS`: ms; temp R/W | Inline history: ms; temp R/W |
+| -----------------: | ------- | ---------------------------------: | ---------------------------: |
+|              1,000 | mixed   |             342.012; 4,620 / 4,620 |               132.583; 0 / 0 |
+|             50,000 | mixed   |             383.949; 4,761 / 4,761 |               280.291; 0 / 0 |
+|            200,000 | mixed   |             480.728; 6,050 / 6,061 |     689.387; 11,433 / 13,394 |
+|              1,000 | webhook |             456.038; 8,246 / 8,246 |               174.353; 0 / 0 |
+|             50,000 | webhook |             495.281; 8,237 / 8,237 |       342.373; 0–468 / 0–468 |
+|            200,000 | webhook |             584.691; 9,609 / 9,620 |     782.470; 14,354 / 16,909 |
 
 The production query is unchanged. The pre-#41 shape is slower at the smaller backlogs;
 inlining also increases the 1000-pending mixed median. Neither alternative meets the

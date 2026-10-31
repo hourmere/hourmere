@@ -1,4 +1,5 @@
 ---
+
 title: Command-line client
 description: Use API-key booking tools from a terminal.
 ---
@@ -40,19 +41,19 @@ data need not appear in process arguments or shell history. Input files must be 
 files (symlinks are refused); input is limited to slightly less than 2 MiB to leave room
 for the MCP envelope. The server enforces the tool's full schema and domain rules.
 
-| Command | Tool | Arguments |
-|---|---|---|
-| `whoami` | `whoami` | `{}` |
-| `profile` | `get_profile` | `{}` |
-| `catalog` | `list_event_types` | optional `limit`, `after` |
-| `event` | `get_event_type` | `id` from `catalog` |
-| `schedules` | `list_schedules` | optional `limit`, `after` |
-| `schedule` | `get_schedule` | `id` from `schedules` |
-| `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `maxSlots`, `after` |
-| `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `responses`, `guests` |
-| `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
-| `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken` |
-| `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
+| Command      | Tool                   | Arguments                                                                                                |
+| ------------ | ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `whoami`     | `whoami`               | `{}`                                                                                                     |
+| `profile`    | `get_profile`          | `{}`                                                                                                     |
+| `catalog`    | `list_event_types`     | optional `limit`, `after`                                                                                |
+| `event`      | `get_event_type`       | `id` from `catalog`                                                                                      |
+| `schedules`  | `list_schedules`       | optional `limit`, `after`                                                                                |
+| `schedule`   | `get_schedule`         | `id` from `schedules`                                                                                    |
+| `slots`      | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `maxSlots`, `after`         |
+| `book`       | `create_booking`       | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `responses`, `guests` |
+| `list`       | `list_bookings`        | optional `from`, `to`, `status`, `order`, `limit`, `cursor`                                              |
+| `reschedule` | `reschedule_booking`   | `start` and exactly one of `bookingId`, `manageToken`                                                    |
+| `cancel`     | `cancel_booking`       | exactly one of `bookingId`, `manageToken`; optional `reason`                                             |
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -151,7 +152,6 @@ provided. Untrusted server messages, URLs and exception causes are not printed.
 A failure after the call begins includes `outcomeMayBeUnknown: true`. A reserved result
 file can remain empty or incomplete after a failed call or write: do not treat it as a
 successful booking, and retain the original request. Inspect the server before retrying.
-
 - For a lost **book** response, repeat the exact request with the same key and
   `idempotencyKey`. A committed booking replays with `manageToken: null`; it cannot return
   the original secret again. Hosts can use `list` and booking IDs; invitees need their

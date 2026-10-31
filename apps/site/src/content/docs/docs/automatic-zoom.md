@@ -1,4 +1,5 @@
 ---
+
 title: Automatic Zoom for one host
 description: Configure explicit automatic Zoom meetings for personal and single-host team events.
 ---
@@ -20,7 +21,6 @@ calendar or webhook key. These settings do not grant access on anyone's behalf.
 
 `Connect Zoom` requests only `user:read:user`. A distinct **Authorize Zoom meetings** action
 requests exactly this set:
-
 - `user:read:user`
 - `meeting:write:meeting`
 - `meeting:read:meeting`
@@ -75,7 +75,6 @@ it; Compose forwards it to the app and inherited worker. An empty value leaves
 `POST /api/conference/zoom/events` disabled with 404. The endpoint is enabled independently
 of the OAuth credentials and `ZOOM_MEETINGS_ENABLED`, so keep the token configured when
 turning off new connections or meeting authorization.
-
 1. Use a publicly reachable HTTPS `PUBLIC_URL` with a valid certificate and TLS 1.2 or later.
    In the Zoom General App build flow, open **Production → App Listing → Link & Support**
    and find **Deauthorization Notification Endpoint URL** (older app flows call this the

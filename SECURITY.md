@@ -12,7 +12,6 @@ fixes; older releases do not. Self-hosters should update to the latest release t
 
 Please report vulnerabilities privately. Do not open a public issue, pull request or
 discussion for them.
-
 - **Email:** [security@hourmere.com](mailto:security@hourmere.com)
 - **GitHub:** use **Report a vulnerability** on the repository's
   [Security tab](https://github.com/hourmere/hourmere/security).
@@ -39,7 +38,6 @@ and `https://www.hourmere.com/.well-known/security.txt`. Its source is
 ## What happens next
 
 Hourmere is maintained by one person, so these targets are best effort:
-
 - **Acknowledgement** within 3 business days of your report.
 - **Initial assessment** (whether we can reproduce it, how severe we think it is, and what
   happens next) within 10 business days.
@@ -57,7 +55,6 @@ you unless you prefer to remain anonymous.
 ## Scope
 
 In scope:
-
 - The code in this repository.
 - Docker images built from this repository's `Dockerfile`.
 - The hourmere.com website and Hourmere hosted services operated by Cobaltmere, LLC,
@@ -65,7 +62,6 @@ In scope:
   these through the same private channels above.
 
 Out of scope:
-
 - Social engineering, phishing or physical attacks against Cobaltmere, LLC, its maintainers
   or its users.
 - Denial-of-service and volume or load tests. Report a resource-exhaustion bug with a small
@@ -88,7 +84,6 @@ person's data. We can coordinate any further testing through the reporting chann
 If you research and report in good faith and follow this policy, we consider your research
 authorized, we will not pursue or support legal action against you for it, and we will work
 with you to understand and fix the issue. Good faith means that you:
-
 - avoid privacy violations, destroying or changing data, and disrupting service;
 - access only the data you need to demonstrate the issue, stop as soon as you reach other
   people's data, and do not keep or share it;

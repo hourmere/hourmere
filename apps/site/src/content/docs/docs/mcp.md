@@ -1,4 +1,5 @@
 ---
+
 title: MCP quickstart
 description: Connect an AI client to Hourmere's remote MCP server using an API key or OAuth.
 ---
@@ -38,14 +39,14 @@ Call `whoami` to check the key's organization and `get_profile` for your booking
 time zone and language. No profile yet returns `profile_not_found`; create one in the web
 app or through REST.
 
-| Tool | Input and result |
-|---|---|
-| `list_event_types` | Optional `limit` and `after`; compact summaries of team types and your personal types in the key's organization. Includes inactive configurations, excludes deleted types. |
-| `get_event_type` | An `id` from the list; full configuration, including questions, location and rules. |
-| `list_schedules` | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations. |
-| `get_schedule` | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate. |
-| `list_calendar_connections` | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination. |
-| `list_conference_connections` | No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status. |
+| Tool                          | Input and result                                                                                                                                                           |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_event_types`            | Optional `limit` and `after`; compact summaries of team types and your personal types in the key's organization. Includes inactive configurations, excludes deleted types. |
+| `get_event_type`              | An `id` from the list; full configuration, including questions, location and rules.                                                                                        |
+| `list_schedules`              | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations.                                                             |
+| `get_schedule`                | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate.                                                                 |
+| `list_calendar_connections`   | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination.                                      |
+| `list_conference_connections` | No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status.                                                            |
 
 Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by default and at
 most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until
@@ -66,19 +67,25 @@ API key; MCP OAuth grants do not authenticate REST requests.
 
 ## Book and manage time
 
-| Tool | Input and result |
-|---|---|
-| `whoami` | No arguments; shows the key's user, organization and key ID. |
-| `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive. |
-| `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
-| `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
-| `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
-| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
+| Tool                   | Input and result                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `whoami`               | No arguments; shows the key's user, organization and key ID.                                                                                                             |
+| `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive.                            |
+| `create_booking`       | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token.                                          |
+| `reschedule_booking`   | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
+| `cancel_booking`       | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking.                                                                                            |
+| `list_bookings`        | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
 
 For example, after confirming the booking page, test recipient and time zone with your agent:
 
 ```json
-{"handle":"ada","slug":"intro","startDate":"2026-11-02","endDate":"2026-11-03","timeZone":"America/Los_Angeles"}
+{
+  "handle": "ada",
+  "slug": "intro",
+  "startDate": "2026-11-02",
+  "endDate": "2026-11-03",
+  "timeZone": "America/Los_Angeles"
+}
 ```
 
 Slot results are paginated: `maxSlots` defaults to 100 and accepts 1–500. When `nextAfter`
@@ -167,7 +174,6 @@ REST API.
 For owner-prepared Registry metadata and directory submission requirements, see
 [MCP directories](https://github.com/hourmere/hourmere/blob/main/docs/mcp-directories.md). The checked-in metadata is a draft; it does not
 assert a live public instance or a published listing.
-
 - **Transport:** Streamable HTTP, built on the official TypeScript SDK
   (`@modelcontextprotocol/server` 2.x).
 - **Protocol versions:** `2026-07-28`, and the earlier revisions that start with
@@ -332,21 +338,21 @@ curl https://hourmere.example.com/mcp \
 Booking someone's time works like their booking page: the event type is named by the two
 parts of its link, `https://<host>/<handle>/<slug>`.
 
-| Tool | What it does | Hints |
-|---|---|---|
-| `whoami` | The key's user, the organization it acts in and the key id (same data as `GET /api/v1/me`) | read-only |
-| `get_profile` | Your booking-page handle, time zone and language | read-only |
-| `list_event_types` | Compact, paginated summaries of visible event types in the key's organization | read-only |
-| `get_event_type` | One visible event type's full configuration | read-only |
-| `list_schedules` | Compact, paginated summaries of your working-hours schedules | read-only |
-| `get_schedule` | One of your schedules, including weekly hours in its time zone | read-only |
-| `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
-| `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
-| `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
-| `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
-| `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
-| `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
-| `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
+| Tool                          | What it does                                                                                                       | Hints                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| `whoami`                      | The key's user, the organization it acts in and the key id (same data as `GET /api/v1/me`)                         | read-only                           |
+| `get_profile`                 | Your booking-page handle, time zone and language                                                                   | read-only                           |
+| `list_event_types`            | Compact, paginated summaries of visible event types in the key's organization                                      | read-only                           |
+| `get_event_type`              | One visible event type's full configuration                                                                        | read-only                           |
+| `list_schedules`              | Compact, paginated summaries of your working-hours schedules                                                       | read-only                           |
+| `get_schedule`                | One of your schedules, including weekly hours in its time zone                                                     | read-only                           |
+| `list_calendar_connections`   | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials             | read-only                           |
+| `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts                       | read-only                           |
+| `find_available_slots`        | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only                           |
+| `create_booking`              | Books a slot for an invitee; returns the booking and its `manageToken`                                             | open world                          |
+| `reschedule_booking`          | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token)         | destructive, open world             |
+| `cancel_booking`              | Cancels a booking you host (`bookingId`) or one you made (`manageToken`)                                           | destructive, idempotent, open world |
+| `list_bookings`               | Bookings you host in the key's organization, by start time, a page at a time                                       | read-only                           |
 
 Configuration discovery starts with `whoami` and `get_profile`. `list_event_types` includes
 team event types and your personal types in the key's organization, including inactive
@@ -398,7 +404,6 @@ reschedule from a cancellation, and `rescheduledFromId` to trace back to its pre
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as
 `structuredContent` and, for older clients, as the same JSON in a text block.
-
 - **Times** are RFC 3339. Results give instants in UTC (`2026-11-02T08:00:00.000Z`).
   `find_available_slots` takes a `timeZone` (an IANA name, e.g. `Europe/Berlin`; numeric
   offsets such as `+01:00` are refused because they ignore daylight saving time) and

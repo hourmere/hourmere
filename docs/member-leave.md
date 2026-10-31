@@ -42,11 +42,11 @@ first pages, total counts and independent cursors. Use the
 [departure-impact endpoint](member-departure-impact.md) to read remaining items. The
 handling values are:
 
-| Field | Value and next step |
-|---|---|
-| `eventTypes` | `ask_admin_to_replace_or_remove_host`: an administrator repairs the listed host assignments. |
-| `futureBookings` | `coordinate_cancellation`: coordinate through an independently authorized cancellation flow, retaining its existing time rules. |
-| `inProgressBookings` | `wait_until_end_or_coordinate_offline`: wait for the meeting to end or coordinate offline; retry after its end. |
+| Field                | Value and next step                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `eventTypes`         | `ask_admin_to_replace_or_remove_host`: an administrator repairs the listed host assignments.                                    |
+| `futureBookings`     | `coordinate_cancellation`: coordinate through an independently authorized cancellation flow, retaining its existing time rules. |
+| `inProgressBookings` | `wait_until_end_or_coordinate_offline`: wait for the meeting to end or coordinate offline; retry after its end.                 |
 
 With no impact, membership deletion, the `member_removed` operation record and the current
 session's personal-organization fallback commit together. The response is

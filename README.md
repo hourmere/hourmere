@@ -1,4 +1,5 @@
 # Hourmere
+
 Open-source scheduling for people and AI agents. Self-host from source; Hourmere Cloud is coming.
 
 > Early development. Nothing here is ready to use yet.
@@ -15,23 +16,23 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 
 ## Repository layout
 
-| Path | What it is |
-|---|---|
-| `apps/server` | API server (Hono). Serves the built web app in production. |
-| `apps/web` | Web app (React + Vite). Talks to the server only through the public API. |
-| `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |
-| `packages/core` | Scheduling logic with no I/O or framework code, such as the availability engine. |
-| `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
-| `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
-| `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
-| `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [Google Calendar](https://hourmere.com/docs/google-calendar). |
-| `packages/conferences` | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](https://hourmere.com/docs/automatic-zoom), separate from sign-in. |
-| `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
-| `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
-| `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
-| `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
-| `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
-| `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
+| Path                     | What it is                                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server`            | API server (Hono). Serves the built web app in production.                                                                                                                 |
+| `apps/web`               | Web app (React + Vite). Talks to the server only through the public API.                                                                                                   |
+| `apps/site`              | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image.                                                           |
+| `packages/core`          | Scheduling logic with no I/O or framework code, such as the availability engine.                                                                                           |
+| `packages/db`            | Database access (Kysely) and SQL migrations in `packages/db/migrations`.                                                                                                   |
+| `packages/scheduling`    | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`.                                        |
+| `packages/auth`          | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys.                                                                                  |
+| `packages/calendars`     | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [Google Calendar](https://hourmere.com/docs/google-calendar). |
+| `packages/conferences`   | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](https://hourmere.com/docs/automatic-zoom), separate from sign-in.                    |
+| `packages/mail`          | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations.                                                     |
+| `packages/jobs`          | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers.                                                                    |
+| `packages/webhooks`      | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks).                             |
+| `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications).                     |
+| `tools/api-types`        | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`).                                                                                |
+| `tools/cli`              | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli).                                     |
 
 ## Development
 
@@ -298,7 +299,6 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
-
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
   [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

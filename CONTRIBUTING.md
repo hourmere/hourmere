@@ -3,7 +3,6 @@
 Thanks for your interest. Hourmere is maintained by one person, so the notes below are about
 keeping contributions easy to review. Issues and pull requests are handled in written
 English.
-
 - **Security vulnerabilities:** do not open an issue; follow [SECURITY.md](SECURITY.md).
 - **Bugs and feature ideas:** open a [GitHub issue](https://github.com/hourmere/hourmere/issues/new/choose)
   using one of the templates.
@@ -347,7 +346,6 @@ There is no Contributor License Agreement (CLA): you keep the copyright to your 
 Instead, external contributors sign off their commits, certifying the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/): in short, that you
 wrote the change or otherwise have the right to submit it under the project's license.
-
 - **Who signs off:** every external contributor, on every commit in the pull request. The
   sign-off must name the commit's author, with the same name and email address as the commit's
   author fields (case does not matter).

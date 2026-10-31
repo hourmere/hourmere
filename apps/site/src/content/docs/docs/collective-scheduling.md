@@ -1,4 +1,5 @@
 ---
+
 title: Collective team scheduling
 description: Book every required team host together.
 ---

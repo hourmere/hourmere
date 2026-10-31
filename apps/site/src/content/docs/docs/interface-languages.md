@@ -1,4 +1,5 @@
 ---
+
 title: Interface languages
 description: Choose a registered interface language, with English fallback and localized dates.
 ---
@@ -116,7 +117,6 @@ it enables both. Notification language choices remain independent of this UI sco
 The registry's `excludedRegions` can leave a regional preference unsupported; for example,
 the `pt-BR` entry excludes `PT` while accepting bare Portuguese and other Latin-script variants.
 Add the corresponding catalogue files; loaders and language selectors discover them automatically:
-
 - `apps/web/src/i18n/catalogues/{code}/common.ts`: public/shared messages (`common` export).
 - `apps/web/src/i18n/catalogues/{code}/admin.ts`: account messages (`admin` export), kept in the lazy session graph.
 - `apps/web/src/i18n/catalogues/{code}/widget.ts`: widget controls (`widget` export).

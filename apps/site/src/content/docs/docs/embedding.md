@@ -1,4 +1,5 @@
 ---
+
 title: Website booking widgets
 description: Embed a public booking page inline or in a popup.
 ---
@@ -106,7 +107,7 @@ on `document` handles both modes:
 ```js
 document.addEventListener('hourmere:booking-completed', () => {
   // Update your local UI; the event has no details.
-});
+})
 ```
 
 The widget validates the iframe's `hourmere:booked` postMessage against its exact origin,
@@ -123,15 +124,15 @@ const handle = window.Hourmere.initInline({
   element: document.querySelector('#booking'),
   url: 'https://hourmere.example.com/ada/intro',
   height: 720, // optional integer, 240–2000
-});
+})
 // Dispose when your page/component unmounts.
-handle.destroy();
+handle.destroy()
 
-window.Hourmere.openPopup({ url: 'https://hourmere.example.com/ada/intro' });
-window.Hourmere.closePopup();
+window.Hourmere.openPopup({ url: 'https://hourmere.example.com/ada/intro' })
+window.Hourmere.closePopup()
 // Initialize newly added declarative elements after a client-side navigation.
-window.Hourmere.init();
-window.Hourmere.destroyInline(document.querySelector('#booking'));
+window.Hourmere.init()
+window.Hourmere.destroyInline(document.querySelector('#booking'))
 ```
 
 Repeated initialization of a declarative inline placeholder creates one iframe. Calling

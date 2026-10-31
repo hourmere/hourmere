@@ -1,4 +1,5 @@
 ---
+
 title: Booking activity
 description: View bounded daily booking activity for your organization.
 ---
@@ -29,7 +30,6 @@ email addresses, answers, cancellation reasons, source credentials or management
 are included. There is no organization-ID override or unlimited pagination.
 
 These are **operation-date counts**, independently of when the meeting was scheduled:
-
 - **Created:** initial booking rows, without a `rescheduled_from_id`, by `created_at`.
 - **Rescheduled:** each successor booking row, by its `created_at`. A chain moved three
   times contributes three reschedules, including when the last booking is later cancelled.

@@ -1,4 +1,5 @@
 ---
+
 title: Notifications and background jobs
 description: Understand booking and sign-in email delivery, calendar invitations and background workers.
 ---
@@ -23,7 +24,6 @@ A job is declared with `defineJob`: a queue name, a zod schema for its payload, 
 policy (limit, delay, backoff, cap), how long one attempt may run, a queue policy and a
 handler. `jobs.enqueue(name, payload, options)` validates the payload (a `JobPayloadError`
 names the fields, never their values) and takes:
-
 - `startAfter`: not before this instant (reminders);
 - `singletonKey`: with the `exclusive` policy, at most one queued or running job per key,
   so a second enqueue returns null;
@@ -58,11 +58,11 @@ With `AUTO_MIGRATE=false`, `npm run db:migrate` runs our migrations and then pg-
 
 One image; `HOURMERE_ROLE` decides what a process runs:
 
-| Role | HTTP | Jobs |
-|---|---|---|
-| `all` (default) | API and web app | queues and runs them, plus pg-boss maintenance |
-| `web` | API and web app | only queues them |
-| `worker` | only `GET /api/health` | runs them, plus pg-boss maintenance |
+| Role            | HTTP                   | Jobs                                           |
+| --------------- | ---------------------- | ---------------------------------------------- |
+| `all` (default) | API and web app        | queues and runs them, plus pg-boss maintenance |
+| `web`           | API and web app        | only queues them                               |
+| `worker`        | only `GET /api/health` | runs them, plus pg-boss maintenance            |
 
 `all` is the simplest self-hosting setup: one container. Larger deployments run `web` and
 `worker` containers from the same image. Every role listens on `PORT`, so the image's one
@@ -92,11 +92,11 @@ default of 10 seconds cuts long jobs short (they are retried, so nothing is lost
 All notifications go through one job, `booking-notification`, with payload
 `{ bookingId, kind }` (queue policy `exclusive`, singleton key `<bookingId>:<kind>`).
 
-| Event (service) | Jobs queued in its transaction |
-|---|---|
-| Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away |
-| Booking rescheduled (`rescheduleManagedBooking`, `rescheduleHostBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
-| Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`, `cancelTeamAdminBooking`) | `cancelled` now |
+| Event (service)                                                                           | Jobs queued in its transaction                                                                       |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Booking created (`createPublicBooking`, not on an idempotent replay)                      | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away         |
+| Booking rescheduled (`rescheduleManagedBooking`, `rescheduleHostBooking`)                 | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
+| Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`, `cancelTeamAdminBooking`) | `cancelled` now                                                                                      |
 
 The same services serve the booking page, the REST API and the MCP tools, so a booking an
 agent makes, moves or cancels sends exactly the emails a person's would.
@@ -162,12 +162,12 @@ the original user content. Generated answer labels such as Yes/No are localized 
 
 The job reads the booking when it runs and sends only what is still true:
 
-| Kind | Sent only if |
-|---|---|
-| `confirmed` | the booking is confirmed and has not started |
+| Kind          | Sent only if                                                                                 |
+| ------------- | -------------------------------------------------------------------------------------------- |
+| `confirmed`   | the booking is confirmed and has not started                                                 |
 | `rescheduled` | the booking is confirmed, has not started, and replaced an earlier booking that is cancelled |
-| `reminder` | the booking is confirmed and has not started |
-| `cancelled` | the booking is cancelled and no booking replaced it |
+| `reminder`    | the booking is confirmed and has not started                                                 |
+| `cancelled`   | the booking is cancelled and no booking replaced it                                          |
 
 The status and start are read again inside each recipient's send transaction (without a
 lock, which would hold up a cancel), so a booking cancelled while the first emails go out
@@ -189,7 +189,6 @@ event type gets both emails). For each recipient the job, in one transaction, in
 row (`ON CONFLICT DO NOTHING`); if it already exists the email has a terminal sent,
 rejected or suppressed outcome and is skipped; otherwise it checks the abuse limits,
 sends the email if permitted, and commits.
-
 - A failed send rolls the row back, and the retry sends to the recipients still missing.
 - Two attempts at the same time (a job that ran past its expiry and was retried while still
   running): the second insert waits for the first transaction, then skips.
@@ -203,7 +202,6 @@ sends the email if permitted, and commits.
 
 Refusals by the mail server (`MailRejectedError`, which carries the reply codes but never the
 reply text, which repeats the address):
-
 - **About this address**: at `RCPT TO` with a mailbox or domain status (x.1.x, x.2.x), or
   without an enhanced code a 450, 550, 551, 552 or 553. The others are still attempted.
   - **Permanent** (5.1.x no such mailbox or domain, 5.2.1 mailbox disabled, or bare 550,
@@ -235,7 +233,6 @@ The invitee's reschedule/cancel secret exists in raw form only inside
 which return it once, in the HTTP response; only its SHA-256 is stored
 (`bookings.manage_token_hash`). The email, however, is sent later, by a job, possibly from
 another process. Options:
-
 1. **Put the token in the job payload, encrypted** with a key derived from
    `BETTER_AUTH_SECRET` (HKDF, AES-256-GCM). Links stay the same as the API's. But the
    ciphertext sits in `pgboss.job` until the job is deleted, for a reminder weeks, and
@@ -274,7 +271,6 @@ emails that went out match (`outcome = 'sent'`); an email the mail server refuse
 keeps no hash (a check constraint), so the secret it would have carried never opens
 anything. Showing and acting resolve the booking through the same function, so they
 always agree on which booking a token means.
-
 - **After an invitee move, the API's token stays with its booking.** It shows the old, cancelled
   booking, and cancelling or rescheduling with it gets 409 `booking_cancelled`. That is the
   documented contract agents rely on: a reschedule retried after a lost response cannot move
@@ -335,12 +331,12 @@ a successor has the new default. Stop all old web/all/worker processes before mi
 including processes on other hosts, then restart every role with the new code. Migration
 0038 does not support rolling deployment; mixed-version workers cannot pin the same policy.
 
-| Recipient | New root (v2, SMTP configured) | Legacy root (v1) |
-|---|---|---|
-| Invitee and guests | REQUEST/CANCEL; invitee/guests are `NEEDS-ACTION;RSVP=FALSE` | REQUEST/CANCEL with original `ACCEPTED;RSVP=FALSE` policy |
-| Host without a pinned provider copy | Same REQUEST/CANCEL; primary host is `CHAIR;PARTSTAT=ACCEPTED`, other hosts accepted required participants | Original host notification REQUEST/CANCEL |
-| Host with a pinned provider copy | Ordinary email; provider writeback updates/removes its calendar item | Keep REQUEST/CANCEL to update an existing emailed copy |
-| Reminder or conference failure | Ordinary email, no calendar part | Ordinary email, no calendar part |
+| Recipient                           | New root (v2, SMTP configured)                                                                             | Legacy root (v1)                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Invitee and guests                  | REQUEST/CANCEL; invitee/guests are `NEEDS-ACTION;RSVP=FALSE`                                               | REQUEST/CANCEL with original `ACCEPTED;RSVP=FALSE` policy |
+| Host without a pinned provider copy | Same REQUEST/CANCEL; primary host is `CHAIR;PARTSTAT=ACCEPTED`, other hosts accepted required participants | Original host notification REQUEST/CANCEL                 |
+| Host with a pinned provider copy    | Ordinary email; provider writeback updates/removes its calendar item                                       | Keep REQUEST/CANCEL to update an existing emailed copy    |
+| Reminder or conference failure      | Ordinary email, no calendar part                                                                           | Ordinary email, no calendar part                          |
 
 New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the verified
 primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
@@ -427,7 +423,6 @@ calendar reply as authorization to cancel: cancellation remains an explicit Hour
 
 An instance with **one fixed host** may use its mail provider's filter to forward calendar
 replies to that host:
-
 1. Verify the fixed host's forwarding destination with the mail provider.
 2. Inspect representative calendar replies and select conditions supported by that provider.
    Subject prefixes and language vary; a subject filter alone cannot reliably identify every
@@ -461,7 +456,6 @@ The booking services load everything their decision needs inside their transacti
 job loads the rest when it runs (event type title, question labels, host names, emails and
 zones, the reschedule chain), which it must do anyway to check the booking's current state.
 So the services pass only ids:
-
 - `PublicContext` and `ServiceContext` carry an optional `notify` (`BookingNotifier` in
   `@hourmere/scheduling`): `(trx, event, now) => Promise<void>`, called with the
   transaction that makes the change and the instant the service used for its checks (read

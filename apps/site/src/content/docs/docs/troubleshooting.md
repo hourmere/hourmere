@@ -1,4 +1,5 @@
 ---
+
 title: Troubleshooting
 description: Diagnose self-hosted email delivery, worker, HTTPS, DNS and database problems.
 ---
@@ -65,7 +66,6 @@ for delivery and retry behavior.
 ## Caddy cannot obtain or renew a certificate
 
 Inspect `docker compose logs --tail=100 proxy`, then check:
-
 1. Public DNS resolves your hostname to the server running Caddy. Remove stale records and
    allow DNS changes to propagate; a local hosts-file entry does not change public DNS.
 2. **TCP ports 80 and 443** reach Caddy from the internet. Check the host firewall, VPS
