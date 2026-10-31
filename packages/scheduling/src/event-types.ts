@@ -435,6 +435,7 @@ export async function updateEventType(
               : {}),
           },
           ctx.successRedirectPolicy,
+          input.successRedirect !== undefined,
         )
         if (
           zoomConnection &&
@@ -687,6 +688,7 @@ const invalid = (message: string) => new DomainError('invalid', 'invalid_event_t
 function validFields(
   candidate: Partial<Record<keyof Fields, unknown>>,
   policy?: SuccessRedirectPolicy,
+  validateRedirect = true,
 ): Fields {
   const c = candidate
   const allowedDurationsMinutes =
@@ -731,7 +733,11 @@ function validFields(
     bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
     location: validLocation(c.location),
-    successRedirect: validateSuccessRedirect(c.successRedirect, policy),
+    // A policy change must not block unrelated edits. Only an explicitly supplied
+    // redirect needs current-policy validation; otherwise preserve the saved value.
+    successRedirect: validateRedirect
+      ? validateSuccessRedirect(c.successRedirect, policy)
+      : (c.successRedirect as SuccessRedirect | null),
     questions: validateQuestions(c.questions),
     isActive: c.isActive,
     isHidden: c.isHidden,

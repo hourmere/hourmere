@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { getPublicEventType, getPublicTeamEventType } from './availability.ts'
 import {
   cancelManagedBooking,
@@ -20,7 +20,7 @@ import {
 } from './event-types.ts'
 import { putProfile } from './profile.ts'
 import { createSchedule } from './schedules.ts'
-import type { SuccessRedirectInput } from './success-redirect.ts'
+import type { SuccessRedirectInput, SuccessRedirectPolicy } from './success-redirect.ts'
 import { createTestTeam, createTestUser, testContext, weekdays } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -32,8 +32,11 @@ const invitee = {
   timeZone: 'Europe/Berlin',
 }
 
-async function sourceCopy(mutate: (source: string) => string) {
-  const location = new URL('./bookings.ts', import.meta.url)
+async function sourceCopy<T = typeof import('./bookings.ts')>(
+  mutate: (source: string) => string,
+  file = './bookings.ts',
+) {
+  const location = new URL(file, import.meta.url)
   const original = readFileSync(location, 'utf8')
   const modified = mutate(original)
   expect(modified).not.toBe(original)
@@ -42,9 +45,9 @@ async function sourceCopy(mutate: (source: string) => string) {
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`) as Promise<
-    typeof import('./bookings.ts')
-  >
+  return import(
+    `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+  ) as Promise<T>
 }
 
 describe.skipIf(!serverUrl)('public booking success redirects', () => {
@@ -57,9 +60,14 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
   afterAll(async () => {
     await owned?.drop()
   })
-  async function setup(successRedirect?: SuccessRedirectInput, teamPage = false) {
+  afterEach(() => vi.restoreAllMocks())
+  async function setup(
+    successRedirect?: SuccessRedirectInput,
+    teamPage = false,
+    successRedirectPolicy?: SuccessRedirectPolicy,
+  ) {
     const user = await createTestUser(db, 'Host & 東京')
-    const personal = testContext(db, user.principal, now)
+    const personal = { ...testContext(db, user.principal, now), successRedirectPolicy }
     const handle = `host-${randomUUID().slice(0, 8)}`
     await putProfile(personal, { handle, timeZone: 'UTC', locale: 'en' })
     await createSchedule(personal, {
@@ -68,7 +76,7 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
       weeklyHours: weekdays({ start: '09:00', end: '17:00' }),
     })
     const team = teamPage ? await createTestTeam(db, [{ user, role: 'owner' }]) : undefined
-    const ctx = team ? testContext(db, team.as(user), now) : personal
+    const ctx = team ? { ...testContext(db, team.as(user), now), successRedirectPolicy } : personal
     const event = await createEventType(ctx, {
       title: 'Call',
       slug: 'call',
@@ -79,7 +87,7 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
     })
     const target = { handle: team ? ctx.principal.organization.slug : handle, slug: event.slug }
     const notify = vi.fn(async () => {})
-    const pub = { db, now, notify }
+    const pub = { db, now, notify, successRedirectPolicy }
     const book = (extra = {}, context = pub) =>
       (team ? createPublicTeamBooking : createPublicBooking)(context, {
         ...target,
@@ -89,6 +97,161 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
       })
     return { user, ctx, event, target, notify, pub, book }
   }
+  const tightenedPolicies = [
+    { name: 'IP-host opt-in disabled', saved: { allowIpHosts: true }, current: {} },
+    {
+      name: 'PUBLIC_URL host changed',
+      saved: { publicUrl: 'https://203.0.113.5' },
+      current: { publicUrl: 'https://hourmere.example' },
+    },
+  ] satisfies { name: string; saved: SuccessRedirectPolicy; current: SuccessRedirectPolicy }[]
+  const policyPages = tightenedPolicies.flatMap((policy) =>
+    [false, true].map((team) => ({ ...policy, team })),
+  )
+
+  it.each(policyPages)(
+    'completes booking without a redirect after $name (team=$team), records a safe diagnostic and replays its absence',
+    async ({ saved, current, team }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const s = await setup({ url: 'https://203.0.113.5/thanks?private=host-value' }, team, saved)
+      const ctx = { ...s.pub, successRedirectPolicy: current }
+      const idempotencyKey = randomUUID()
+      const first = await s.book({ idempotencyKey }, ctx)
+      expect(first.booking.status).toBe('confirmed')
+      expect(first).not.toHaveProperty('successRedirect')
+      expect(first.manageToken !== null).toBe(true)
+      expect((await getManagedBooking(ctx, first.manageToken as string)).id).toBe(first.booking.id)
+      expect(warn).toHaveBeenCalledExactlyOnceWith('success_redirect_disabled', {
+        eventTypeId: s.event.id,
+      })
+      expect(
+        (
+          await owned.pool.query('SELECT success_redirect FROM bookings WHERE id=$1', [
+            first.booking.id,
+          ])
+        ).rows,
+      ).toEqual([{ success_redirect: null }])
+      // Restoring the policy cannot give an already-created booking a new target.
+      const replay = await s.book({ idempotencyKey })
+      expect(replay.replayed).toBe(true)
+      expect(replay).not.toHaveProperty('successRedirect')
+      expect(s.notify).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledTimes(1)
+    },
+  )
+  it.each(policyPages)(
+    'allows unrelated event edits after $name (team=$team) but validates an explicitly supplied redirect',
+    async ({ saved, current, team }) => {
+      const s = await setup({ url: 'https://203.0.113.5/thanks' }, team, saved)
+      const ctx = { ...s.ctx, successRedirectPolicy: current }
+      const edited = await updateEventType(ctx, s.event.id, {
+        title: 'Renamed',
+        durationMinutes: 45,
+        successRedirect: undefined,
+      })
+      expect(edited.title).toBe('Renamed')
+      expect(edited.durationMinutes).toBe(45)
+      expect(edited.successRedirect).toEqual(s.event.successRedirect)
+      await expect(
+        updateEventType(ctx, s.event.id, { successRedirect: s.event.successRedirect }),
+      ).rejects.toMatchObject({ code: 'invalid_success_redirect' })
+      const replaced = await updateEventType(ctx, s.event.id, {
+        successRedirect: { url: 'https://target.example/thanks' },
+      })
+      expect(replaced.successRedirect?.url).toBe('https://target.example/thanks')
+      expect(
+        (await updateEventType(ctx, s.event.id, { successRedirect: null })).successRedirect,
+      ).toBeNull()
+    },
+  )
+  it('detects removal of stale-redirect booking fallback with a real assertion failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    async function verify(book: typeof createPublicBooking) {
+      const s = await setup({ url: 'https://203.0.113.5/thanks' }, false, { allowIpHosts: true })
+      await expect(
+        book({ ...s.pub, successRedirectPolicy: {} }, { ...s.target, start, invitee }),
+      ).resolves.not.toHaveProperty('successRedirect')
+    }
+    await verify(createPublicBooking)
+    const broken = await sourceCopy((source) =>
+      source.replace(
+        "console.warn('success_redirect_disabled', { eventTypeId: current.id })",
+        'throw error',
+      ),
+    )
+    await expect(verify(broken.createPublicBooking)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+  it('detects revalidation of untouched redirects with a real assertion failure', async () => {
+    async function verify(update: typeof updateEventType) {
+      const s = await setup({ url: 'https://203.0.113.5/thanks' }, false, { allowIpHosts: true })
+      await expect(
+        update({ ...s.ctx, successRedirectPolicy: {} }, s.event.id, { title: 'Renamed' }),
+      ).resolves.toMatchObject({ title: 'Renamed', successRedirect: s.event.successRedirect })
+    }
+    await verify(updateEventType)
+    const broken = await sourceCopy<typeof import('./event-types.ts')>(
+      (source) => source.replace('input.successRedirect !== undefined,', 'true,'),
+      './event-types.ts',
+    )
+    await expect(verify(broken.updateEventType)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  it.each([
+    { name: 'missing host diagnostics', replacement: 'void current.id' },
+    {
+      name: 'target URL in diagnostics',
+      replacement:
+        "console.warn('success_redirect_disabled', { eventTypeId: current.id, url: current.successRedirect?.url })",
+    },
+  ])('detects $name with a real assertion failure', async ({ replacement }) => {
+    async function verify(book: typeof createPublicBooking) {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const s = await setup({ url: 'https://203.0.113.5/thanks?private=host-value' }, false, {
+        allowIpHosts: true,
+      })
+      await book({ ...s.pub, successRedirectPolicy: {} }, { ...s.target, start, invitee })
+      expect(warn).toHaveBeenCalledExactlyOnceWith('success_redirect_disabled', {
+        eventTypeId: s.event.id,
+      })
+      warn.mockRestore()
+    }
+    await verify(createPublicBooking)
+    const broken = await sourceCopy((source) =>
+      source.replace(
+        "console.warn('success_redirect_disabled', { eventTypeId: current.id })",
+        replacement,
+      ),
+    )
+    await expect(verify(broken.createPublicBooking)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+  it('does not swallow unexpected validator failures and detects an overbroad catch', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const injectFailure = (source: string) =>
+      source.replace(
+        'validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)',
+        '(() => { throw new Error("synthetic validator failure") })()',
+      )
+    async function verify(book: typeof createPublicBooking) {
+      const s = await setup({ url: 'https://target.example' })
+      await expect(book(s.pub, { ...s.target, start, invitee })).rejects.toThrow(
+        'synthetic validator failure',
+      )
+    }
+    const baseline = await sourceCopy(injectFailure)
+    await verify(baseline.createPublicBooking)
+    const broken = await sourceCopy((source) =>
+      injectFailure(source).replace(
+        "if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect')",
+        'if (false)',
+      ),
+    )
+    await expect(verify(broken.createPublicBooking)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
   it('keeps the ordinary confirmation when unset and ignores request targets', async () => {
     const s = await setup()
     const result = await s.book({

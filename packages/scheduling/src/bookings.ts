@@ -35,6 +35,7 @@ import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
   type BookingSuccessRedirect,
   bookingSuccessRedirect,
+  type SuccessRedirect,
   validateSuccessRedirect,
 } from './success-redirect.ts'
 import { cleanText } from './text.ts'
@@ -995,10 +996,18 @@ async function publicBooking(
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
-      const settings =
-        origin.source === 'web' || origin.source === 'embed'
-          ? validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
-          : null
+      let settings: SuccessRedirect | null = null
+      if (origin.source === 'web' || origin.source === 'embed') {
+        try {
+          settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
+        } catch (error) {
+          if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect')
+            throw error
+          // An operator can tighten policy after this target was saved. Keep booking
+          // available, with no continuation. Never log the URL, its query or invitee data.
+          console.warn('success_redirect_disabled', { eventTypeId: current.id })
+        }
+      }
       const selectedHosts = selectedHostIds.map(
         (id) => current.hosts[current.hostUserIds.indexOf(id)]?.name ?? current.hostName,
       )

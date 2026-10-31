@@ -26,3 +26,18 @@ export function notifyEmbedBooked() {
   const target = embedMessageContext()
   if (target) window.parent.postMessage({ type: 'hourmere:booked', id: target.id }, target.origin)
 }
+/** Only the saved capability is disclosed; the continuation target stays in the frame. */
+export function notifyEmbedReady(allowEmbedParent: boolean) {
+  const target = embedMessageContext()
+  if (target)
+    window.parent.postMessage(
+      { type: 'hourmere:ready', id: target.id, allowEmbedParent },
+      target.origin,
+    )
+}
+/** The widget marker can only narrow saved permission, including after a policy race. */
+export function embedParentRedirectAllowed() {
+  const values = new URLSearchParams(window.location.search).getAll('parentRedirect')
+  // Manual iframe integrations have no widget marker and own their sandbox configuration.
+  return values.length === 0 || (values.length === 1 && values[0] === 'enabled')
+}

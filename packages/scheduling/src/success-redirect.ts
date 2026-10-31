@@ -31,9 +31,9 @@ export interface SuccessRedirect {
 }
 
 export interface SuccessRedirectPolicy {
-  /** The instance's own hostname is allowed, including an IP host. HTTPS is still required. */
+  /** The instance's own hostname is allowed, including local hosts. HTTPS is still required. */
   publicUrl?: string | undefined
-  /** Explicit instance opt-in; IP literals otherwise fail closed. */
+  /** Explicit instance opt-in for IP literals, localhost and single-label hosts. */
   allowIpHosts?: boolean | undefined
 }
 
@@ -75,7 +75,8 @@ export function validateSuccessRedirect(
       'successRedirect.url must be an absolute HTTPS URL of at most 2000 characters without control characters',
     )
   const authority = raw.slice(8).split(/[/?#]/, 1)[0] ?? ''
-  if (!authority || authority.includes('@'))
+  // WHATWG parsing removes empty credentials; nonempty credentials are checked below.
+  if (!authority || /^:?@/.test(authority))
     throw invalid('successRedirect.url must not contain user information')
   let target: URL
   try {
@@ -103,9 +104,10 @@ export function validateSuccessRedirect(
   let ownHost: string | undefined
   if (policy.publicUrl && URL.canParse(policy.publicUrl))
     ownHost = hostname(new URL(policy.publicUrl))
-  if (ip && policy.allowIpHosts !== true && host !== ownHost)
+  const localHost = ip || !host.includes('.') || host.endsWith('.localhost')
+  if (localHost && policy.allowIpHosts !== true && host !== ownHost)
     throw invalid(
-      'successRedirect.url cannot use an IP host unless the instance explicitly allows it',
+      'successRedirect.url cannot use an IP host, localhost or a single-label host unless the instance explicitly allows it',
     )
   for (const key of ['includeInviteePersonalData', 'allowEmbedParent'])
     if (input[key] !== undefined && typeof input[key] !== 'boolean')
@@ -140,7 +142,11 @@ export function bookingSuccessRedirect(
   values: Record<SuccessRedirectParameter, string>,
 ): BookingSuccessRedirect | undefined {
   if (!settings) return undefined
-  const url = new URL(settings.url)
-  for (const key of settings.parameters) url.searchParams.append(key, values[key])
-  return { url: url.href, allowEmbedParent: settings.allowEmbedParent }
+  // Serialize only the new pairs: touching URL.searchParams would rewrite the saved query.
+  const parameters = new URLSearchParams(settings.parameters.map((key) => [key, values[key]]))
+  const fragmentStart = settings.url.indexOf('#')
+  const target = fragmentStart === -1 ? settings.url : settings.url.slice(0, fragmentStart)
+  const fragment = fragmentStart === -1 ? '' : settings.url.slice(fragmentStart)
+  const suffix = parameters.size ? `${target.includes('?') ? '&' : '?'}${parameters}` : ''
+  return { url: target + suffix + fragment, allowEmbedParent: settings.allowEmbedParent }
 }

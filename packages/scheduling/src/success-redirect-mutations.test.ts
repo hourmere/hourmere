@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import type * as Redirect from './success-redirect.ts'
+import * as Redirect from './success-redirect.ts'
 
 async function sourceCopy(mutate: (source: string) => string) {
   const location = new URL('./success-redirect.ts', import.meta.url)
@@ -53,16 +53,38 @@ describe('redirect source-copy mutation controls', () => {
         requireRejection(module, { url: `https://example.com/${'東'.repeat(300)}` }),
     },
     {
-      name: 'userinfo including empty credentials',
-      mutate: (source: string) => source.replace("authority.includes('@')", 'false'),
+      name: 'empty userinfo before normalization',
+      mutate: (source: string) => source.replace('/^:?@/.test(authority)', 'false'),
       verify: (module: typeof Redirect) =>
         requireRejection(module, { url: 'https://@example.com' }),
     },
     {
-      name: 'normalized IP literals',
+      name: 'parsed nonempty userinfo',
       mutate: (source: string) =>
-        source.replace('ip && policy.allowIpHosts !== true && host !== ownHost', 'false'),
+        source.replace('target.username ||\n    target.password ||', 'false ||'),
+      verify: (module: typeof Redirect) =>
+        requireRejection(module, { url: 'https://user:password@example.com' }),
+    },
+    {
+      name: 'raw backslashes',
+      mutate: (source: string) => source.replace(String.raw`raw.includes('\\')`, 'false'),
+      verify: (module: typeof Redirect) =>
+        requireRejection(module, { url: 'https://example.com/path\\segment' }),
+    },
+    {
+      name: 'normalized IP literals',
+      mutate: (source: string) => source.replace('const localHost = ip ||', 'const localHost ='),
       verify: (module: typeof Redirect) => requireRejection(module, { url: 'https://2130706433' }),
+    },
+    {
+      name: 'localhost and single-label hosts',
+      mutate: (source: string) => source.replace("!host.includes('.')", 'false'),
+      verify: (module: typeof Redirect) => requireRejection(module, { url: 'https://intranet' }),
+    },
+    {
+      name: 'localhost subdomains',
+      mutate: (source: string) => source.replace("host.endsWith('.localhost')", 'false'),
+      verify: (module: typeof Redirect) => requireRejection(module, { url: 'https://a.localhost' }),
     },
     {
       name: 'explicit parameter whitelist',
@@ -99,32 +121,31 @@ describe('redirect source-copy mutation controls', () => {
         expect(module.validateSuccessRedirect(valid)?.allowEmbedParent).toBe(false),
     },
     {
-      name: 'query preservation',
+      name: 'verbatim query preservation',
       mutate: (source: string) =>
         source.replace(
-          'url.searchParams.append(key, values[key])',
-          'url.searchParams.set(key, values[key])',
+          'url: target + suffix + fragment',
+          'url: (() => { const url = new URL(target + suffix + fragment); url.search = url.searchParams.toString(); return url.href })()',
         ),
       verify: (module: typeof Redirect) => {
         const result = module.bookingSuccessRedirect(
           module.validateSuccessRedirect({
-            url: 'https://example.com?start=old',
+            url: 'https://example.com/?x=%zz&flag&a;b&start=old#done',
             parameters: ['start'],
           }),
           values,
         )
-        expect(new URL(result?.url as string).searchParams.getAll('start')).toEqual([
-          'old',
-          'new&value',
-        ])
+        expect(result?.url).toBe(
+          'https://example.com/?x=%zz&flag&a;b&start=old&start=new%26value#done',
+        )
       },
     },
     {
       name: 'correct parameter encoding',
       mutate: (source: string) =>
         source.replace(
-          'url.searchParams.append(key, values[key])',
-          "url.search = url.search + '&' + key + '=' + values[key]",
+          'new URLSearchParams(settings.parameters.map((key) => [key, values[key]]))',
+          "{ size: settings.parameters.length, toString: () => settings.parameters.map((key) => key + '=' + values[key]).join('&') }",
         ),
       verify: (module: typeof Redirect) => {
         const result = module.bookingSuccessRedirect(
@@ -137,6 +158,7 @@ describe('redirect source-copy mutation controls', () => {
   ])(
     'detects removed $name protection with a real assertion failure',
     async ({ mutate, verify }) => {
+      verify(Redirect)
       const copy = await sourceCopy(mutate)
       expect(() => verify(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
     },

@@ -10,7 +10,7 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0048_booking_success_redirect.sql'
+const migration = '0050_booking_success_redirect.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
 async function records(pool: pg.Pool) {
   const inventory = (
@@ -38,6 +38,7 @@ describe.skipIf(!serverUrl)('booking success redirect migration', () => {
       const files = (await readdir(migrationsDir))
         .filter((file) => file.endsWith('.sql') && file < migration)
         .sort()
+      expect(files).toContain('0048_api_key_scopes.sql')
       const early = files.filter((file) => file.slice(0, 4) <= '0012')
       for (const file of early) await copyFile(join(migrationsDir, file), join(predecessor, file))
       upgraded = await createTestDatabase(serverUrl as string, predecessor)
@@ -47,6 +48,26 @@ describe.skipIf(!serverUrl)('booking success redirect migration', () => {
         await copyFile(join(migrationsDir, file), join(predecessor, file))
       await runMigrations(pool, predecessor)
       await seedLater(pool)
+      expect(
+        (await pool.query('SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1')).rows,
+      ).toEqual([{ name: files.at(-1) }])
+      // Include keys created after 0048, with non-default scopes and retained metadata.
+      await pool.query(`
+        INSERT INTO auth.apikey ("configId",name,"referenceId",key,"createdAt","updatedAt",
+          metadata,"requestCount",remaining)
+        SELECT 'default','Redirect predecessor ' || scopes.scope,k."referenceId",
+          'synthetic-redirect-predecessor-' || scopes.scope,'2026-01-02T03:04:05.123456Z',
+          '2026-02-03T04:05:06.654321Z',json_build_object('scope',scopes.scope,
+            'organizationId',k.metadata::jsonb->>'organizationId','retained','preserve')::text,7,593
+        FROM (SELECT * FROM auth.apikey ORDER BY id LIMIT 1) k
+        CROSS JOIN (VALUES ('read'),('bookings')) AS scopes(scope)`)
+      expect(
+        (
+          await pool.query(
+            "SELECT DISTINCT metadata::jsonb->>'scope' AS scope FROM auth.apikey ORDER BY scope",
+          )
+        ).rows,
+      ).toEqual([{ scope: 'bookings' }, { scope: 'full' }, { scope: 'read' }])
       const before = await records(pool)
       expect(before['public.event_types']?.length).toBeGreaterThan(0)
       expect(before['public.bookings']?.length).toBeGreaterThan(0)

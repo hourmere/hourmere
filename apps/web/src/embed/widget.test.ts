@@ -91,14 +91,152 @@ describe('standalone booking widget', () => {
       'allow-forms',
       'allow-popups',
       'allow-popups-to-escape-sandbox',
-      'allow-top-navigation-by-user-activation',
       'allow-downloads',
     ])
       expect(sandbox.split(' ')).toContain(value)
     expect(sandbox.split(' ')).not.toContain('allow-top-navigation')
+    expect(sandbox.split(' ')).not.toContain('allow-top-navigation-by-user-activation')
     expect(new URL(mount('https://hourmere.test/team/Alpha/intro').iframe.src).pathname).toBe(
       '/embed/team/Alpha/intro',
     )
+  })
+  it('reveals a ready frame without granting parent navigation when the saved flag is false', () => {
+    const { iframe } = mount(),
+      src = new URL(iframe.src),
+      setSrc = vi.spyOn(iframe, 'src', 'set')
+    expect(iframe.inert).toBe(true)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: src.origin,
+        source: iframe.contentWindow,
+        data: {
+          type: 'hourmere:ready',
+          id: src.searchParams.get('embedId'),
+          allowEmbedParent: false,
+        },
+      }),
+    )
+    expect(iframe.inert).toBe(false)
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(setSrc).not.toHaveBeenCalled()
+  })
+  it('activates the saved parent opt-in before revealing the frame and ignores retired-document messages', () => {
+    const { iframe } = mount(),
+      initial = new URL(iframe.src),
+      setSrc = vi.spyOn(iframe, 'src', 'set'),
+      send = (id: string | null, allowEmbedParent: boolean) =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: initial.origin,
+            source: iframe.contentWindow,
+            data: { type: 'hourmere:ready', id, allowEmbedParent },
+          }),
+        )
+    send(initial.searchParams.get('embedId'), true)
+    expect(iframe.getAttribute('sandbox')?.split(' ')).toContain(
+      'allow-top-navigation-by-user-activation',
+    )
+    expect(iframe.getAttribute('sandbox')?.split(' ')).not.toContain('allow-top-navigation')
+    expect(setSrc).toHaveBeenCalledOnce()
+    const reloaded = new URL(iframe.src)
+    expect(reloaded.origin + reloaded.pathname).toBe(initial.origin + initial.pathname)
+    expect(reloaded.searchParams.get('parentOrigin')).toBe(initial.searchParams.get('parentOrigin'))
+    expect(reloaded.searchParams.get('language')).toBe(initial.searchParams.get('language'))
+    expect(reloaded.searchParams.get('embedId')).not.toBe(initial.searchParams.get('embedId'))
+    expect(initial.searchParams.get('parentRedirect')).toBe('disabled')
+    expect(reloaded.searchParams.get('parentRedirect')).toBe('enabled')
+    expect(iframe.inert).toBe(true)
+    send(initial.searchParams.get('embedId'), true)
+    expect(iframe.inert).toBe(true)
+    send(reloaded.searchParams.get('embedId'), true)
+    expect(iframe.inert).toBe(false)
+    send(reloaded.searchParams.get('embedId'), true)
+    expect(setSrc).toHaveBeenCalledOnce()
+  })
+  it('activates a restrictive document if the saved opt-in changes during reload and prevents loops', () => {
+    const { iframe } = mount(),
+      setSrc = vi.spyOn(iframe, 'src', 'set'),
+      send = (allowEmbedParent: boolean) => {
+        const src = new URL(iframe.src)
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: src.origin,
+            source: iframe.contentWindow,
+            data: {
+              type: 'hourmere:ready',
+              id: src.searchParams.get('embedId'),
+              allowEmbedParent,
+            },
+          }),
+        )
+      }
+    send(true)
+    send(false)
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(setSrc).toHaveBeenCalledTimes(2)
+    expect(new URL(iframe.src).searchParams.get('parentRedirect')).toBe('disabled')
+    expect(iframe.inert).toBe(true)
+    send(true)
+    expect(iframe.inert).toBe(false)
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    send(true)
+    send(false)
+    expect(setSrc).toHaveBeenCalledTimes(2)
+  })
+  it('refuses forged, malformed and navigation-bearing ready messages', () => {
+    const { iframe } = mount(),
+      other = mount(),
+      src = new URL(iframe.src),
+      id = src.searchParams.get('embedId'),
+      setSrc = vi.spyOn(iframe, 'src', 'set')
+    const message = { type: 'hourmere:ready', id, allowEmbedParent: true }
+    for (const [data, origin, source] of [
+      [message, 'https://attacker.example', iframe.contentWindow],
+      [message, src.origin, other.iframe.contentWindow],
+      [{ ...message, id: 'different-instance' }, src.origin, iframe.contentWindow],
+      [{ ...message, allowEmbedParent: 'true' }, src.origin, iframe.contentWindow],
+      [{ ...message, allowEmbedParent: 1 }, src.origin, iframe.contentWindow],
+      [{ ...message, allowEmbedParent: undefined }, src.origin, iframe.contentWindow],
+      [{ ...message, url: 'https://attacker.example' }, src.origin, iframe.contentWindow],
+    ])
+      window.dispatchEvent(
+        new MessageEvent('message', { data, origin: origin as string, source: source as Window }),
+      )
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(setSrc).not.toHaveBeenCalled()
+    expect(iframe.inert).toBe(true)
+  })
+  it('uses the same saved capability handshake for popup frames', () => {
+    stubDialogs()
+    openPopup({ url })
+    const iframe = popupRoot()?.querySelector('iframe') as HTMLIFrameElement,
+      initial = new URL(iframe.src)
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: initial.origin,
+        source: iframe.contentWindow,
+        data: {
+          type: 'hourmere:ready',
+          id: initial.searchParams.get('embedId'),
+          allowEmbedParent: true,
+        },
+      }),
+    )
+    expect(iframe.getAttribute('sandbox')).toContain('allow-top-navigation-by-user-activation')
+    const reloaded = new URL(iframe.src)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: reloaded.origin,
+        source: iframe.contentWindow,
+        data: {
+          type: 'hourmere:ready',
+          id: reloaded.searchParams.get('embedId'),
+          allowEmbedParent: true,
+        },
+      }),
+    )
+    expect(iframe.inert).toBe(false)
   })
   it.each([
     'javascript:alert(1)',
@@ -403,7 +541,13 @@ describe('standalone widget languages', () => {
     expect(handle.iframe.title).toBe('通过 Hourmere 预约会议')
     const query = new URL(handle.iframe.src).searchParams
     expect(query.get('language')).toBe('zh-CN')
-    expect([...query.keys()].sort()).toEqual(['embedId', 'language', 'parentOrigin'])
+    expect([...query.keys()].sort()).toEqual([
+      'embedId',
+      'language',
+      'parentOrigin',
+      'parentRedirect',
+    ])
+    expect(query.get('parentRedirect')).toBe('disabled')
   })
   it.each(['zh', 'EN', 'zh-TW', 'en-US', '__proto__', 'constructor', 'zh-CN&token=private'])(
     'rejects unsupported explicit language %s before replacing an existing frame',

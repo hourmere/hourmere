@@ -20,6 +20,7 @@ import {
   dispatchConferenceNotifications,
   sendBookingNotification,
 } from '../../packages/notifications/src/index.ts'
+import { validateSuccessRedirect } from '../../packages/scheduling/src/success-redirect.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 import {
   AUDIT_BOOKING_END,
@@ -43,6 +44,7 @@ export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
   auditState: () => Promise<AuditFixtureState>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
@@ -465,6 +467,19 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        configureSuccessRedirect: async (allowEmbedParent) => {
+          const settings = validateSuccessRedirect({
+            url: 'https://continuation.example/thanks?x=%zz&flag&a;b',
+            parameters: ['start'],
+            allowEmbedParent,
+          })
+          await db
+            .updateTable('event_types')
+            .set({ success_redirect: JSON.stringify(settings) })
+            .where('organization_id', '=', host.organizationId)
+            .where('slug', '=', 'call')
+            .execute()
+        },
         screenshotState: async () => {
           if (auditState || automaticMeet)
             throw new Error(

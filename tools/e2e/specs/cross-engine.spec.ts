@@ -50,7 +50,11 @@ test('embed popup booking and keyboard dismissal', async ({ page, app }) => {
   expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
   const safeMessages = await page.evaluate(() =>
     (window as unknown as { fixtureMessages: Record<string, unknown>[] }).fixtureMessages.every(
-      (message) => Object.keys(message).every((key) => ['type', 'id', 'height'].includes(key)),
+      (message) =>
+        message.type === 'hourmere:ready'
+          ? Object.keys(message).sort().join(',') === 'allowEmbedParent,id,type' &&
+            typeof message.allowEmbedParent === 'boolean'
+          : Object.keys(message).every((key) => ['type', 'id', 'height'].includes(key)),
     ),
   )
   expect(safeMessages).toBe(true)

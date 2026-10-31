@@ -357,6 +357,8 @@ export interface PublicEventType {
   location: { kind: LocationKind } | null
   questions: Question[]
   allowGuests: boolean
+  /** Only the saved parent-navigation opt-in; never the redirect target or parameters. */
+  allowEmbedParentRedirect?: boolean
   host: { name: string; timeZone?: string; image?: string }
   /** Every required host, without private identities or availability. */
   hosts?: { name: string; timeZone: string }[]
@@ -389,6 +391,7 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     allowGuests: et.allowGuests,
+    ...(et.successRedirect?.allowEmbedParent === true && { allowEmbedParentRedirect: true }),
     host: {
       name: et.hostName,
       ...(et.hostImage && { image: et.hostImage }),

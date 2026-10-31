@@ -50,6 +50,10 @@ export const PublicEventType = z
       description: 'Only the kind; details such as a phone number come with the booking',
     }),
     allowGuests: z.boolean().openapi({ description: 'Whether invitees may add guest recipients' }),
+    allowEmbedParentRedirect: z.boolean().optional().openapi({
+      description:
+        'Whether saved event-type settings permit user-activated continuation in the embedding parent. Omitted means false. No redirect URL or parameters are exposed.',
+    }),
     questions: z
       .array(Question)
       .openapi({ description: 'Booking-form fields beyond name and email' }),

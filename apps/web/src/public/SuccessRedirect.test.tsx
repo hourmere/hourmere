@@ -40,6 +40,82 @@ function expectNoContinue() {
 }
 
 describe('the saved booking success redirect', () => {
+  it.each([undefined, false, true])(
+    'announces only the saved parent-navigation capability after event load (%s)',
+    async (allowEmbedParentRedirect) => {
+      const postMessage = vi.fn(),
+        query =
+          '?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234&allowEmbedParent=true',
+        pending = later()
+      vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)
+      window.history.replaceState(null, '', `/embed/ada/intro${query}`)
+      fakeApi({
+        ...eventRoutes(EVENT, [START]),
+        'GET /api/v1/public/ada/intro': () => pending.response,
+      })
+      renderApp(`/embed/ada/intro${query}`)
+      expect(postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:ready')).toEqual([])
+      await pending.answer(json(200, { ...EVENT, allowEmbedParentRedirect }))
+      await screen.findByRole('heading', { name: 'Intro call' })
+      await waitFor(() =>
+        expect(postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:ready')).toEqual([
+          [
+            {
+              type: 'hourmere:ready',
+              id: 'abcdefghijklmnop1234',
+              allowEmbedParent: allowEmbedParentRedirect === true,
+            },
+            'https://parent.example',
+          ],
+        ]),
+      )
+    },
+  )
+  it('announces no parent navigation on event-load errors so the widget reveals its error view', async () => {
+    const postMessage = vi.fn(),
+      query = '?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234'
+    vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)
+    window.history.replaceState(null, '', `/embed/ada/intro${query}`)
+    fakeApi({
+      'GET /api/v1/public/ada/intro': () => json(503, { error: 'internal_error' }),
+    })
+    renderApp(`/embed/ada/intro${query}`)
+    await screen.findByRole('alert')
+    await waitFor(() =>
+      expect(postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:ready')).toEqual([
+        [
+          { type: 'hourmere:ready', id: 'abcdefghijklmnop1234', allowEmbedParent: false },
+          'https://parent.example',
+        ],
+      ]),
+    )
+  })
+  it.each([
+    ['parentRedirect=enabled', '_top', 'the parent page'],
+    ['parentRedirect=disabled', '_blank', 'a new tab'],
+    ['parentRedirect=true', '_blank', 'a new tab'],
+    ['parentRedirect=enabled&parentRedirect=enabled', '_blank', 'a new tab'],
+  ])(
+    'restricts saved parent opt-in to the active widget permission (%s)',
+    async (marker, target, context) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...eventRoutes(EVENT, [START]),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, {
+            booking: booking(),
+            manageToken: TOKEN,
+            successRedirect: { url: TARGET, allowEmbedParent: true },
+          }),
+      })
+      window.history.replaceState(null, '', `/embed/ada/intro?${marker}`)
+      renderApp(`/embed/ada/intro?${marker}`)
+      await submitBooking(user)
+      const link = await screen.findByRole('link', { name: CONTINUE })
+      expect(link.getAttribute('target')).toBe(target)
+      expect(screen.getByText(`Opens the host’s website in ${context}.`)).toBeDefined()
+    },
+  )
   it.each([
     { path: '/ada/intro', allowEmbedParent: false, target: null, context: 'this tab' },
     { path: '/embed/ada/intro', allowEmbedParent: false, target: '_blank', context: 'a new tab' },

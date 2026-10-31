@@ -13,9 +13,14 @@ describe('success redirect validation', () => {
     'https://',
     'https://user@example.com',
     'https://user:password@example.com',
+    'https://us%40er:pass%3Aword@example.com',
     'https://@example.com',
+    'https://:@example.com',
     'https://:password@example.com',
     'https://example.com\\@other.example',
+    'https://example.com/path\\segment',
+    'https://example.com/?query=back\\slash',
+    'https://example.com/#back\\slash',
     'https://exa\tmple.com',
     'https://example.com/\npath',
     ' https://example.com',
@@ -53,6 +58,34 @@ describe('success redirect validation', () => {
     expect(() =>
       validateSuccessRedirect({ url }, { publicUrl: 'https://example.com' }),
     ).toThrowError(/IP host/)
+  })
+  it.each([
+    'https://localhost',
+    'https://LOCALHOST.',
+    'https://a.localhost',
+    'https://a.b.localhost.',
+    'https://intranet',
+    'https://INTRANET.',
+  ])('rejects local host %s unless explicitly allowed or the instance own host', (url) => {
+    expect(() => validateSuccessRedirect({ url })).toThrowError(/localhost or a single-label/)
+    expect(validateSuccessRedirect({ url }, { allowIpHosts: true })?.url).toBe(new URL(url).href)
+    expect(validateSuccessRedirect({ url }, { publicUrl: new URL(url).origin })?.url).toBe(
+      new URL(url).href,
+    )
+    expect(() =>
+      validateSuccessRedirect({ url }, { publicUrl: 'https://example.com' }),
+    ).toThrowError(/localhost or a single-label/)
+  })
+  it('limits the own-host exception to the exact hostname', () => {
+    expect(() =>
+      validateSuccessRedirect(
+        { url: 'https://other.localhost' },
+        { publicUrl: 'https://app.localhost' },
+      ),
+    ).toThrowError(/localhost/)
+    expect(validateSuccessRedirect({ url: 'https://localhost.example.com' })?.url).toBe(
+      'https://localhost.example.com/',
+    )
   })
   it('normalizes IDN, Unicode path, casing and default ports with private defaults', () => {
     expect(validateSuccessRedirect({ url: 'HTTPS://例え.テスト:443/完了?x=1#done' })).toEqual({
@@ -159,5 +192,33 @@ describe('success redirect validation', () => {
     expect(url.searchParams.getAll('start')).toEqual(['old', '2026-11-02T09:00:00.000Z'])
     expect(url.hash).toBe('#thanks')
     expect(snapshot?.allowEmbedParent).toBe(true)
+  })
+  it.each([
+    ['https://example.com/p?x=%zz&flag&a;b#done', '&', '#done'],
+    ['https://example.com/p?x=%zz&flag&a;b', '&', ''],
+    ['https://example.com/p?#done', '&', '#done'],
+    ['https://example.com/p#done', '?', '#done'],
+    ['https://example.com/p#', '?', '#'],
+  ])('preserves the query verbatim when appending to %s', (target, separator, fragment) => {
+    const settings = validateSuccessRedirect({
+      url: target,
+      parameters: ['hostName', 'inviteeEmail'],
+      includeInviteePersonalData: true,
+    })
+    const values = {
+      eventTypeSlug: 'call',
+      start: 'start',
+      end: 'end',
+      timeZone: 'UTC',
+      hostName: 'A & B=東京',
+      inviteeName: 'Invitee',
+      inviteeEmail: 'a+b@example.com',
+    }
+    expect(bookingSuccessRedirect(settings, values)?.url).toBe(
+      `${target.slice(0, target.length - fragment.length)}${separator}hostName=A+%26+B%3D%E6%9D%B1%E4%BA%AC&inviteeEmail=a%2Bb%40example.com${fragment}`,
+    )
+    expect(bookingSuccessRedirect(validateSuccessRedirect({ url: target }), values)?.url).toBe(
+      target,
+    )
   })
 })

@@ -177,27 +177,41 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   )
     throw new Error('Invalid Hourmere embed container or height')
   const selectedLanguage = widgetLanguage(language)
-  const id = randomHex(16),
-    target = iframeUrl(url, window.location.origin, id, selectedLanguage)
+  let id = randomHex(16)
+  const target = iframeUrl(url, window.location.origin, id, selectedLanguage)
+  target.searchParams.set('parentRedirect', 'disabled')
   mounted.get(element)?.destroy()
   const iframe = document.createElement('iframe')
   iframe.title = widgetMessages(selectedLanguage).iframe
   iframe.referrerPolicy = 'no-referrer'
   iframe.setAttribute('allow', 'clipboard-write')
-  // The saved confirmation opt-in may show a _top link. It still needs a user click.
-  iframe.setAttribute(
-    'sandbox',
-    'allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation',
-  )
+  const sandbox =
+    'allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox'
+  iframe.setAttribute('sandbox', sandbox)
   iframe.setAttribute('loading', 'lazy')
+  iframe.inert = true
+  iframe.tabIndex = -1
   Object.assign(iframe.style, {
     width: '100%',
     height: `${height}px`,
     border: '0',
     display: 'block',
+    // Keep loading/error text visible and lazy loading eligible, while blocking input
+    // until saved settings are known and a possible reload can no longer discard it.
+    pointerEvents: 'none',
   })
   iframe.src = target.href
   let destroyed = false
+  let ready = false
+  let parentNavigation = false
+  let downgraded = false
+  const reload = () => {
+    // Window identity survives navigation. Rotate the correlation ID so queued messages
+    // from the retiring document cannot enable input in the new frame before it is ready.
+    id = randomHex(16)
+    target.searchParams.set('embedId', id)
+    iframe.src = target.href
+  }
   const receive = (event: MessageEvent<unknown>) => {
     if (
       destroyed ||
@@ -210,6 +224,34 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
       return
     const data = event.data as Record<string, unknown>
     if (data.id !== id) return
+    if (data.type === 'hourmere:ready') {
+      if (ready || Object.keys(data).length !== 3 || typeof data.allowEmbedParent !== 'boolean')
+        return
+      if (data.allowEmbedParent && !parentNavigation && !downgraded) {
+        parentNavigation = true
+        iframe.setAttribute('sandbox', `${sandbox} allow-top-navigation-by-user-activation`)
+        target.searchParams.set('parentRedirect', 'enabled')
+        // Sandbox changes affect the next document, not the active one. Reload only this
+        // validated URL before enabling input; ready messages never supply a URL.
+        reload()
+        return
+      }
+      if (!data.allowEmbedParent && parentNavigation) {
+        parentNavigation = false
+        downgraded = true
+        iframe.setAttribute('sandbox', sandbox)
+        target.searchParams.set('parentRedirect', 'disabled')
+        // A setting changed during the reload: activate the restrictive sandbox once.
+        // Further upgrades are ignored so changing settings cannot cause a reload loop.
+        reload()
+        return
+      }
+      ready = true
+      iframe.inert = false
+      iframe.removeAttribute('tabindex')
+      iframe.style.removeProperty('pointer-events')
+      return
+    }
     if (
       data.type === 'hourmere:resize' &&
       typeof data.height === 'number' &&

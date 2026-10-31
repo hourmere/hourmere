@@ -4107,6 +4107,8 @@ export interface components {
             };
         };
         PublicEventType: {
+            /** @description Whether saved event-type settings permit user-activated continuation in the embedding parent. Omitted means false. No redirect URL or parameters are exposed. */
+            allowEmbedParentRedirect?: boolean;
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
             description: string | null;

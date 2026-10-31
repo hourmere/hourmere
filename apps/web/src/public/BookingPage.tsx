@@ -33,7 +33,12 @@ import {
 } from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
 import { EventDescription } from './EventDescription.tsx'
-import { notifyEmbedBooked, useEmbedded } from './embed-context.ts'
+import {
+  embedParentRedirectAllowed,
+  notifyEmbedBooked,
+  notifyEmbedReady,
+  useEmbedded,
+} from './embed-context.ts'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import {
   CreateBookingLink,
@@ -97,6 +102,12 @@ function BookingPageContent({
     [handle, slug, team],
   )
   const [state, reload] = useRequest(load)
+  const embedded = useEmbedded()
+  const allowEmbedParent = state.status === 'ready' && state.data.allowEmbedParentRedirect === true
+  const loaded = state.status !== 'loading'
+  useEffect(() => {
+    if (embedded && loaded) notifyEmbedReady(allowEmbedParent)
+  }, [embedded, loaded, allowEmbedParent])
   usePageTitle(
     state.status === 'ready' ? literal(`${state.data.title} · ${state.data.host.name}`) : 'Booking',
   )
@@ -594,7 +605,7 @@ function Confirmation({
                 aria-describedby={redirectDescription}
                 target={
                   embedded
-                    ? confirmed.successRedirect.allowEmbedParent
+                    ? confirmed.successRedirect.allowEmbedParent && embedParentRedirectAllowed()
                       ? '_top'
                       : '_blank'
                     : undefined
@@ -607,7 +618,7 @@ function Confirmation({
             <p className="hint" id={redirectDescription}>
               {t(
                 embedded
-                  ? confirmed.successRedirect.allowEmbedParent
+                  ? confirmed.successRedirect.allowEmbedParent && embedParentRedirectAllowed()
                     ? 'Opens the host’s website in the parent page.'
                     : 'Opens the host’s website in a new tab.'
                   : 'Opens the host’s website in this tab.',
