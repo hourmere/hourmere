@@ -15,6 +15,9 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 const serverUrl = process.env.DATABASE_URL
 const migration = '0049_configurable_booking_messages.sql'
 const predecessorMigration = '0048_api_key_scopes.sql'
+const bookingWithReceipt = `SELECT b.id,b.organization_id FROM bookings b
+  WHERE EXISTS (SELECT FROM booking_notifications n WHERE n.booking_id=b.id)
+  ORDER BY b.id LIMIT 1`
 const defaultSettings = {
   reminders: [
     {
@@ -154,11 +157,8 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
     ).rejects.toMatchObject({ code: '23514' })
     return
   }
-  const selected = (
-    await pool.query<{ id: string; organization_id: string }>(
-      'SELECT id,organization_id FROM bookings ORDER BY id LIMIT 1',
-    )
-  ).rows[0] as { id: string; organization_id: string }
+  const selected = (await pool.query<{ id: string; organization_id: string }>(bookingWithReceipt))
+    .rows[0] as { id: string; organization_id: string }
   if (guard === 'snapshot marker') {
     await expect(
       pool.query(`UPDATE bookings SET notification_snapshot='{}' WHERE id=$1`, [selected.id]),
@@ -246,6 +246,51 @@ const guardMutations = [
 ] as const
 
 describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
+  it('selects a booking with a receipt even when the lowest UUID has none', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-message-receipt-selection-'))
+    let owned: TestDatabase | undefined
+    try {
+      owned = await predecessor(directory)
+      const pool = owned.pool
+      const receiptlessId = '00000000-0000-4000-8000-000000000000'
+      await pool.query(
+        `INSERT INTO bookings(id,organization_id,event_type_id,status,start_at,end_at,
+        title,source,cancelled_at)
+        SELECT $1,organization_id,event_type_id,'cancelled',start_at,end_at,'Receiptless fixture','web',now()
+        FROM bookings ORDER BY id LIMIT 1`,
+        [receiptlessId],
+      )
+      expect((await pool.query('SELECT id FROM bookings ORDER BY id LIMIT 1')).rows).toEqual([
+        { id: receiptlessId },
+      ])
+      expect(
+        (
+          await pool.query('SELECT recipient FROM booking_notifications WHERE booking_id=$1', [
+            receiptlessId,
+          ])
+        ).rows,
+      ).toEqual([])
+      const selected = (await pool.query<{ id: string }>(bookingWithReceipt)).rows[0]
+      expect(selected?.id).not.toBe(receiptlessId)
+      expect(
+        (
+          await pool.query('SELECT recipient FROM booking_notifications WHERE booking_id=$1', [
+            selected?.id,
+          ])
+        ).rows.length,
+      ).toBeGreaterThan(0)
+      await copyFile(join(migrationsDir, migration), join(directory, migration))
+      await runMigrations(pool, directory)
+      await verifyGuard(pool, 'receipt identity')
+    } finally {
+      try {
+        await owned?.drop()
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
+    }
+  }, 60_000)
+
   it.each(guardMutations)(
     'detects source-copy removal of %s',
     async (guard, original, broken) => {
@@ -443,9 +488,7 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
       await runMigrations(owned.pool, directory)
       const pool = owned.pool
       const selected = (
-        await pool.query<{ id: string; organization_id: string }>(
-          'SELECT id,organization_id FROM bookings ORDER BY id LIMIT 1',
-        )
+        await pool.query<{ id: string; organization_id: string }>(bookingWithReceipt)
       ).rows[0] as { id: string; organization_id: string }
       const eventId = (
         await pool.query<{ id: string }>('SELECT id FROM event_types ORDER BY id LIMIT 1')
