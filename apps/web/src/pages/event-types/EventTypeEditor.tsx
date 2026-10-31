@@ -12,7 +12,6 @@ import {
   type Schedule,
 } from '../../api/resources.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
-import { CopyButton } from '../../components/CopyButton.tsx'
 import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../components/forms.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
@@ -54,6 +53,7 @@ import {
 import { HostAssignment } from './HostAssignment.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
+import { SavedEventShare } from './SavedEventShare.tsx'
 import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
 interface Loaded {
@@ -155,6 +155,7 @@ function EventTypeForm({
   const [contextChanged, setContextChanged] = useState(false)
   const navigate = useNavigate()
   const message = useFlash()
+  const [shareFocusVersion, setShareFocusVersion] = useState(message ? 1 : 0)
   const [saved, setSaved] = useState<EventType | null>(eventType)
   const [baseline, setBaseline] = useState(() =>
     eventType
@@ -175,7 +176,7 @@ function EventTypeForm({
   const [status, setStatus] = useState<UiText>(message ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const mounted = useMounted()
-  const [readiness, retryReadiness, invalidateReadiness] = useEditorReadiness(
+  const [readiness, retryReadiness, invalidateReadiness, shareReadiness] = useEditorReadiness(
     me,
     saved,
     contextChanged,
@@ -237,7 +238,7 @@ function EventTypeForm({
         setBaseline(next)
         setDraft(next)
         setStatus('Saved.')
-        statusRef.current?.focus()
+        setShareFocusVersion((version) => version + 1)
       } else {
         const created = await unwrap(api.POST('/api/v1/event-types', { body, headers }))
         // Left meanwhile: don't pull the person away from the page they are on now.
@@ -303,7 +304,7 @@ function EventTypeForm({
           ? 'Round robin activated.'
           : 'Default availability saved. Activate round robin separately when ready.',
       )
-      statusRef.current?.focus()
+      setShareFocusVersion((version) => version + 1)
     } catch (error) {
       if (!mounted.current) return
       setStatus('')
@@ -354,6 +355,17 @@ function EventTypeForm({
         title={uiText(title)}
         lede={t('Set the booking details, questions and availability for this event type.')}
       />
+      {saved && (
+        <SavedEventShare
+          event={saved}
+          me={me}
+          profile={profile}
+          schedules={schedules}
+          disabled={contextChanged}
+          focusVersion={shareFocusVersion}
+          readiness={shareReadiness}
+        />
+      )}
       <form className="editor" onSubmit={submit} noValidate>
         <ErrorSummary
           errors={errors}
@@ -444,7 +456,9 @@ function EventTypeForm({
                             {previewPath.slice(previewPath.lastIndexOf('/'))}
                           </span>
                         </span>
-                        <CopyButton text={previewUrl} label={t('Copy link')} />
+                        {(dirty || !saved) && (
+                          <span>{t('Save your changes before sharing this address.')}</span>
+                        )}
                       </span>
                     ) : (
                       <span>{ui(slugPreview)}</span>
@@ -520,6 +534,7 @@ function EventTypeForm({
               </label>
               <label className="checkbox">
                 <input
+                  id="event-visibility"
                   type="checkbox"
                   checked={draft.isHidden}
                   onChange={(e) => {
