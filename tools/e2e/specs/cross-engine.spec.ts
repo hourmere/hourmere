@@ -37,7 +37,7 @@ test('embed popup booking and keyboard dismissal', async ({ page, app }) => {
   const dialog = page.getByRole('dialog')
   const frame = dialog.locator('iframe').contentFrame()
   await expect(frame.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
-  await frame.getByRole('button', { name: 'Next month' }).focus()
+  await frame.getByRole('button', { name: 'Next month', exact: true }).focus()
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(opener).toBeFocused()
