@@ -13,7 +13,8 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0048_configurable_booking_messages.sql'
+const migration = '0049_configurable_booking_messages.sql'
+const predecessorMigration = '0048_api_key_scopes.sql'
 const defaultSettings = {
   reminders: [
     {
@@ -68,6 +69,19 @@ async function predecessor(directory: string): Promise<TestDatabase> {
     await runMigrations(owned.pool, directory)
     await seedLater(owned.pool)
     await owned.pool.query(`
+      INSERT INTO auth.apikey ("configId",name,start,"referenceId",prefix,key,enabled,
+        "rateLimitEnabled","rateLimitTimeWindow","rateLimitMax","requestCount",remaining,
+        "createdAt","updatedAt",permissions,metadata)
+        SELECT "configId",'Scoped upgrade ' || scoped.scope,'hm_scoped_' || scoped.scope,
+          "referenceId",prefix,'synthetic-scoped-key-' || scoped.scope,scoped.enabled,
+          true,60000,600,scoped.requests,600-scoped.requests,"createdAt","updatedAt",permissions,
+          json_build_object('organizationId',metadata::jsonb->>'organizationId',
+            'scope',scoped.scope,'purpose','preserve scoped upgrade metadata',
+            'custom',json_build_object('labels',ARRAY['東京','upgrade'],
+              'ownerVisible',scoped.enabled))::text
+        FROM auth.apikey CROSS JOIN (VALUES
+          ('full',true,9),('read',true,23),('bookings',false,41)
+        ) AS scoped(scope,enabled,requests) WHERE name='Upgrade agent';
       INSERT INTO booking_notifications
         (booking_id,kind,recipient,outcome,suppression_reason,created_at)
         SELECT booking_id,'cancelled',recipient,'suppressed','recipient_hourly_limit',
@@ -257,7 +271,7 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
     60_000,
   )
 
-  it('preserves populated 0047 data, duration selections, default policy, tokens, queue and ledger; matches fresh install and reruns without writes', async () => {
+  it('preserves populated 0048 data, scoped keys, duration selections, default policy, tokens, queue and ledger; matches fresh install and reruns without writes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-message-predecessor-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -297,13 +311,43 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
       expect(before['public.booking_notifications']).toHaveLength(13)
       expect(before['public.notification_email_sends']).toHaveLength(2)
       expect(before['public.booking_conference_notifications']).toHaveLength(4)
+      expect(before['auth.apikey']).toHaveLength(5)
+      expect(
+        (
+          await pool.query(`SELECT metadata::jsonb->>'scope' AS scope,enabled,
+            "requestCount",remaining,metadata::jsonb->'custom' AS custom
+            FROM auth.apikey WHERE name LIKE 'Scoped upgrade %' ORDER BY scope`)
+        ).rows,
+      ).toEqual([
+        {
+          scope: 'bookings',
+          enabled: false,
+          requestCount: 41,
+          remaining: 559,
+          custom: { labels: ['東京', 'upgrade'], ownerVisible: false },
+        },
+        {
+          scope: 'full',
+          enabled: true,
+          requestCount: 9,
+          remaining: 591,
+          custom: { labels: ['東京', 'upgrade'], ownerVisible: true },
+        },
+        {
+          scope: 'read',
+          enabled: true,
+          requestCount: 23,
+          remaining: 577,
+          custom: { labels: ['東京', 'upgrade'], ownerVisible: true },
+        },
+      ])
       expect(
         (await pool.query('SELECT DISTINCT ical_version FROM bookings ORDER BY ical_version')).rows,
       ).toEqual([{ ical_version: 1 }, { ical_version: 2 }])
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
       ).toEqual({
-        name: '0047_event_type_durations.sql',
+        name: predecessorMigration,
       })
       expect(
         (
@@ -339,7 +383,7 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
       const started = performance.now()
       expect(await runMigrations(pool, directory)).toEqual([migration])
       console.info(
-        `0048 synthetic predecessor migration: ${(performance.now() - started).toFixed(1)} ms`,
+        `0049 synthetic predecessor migration: ${(performance.now() - started).toFixed(1)} ms`,
       )
       await verifyNoHistoricalMail(pool, tables, before)
       expect((await pool.query('SELECT notifications FROM event_types')).rows).toEqual(
@@ -536,6 +580,8 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
     'historical schedule',
     'duration list reset',
     'booking duration reset',
+    'scoped key metadata reset',
+    'scoped key scope rewrite',
   ] as const)(
     'detects source-copy %s mutation with the preservation assertions',
     async (mutation) => {
@@ -554,6 +600,13 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
           'booking duration reset': `UPDATE bookings b
             SET end_at=b.start_at+make_interval(mins=>e.duration_minutes)
             FROM event_types e WHERE e.id=b.event_type_id;`,
+          'scoped key metadata reset': `UPDATE auth.apikey
+            SET metadata=(metadata::jsonb-'purpose'-'custom')::text
+            WHERE name LIKE 'Scoped upgrade %';`,
+          'scoped key scope rewrite': `ALTER TABLE auth.apikey DISABLE TRIGGER api_key_scope_guard;
+            UPDATE auth.apikey SET metadata=(metadata::jsonb || '{"scope":"full"}'::jsonb)::text
+              WHERE metadata::jsonb->>'scope' IN ('read','bookings');
+            ALTER TABLE auth.apikey ENABLE TRIGGER api_key_scope_guard;`,
         }
         const check = async (sql: string) => {
           owned = await predecessor(directory)

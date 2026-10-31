@@ -699,7 +699,7 @@ for defaults, reserve and diagnostics.
 
 ## Configurable booking mail
 
-Migration 0048 adds event-type `notifications` settings and the immutable per-booking
+Migration 0049 adds event-type `notifications` settings and the immutable per-booking
 `notification_snapshot`. Existing types receive the previous all-recipient 24-hour reminder;
 existing bookings keep NULL, which always means that legacy default. Settings edits affect
 only new booking roots. Reschedules materialize or copy the predecessor snapshot and
@@ -726,10 +726,11 @@ scan bounded fair batches without resetting attempts or reviving terminal messag
 booking or message row lock spans SMTP. SMTP acceptance followed by a failed commit, or a
 cancellation after the final read, retains the existing unavoidable delivery race.
 
-The populated predecessor test starts at migration 0047 and verifies preservation of ordered
-allowed duration lists and bookings whose actual duration differs from the event default.
-It also compares the upgraded schema with a fresh install and verifies no-op reruns. See
-[the 0048 upgrade note](../packages/db/migrations/0048_configurable_booking_messages.md)
+The populated predecessor test starts at migration 0048 (`0048_api_key_scopes.sql`) and
+verifies preservation of scoped API keys, ordered allowed duration lists and bookings whose
+actual duration differs from the event default. It also compares the upgraded schema with a
+fresh install and verifies no-op reruns. See
+[the 0049 upgrade note](../packages/db/migrations/0049_configurable_booking_messages.md)
 for the required coordinated worker rollout.
 
 ## Booking webhooks
