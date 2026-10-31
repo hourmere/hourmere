@@ -13,7 +13,7 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0047_configurable_booking_messages.sql'
+const migration = '0048_configurable_booking_messages.sql'
 const defaultSettings = {
   reminders: [
     {
@@ -78,6 +78,15 @@ async function predecessor(directory: string): Promise<TestDatabase> {
       INSERT INTO notification_email_sends (recipient_hash,sent_at) VALUES
         (decode(repeat('ab',32),'hex'),now()-interval '10 minutes'),
         (NULL,now()-interval '20 minutes');
+      UPDATE event_types SET allowed_durations_minutes=ARRAY[60,15,30]
+        WHERE slug='upgrade-event-3';
+      UPDATE event_types SET allowed_durations_minutes=ARRAY[90,45]
+        WHERE slug='upgrade-collective-meet';
+      UPDATE bookings SET end_at=start_at+interval '60 minutes'
+        WHERE id=(SELECT b.id FROM bookings b JOIN event_types e ON e.id=b.event_type_id
+          WHERE e.slug='upgrade-event-3' AND b.status='confirmed' ORDER BY b.id LIMIT 1);
+      UPDATE bookings SET end_at=start_at+interval '90 minutes'
+        WHERE event_type_id=(SELECT id FROM event_types WHERE slug='upgrade-collective-meet');
       UPDATE bookings SET start_at='2025-01-01T09:00Z',end_at='2025-01-01T09:30Z'
         WHERE id=(SELECT id FROM bookings WHERE status='cancelled' ORDER BY id LIMIT 1);
     `)
@@ -248,7 +257,7 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
     60_000,
   )
 
-  it('preserves predecessor data, default policy, tokens, queue and ledger; matches fresh install and reruns without writes', async () => {
+  it('preserves populated 0047 data, duration selections, default policy, tokens, queue and ledger; matches fresh install and reruns without writes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-message-predecessor-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -294,13 +303,43 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
       ).toEqual({
-        name: '0046_current_inviter_signup.sql',
+        name: '0047_event_type_durations.sql',
       })
+      expect(
+        (
+          await pool.query(`SELECT slug,duration_minutes,allowed_durations_minutes
+            FROM event_types WHERE slug IN ('upgrade-event-3','upgrade-collective-meet')
+            ORDER BY slug`)
+        ).rows,
+      ).toEqual([
+        {
+          slug: 'upgrade-collective-meet',
+          duration_minutes: 45,
+          allowed_durations_minutes: [90, 45],
+        },
+        {
+          slug: 'upgrade-event-3',
+          duration_minutes: 30,
+          allowed_durations_minutes: [60, 15, 30],
+        },
+      ])
+      expect(
+        (
+          await pool.query(`SELECT e.slug,
+            extract(epoch FROM b.end_at-b.start_at)::integer/60 AS duration_minutes
+            FROM bookings b JOIN event_types e ON e.id=b.event_type_id
+            WHERE b.status='confirmed' AND b.end_at-b.start_at=interval '60 minutes'
+              OR e.slug='upgrade-collective-meet' ORDER BY e.slug`)
+        ).rows,
+      ).toEqual([
+        { slug: 'upgrade-collective-meet', duration_minutes: 90 },
+        { slug: 'upgrade-event-3', duration_minutes: 60 },
+      ])
       await copyFile(join(migrationsDir, migration), join(directory, migration))
       const started = performance.now()
       expect(await runMigrations(pool, directory)).toEqual([migration])
       console.info(
-        `0047 synthetic predecessor migration: ${(performance.now() - started).toFixed(1)} ms`,
+        `0048 synthetic predecessor migration: ${(performance.now() - started).toFixed(1)} ms`,
       )
       await verifyNoHistoricalMail(pool, tables, before)
       expect((await pool.query('SELECT notifications FROM event_types')).rows).toEqual(
@@ -492,28 +531,50 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
     }
   }, 60_000)
 
-  it.each(['ledger reseed', 'historical schedule'] as const)(
+  it.each([
+    'ledger reseed',
+    'historical schedule',
+    'duration list reset',
+    'booking duration reset',
+  ] as const)(
     'detects source-copy %s mutation with the preservation assertions',
     async (mutation) => {
       const directory = await mkdtemp(join(tmpdir(), 'hourmere-message-mutation-'))
       let owned: TestDatabase | undefined
       try {
-        owned = await predecessor(directory)
-        const tables = await inventory(owned.pool)
-        const before = await records(owned.pool, tables)
         const source = await readFile(join(migrationsDir, migration), 'utf8')
-        const broken =
-          mutation === 'ledger reseed'
-            ? `INSERT INTO notification_email_sends (recipient_hash,sent_at)
-            SELECT NULL,created_at FROM booking_notifications WHERE outcome='sent';`
-            : `INSERT INTO booking_scheduled_messages
+        const additions = {
+          'ledger reseed': `INSERT INTO notification_email_sends (recipient_hash,sent_at)
+            SELECT NULL,created_at FROM booking_notifications WHERE outcome='sent';`,
+          'historical schedule': `INSERT INTO booking_scheduled_messages
             (organization_id,booking_id,kind,rule_id,anchor_start_at,anchor_end_at,due_at,expires_at,next_attempt_at)
-            SELECT organization_id,id,'reminder','default-24h',start_at,end_at,start_at-interval '1 day',start_at,start_at-interval '1 day' FROM bookings;`
-        await writeFile(join(directory, migration), `${source}\n${broken}\n`)
-        expect(await runMigrations(owned.pool, directory)).toEqual([migration])
-        await expect(verifyNoHistoricalMail(owned.pool, tables, before)).rejects.toMatchObject({
+            SELECT organization_id,id,'reminder','default-24h',start_at,end_at,start_at-interval '1 day',start_at,start_at-interval '1 day' FROM bookings;`,
+          'duration list reset': `UPDATE event_types
+            SET allowed_durations_minutes=ARRAY[duration_minutes];`,
+          'booking duration reset': `UPDATE bookings b
+            SET end_at=b.start_at+make_interval(mins=>e.duration_minutes)
+            FROM event_types e WHERE e.id=b.event_type_id;`,
+        }
+        const check = async (sql: string) => {
+          owned = await predecessor(directory)
+          try {
+            const tables = await inventory(owned.pool)
+            const before = await records(owned.pool, tables)
+            await writeFile(join(directory, migration), sql)
+            expect(await runMigrations(owned.pool, directory)).toEqual([migration])
+            await verifyNoHistoricalMail(owned.pool, tables, before)
+            expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
+          } finally {
+            await owned.drop()
+            owned = undefined
+            await rm(join(directory, migration), { force: true })
+          }
+        }
+        await check(source)
+        await expect(check(`${source}\n${additions[mutation]}\n`)).rejects.toMatchObject({
           name: 'AssertionError',
         })
+        await check(source)
       } finally {
         try {
           await owned?.drop()

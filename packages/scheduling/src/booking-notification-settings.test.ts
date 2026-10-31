@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import type { EnqueueOptions } from '@hourmere/jobs'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { bookingNotifier } from '../../notifications/src/index.ts'
+import { enqueueScheduledBookingEmails } from '../../notifications/src/scheduled.ts'
 import * as bookings from './bookings.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import {
@@ -73,7 +75,8 @@ async function sourceCopy<T>(
   names: string[],
   replacement: Replacement,
 ): Promise<T> {
-  let source = readFileSync(`packages/scheduling/src/${filename}`, 'utf8')
+  const moduleUrl = new URL(filename, import.meta.url)
+  let source = readFileSync(moduleUrl, 'utf8')
   expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
   source = stripTypeScriptTypes(source.replace(...replacement))
   const dependencies: Record<string, unknown> = {}
@@ -81,7 +84,7 @@ async function sourceCopy<T>(
   for (const item of imports) {
     const specifier = item[2] as string
     const imported = await import(
-      specifier.startsWith('.') ? new URL(specifier, import.meta.url).href : specifier
+      specifier.startsWith('.') ? new URL(specifier, moduleUrl).href : specifier
     )
     for (const binding of (item[1] as string)
       .split(',')
@@ -600,6 +603,145 @@ describe.skipIf(!serverUrl)('booking notification settings storage', () => {
   it.each(['host', 'invitee'] as const)(
     '%s reschedule materializes the immutable default of a legacy null snapshot',
     (kind) => verifyReschedule(kind, bookings, true),
+  )
+
+  async function verifyActualDuration(
+    kind: 'host' | 'invitee',
+    module: BookingModule = bookings,
+    enqueue = enqueueScheduledBookingEmails,
+  ) {
+    const b = await setup()
+    await db
+      .updateTable('event_types')
+      .set({ duration_minutes: 30, allowed_durations_minutes: [15, 30, 60] })
+      .where('id', '=', b.eventTypeId)
+      .execute()
+    const queued = new Map<string, string | undefined>()
+    const queue = {
+      enqueue: async (_name: string, payload: object, options?: EnqueueOptions) => {
+        if ('messageId' in payload)
+          queued.set(payload.messageId as string, options?.startAfter?.toString())
+        return randomUUID()
+      },
+    }
+    const notify: BookingNotifier =
+      enqueue === enqueueScheduledBookingEmails
+        ? bookingNotifier(queue)
+        : async (trx, event, now) => {
+            if (event.type !== 'cancelled') await enqueue(queue, trx, event.bookingId, now)
+          }
+    const context = publicContext(notify)
+    const assertMessages = async (bookingId: string, start: string, end: string) => {
+      expect(await savedSnapshot(bookingId)).toEqual(createNotificationSnapshot(CUSTOM))
+      const rows = await messageRows(bookingId)
+      expect(rows).toHaveLength(3)
+      for (const row of rows) {
+        const rule = [...CUSTOM.reminders, ...CUSTOM.followUps].find(
+          (candidate) => candidate.id === row.rule_id,
+        )
+        if (!rule) throw new Error('Unknown notification rule')
+        const due =
+          row.kind === 'reminder'
+            ? Temporal.Instant.from(start).subtract({ minutes: rule.offsetMinutes })
+            : Temporal.Instant.from(end).add({ minutes: rule.offsetMinutes })
+        expect(row.anchor_start_at.toISOString()).toBe(start)
+        expect(row.anchor_end_at.toISOString()).toBe(end)
+        expect(row.due_at.getTime()).toBe(due.epochMilliseconds)
+        expect(row.next_attempt_at.getTime()).toBe(due.epochMilliseconds)
+        expect(row.expires_at.getTime()).toBe(
+          row.kind === 'reminder'
+            ? Temporal.Instant.from(start).epochMilliseconds
+            : due.add({ hours: 24 }).epochMilliseconds,
+        )
+        expect(row.state).toBe('pending')
+        expect(queued.get(row.id)).toBe(due.toString())
+      }
+    }
+    const created = await module.createPublicBooking(context, { ...b.input, durationMinutes: 60 })
+    await assertMessages(created.booking.id, '2026-11-02T09:00:00.000Z', '2026-11-02T10:00:00.000Z')
+    // Neither a changed default/list nor a new mail policy rewrites an existing booking.
+    await updateEventType(b.service, b.eventTypeId, {
+      durationMinutes: 15,
+      allowedDurationsMinutes: [15, 30],
+    })
+    await setEventTypeNotifications(b.service, b.eventTypeId, CHANGED)
+    const move = async (
+      previous: bookings.BookingWithToken,
+      start: string,
+      durationMinutes?: number,
+    ) => {
+      const pending =
+        kind === 'host'
+          ? module.rescheduleHostBooking({ ...b.service, notify }, previous.booking.id, {
+              start: Temporal.Instant.from(start),
+              durationMinutes,
+            })
+          : module.rescheduleManagedBooking(context, previous.manageToken as string, {
+              start: Temporal.Instant.from(start),
+              durationMinutes,
+            })
+      await expect(pending).resolves.toHaveProperty('booking.id')
+      return pending
+    }
+    const preserved = await move(created, '2026-11-02T11:00:00Z')
+    await assertMessages(
+      preserved.booking.id,
+      '2026-11-02T11:00:00.000Z',
+      '2026-11-02T12:00:00.000Z',
+    )
+    const replaced = await move(preserved, '2026-11-02T13:00:00Z', 15)
+    await assertMessages(
+      replaced.booking.id,
+      '2026-11-02T13:00:00.000Z',
+      '2026-11-02T13:15:00.000Z',
+    )
+    for (const previous of [created, preserved]) {
+      const rows = await messageRows(previous.booking.id)
+      expect(rows).toHaveLength(3)
+      expect(
+        rows.every((row) => row.state === 'skipped' && row.skip_reason === 'booking_replaced'),
+      ).toBe(true)
+    }
+    expect(queued.size).toBe(9)
+  }
+
+  it.each(['host', 'invitee'] as const)(
+    '%s reschedule recomputes real notifier offsets from the actual non-default booking duration',
+    (kind) => verifyActualDuration(kind),
+  )
+
+  it('detects follow-ups anchored to the event default with a real assertion failure', async () => {
+    const copy = await sourceCopy<{
+      enqueueScheduledBookingEmails: typeof enqueueScheduledBookingEmails
+    }>(
+      '../../notifications/src/scheduled.ts',
+      ['enqueueScheduledBookingEmails'],
+      [
+        'instant(booking.end_at).add({ minutes: rule.offsetMinutes })',
+        'instant(booking.start_at).add({ minutes: 30 + rule.offsetMinutes })',
+      ],
+    )
+    await expect(
+      verifyActualDuration('invitee', bookings, copy.enqueueScheduledBookingEmails),
+    ).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it.each<Replacement>([
+    ['end_at: b.end.toString(),', 'end_at: b.start.add({ minutes: 30 }).toString(),'],
+    [
+      "toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })",
+      'eventType.duration_minutes',
+    ],
+  ])(
+    'detects default duration substitution in %s with a real assertion failure',
+    async (from, to) => {
+      const copy = await sourceCopy<BookingModule>('bookings.ts', BOOKING_EXPORTS, [from, to])
+      await expect(verifyActualDuration('host', copy)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
   )
 
   async function verifyCancel(

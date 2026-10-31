@@ -1,5 +1,9 @@
 Schema-break upgrade: Stop every old web, all-role and worker process before applying this migration; restart all roles on the matching new code before enabling custom notification settings.
 
+Migration `0048_configurable_booking_messages.sql` follows published migration
+`0047_event_type_durations.sql`. Existing ordered duration choices and actual booking
+start/end instants are preserved, including bookings using a non-default duration.
+
 Existing event types receive the exact previous all-recipient 24-hour reminder policy,
 including hidden, inactive and deleted types. Existing bookings retain a NULL snapshot:
 this means the immutable previous default policy, not inheritance from current settings.
@@ -29,8 +33,10 @@ rows and the index builds process and sort their keys. Plan for work growing wit
 event-type and retained receipt counts, with additional sort and I/O cost for the indexes;
 the receipt index can dominate on large installations. Allow downtime for the entire
 migration and test its duration on a restored production-size backup before upgrading.
-The automated predecessor fixture verifies preservation and reports its measured migration
-duration; its small synthetic dataset does not predict production lock time.
+The automated predecessor fixture starts at migration 0047 with populated multi-duration
+event types and non-default booking durations, verifies preservation, fresh-install schema
+equivalence and no-op reruns, and reports its measured migration duration; its small
+synthetic dataset does not predict production lock time.
 
 The SQL retains atomic validation and index creation. Adding CHECKs as NOT VALID and
 validating later within this same transaction, or creating the booking index after its
