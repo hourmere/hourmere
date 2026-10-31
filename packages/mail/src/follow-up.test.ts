@@ -179,15 +179,23 @@ function verifyPrivacy(render: Render = followUpEmail) {
     for (const body of [message.text, message.html ?? '']) {
       expect(body).not.toMatch(/meet\.example|Google Meet|token=|Private question|Private answer/)
       expect(body).not.toContain('charles@example.test')
-      expect(body.includes(bookingUrl)).toBe(recipient.role === 'host')
     }
+    verifyExactBookingLink(message, recipient.role === 'host')
   }
+}
+
+function verifyExactBookingLink(message: MailMessage, isHost: boolean) {
+  const lines = message.text.split('\n').filter((line) => line.startsWith('Open in Hourmere:'))
+  const links = [...(message.html ?? '').matchAll(/<a\b[^>]*\bhref="([^"]*)"/g)].map(
+    (match) => match[1],
+  )
+  expect(lines).toEqual(isHost ? [`Open in Hourmere: ${bookingUrl}`] : [])
+  expect(links).toEqual(isHost ? [bookingUrl] : [])
 }
 
 function verifyBookingLinks(render: Render = followUpEmail) {
   const message = render(meeting, host, { bookingUrl })
-  expect(message.text).toContain(bookingUrl)
-  expect(message.html).toContain(`href="${bookingUrl}"`)
+  verifyExactBookingLink(message, true)
   for (const unsafe of ['javascript:alert(1)', 'data:text/html,test', '//outside.example.test']) {
     const rejected = render(meeting, host, { bookingUrl: unsafe })
     expect(rejected.text).not.toContain(unsafe)
