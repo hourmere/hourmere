@@ -52,7 +52,7 @@ test('a collective popup embeds the shared slots and records both hosts with sou
       await frame.locator('.slots button').first().click()
       break
     }
-    await frame.getByRole('button', { name: 'Next month' }).click()
+    await frame.getByRole('button', { name: 'Next month', exact: true }).click()
   }
   await frame.getByLabel('Your name', { exact: true }).fill('Fixture Invitee')
   await frame.getByLabel('Email', { exact: true }).fill('fixture-invitee@hourmere.invalid')
