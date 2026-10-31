@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFixtures, type Fixtures } from './testing.ts'
 import {
   cleanupWaitlist,
@@ -209,6 +209,79 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
     ])
       await expect(joinWaitlist(ctx, bad as typeof base)).rejects.toBeInstanceOf(Error)
     expect(await countRequests()).toBe(0)
+  })
+
+  it.each(['start', 'end'] as const)(
+    'rejects huge malformed %s before parsing instants or admitting mail',
+    async (field) => {
+      const et = await event(),
+        base = input(et)
+      const parseInstant = vi.spyOn(Temporal.Instant, 'from')
+      try {
+        for (const value of ['T'.repeat(100_000), `2026-11-02T00:00:00.${'1'.repeat(100_000)}Z`]) {
+          await expect(
+            joinWaitlist(ctx, {
+              ...base,
+              preferredWindow: { ...base.preferredWindow, [field]: value },
+            }),
+          ).rejects.toMatchObject({ code: 'invalid_waitlist_input' })
+        }
+        expect(parseInstant.mock.calls.length).toBe(0)
+        expect(await countRequests()).toBe(0)
+        expect(await db.selectFrom('waitlist_entries').select('id').execute()).toHaveLength(0)
+        expect(
+          await db.selectFrom('waitlist_verification_outbox').select('id').execute(),
+        ).toHaveLength(0)
+      } finally {
+        parseInstant.mockRestore()
+      }
+    },
+  )
+
+  it.each(['start', 'end'] as const)(
+    'requires the complete RFC3339 shape for %s despite permissive Temporal parsing',
+    async (field) => {
+      const et = await event(),
+        base = input(et)
+      const date = field === 'start' ? '2026-11-02' : '2026-11-30'
+      // Temporal also accepts these ISO8601 forms; the service contract requires RFC3339.
+      for (const value of [
+        `${date.replaceAll('-', '')}T000000Z`,
+        `${date}T00:00Z`,
+        `${date}T00:00:00+0000`,
+        `${date}T00:00:00Z[UTC]`,
+      ]) {
+        expect(() => Temporal.Instant.from(value)).not.toThrow()
+        await expect(
+          joinWaitlist(ctx, {
+            ...base,
+            preferredWindow: { ...base.preferredWindow, [field]: value },
+          }),
+        ).rejects.toMatchObject({ code: 'invalid_waitlist_input' })
+      }
+      expect(await countRequests()).toBe(0)
+      expect(await db.selectFrom('waitlist_entries').select('id').execute()).toHaveLength(0)
+    },
+  )
+
+  it('accepts RFC3339 offsets and bounded fractions and stores UTC milliseconds', async () => {
+    const et = await event(),
+      base = input(et)
+    await expect(
+      joinWaitlist(ctx, {
+        ...base,
+        preferredWindow: {
+          ...base.preferredWindow,
+          start: '2026-11-02T01:00:00.123456789+01:00',
+          end: '2026-11-30T01:00:00.1+01:00',
+        },
+      }),
+    ).resolves.toEqual({ accepted: true })
+    const row = await entry()
+    expect(row.window_start?.toISOString()).toBe('2026-11-02T00:00:00.123Z')
+    expect(row.window_end?.toISOString()).toBe('2026-11-30T00:00:00.100Z')
+    expect(row.expires_at.toISOString()).toBe('2026-11-30T00:00:00.100Z')
+    expect(await countRequests()).toBe(1)
   })
 
   it('requires enabled supported single-host events; supported teams use the same lifecycle', async () => {

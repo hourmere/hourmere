@@ -232,14 +232,22 @@ function emailValue(value: unknown): string {
   if (!email || !z.email().safeParse(email).success) throw invalidInput()
   return email
 }
+
+// Bound both the input and every repetition before Temporal parses calendar semantics.
+// Nanosecond precision plus an explicit offset is the longest supported form (35 chars).
+const RFC3339_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/i
+function isRfc3339Instant(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 35 && RFC3339_INSTANT.test(value)
+}
+
 function parseInput(input: JoinWaitlistInput) {
   const email = emailValue(input.email)
   const name = input.name === undefined ? null : cleanText(input.name, { max: 200 })
   if (name === undefined || input.consent !== true) throw invalidInput()
   try {
     if (
-      !/T.*(?:Z|[+-]\d\d:\d\d)$/i.test(input.preferredWindow.start) ||
-      !/T.*(?:Z|[+-]\d\d:\d\d)$/i.test(input.preferredWindow.end)
+      !isRfc3339Instant(input.preferredWindow.start) ||
+      !isRfc3339Instant(input.preferredWindow.end)
     )
       throw invalidInput()
     const start = Temporal.Instant.from(input.preferredWindow.start)
