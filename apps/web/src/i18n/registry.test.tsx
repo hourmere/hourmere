@@ -14,6 +14,7 @@ import {
   signedInAs,
 } from '../test/fake-api.tsx'
 import { booking, EVENT, eventRoutes } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { registerCatalogues } from './catalogues.ts'
 import { formatDuration, formatMinutes } from './duration.ts'
 import { AccountLanguage, LanguageSwitcher, useI18n } from './runtime.tsx'
@@ -191,7 +192,7 @@ describe('a locale registered only by metadata and catalogue files', () => {
     })
     renderApp('/ada/intro')
     await screen.findByRole('heading', { name: 'Intro call' })
-    await user.selectOptions(screen.getByLabelText('Interface language'), fixture)
+    await selectPublicLanguage(user, fixture)
     const date = new Intl.DateTimeFormat('de-DE', {
       calendar: 'gregory',
       timeZone: 'UTC',

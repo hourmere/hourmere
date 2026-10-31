@@ -49,7 +49,13 @@ export function ZoomMeetingFields({
       </p>
       {!enabled && <p>{t('Automatic Zoom meetings are disabled on this instance.')}</p>}
       {!ownHost && (
-        <p>{t('The assigned host must configure Zoom in their own signed-in session.')}</p>
+        <p>
+          {t(
+            draft.schedulingType === 'individual'
+              ? 'The assigned host must configure Zoom in their own signed-in session.'
+              : 'Automatic Zoom supports individual meetings with exactly one host.',
+          )}
+        </p>
       )}
       {draft.autoCreateZoom && enabled && ownHost && (
         <ZoomAccounts draft={draft} errors={errors} set={set} />

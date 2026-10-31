@@ -1,5 +1,5 @@
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import {
   type EventType,
   loadEventTypes,
@@ -45,6 +45,16 @@ export function EventTypesPage() {
   const me = useMe()
   const [state, reload] = useLoad(loadPage)
   const message = useFlash()
+  const [search] = useSearchParams()
+  const hostUserId = !me.organization.personal ? search.get('hostUserId') : null
+  const eventTypes =
+    state.status === 'ready'
+      ? state.data.eventTypes.filter(
+          (event) =>
+            !hostUserId ||
+            (event.ownerUserId === null && event.hosts.some((host) => host.userId === hostUserId)),
+        )
+      : []
 
   return (
     <>
@@ -95,10 +105,21 @@ export function EventTypesPage() {
               </p>
             </div>
           )}
-          {state.data.eventTypes.length === 0 ? (
+          {hostUserId && (
+            <p>
+              {t('Showing team events with this member as a host or pool candidate.')}{' '}
+              <Link to={PATHS.eventTypes}>{t('Show all event types')}</Link>
+            </p>
+          )}
+          {eventTypes.length === 0 ? (
             <EmptyState
-              title={t('You have no event types yet. Create one to start taking bookings.')}
+              title={t(
+                hostUserId
+                  ? 'This member does not host any team events.'
+                  : 'You have no event types yet. Create one to start taking bookings.',
+              )}
               action={
+                !hostUserId &&
                 !me.organization.personal && (
                   <Link to={PATHS.newEventType} className="button">
                     {t('Create your first event type')}
@@ -107,11 +128,7 @@ export function EventTypesPage() {
               }
             />
           ) : (
-            <EventTypeTable
-              eventTypes={state.data.eventTypes}
-              me={me}
-              profile={state.data.profile}
-            />
+            <EventTypeTable eventTypes={eventTypes} me={me} profile={state.data.profile} />
           )}
         </>
       )}

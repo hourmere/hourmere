@@ -8,6 +8,11 @@ emails are available in English, Simplified Chinese, German, French, Spanish and
 and sign-in interfaces remain available in English and Simplified Chinese. The language control is
 available on sign-in, account and standalone public booking pages.
 
+On standalone public pages and the email sign-in confirmation page, open the globe button
+beside the current language to choose another language. The current choice has a check mark.
+Use Enter or Space to open the menu, arrow keys to move between languages, and Escape to
+close it and return focus to the button.
+
 German, French, Spanish and Brazilian Portuguese translations are AI-assisted (machine-translated) and have not yet
 been reviewed by a native speaker. Corrections are welcome through a GitHub issue or pull request.
 German regional preferences such as `de-AT` and `de-CH` resolve to `de`.

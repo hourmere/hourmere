@@ -11,6 +11,7 @@ import {
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { chooseLanguage } from './store.ts'
 import { dateMessage, msg, translateMessage } from './translate.ts'
 
@@ -44,7 +45,7 @@ describe('Brazilian Portuguese public booking language', () => {
     })
     renderApp('/ada/intro')
     await screen.findByRole('heading', { name: 'Intro call' })
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'pt-BR')
+    await selectPublicLanguage(user, 'pt-BR')
     expect(screen.getByRole('heading', { name: 'Escolha um horário' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'novembro de 2026' })).toBeDefined()
     await completeBooking(user)
@@ -98,7 +99,9 @@ describe('Brazilian Portuguese public booking language', () => {
       })
       renderApp('/ada/intro')
       await screen.findByRole('button', { name: day })
-      expect(screen.getByLabelText<HTMLSelectElement>('Idioma da interface').value).toBe('pt-BR')
+      expect(screen.getByRole('button', { name: /Português \(Brasil\)/ }).textContent).toContain(
+        'Português (Brasil)',
+      )
       const zone = screen.getByRole('button', { name: /Fuso horário/ })
       expect(zone.textContent).toContain('Europe/Paris')
       expect(zone.textContent).toContain('GMT+01:00')
@@ -254,7 +257,9 @@ describe('Brazilian Portuguese public booking language', () => {
     fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
     renderApp('/ada/intro')
     expect(await screen.findByRole('heading', { name: 'Pick a time' })).toBeDefined()
-    expect(screen.getByLabelText<HTMLSelectElement>('Interface language').value).toBe('en')
+    expect(screen.getByRole('button', { name: 'Language: English' }).textContent).toContain(
+      'English',
+    )
     document.documentElement.lang = 'pt-PT'
     expect(widgetLanguage()).toBe('en')
   })

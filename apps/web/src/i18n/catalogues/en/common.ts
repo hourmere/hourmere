@@ -106,6 +106,7 @@ export const common = {
   ' (primary)': ' (primary)',
   ' (personal)': ' (personal)',
   'Interface language': 'Interface language',
+  'Language: {0}': 'Language: {0}',
   '. If it was moved to another time, the new booking has its own link.':
     '. If it was moved to another time, the new booking has its own link.',
   '(optional, shared with your host)': '(optional, shared with your host)',

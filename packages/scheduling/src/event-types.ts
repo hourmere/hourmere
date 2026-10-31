@@ -947,18 +947,18 @@ function validHosts(value: unknown, mode: string, personalOwnerId: string | null
   return ids.sort()
 }
 
-/** Host assignment exposes names and IDs only to current owners/admins, one page at a time. */
+/** Host assignment exposes names and stable member/user IDs to current owners/admins. */
 export async function listEventTypeHosts(
   ctx: ServiceContext,
   input: CatalogPageInput = {},
-): Promise<CatalogPage<{ id: string; name: string }>> {
+): Promise<CatalogPage<{ id: string; memberId: string; name: string }>> {
   const { personalOwnerId, canManageTeam } = await access(ctx.db, ctx)
   if (personalOwnerId !== ctx.principal.user.id && !canManageTeam) throw insufficientRole()
   const { limit, after } = checkedCatalogPage(input)
   let query = ctx.db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
-    .select(['u.id', 'u.name'])
+    .select(['u.id', 'm.id as memberId', 'u.name'])
     .where('m.organizationId', '=', ctx.principal.organization.id)
     .where('u.emailVerified', '=', true)
   if (after !== undefined) query = query.where('u.id', '>', after)

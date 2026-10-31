@@ -15,8 +15,8 @@ const webMark = readFileSync(
   'utf8',
 )
 const languages = [
-  ['en', 'Sign in to Hourmere', 'Interface language'],
-  ['zh-CN', '登录 Hourmere', '界面语言'],
+  ['en', 'Sign in to Hourmere', 'Language: English', 'English'],
+  ['zh-CN', '登录 Hourmere', '语言：简体中文', '简体中文'],
 ] as const
 
 function elements(html: string): Element[] {
@@ -37,6 +37,10 @@ const text = (element: Element | undefined): string =>
   element?.childNodes
     .map((child) => ('value' in child ? child.value : 'tagName' in child ? text(child) : ''))
     .join('') ?? ''
+const descendants = (element: Element | undefined): Element[] =>
+  element?.childNodes.flatMap((child) =>
+    'tagName' in child ? [child, ...descendants(child)] : [],
+  ) ?? []
 
 // These are static declarations from this small self-contained stylesheet. Restrict each
 // lookup to one rule so a token or property elsewhere cannot make an assertion pass.
@@ -96,7 +100,7 @@ async function content(language: string) {
 describe('branded sign-in confirmation appearance', () => {
   it.each(languages)(
     'renders the sign-in card and controls in %s',
-    async (language, title, label) => {
+    async (language, title, label, nativeName) => {
       const { nodes } = await content(language)
       const main = nodes.find((element) => element.tagName === 'main')
       const card = nodes.find((element) => hasClass(element, 'card'))
@@ -105,7 +109,9 @@ describe('branded sign-in confirmation appearance', () => {
       const heading = nodes.find((element) => attribute(element, 'id') === 'page-title')
       const header = nodes.find((element) => hasClass(element, 'card-header'))
       const picker = nodes.find((element) => hasClass(element, 'language-picker'))
-      const controls = nodes.find((element) => attribute(element, 'id') === 'language-select')
+      const controls = nodes.find((element) => attribute(element, 'id') === 'language-trigger')
+      const menu = nodes.find((element) => attribute(element, 'id') === 'language-menu')
+      const current = nodes.find((element) => attribute(element, 'id') === 'language-current')
       const form = nodes.find((element) => attribute(element, 'id') === 'confirm')
       expect(main && hasClass(main, 'centered')).toBe(true)
       expect(card?.parentNode).toBe(main)
@@ -117,19 +123,33 @@ describe('branded sign-in confirmation appearance', () => {
       expect(heading?.parentNode).toBe(card)
       expect(text(heading)).toBe(title)
       expect(picker?.parentNode).toBe(header)
-      expect(picker?.tagName).toBe('label')
+      expect(picker?.tagName).toBe('div')
       expect(controls?.parentNode).toBe(picker)
-      expect(controls?.tagName).toBe('select')
+      expect(controls?.tagName).toBe('button')
       expect(attribute(controls, 'aria-label')).toBe(label)
+      expect(attribute(controls, 'type')).toBe('button')
+      expect(attribute(controls, 'aria-haspopup')).toBe('menu')
+      expect(attribute(controls, 'aria-controls')).toBe('language-menu')
+      expect(attribute(controls, 'aria-expanded')).toBe('false')
+      expect(text(current)).toBe(nativeName)
+      expect(attribute(current, 'lang')).toBe(language)
+      expect(attribute(menu, 'hidden')).toBe('')
+      expect(attribute(menu, 'role')).toBe('menu')
+      expect(attribute(menu, 'aria-labelledby')).toBe('language-trigger')
       const options = nodes.filter(
-        (element) => element.tagName === 'option' && element.parentNode === controls,
+        (element) => attribute(element, 'role') === 'menuitemradio' && element.parentNode === menu,
       )
       expect(options).toHaveLength(2)
       for (const option of options) {
-        expect(attribute(option, 'value')).toBe(attribute(option, 'lang'))
-        expect(attribute(option, 'selected')).toBe(
-          attribute(option, 'lang') === language ? '' : undefined,
+        expect(attribute(option, 'type')).toBe('button')
+        expect(attribute(option, 'tabindex')).toBe('-1')
+        const selected = attribute(option, 'lang') === language
+        expect(attribute(option, 'aria-checked')).toBe(String(selected))
+        const check = descendants(option).find(
+          (element) => attribute(element, 'data-language-check') !== undefined,
         )
+        expect(attribute(check, 'aria-hidden')).toBe('true')
+        expect(text(check)).toBe(selected ? '✓' : '')
       }
       expect(attribute(form, 'method')).toBe('get')
       expect(attribute(form, 'action')).toBe('/api/auth/magic-link/verify')
@@ -157,7 +177,7 @@ describe('branded sign-in confirmation appearance', () => {
       expect(card).toMatchObject({ width: '100%', 'max-width': '420px' })
       expect(resolve(card.padding, tokens)).toBe('32px 24px')
       expect(resolve(card['border-radius'], tokens)).toBe('10px')
-      expect(declarations(style, 'button, select')).toMatchObject({
+      expect(declarations(style, 'button')).toMatchObject({
         'min-height': '42px',
         font: 'inherit',
         'font-size': 'max(16px, 1rem)',
@@ -189,11 +209,21 @@ describe('branded sign-in confirmation appearance', () => {
     expect(declarations(style, '.centered')['min-width']).toBe('0')
     expect(style).toMatch(/min-height:\s*100vh;\s*min-height:\s*100svh;/)
     expect(declarations(style, 'body')['font-size']).toBe('1rem')
-    expect(declarations(style, '.language-picker span')).toMatchObject({
-      position: 'absolute',
-      'clip-path': 'inset(50%)',
+    expect(declarations(style, '.language-picker')).toMatchObject({
+      position: 'relative',
+      'max-width': '100%',
     })
-    expect(declarations(mediaBlock(style, 'pointer: coarse'), 'button, select')).toMatchObject({
+    expect(declarations(style, '.language-trigger')).toMatchObject({
+      'min-height': '44px',
+      'max-width': '100%',
+    })
+    expect(declarations(style, '.language-menu')).toMatchObject({
+      position: 'absolute',
+      right: '0',
+      'max-width': 'min(16rem, calc(100vw - 64px))',
+    })
+    expect(declarations(style, '.language-option')['min-height']).toBe('44px')
+    expect(declarations(mediaBlock(style, 'pointer: coarse'), 'button')).toMatchObject({
       'min-height': '44px',
     })
     const hover = mediaBlock(style, 'hover: hover')
@@ -259,7 +289,7 @@ describe('branded sign-in confirmation appearance', () => {
     async (language) => {
       const { response, html, nodes, style } = await content(language)
       const svg = nodes.filter((element) => element.tagName === 'svg')
-      expect(svg).toHaveLength(1)
+      expect(svg).toHaveLength(2)
       expect(attribute(svg[0], 'viewBox')).toBe('0 0 100 100')
       expect(attribute(svg[0], 'width')).toBe('32')
       expect(attribute(svg[0], 'height')).toBe('32')
@@ -274,7 +304,8 @@ describe('branded sign-in confirmation appearance', () => {
               ['cx', 'cy', 'r', 'd', 'stroke-width', 'stroke-linecap'].includes(name),
             ),
           }))
-      expect(geometry(nodes)).toEqual(geometry(elements(webMark)))
+      const logo = nodes.find((element) => hasClass(element, 'logo'))
+      expect(geometry(descendants(logo))).toEqual(geometry(elements(webMark)))
       const clip = nodes.find((element) => element.tagName === 'clipPath')
       const wave = nodes.find((element) => attribute(element, 'clip-path'))
       expect(attribute(clip, 'id')).toBeTruthy()
