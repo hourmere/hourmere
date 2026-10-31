@@ -36,6 +36,7 @@ import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
+import { teamReadinessBlocksSharing } from './event-readiness.ts'
 import {
   comparable,
   draftFromEventType,
@@ -330,17 +331,41 @@ function EventTypeForm({
     navigate(PATHS.eventTypes, { state: flash(msg('Deleted “{0}”.', { '0': saved.title })) })
   }
 
+  const previewItem = shareReadiness.status === 'ready' ? shareReadiness.item : undefined
+  const previewReasons = previewItem && 'reasonCodes' in previewItem ? previewItem.reasonCodes : []
   const slugPreview = bookingLinkPreview(
     me,
     profile,
     draft.slug.trim(),
     draft.schedulingType,
     draft.hostUserIds.length,
-    saved?.roundRobinActive ?? false,
+    saved?.roundRobinActive === true && previewItem?.activation !== 'inactive',
+    draft.isActive && (saved?.isActive ?? true) && previewItem?.enablement !== 'disabled',
+    saved !== null &&
+      shareReadiness.status === 'ready' &&
+      teamReadinessBlocksSharing(shareReadiness.item),
   )
   const previewUrl = slugPreview.startsWith(`${window.location.origin}/`) ? slugPreview : null
   const previewPath = previewUrl ? new URL(previewUrl).pathname : ''
-  const bookingLinkHint = t('Lowercase letters, digits and hyphens. {0}').split('{0}')
+  const previewReadinessMessage: MessageKey | null =
+    !me.organization.personal &&
+    saved !== null &&
+    (previewItem?.completeness !== 'complete' ||
+      previewItem.summary === 'not_checked' ||
+      previewItem.summary === 'check_failed' ||
+      previewReasons.some(
+        (reason) => reason === 'check_failed' || reason === 'check_not_performed',
+      ))
+      ? shareReadiness.status === 'loading'
+        ? 'Checking configuration…'
+        : shareReadiness.status === 'unavailable'
+          ? 'Readiness checks are unavailable for this account.'
+          : shareReadiness.status === 'error' ||
+              previewItem?.summary === 'check_failed' ||
+              previewReasons.includes('check_failed')
+            ? 'Configuration check failed'
+            : 'Configuration not checked'
+      : null
   const duration = parseWhole(draft.durationMinutes)
   const suggestedSlug = slugSuffix
     ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
@@ -395,9 +420,13 @@ function EventTypeForm({
           ) : readiness.status === 'unavailable' ? (
             <>
               <p>{t('Readiness checks are unavailable for this account.')}</p>
-              <button type="button" className="button button-small" onClick={retryReadiness}>
-                {t('Retry checks')}
-              </button>
+              {me.principal.kind === 'session' &&
+                access.status === 'ready' &&
+                access.role !== null && (
+                  <button type="button" className="button button-small" onClick={retryReadiness}>
+                    {t('Retry checks')}
+                  </button>
+                )}
             </>
           ) : (
             <>
@@ -449,33 +478,12 @@ function EventTypeForm({
                 id="slug"
                 label={t('Booking link')}
                 error={errors.slug}
-                hint={
-                  <>
-                    {bookingLinkHint[0]}
-                    {previewUrl ? (
-                      <span className="booking-link">
-                        <span className="mono preview booking-link-path" title={previewUrl}>
-                          <span className="booking-link-handle">
-                            {previewPath.slice(0, previewPath.lastIndexOf('/'))}
-                          </span>
-                          <span className="booking-link-slug">
-                            {previewPath.slice(previewPath.lastIndexOf('/'))}
-                          </span>
-                        </span>
-                        {(dirty || !saved) && (
-                          <span>{t('Save your changes before sharing this address.')}</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span>{ui(slugPreview)}</span>
-                    )}
-                    {bookingLinkHint[1]}
-                  </>
-                }
+                hint={t('Lowercase letters, digits and hyphens.')}
               >
                 {(props) => (
                   <input
                     {...props}
+                    aria-describedby={`${props['aria-describedby']} booking-link-status`}
                     className="mono"
                     value={draft.slug}
                     autoComplete="off"
@@ -488,6 +496,31 @@ function EventTypeForm({
                   />
                 )}
               </Field>
+              <div id="booking-link-status" className="hint" role="status">
+                {previewUrl ? (
+                  <span className="booking-link">
+                    <span className="mono preview booking-link-path" title={previewUrl}>
+                      <span className="booking-link-handle">
+                        {previewPath.slice(0, previewPath.lastIndexOf('/'))}
+                      </span>
+                      <span className="booking-link-slug">
+                        {previewPath.slice(previewPath.lastIndexOf('/'))}
+                      </span>
+                    </span>
+                    {(dirty || !saved) && (
+                      <span>{t('Save your changes before sharing this address.')}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span>{ui(slugPreview)}</span>
+                )}
+                {previewReadinessMessage && (
+                  <p>
+                    {t(previewReadinessMessage)}{' '}
+                    <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+                  </p>
+                )}
+              </div>
               <Field
                 id="description"
                 label={t('Description')}
@@ -536,7 +569,11 @@ function EventTypeForm({
                   checked={draft.isActive}
                   onChange={(e) => set('isActive', e.target.checked)}
                 />
-                {t('Active: invitees can book it')}
+                {t(
+                  me.organization.personal
+                    ? 'Active: invitees can book it'
+                    : 'Enable this event type',
+                )}
               </label>
               <label className="checkbox">
                 <input
@@ -554,7 +591,9 @@ function EventTypeForm({
               </label>
               <p className="hint" id="hidden-hint">
                 {t(
-                  'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.',
+                  me.organization.personal
+                    ? 'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.'
+                    : 'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.',
                 )}
               </p>
               {draft.isHidden && suggestedSlug && (
@@ -628,7 +667,7 @@ function EventTypeForm({
                     'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
                   )}
                 </p>
-                {!canAssignHosts && (
+                {access.status === 'ready' && !canAssignHosts && (
                   <p>{t('Only team owners and admins can change host assignments.')}</p>
                 )}
                 {canAssignHosts &&
@@ -925,6 +964,8 @@ function bookingLinkPreview(
   schedulingType: EventType['schedulingType'] = 'individual',
   hostCount = 1,
   roundRobinActive = false,
+  isActive = true,
+  configurationBlocked = false,
 ): string {
   if (
     !me.organization.personal &&
@@ -940,6 +981,9 @@ function bookingLinkPreview(
     return 'Choose two to eight required hosts to get a collective booking link.'
   if (!me.organization.personal && schedulingType === 'round_robin' && !roundRobinActive)
     return 'Activate round robin to get a public booking link.'
+  if (!me.organization.personal && !isActive)
+    return 'This event type is inactive. Enable it and save before sharing.'
+  if (!me.organization.personal && configurationBlocked) return 'Configuration needs attention'
   if (!me.organization.personal && !isPublicTeamSlug(me.organization.slug))
     return TEAM_LINK_SLUG_HINT
   if (!me.organization.personal) return publicTeamPageUrl(me.organization.slug, slug || 'your-link')
