@@ -144,7 +144,7 @@ export const test = base.extend<{
       provider.controls.eventHook = async (target, init) => {
         const values = provider.controls.storedEvents,
           calendar = decodeURIComponent(target.pathname.split('/')[4] as string)
-        const describe = (value: Record<string, unknown>, poll = false) => {
+        const describeConferenceEvent = (value: Record<string, unknown>, poll = false) => {
           const request = conferenceRequests.get(String(value.id))
           if (!request) return value
           if (poll) request.polls++
@@ -201,7 +201,7 @@ export const test = base.extend<{
             if (!previousRequest || previousRequest.requestId !== requestId)
               conferenceRequests.set(id, { requestId, polls: 0 })
           }
-          const value = describe({
+          const value = describeConferenceEvent({
             ...previous,
             ...input,
             id,
@@ -218,10 +218,12 @@ export const test = base.extend<{
                   v.iCalUID === target.searchParams.get('iCalUID') &&
                   v.fixtureCalendar === calendar,
               )
-              .map((value) => describe(value, true)),
+              .map((value) => describeConferenceEvent(value, true)),
           })
         const value = values.get(id)
-        return value ? Response.json(describe(value, true)) : Response.json({}, { status: 404 })
+        return value
+          ? Response.json(describeConferenceEvent(value, true))
+          : Response.json({}, { status: 404 })
       }
       if (automaticMeet) {
         const account = 'fixture-google-account'

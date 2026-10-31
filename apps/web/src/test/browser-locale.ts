@@ -4,7 +4,7 @@ import { vi } from 'vitest'
 export function browserLocale(locale: string) {
   const DateTimeFormat = Intl.DateTimeFormat
   vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(
-    function BrowserDateTimeFormat(locales, options) {
+    function browserDateTimeFormat(locales, options) {
       return new DateTimeFormat(locales ?? locale, options)
     },
   )
