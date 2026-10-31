@@ -32,6 +32,8 @@ function server(overrides: Routes = {}, me = TEAM) {
   return fakeApi({
     ...signedInAs(me),
     ...profile(),
+    'GET /api/auth/organization/get-active-member': () =>
+      json(200, { organizationId: TEAM.organization.id, userId: ME.user.id, role: 'admin' }),
     'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
     'GET /api/v1/event-type-hosts': () =>
       json(200, { data: [{ id: me.user.id, name: me.user.name }], nextAfter: null }),

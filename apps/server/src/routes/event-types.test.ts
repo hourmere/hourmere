@@ -127,8 +127,18 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     expect((await memberApi.get('/api/v1/event-type-hosts')).status).toBe(403)
     const first = await ownerApi.get('/api/v1/event-type-hosts?limit=1')
     expect(first.status).toBe(200)
-    const page = first.body as { data: { id: string; name: string }[]; nextAfter: string }
+    const page = first.body as {
+      data: { id: string; memberId: string; name: string }[]
+      nextAfter: string
+    }
     expect(page.data).toHaveLength(1)
+    const membership = await t.db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', page.data[0]?.id as string)
+      .executeTakeFirstOrThrow()
+    expect(page.data[0]?.memberId).toBe(membership.id)
     expect(JSON.stringify(first.body)).not.toContain('@')
     expect(
       (await ownerApi.get(`/api/v1/event-type-hosts?limit=1&after=${page.nextAfter}`)).status,
@@ -156,6 +166,42 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     })
   })
 
+  it('accepts additive duration options and rejects invalid lists atomically', async () => {
+    const user = await createTestUser(t.db)
+    const client = api(user)
+    const created = await client.post(
+      '/api/v1/event-types',
+      body({ allowedDurationsMinutes: [15, 30, 60] }),
+    )
+    expect(created.status).toBe(201)
+    expect(created.body).toMatchObject({
+      durationMinutes: 30,
+      allowedDurationsMinutes: [15, 30, 60],
+    })
+    const id = idOf(created)
+    expect(
+      (await client.patch(`/api/v1/event-types/${id}`, { durationMinutes: 60 })).body,
+    ).toMatchObject({ durationMinutes: 60, allowedDurationsMinutes: [15, 30, 60] })
+    for (const options of [
+      [],
+      [15],
+      [60, 60],
+      [0, 60],
+      [60, 1441],
+      Array.from({ length: 13 }, (_, i) => i + 60),
+    ]) {
+      const rejected = await client.patch(`/api/v1/event-types/${id}`, {
+        allowedDurationsMinutes: options,
+      })
+      expect(rejected.status).toBe(400)
+      expect(rejected.body).toMatchObject({ error: 'invalid_event_type' })
+    }
+    expect((await client.get(`/api/v1/event-types/${id}`)).body).toMatchObject({
+      durationMinutes: 60,
+      allowedDurationsMinutes: [15, 30, 60],
+    })
+  })
+
   it('requires a caller', async () => {
     expect((await t.anonymous.get('/api/v1/event-types')).status).toBe(401)
     expect((await t.anonymous.post('/api/v1/event-types', body())).status).toBe(401)
@@ -179,6 +225,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       title: 'Intro call',
       description: null,
       durationMinutes: 30,
+      allowedDurationsMinutes: [30],
       slotStepMinutes: null,
       bufferBeforeMinutes: 0,
       bufferAfterMinutes: 0,

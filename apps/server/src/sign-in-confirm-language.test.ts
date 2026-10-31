@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
 import { LANGUAGE_COOKIE } from '@hourmere/core/language'
 import { Hono } from 'hono'
+import { type DefaultTreeAdapterTypes, parse } from 'parse5'
 import { describe, expect, it } from 'vitest'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import { inlineAsset, pressConfirmButton } from './sign-in-confirm-testing.ts'
@@ -18,54 +19,91 @@ it.each<Record<string, string>>([
 ])('keeps public-only languages out of the sign-in interface: %j', async (headers) => {
   const { html } = await content(headers)
   expect(html).toContain('<html lang="en">')
-  expect(html).not.toContain('<option value="de"')
+  expect(html).not.toContain('id="language-option-de"')
   expect(inlineAsset(html, 'script')).not.toContain('"de":')
 })
 
+interface Event {
+  target: Element
+  key?: string
+  shiftKey?: boolean
+  preventDefault(): void
+}
+
 interface Element {
   hidden: boolean
-  value: string
   textContent: string
   attributes: Record<string, string>
-  events: Record<string, (event: { target: { value: string } }) => void>
+  events: Record<string, (event: Event) => void>
+  children: Element[]
+  getAttribute(name: string): string | null
   setAttribute(name: string, value: string): void
-  addEventListener(name: string, listener: (event: { target: { value: string } }) => void): void
+  addEventListener(name: string, listener: (event: Event) => void): void
+  querySelector(selector: string): Element | undefined
+  querySelectorAll(selector: string): Element[]
+  contains(target: Element): boolean
+  focus(): void
   append(input: { type?: string; name?: string; value?: string }): void
 }
 
 function browser(html: string, fragment: string, storageBlocked = false, protocol = 'https:') {
   const elements = new Map<string, Element>()
   const inputs: { type?: string; name?: string; value?: string }[] = []
-  for (const id of [
-    'confirm',
-    'incomplete',
-    'page-title',
-    'confirm-instruction',
-    'scanner-note',
-    'language-label',
-    'language-select',
-  ]) {
-    const text = new RegExp(`<[^>]+id="${id}"[^>]*>([^<]*)<`).exec(html)?.[1] ?? ''
-    elements.set(id, {
-      hidden: id === 'confirm' || id === 'incomplete',
-      value: '',
-      textContent: text,
-      attributes: {},
+  let activeElement: Element | undefined
+  const documentEvents: Record<string, (event: Event) => void> = {}
+  const buildElement = (node: DefaultTreeAdapterTypes.Element): Element => {
+    const attributes = Object.fromEntries(node.attrs.map(({ name, value }) => [name, value]))
+    const descendants = (element: Element): Element[] =>
+      element.children.flatMap((child) => [child, ...descendants(child)])
+    const element: Element = {
+      hidden: Object.hasOwn(attributes, 'hidden'),
+      textContent: node.childNodes.map((child) => ('value' in child ? child.value : '')).join(''),
+      attributes,
       events: {},
+      children: node.childNodes
+        .filter((child): child is DefaultTreeAdapterTypes.Element => 'tagName' in child)
+        .map(buildElement),
+      getAttribute(name) {
+        return this.attributes[name] ?? null
+      },
       setAttribute(name, value) {
         this.attributes[name] = value
       },
       addEventListener(name, listener) {
         this.events[name] = listener
       },
+      querySelector(selector) {
+        return this.querySelectorAll(selector)[0]
+      },
+      querySelectorAll(selector) {
+        if (selector === '[role="menuitemradio"]')
+          return descendants(this).filter((child) => child.attributes.role === 'menuitemradio')
+        if (selector === '[data-language-check]')
+          return descendants(this).filter((child) =>
+            Object.hasOwn(child.attributes, 'data-language-check'),
+          )
+        throw new Error(`Unexpected element selector: ${selector}`)
+      },
+      contains(target) {
+        return this === target || descendants(this).includes(target)
+      },
+      focus() {
+        activeElement = this
+        documentEvents.focusin?.({ target: this, preventDefault() {} })
+      },
       append(input) {
         inputs.push(input)
       },
-    })
+    }
+    if (attributes.id) elements.set(attributes.id, element)
+    if (node.tagName === 'button' && attributes.type === 'submit') elements.set('submit', element)
+    return element
   }
+  for (const child of parse(html).childNodes) if ('tagName' in child) buildElement(child)
   // With scripting enabled, <noscript> contains raw text, not a live child element.
   expect(elements.has('javascript-note')).toBe(false)
-  const submit = { textContent: /<button type="submit">([^<]+)<\/button>/.exec(html)?.[1] ?? '' }
+  const submit = elements.get('submit')
+  if (!submit) throw new Error('No submit button')
   const stored: [string, string][] = []
   const cookies: string[] = []
   const location = new Proxy(
@@ -85,6 +123,12 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
     documentElement: { lang: /<html lang="([^"]+)"/.exec(html)?.[1] ?? '' },
     title: /<title>([^<]+)<\/title>/.exec(html)?.[1] ?? '',
     getElementById: (id: string) => elements.get(id) ?? null,
+    get activeElement() {
+      return activeElement
+    },
+    addEventListener(name: string, listener: (event: Event) => void) {
+      documentEvents[name] = listener
+    },
     querySelector: (selector: string) => {
       if (selector !== '#confirm button[type="submit"]') throw new Error('Unexpected selector')
       return submit
@@ -125,9 +169,34 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
       runInNewContext(`setLanguage(${JSON.stringify(value)})`, context)
     },
     select(language: 'en' | 'zh-CN') {
-      const listener = elements.get('language-select')?.events.change
-      if (!listener) throw new Error('Language select is not wired')
-      listener({ target: { value: language } })
+      const option = elements.get(`language-option-${language}`)
+      const listener = option?.events.click
+      if (!option || !listener) throw new Error('Language option is not wired')
+      listener({ target: option, preventDefault() {} })
+    },
+    click(id: string) {
+      const element = elements.get(id)
+      if (!element?.events.click) throw new Error(`No click listener on ${id}`)
+      element.events.click({ target: element, preventDefault() {} })
+    },
+    key(id: string, key: string, shiftKey = false) {
+      const element = elements.get(id)
+      if (!element?.events.keydown) throw new Error(`No key listener on ${id}`)
+      let prevented = false
+      element.events.keydown({
+        target: element,
+        key,
+        shiftKey,
+        preventDefault() {
+          prevented = true
+        },
+      })
+      return prevented
+    },
+    outsidePointer() {
+      const listener = documentEvents.pointerdown
+      if (!listener) throw new Error('Outside pointer listener is not wired')
+      listener({ target: submit, preventDefault() {} })
     },
   }
 }
@@ -194,15 +263,24 @@ describe('server-rendered sign-in confirmation languages', () => {
     expect(view.elements.get('incomplete')?.hidden).toBe(true)
     expect(view.cookies).toEqual([])
     expect(view.stored).toEqual([])
-    expect(view.elements.get('language-select')?.events.change).toBeTypeOf('function')
+    expect(view.elements.get('language-trigger')?.events.click).toBeTypeOf('function')
     view.select('zh-CN')
     expect(view.document.documentElement.lang).toBe('zh-CN')
     expect(view.document.title).toBe('登录 Hourmere')
     expect(view.submit.textContent).toBe('登录 Hourmere')
     expect(view.elements.get('incomplete')?.textContent).toContain('链接不完整')
-    expect(view.elements.get('language-select')?.attributes['aria-label']).toBe('界面语言')
-    expect(view.elements.get('language-label')?.textContent).toBe('界面语言')
-    expect(view.elements.get('language-select')?.value).toBe('zh-CN')
+    expect(view.elements.get('language-trigger')?.attributes['aria-label']).toBe('语言：简体中文')
+    expect(view.elements.get('language-current')?.textContent).toBe('简体中文')
+    expect(view.elements.get('language-current')?.attributes.lang).toBe('zh-CN')
+    expect(view.elements.get('language-option-zh-CN')?.attributes['aria-checked']).toBe('true')
+    expect(view.elements.get('language-option-en')?.attributes['aria-checked']).toBe('false')
+    expect(
+      view.elements.get('language-option-zh-CN')?.querySelector('[data-language-check]')
+        ?.textContent,
+    ).toBe('✓')
+    expect(
+      view.elements.get('language-option-en')?.querySelector('[data-language-check]')?.textContent,
+    ).toBe('')
     expect(view.stored).toEqual([[LANGUAGE_COOKIE, 'zh-CN']])
     expect(view.cookies).toEqual([
       `${LANGUAGE_COOKIE}=zh-CN; Path=/; SameSite=Lax; Max-Age=31536000; Secure`,
@@ -210,12 +288,72 @@ describe('server-rendered sign-in confirmation languages', () => {
     view.select('en')
     expect(view.document.documentElement.lang).toBe('en')
     expect(view.submit.textContent).toBe('Sign in to Hourmere')
+    expect(view.elements.get('language-trigger')?.attributes['aria-label']).toBe(
+      'Language: English',
+    )
     expect(JSON.stringify(view.inputs)).toBe(original)
     expect(view.inputs.map((input) => input.name)).not.toContain('untrusted')
     expect(JSON.stringify([view.stored, view.cookies])).not.toContain('synthetic-capability')
     expect(view.elements.get('confirm')?.hidden).toBe(false)
     expect(view.elements.get('incomplete')?.hidden).toBe(true)
   })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'opens to the current %s option, navigates, closes and restores focus',
+    async (language) => {
+      const { html } = await content({ Cookie: `${LANGUAGE_COOKIE}=${language}` })
+      const view = browser(html, '#token=synthetic')
+      const trigger = view.elements.get('language-trigger')
+      const menu = view.elements.get('language-menu')
+      const current = view.elements.get(`language-option-${language}`)
+      expect(trigger?.attributes).toMatchObject({
+        type: 'button',
+        'aria-haspopup': 'menu',
+        'aria-expanded': 'false',
+        'aria-controls': 'language-menu',
+      })
+      expect(menu?.hidden).toBe(true)
+      view.click('language-trigger')
+      expect(menu?.hidden).toBe(false)
+      expect(trigger?.attributes['aria-expanded']).toBe('true')
+      expect(view.document.activeElement).toBe(current)
+      expect(view.key('language-menu', 'Home')).toBe(true)
+      expect(view.document.activeElement).toBe(view.elements.get('language-option-en'))
+      expect(view.key('language-menu', 'ArrowUp')).toBe(true)
+      expect(view.document.activeElement).toBe(view.elements.get('language-option-zh-CN'))
+      expect(view.key('language-menu', 'ArrowDown')).toBe(true)
+      expect(view.document.activeElement).toBe(view.elements.get('language-option-en'))
+      expect(view.key('language-menu', 'End')).toBe(true)
+      expect(view.document.activeElement).toBe(view.elements.get('language-option-zh-CN'))
+      expect(view.key('language-menu', 'Escape')).toBe(true)
+      expect(menu?.hidden).toBe(true)
+      expect(trigger?.attributes['aria-expanded']).toBe('false')
+      expect(view.document.activeElement).toBe(trigger)
+      expect(view.cookies).toEqual([])
+      expect(view.stored).toEqual([])
+      view.key('language-trigger', 'ArrowDown')
+      expect(menu?.hidden).toBe(false)
+      expect(view.document.activeElement).toBe(current)
+      expect(view.key('language-menu', 'End')).toBe(true)
+      expect(view.key('language-menu', 'Tab', true)).toBe(true)
+      expect(menu?.hidden).toBe(true)
+      expect(trigger?.attributes['aria-expanded']).toBe('false')
+      expect(view.document.activeElement).toBe(trigger)
+      view.key('language-trigger', 'ArrowDown')
+      expect(menu?.hidden).toBe(false)
+      expect(view.document.activeElement).toBe(current)
+      view.select(language === 'en' ? 'zh-CN' : 'en')
+      expect(menu?.hidden).toBe(true)
+      expect(view.document.activeElement).toBe(trigger)
+      view.click('language-trigger')
+      view.outsidePointer()
+      expect(menu?.hidden).toBe(true)
+      view.click('language-trigger')
+      view.submit.focus()
+      expect(menu?.hidden).toBe(true)
+      expect(view.document.activeElement).toBe(view.submit)
+    },
+  )
 
   it('supports incomplete links and refused preference storage without showing a sign-in button', async () => {
     const { html } = await content()
@@ -251,5 +389,5 @@ describe('server-rendered sign-in confirmation languages', () => {
 it('negotiates the next supported sign-in language after a public-only preference', async () => {
   const { html } = await content({ 'accept-language': 'de-CH,zh-CN;q=0.8,en;q=0.5' })
   expect(html).toContain('<html lang="zh-CN">')
-  expect(html).not.toContain('<option value="de"')
+  expect(html).not.toContain('id="language-option-de"')
 })

@@ -273,6 +273,11 @@ row links to schedule, calendar and conference settings and refreshes when you r
 personal default schedule is reused across every team you belong to; an external calendar
 is optional for basic bookings.
 
+The team event host editor shows the same coarse checks for selected hosts. Your own setup
+links open your settings; other hosts' setup links open the members page with guidance to
+ask the member to make private changes. Owners and admins can open a member's hosted
+team event types from that member's row, including dormant round-robin pool candidates.
+
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
 committed isolation (Postgres's default) or serializable. Connect the app to Postgres

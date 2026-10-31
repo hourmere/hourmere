@@ -61,7 +61,9 @@ export interface EventType {
   title: string
   description: string | null
   durationMinutes: number
-  /** null = the duration. */
+  /** Distinct permitted lengths; includes durationMinutes, the default. */
+  allowedDurationsMinutes: number[]
+  /** null = the selected duration. */
   slotStepMinutes: number | null
   bufferBeforeMinutes: number
   bufferAfterMinutes: number
@@ -100,6 +102,8 @@ export interface EventTypeInput {
   title: string
   description?: string | null | undefined
   durationMinutes: number
+  /** Omitted on creation = [durationMinutes]. */
+  allowedDurationsMinutes?: number[] | undefined
   slotStepMinutes?: number | null | undefined
   bufferBeforeMinutes?: number | undefined
   bufferAfterMinutes?: number | undefined
@@ -145,6 +149,7 @@ interface Fields {
   title: string
   description: string | null
   durationMinutes: number
+  allowedDurationsMinutes: number[]
   slotStepMinutes: number | null
   bufferBeforeMinutes: number
   bufferAfterMinutes: number
@@ -166,6 +171,7 @@ const FIELD_NAMES = [
   'title',
   'description',
   'durationMinutes',
+  'allowedDurationsMinutes',
   'slotStepMinutes',
   'bufferBeforeMinutes',
   'bufferAfterMinutes',
@@ -441,7 +447,16 @@ export async function updateEventType(
         organizer !== undefined ||
         zoomConnection !== undefined
       ) {
-        const fields = validFields({ ...fieldsOf(row), ...changes })
+        const fields = validFields({
+          ...fieldsOf(row),
+          ...changes,
+          // A legacy duration-only edit keeps a single-duration type single-duration.
+          ...(changes.durationMinutes !== undefined &&
+          changes.allowedDurationsMinutes === undefined &&
+          row.allowed_durations_minutes.length === 1
+            ? { allowedDurationsMinutes: [changes.durationMinutes] }
+            : {}),
+        })
         if (
           zoomConnection &&
           zoomConnection !== row.zoom_connection_id &&
@@ -692,11 +707,14 @@ const invalid = (message: string) => new DomainError('invalid', 'invalid_event_t
 
 function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields {
   const c = candidate
+  const allowedDurationsMinutes =
+    c.allowedDurationsMinutes === undefined ? [c.durationMinutes] : c.allowedDurationsMinutes
   // The engine's own check, so a stored event type can never make availability fail.
   engineValidation('invalid_event_type', () =>
     validateEventTypeRules(
       {
         durationMinutes: c.durationMinutes,
+        allowedDurationsMinutes,
         slotStepMinutes: c.slotStepMinutes ?? undefined,
         bufferBeforeMinutes: c.bufferBeforeMinutes,
         bufferAfterMinutes: c.bufferAfterMinutes,
@@ -723,6 +741,7 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
     title: validTitle(c.title),
     description: validDescription(c.description),
     durationMinutes: c.durationMinutes as number,
+    allowedDurationsMinutes: [...(allowedDurationsMinutes as number[])],
     slotStepMinutes: (c.slotStepMinutes ?? null) as number | null,
     bufferBeforeMinutes: c.bufferBeforeMinutes as number,
     bufferAfterMinutes: c.bufferAfterMinutes as number,
@@ -862,6 +881,7 @@ function fieldsOf(row: {
   title: string
   description: string | null
   duration_minutes: number
+  allowed_durations_minutes: number[]
   slot_step_minutes: number | null
   buffer_before_minutes: number
   buffer_after_minutes: number
@@ -880,6 +900,7 @@ function fieldsOf(row: {
     title: row.title,
     description: row.description,
     durationMinutes: row.duration_minutes,
+    allowedDurationsMinutes: row.allowed_durations_minutes,
     slotStepMinutes: row.slot_step_minutes,
     bufferBeforeMinutes: row.buffer_before_minutes,
     bufferAfterMinutes: row.buffer_after_minutes,
@@ -901,6 +922,7 @@ function columns(fields: Fields) {
     title: fields.title,
     description: fields.description,
     duration_minutes: fields.durationMinutes,
+    allowed_durations_minutes: fields.allowedDurationsMinutes,
     slot_step_minutes: fields.slotStepMinutes,
     buffer_before_minutes: fields.bufferBeforeMinutes,
     buffer_after_minutes: fields.bufferAfterMinutes,
@@ -960,18 +982,18 @@ function validHosts(value: unknown, mode: string, personalOwnerId: string | null
   return ids.sort()
 }
 
-/** Host assignment exposes names and IDs only to current owners/admins, one page at a time. */
+/** Host assignment exposes names and stable member/user IDs to current owners/admins. */
 export async function listEventTypeHosts(
   ctx: ServiceContext,
   input: CatalogPageInput = {},
-): Promise<CatalogPage<{ id: string; name: string }>> {
+): Promise<CatalogPage<{ id: string; memberId: string; name: string }>> {
   const { personalOwnerId, canManageTeam } = await access(ctx.db, ctx)
   if (personalOwnerId !== ctx.principal.user.id && !canManageTeam) throw insufficientRole()
   const { limit, after } = checkedCatalogPage(input)
   let query = ctx.db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
-    .select(['u.id', 'u.name'])
+    .select(['u.id', 'm.id as memberId', 'u.name'])
     .where('m.organizationId', '=', ctx.principal.organization.id)
     .where('u.emailVerified', '=', true)
   if (after !== undefined) query = query.where('u.id', '>', after)

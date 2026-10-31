@@ -176,7 +176,8 @@ describe('UI measurement CI contract', () => {
 
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
-    ['check', '7454d8fe440d98ff3ae3a93a0674f4201fed921f3193225883c340296f1bd78b'],
+    // Parity gaps compare against event-base Git history; PostgreSQL limits stay unchanged.
+    ['check', '2ac262fd2886d7e2434ed955f7905dc2e7591c39ce0ecf7298b3ec1a3dabdbe6'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // PR #58 builds a disposable documentation-site fixture before the browser regressions.
     // The owner approved a 20-minute job limit because the suite now runs close to 10 minutes.

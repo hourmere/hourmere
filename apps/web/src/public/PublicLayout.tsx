@@ -4,8 +4,9 @@ import { api } from '../api/client.ts'
 import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
-import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
+import { useI18n } from '../i18n/runtime.tsx'
 import { useEmbedded } from './embed-context.ts'
+import { PublicLanguageSwitcher } from './PublicLanguageSwitcher.tsx'
 import './public.css'
 
 const HostedSignupUrl = createContext('https://hourmere.com')
@@ -91,7 +92,7 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
       <div className={`public${embedded ? ' public-embedded' : ''}`}>
         {!embedded && (
           <header className="public-language">
-            <LanguageSwitcher />
+            <PublicLanguageSwitcher />
           </header>
         )}
         <main id="main" className={`public-main user-content${wide ? ' public-main-wide' : ''}`}>

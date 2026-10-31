@@ -99,8 +99,9 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
           await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`)
         ).rows
         // 0037 intentionally retires this unused flag. 0038 backfills booking
-        // organizer metadata, so only bookings may change their physical tuples;
-        // every retained predecessor value, including updated_at, must survive.
+        // organizer metadata and 0047 backfills event duration lists, so those
+        // tables change physical tuples; every retained predecessor value,
+        // including updated_at, must survive.
         if (table === 'booking_conferences')
           for (const row of rows) {
             expect(row.retry_conference).toBe(false)
@@ -119,6 +120,7 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
         '0029_host_reschedule_tokens.sql',
         '0030_mcp_oauth_client_activity.sql',
         '0038_booking_ical_identity.sql',
+        '0047_event_type_durations.sql',
       ]) {
         const index = applied.indexOf(migration)
         expect(index, migration).toBeGreaterThan(previousIndex)
@@ -141,8 +143,15 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
               ical_organizer_email: 'host@example.test',
             })
           }
+        if (table === 'event_types')
+          for (const [index, row] of after.entries()) {
+            expect(row.original_xmin).not.toBe(old[index]?.original_xmin)
+            expect(row.allowed_durations_minutes).toEqual([old[index]?.duration_minutes])
+          }
         const predecessorKeys = (row: Record<string, unknown>) =>
-          Object.keys(row).filter((key) => table !== 'bookings' || key !== 'original_xmin')
+          Object.keys(row).filter(
+            (key) => (table !== 'bookings' && table !== 'event_types') || key !== 'original_xmin',
+          )
         expect(
           after.map((row, index) =>
             Object.fromEntries(predecessorKeys(old[index] ?? {}).map((key) => [key, row[key]])),

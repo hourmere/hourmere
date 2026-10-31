@@ -11,6 +11,7 @@ import {
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { chooseLanguage } from './store.ts'
 import { dateMessage, msg, translateMessage } from './translate.ts'
 
@@ -47,7 +48,7 @@ describe('Spanish public booking language', () => {
     })
     renderApp('/ada/intro')
     await screen.findByRole('heading', { name: 'Intro call' })
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'es')
+    await selectPublicLanguage(user, 'es')
     expect(screen.getByRole('heading', { name: 'Elija un horario' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'noviembre de 2026' })).toBeDefined()
     await completeBooking(user)
@@ -72,7 +73,7 @@ describe('Spanish public booking language', () => {
       })
       renderApp('/ada/intro')
       await screen.findByRole('button', { name: day })
-      expect(screen.getByLabelText<HTMLSelectElement>('Idioma de la interfaz').value).toBe('es')
+      expect(screen.getByRole('button', { name: /Español/ }).textContent).toContain('Español')
       const zone = screen.getByRole('button', { name: /Zona horaria/ })
       expect(zone.textContent).toContain('Europe/Paris')
       expect(zone.textContent).toContain('GMT+01:00')

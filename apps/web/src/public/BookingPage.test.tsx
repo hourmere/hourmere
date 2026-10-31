@@ -13,6 +13,7 @@ import {
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 
 // The visitor's zone, language and clock, as the browser would report them.
 const env = vi.hoisted(() => ({
@@ -217,7 +218,7 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByText(/Your booking is not confirmed yet/)
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectPublicLanguage(user, 'zh-CN')
     expect(screen.getByLabelText<HTMLInputElement>('你的姓名').value).toBe('Synthetic Visitor')
     await user.click(screen.getByRole('button', { name: '确认预约' }))
     await screen.findByText(/你的预约尚未确认/)
@@ -370,7 +371,7 @@ describe('the booking page', () => {
       fakeApi(eventRoutes(EVENT, DST_SLOTS))
       renderApp('/ada/intro')
       await chooseSlot(user, /November 2, available/, '9:00 AM')
-      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      await selectPublicLanguage(user, language)
       const zone = document.querySelector('.chosen-time .muted')
       expect(zone?.textContent).toBe(expected)
       const offsetSpan = zone?.querySelector('.time-offset')
@@ -442,7 +443,7 @@ describe('the booking page', () => {
       await chooseSlot(user, /November 2, available/, '9:00 AM')
       await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
       await user.type(screen.getByLabelText('Email'), 'grace@example.com')
-      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      await selectPublicLanguage(user, 'zh-CN')
       expect(
         screen.getByText('必选主持人：王小明（Europe/Berlin）、李小红（Asia/Shanghai）'),
       ).toBeDefined()
@@ -501,7 +502,7 @@ describe('the booking page', () => {
       await user.type(screen.getByLabelText('Email'), 'grace@example.com')
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       await screen.findByRole('heading', { name: 'You’re booked' })
-      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      await selectPublicLanguage(user, language)
 
       const ordered = [
         screen.getByRole('heading', { name: result }),
@@ -568,7 +569,7 @@ describe('the booking page', () => {
     for (const link of document.querySelectorAll('.calendar-links a')) {
       expect(decodeURIComponent(link.getAttribute('href') ?? '')).not.toContain(TOKEN)
     }
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectPublicLanguage(user, 'zh-CN')
     expect(
       screen.getByText(
         (_, element) =>
@@ -658,7 +659,7 @@ describe('the booking page', () => {
       expect(screen.queryByText(/^Booking confirmed\./)).toBeNull()
       expect(screen.queryByRole('heading', { name: 'Add to your calendar' })).toBeNull()
       expect(screen.getByLabelText('Your link to change or cancel this booking')).toBeDefined()
-      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      await selectPublicLanguage(user, 'zh-CN')
       expect(
         screen.getByText(
           (_, element) =>
@@ -1358,7 +1359,7 @@ describe('the booking page', () => {
     expect(document.querySelectorAll('.confirmation .alert-info')).toHaveLength(1)
     expectStackGap(calendarNote.parentElement?.parentElement as HTMLElement)
     expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectPublicLanguage(user, 'zh-CN')
     expect(screen.getByText('此前的尝试已创建此预约，因此无法再次显示预约链接。')).toBeDefined()
     expect(
       screen.getByText(
@@ -1386,10 +1387,10 @@ describe('the booking page', () => {
       renderApp('/ada/intro')
       await screen.findByRole('heading', { name: 'Intro call', level: 1 })
       expect(
-        screen.getByRole<HTMLSelectElement>('combobox', {
-          name: chinese ? '界面语言' : 'Interface language',
-        }).value,
-      ).toBe(language)
+        screen.getByRole('button', {
+          name: chinese ? '语言：简体中文' : 'Language: English',
+        }).textContent,
+      ).toContain(chinese ? '简体中文' : 'English')
       const selectedDay = await waitFor(() => {
         const button = document.querySelector<HTMLButtonElement>('[data-day="2026-11-02"]')
         expect(button?.disabled).toBe(false)

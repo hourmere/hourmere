@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import { type Call, fakeApi, json, later, type Routes, renderApp } from '../test/fake-api.tsx'
 import { booking, managed, NEW_TOKEN, slotsAnswer, TOKEN } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { parseManageFragment } from './ManageBookingPage.tsx'
 import publicStyles from './public.css?raw'
 
@@ -264,7 +265,7 @@ describe('the invitee’s manage page', () => {
       renderApp(`/booking#token=${TOKEN}&action=reschedule`)
       await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
       await user.click(screen.getByRole('button', { name: '10:00 AM' }))
-      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      await selectPublicLanguage(user, language)
       await user.click(
         screen.getByRole('button', {
           name: language === 'en' ? 'Confirm new time' : '确认新时间',
@@ -369,7 +370,7 @@ describe('the invitee’s manage page', () => {
     renderApp(`/booking#token=${TOKEN}&action=reschedule`)
     await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
     await user.click(screen.getByRole('button', { name: '10:00 AM' }))
-    await user.selectOptions(screen.getByLabelText('Interface language'), expected.language)
+    await selectPublicLanguage(user, expected.language)
     const details = document.querySelector('.manage .booking-details') as HTMLElement
     const value = (label: string) => within(details).getByText(label).nextElementSibling
     expect(plain(value(expected.fromLabel)?.textContent)).toBe(expected.from)
@@ -602,12 +603,7 @@ describe('the invitee’s manage page', () => {
         ),
       ).toBeDefined()
       env.now += 1000
-      await user.selectOptions(
-        screen.getByRole('combobox', {
-          name: initialLanguage === 'en' ? 'Interface language' : '界面语言',
-        }),
-        language,
-      )
+      await selectPublicLanguage(user, language)
       expect(screen.getByText(language === 'en' ? 'Ended' : '已结束')).toBeDefined()
       expect(
         screen.getByText(language === 'en' ? 'This meeting has ended.' : '此会议已结束。'),
@@ -633,12 +629,7 @@ describe('the invitee’s manage page', () => {
           await screen.findByText(initialLanguage === 'en' ? 'Confirmed' : '已确认'),
         ).toBeDefined()
         env.now += 1000
-        await user.selectOptions(
-          screen.getByRole('combobox', {
-            name: initialLanguage === 'en' ? 'Interface language' : '界面语言',
-          }),
-          language,
-        )
+        await selectPublicLanguage(user, language)
         const ended = boundary === 'end'
         const message = ended
           ? language === 'en'

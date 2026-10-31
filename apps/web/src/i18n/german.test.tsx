@@ -11,6 +11,7 @@ import {
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { dateMessage, translateMessage } from './translate.ts'
 
 vi.mock('../public/env.ts', async (importOriginal) => ({
@@ -32,7 +33,7 @@ describe('German public booking language', () => {
     })
     renderApp('/ada/intro')
     await screen.findByRole('heading', { name: 'Intro call' })
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'de')
+    await selectPublicLanguage(user, 'de')
     expect(screen.getByRole('heading', { name: 'Zeit wählen' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'November 2026' })).toBeDefined()
     await user.click(await screen.findByRole('button', { name: day }))
@@ -62,9 +63,7 @@ describe('German public booking language', () => {
       fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
       renderApp('/ada/intro')
       expect(await screen.findByRole('button', { name: day })).toBeDefined()
-      expect(screen.getByLabelText<HTMLSelectElement>('Sprache der Benutzeroberfläche').value).toBe(
-        'de',
-      )
+      expect(screen.getByRole('button', { name: /Deutsch/ }).textContent).toContain('Deutsch')
       expect(translateMessage('de', dateMessage('2026-11-02'))).toBe(
         new Intl.DateTimeFormat('de-DE', {
           calendar: 'gregory',
