@@ -77,6 +77,7 @@ const classes = {
     'POST /api/v1/event-types',
     'DELETE /api/v1/event-types/{id}',
     'PATCH /api/v1/event-types/{id}',
+    'PUT /api/v1/event-types/{id}/notifications',
     'POST /api/v1/event-types/{id}/round-robin/activate',
     'PUT /api/v1/profile',
     'PATCH /api/v1/profile/name',
@@ -420,6 +421,26 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 201
         }
         if (method === 'PATCH') payload = { title: 'Matrix updated event' }
+        if (operation === 'PUT /api/v1/event-types/{id}/notifications')
+          payload = {
+            notifications: {
+              reminders: [
+                {
+                  id: 'one-hour',
+                  offsetMinutes: 60,
+                  recipients: { invitee: true, guests: false, host: true },
+                },
+              ],
+              followUps: [
+                {
+                  id: 'thanks',
+                  offsetMinutes: 5,
+                  recipients: { invitee: true, guests: false, host: false },
+                  hostNote: 'Thank you for your time.',
+                },
+              ],
+            },
+          }
         if (method === 'DELETE') expectedStatus = 204
       } else if (template.startsWith('/api/v1/webhooks')) {
         id = mainWebhook
@@ -477,14 +498,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 80-operation contract and all 240 scope combinations', () => {
+    it('covers the exact 81-operation contract and all 243 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(80)
-      expect(new Set(ids).size).toBe(80)
+      expect(ids).toHaveLength(81)
+      expect(new Set(ids).size).toBe(81)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(240)
+      expect(cases).toHaveLength(243)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -513,6 +534,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
           if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
+            if (operation === 'PUT /api/v1/event-types/{id}/notifications')
+              expect(data).toMatchObject(fixture.payload as { notifications: unknown })
             if (operation === 'POST /api/v1/schedules')
               await db
                 .deleteFrom('schedules')
