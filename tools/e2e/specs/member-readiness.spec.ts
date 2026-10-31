@@ -32,7 +32,14 @@ for (const language of ['en', 'zh-CN'] as const) {
     const own = rows.filter({ hasText: 'Fixture Host' })
     const peer = rows.filter({ hasText: 'Second Required Host' })
     await expect(own.getByText(/^(Default schedule set|已设置默认时间表)$/)).toBeVisible()
-    await expect(peer.getByRole('link')).toHaveCount(0)
+    const hostedEvents = peer.getByRole('link', {
+      name: /^(View hosted team events|查看主持的团队活动)$/,
+    })
+    await expect(peer.getByRole('link')).toHaveCount(1)
+    await expect(hostedEvents).toHaveAttribute(
+      'href',
+      /^\/app\/event-types\?hostUserId=[0-9a-f-]{36}$/,
+    )
     await expect(own).toContainText(/every team you belong to|所有团队共用/)
     await expect(members).toContainText(/do not guarantee available times|不保证有可约时段/)
     expect(summaryRequests).toBe(1)
@@ -72,5 +79,12 @@ for (const language of ['en', 'zh-CN'] as const) {
     await expect(own.getByText(/^(Default schedule set|已设置默认时间表)$/)).toBeVisible()
     await expect(members).not.toContainText(privateName)
     expect(summaryRequests).toBe(2)
+    await hostedEvents.click()
+    await expect(page).toHaveURL(/\/app\/event-types\?hostUserId=[0-9a-f-]{36}$/)
+    await expect(
+      page.getByText(
+        /Showing team events with this member as a host or pool candidate\.|当前显示该成员主持或参与候选池的团队活动。/,
+      ),
+    ).toBeVisible()
   })
 }
