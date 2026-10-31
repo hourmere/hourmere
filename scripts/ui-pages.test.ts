@@ -568,7 +568,9 @@ describe('source-copy coverage mutations', () => {
 
 function assertIntentionalScrollers(shell: string, keys: string) {
   expect(shell).toMatch(/<nav\s+className="sidenav"[^>]*>\s*<ul data-layout-scroll="horizontal">/)
-  expect(keys.match(/<pre\b[^>]*\bdata-layout-scroll="horizontal"[^>]*>/g)).toHaveLength(2)
+  const examples = keys.match(/<pre\b[^>]*>/g) ?? []
+  expect(examples.length).toBeGreaterThanOrEqual(2)
+  for (const example of examples) expect(example).toMatch(/\bdata-layout-scroll="horizontal"/)
 }
 
 it('marks the mobile navigation and code examples as intentional horizontal scrollers', () => {

@@ -6428,6 +6428,11 @@ export interface components {
              * @description This instance operator's privacy policy; absent when not configured
              */
             privacyPolicyUrl?: string;
+            /**
+             * Format: uri
+             * @description The public origin of this instance, configured by its operator
+             */
+            publicUrl: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */

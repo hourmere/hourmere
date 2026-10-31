@@ -8,6 +8,7 @@ import {
   listApiKeys,
   listOrganizations,
 } from '../api/auth.ts'
+import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { EmptyState } from '../components/EmptyState.tsx'
@@ -55,9 +56,13 @@ async function loadKeys(signal: AbortSignal) {
   return { keys, organizations: new Map(organizations.map((o) => [o.id, o.name])) }
 }
 
+const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
+
+const shellArgument = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+
 /** The command that checks a key works: GET /api/v1/me answers with whom it acts as. */
-const curlExample = (key: string) =>
-  `curl -H "Authorization: Bearer ${key}" ${window.location.origin}/api/v1/me`
+const curlExample = (key: string, publicUrl = window.location.origin) =>
+  `curl -H "Authorization: Bearer ${key}" ${shellArgument(new URL('/api/v1/me', publicUrl).href)}`
 
 export function ApiKeysPage() {
   const { t, uiText: ui } = useI18n()
@@ -65,9 +70,32 @@ export function ApiKeysPage() {
   usePageTitle('API keys')
   const me = useMe()
   const [keys, reload] = useLoad(loadKeys)
+  const [instance, reloadInstance] = useLoad(loadInstance)
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
+  // Keep only metadata in the list, even while the follow-up request is pending.
+  const [recentKeys, setRecentKeys] = useState<ApiKey[]>([])
   const [status, setStatus] = useState<UiText>('')
   const keysHeading = useRef<HTMLHeadingElement>(null)
+  const listedKeys = keys.status === 'ready' ? keys.data.keys : []
+  const visibleKeys = [
+    ...recentKeys.filter((key) => !listedKeys.some((listed) => listed.id === key.id)),
+    ...listedKeys,
+  ]
+  const organizations =
+    keys.status === 'ready'
+      ? keys.data.organizations
+      : new Map([[me.organization.id, me.organization.name]])
+  const publicUrl = instance.status === 'ready' ? instance.data.publicUrl : undefined
+
+  useEffect(() => {
+    if (keys.status !== 'ready') return
+    setRecentKeys((previous) => {
+      const unconfirmed = previous.filter(
+        (key) => !keys.data.keys.some((listed) => listed.id === key.id),
+      )
+      return unconfirmed.length === previous.length ? previous : unconfirmed
+    })
+  }, [keys])
 
   return (
     <>
@@ -81,6 +109,9 @@ export function ApiKeysPage() {
       {created ? (
         <NewKey
           apiKey={created}
+          publicUrl={publicUrl}
+          configStatus={instance.status}
+          onRetry={reloadInstance}
           onDone={() => {
             setCreated(null)
             // The panel (and the focused button) goes away; the new key is in the list.
@@ -93,6 +124,8 @@ export function ApiKeysPage() {
           onCreated={(key) => {
             setStatus('')
             setCreated(key)
+            const { key: _secret, ...metadata } = key
+            setRecentKeys((previous) => [metadata, ...previous])
             reload()
           }}
         />
@@ -116,8 +149,8 @@ export function ApiKeysPage() {
             </button>
           </div>
         )}
-        {keys.status === 'ready' &&
-          (keys.data.keys.length === 0 ? (
+        {(keys.status === 'ready' || visibleKeys.length > 0) &&
+          (visibleKeys.length === 0 ? (
             <EmptyState
               title={t('You have no API keys yet.')}
               action={
@@ -130,9 +163,10 @@ export function ApiKeysPage() {
             </EmptyState>
           ) : (
             <KeyTable
-              keys={keys.data.keys}
-              organizations={keys.data.organizations}
+              keys={visibleKeys}
+              organizations={organizations}
               onRevoked={(key) => {
+                setRecentKeys((previous) => previous.filter((recent) => recent.id !== key.id))
                 setStatus(msg('Revoked “{0}”.', { '0': key.name || key.start || 'the key' }))
                 reload()
                 // Its row (and the focused button) goes away.
@@ -158,9 +192,9 @@ export function ApiKeysPage() {
             role="region"
             aria-label={t('API key usage command')}
           >
-            <code>{curlExample('hm_…')}</code>
+            <code>{curlExample('hm_…', publicUrl)}</code>
           </pre>
-          <CopyButton text={curlExample('hm_…')} label={t('Copy command')} />
+          <CopyButton text={curlExample('hm_…', publicUrl)} label={t('Copy command')} />
         </div>
         <p>
           {t('The API is described in its')}{' '}
@@ -274,7 +308,19 @@ function CreateKeyForm({
 }
 
 /** The new key's secret, shown this once: Better Auth stores only a hash of it. */
-function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void }) {
+function NewKey({
+  apiKey,
+  publicUrl,
+  configStatus,
+  onRetry,
+  onDone,
+}: {
+  apiKey: CreatedApiKey
+  publicUrl: string | undefined
+  configStatus: 'loading' | 'ready' | 'error'
+  onRetry: () => void
+  onDone: () => void
+}) {
   const { t, text } = useI18n()
 
   const heading = useRef<HTMLHeadingElement>(null)
@@ -315,14 +361,69 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
           role="region"
           aria-label={t('New API key test command')}
         >
-          <code>{curlExample(apiKey.key)}</code>
+          <code>{curlExample(apiKey.key, publicUrl)}</code>
         </pre>
-        <CopyButton text={curlExample(apiKey.key)} label={t('Copy command')} />
+        <CopyButton text={curlExample(apiKey.key, publicUrl)} label={t('Copy command')} />
       </div>
+      <h3>{t('Use this key with MCP')}</h3>
+      {configStatus === 'loading' && <p role="status">{t('Loading MCP configuration…')}</p>}
+      {configStatus === 'error' && (
+        <div className="alert alert-error" role="alert">
+          <p>{t('Could not load MCP configuration.')}</p>
+          <button type="button" className="button button-small" onClick={onRetry}>
+            {t('Try again')}
+          </button>
+        </div>
+      )}
+      {publicUrl && <McpConfig apiKey={apiKey.key} publicUrl={publicUrl} />}
       <button type="button" className="button button-primary" onClick={onDone}>
         {t('I’ve saved my key')}
       </button>
     </section>
+  )
+}
+
+function McpConfig({ apiKey, publicUrl }: { apiKey: string; publicUrl: string }) {
+  const { t } = useI18n()
+  const url = new URL('/mcp', publicUrl).href
+  const json = JSON.stringify(
+    {
+      mcpServers: {
+        hourmere: { type: 'http', url, headers: { Authorization: `Bearer ${apiKey}` } },
+      },
+    },
+    null,
+    2,
+  )
+  // Match the documented Claude Code form; quote the URL for shells such as zsh.
+  const command = `claude mcp add --transport http hourmere ${shellArgument(url)} \\\n  --header "Authorization: Bearer ${apiKey}"`
+  const snippets = [
+    { label: 'MCP client JSON', copy: 'Copy MCP JSON', value: json },
+    { label: 'Claude Code command', copy: 'Copy Claude command', value: command },
+  ] as const
+  return (
+    <>
+      <p>
+        {t(
+          'Use the JSON in a client that supports remote MCP servers with HTTP headers, or run the Claude Code command. Configuration keys may vary by client.',
+        )}
+      </p>
+      {snippets.map((snippet) => (
+        <div className="code-block" key={snippet.label}>
+          {/* biome-ignore lint/a11y/useSemanticElements: preserve formatting on the scrollable region. */}
+          <pre
+            data-layout-scroll="horizontal"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus the scrolling element.
+            tabIndex={0}
+            role="region"
+            aria-label={t(snippet.label)}
+          >
+            <code>{snippet.value}</code>
+          </pre>
+          <CopyButton text={snippet.value} label={t(snippet.copy)} />
+        </div>
+      ))}
+    </>
   )
 }
 
