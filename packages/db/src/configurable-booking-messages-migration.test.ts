@@ -13,7 +13,7 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0046_configurable_booking_messages.sql'
+const migration = '0047_configurable_booking_messages.sql'
 const defaultSettings = {
   reminders: [
     {
@@ -294,13 +294,13 @@ describe.skipIf(!serverUrl)('configurable booking messages migration', () => {
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
       ).toEqual({
-        name: '0045_invitation_generation_actor.sql',
+        name: '0046_current_inviter_signup.sql',
       })
       await copyFile(join(migrationsDir, migration), join(directory, migration))
       const started = performance.now()
       expect(await runMigrations(pool, directory)).toEqual([migration])
       console.info(
-        `0046 synthetic predecessor migration: ${(performance.now() - started).toFixed(1)} ms`,
+        `0047 synthetic predecessor migration: ${(performance.now() - started).toFixed(1)} ms`,
       )
       await verifyNoHistoricalMail(pool, tables, before)
       expect((await pool.query('SELECT notifications FROM event_types')).rows).toEqual(

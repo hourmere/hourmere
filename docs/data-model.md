@@ -669,7 +669,7 @@ for defaults, reserve and diagnostics.
 
 ## Configurable booking mail
 
-Migration 0046 adds event-type `notifications` settings and the immutable per-booking
+Migration 0047 adds event-type `notifications` settings and the immutable per-booking
 `notification_snapshot`. Existing types receive the previous all-recipient 24-hour reminder;
 existing bookings keep NULL, which always means that legacy default. Settings edits affect
 only new booking roots. Reschedules materialize or copy the predecessor snapshot and
