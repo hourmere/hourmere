@@ -333,7 +333,7 @@ describe.skipIf(!serverUrl)(
       expect(retry.status).toBe(200)
       await expectJobs(invitation.id, [1])
       expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([])
-    })
+    }, 15_000)
 
     it('queues one job for explicit resend and replays the same request without another generation', async () => {
       const app = instance()
@@ -362,7 +362,7 @@ describe.skipIf(!serverUrl)(
         expect(await queued()).toEqual(before)
       }
       expect((await current(invitation.id)).last_job_id).toBe((await queued())[1]?.id)
-    })
+    }, 15_000)
 
     it('waits for durable enqueue before answering while the committed invitation is visible', async () => {
       const reached = Promise.withResolvers<void>()

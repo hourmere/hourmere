@@ -11,6 +11,9 @@ export const admin = {
   'Review member setup': 'Review member setup',
   'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
     'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
+  'No longer valid': 'No longer valid',
+  'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
+    'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
   'Set up your booking page': 'Set up your booking page',
   'Complete these steps at your own pace. You can keep using the app as you go.':
     'Complete these steps at your own pace. You can keep using the app as you go.',
@@ -1299,6 +1302,8 @@ export const admin = {
     'Saved account — unavailable for a new selection',
   'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
+  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
+    'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
   'Accept invitation': 'Accept invitation',
   'Checking invitation…': 'Checking invitation…',
   'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':

@@ -11,6 +11,9 @@ export const admin = {
   'Review member setup': '查看成员设置',
   'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
     '请该成员检查个人工作时间和日历。只有成员本人可以修改其私人时间表。',
+  'No longer valid': '已失效',
+  'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
+    '邀请人已不再是团队成员。请取消此邀请，再以你自己的名义发送一封全新邀请。',
   'Set up your booking page': '设置你的预约页面',
   'Complete these steps at your own pace. You can keep using the app as you go.':
     '按自己的节奏完成这些步骤。设置过程中仍可继续使用应用。',
@@ -1226,6 +1229,8 @@ export const admin = {
   'Saved account — unavailable for a new selection': '已保存的账号，目前无法重新选择',
   'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
     '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
+  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
+    '此邀请已失效，因为发送邀请的人已不再是团队成员。请联系团队获取新邀请。',
   'Accept invitation': '接受邀请',
   'Checking invitation…': '正在检查邀请…',
   'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':

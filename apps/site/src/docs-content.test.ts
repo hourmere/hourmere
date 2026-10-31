@@ -517,16 +517,44 @@ describe('complete public documentation', () => {
     expect(frontmatter).toMatch(/^description: .+$/m)
     const original = `docs/${guide}.md`
     if (guide === 'notifications') {
-      expect(read(original).trim()).toBe(
-        '[Notifications and background jobs](https://hourmere.com/docs/notifications).',
+      const invitationPolicy = source.match(
+        /If the original inviter leaves[\s\S]*?stored lifecycle\./,
+      )
+      expect(invitationPolicy).not.toBeNull()
+      expect(read(original)).toBe(
+        `[Notifications and background jobs](https://hourmere.com/docs/notifications).\n\n${invitationPolicy?.[0]}\n`,
       )
     } else if (guide === 'api-conventions') {
-      // Retain only the requested compatibility excerpt; the full guide stays canonical.
+      // Requested policy excerpts mirror the canonical guide rather than diverging.
+      const resendPolicy = source
+        .match(/ {2}The original inviter must still belong[\s\S]*?validity requirement\./)?.[0]
+        ?.replace(/^ {2}/gm, '')
+      const acceptancePolicy = source.match(
+        /The original inviter must remain[\s\S]*?invalidate it\./,
+      )?.[0]
+      const recipientPolicy = source.match(
+        /Native `list-user-invitations` omits[\s\S]*?otherwise ineligible address\./,
+      )?.[0]
+      const summaryPolicy = source.match(
+        /Rows with `invalidReason:[\s\S]*?cancellation remains available\./,
+      )?.[0]
+      expect(resendPolicy).toBeDefined()
+      expect(acceptancePolicy).toBeDefined()
+      expect(recipientPolicy).toBeDefined()
+      expect(summaryPolicy).toBeDefined()
       const webhookRows = source.split('\n').filter((line) => line.startsWith('| Session webhook'))
       expect(webhookRows.length).toBeGreaterThan(0)
       expect(read(original)).toBe(
         [
           '[API conventions](https://hourmere.com/docs/api-conventions).',
+          '',
+          resendPolicy,
+          '',
+          acceptancePolicy,
+          '',
+          recipientPolicy,
+          '',
+          summaryPolicy,
           '',
           'These session webhook compatibility rows mirror the canonical documentation for repository readers.',
           '',

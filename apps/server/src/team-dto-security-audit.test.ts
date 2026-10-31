@@ -45,6 +45,7 @@ const invitationSummaryKeys = [
   'id',
   'email',
   'status',
+  'invalidReason',
   'createdAt',
   'expiresAt',
   'delivery',
@@ -986,6 +987,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     expect(invitations.data).toHaveLength(1)
     for (const item of invitations.data) {
       keys(item, invitationSummaryKeys)
+      expect(item.invalidReason).toBeNull()
       keys(item.delivery, ['state', 'attempts', 'lastAttemptAt', 'lastErrorCode'])
       expect(item.delivery).toEqual({
         state: 'unknown',

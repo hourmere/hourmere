@@ -87,8 +87,11 @@ sign in. `SIGNUP=closed` still allows the listed domains. In either restricted m
 pending, unexpired team invitation admits its exact email address only if the inviter's
 current email domain is in the allowlist or the inviter is the first user: the earliest
 remaining auth user by creation time, with user id breaking ties. The current allowlist
-applies to existing invitations too. Registration authority is non-transitive: an invitee
-outside those domains cannot admit another address by creating a team and inviting it;
+applies to existing invitations too. The inviter must also still belong to the invitation's
+team; demotion while retaining membership preserves eligibility. Otherwise the invitation
+grants no registration exception or sign-in email to an ineligible address.
+Registration authority is non-transitive: an invitee outside those domains cannot admit
+another address by creating a team and inviting it;
 neither team creation nor invitation acceptance grants that authority. Invitees must still
 prove email ownership and accept the invitation separately to join the team.
 With `closed` and an empty domain list, only invitations from the first user admit new

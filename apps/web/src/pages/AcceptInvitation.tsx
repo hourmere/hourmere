@@ -31,6 +31,10 @@ function invitationError(error: unknown): UiText {
   if (error instanceof RequestError) {
     const known: ReadonlyMap<string, MessageKey> = new Map([
       ['YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION', WRONG_ACCOUNT],
+      [
+        'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+        'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
+      ],
       ['EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION', VERIFY_EMAIL],
       ['EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION', VERIFY_EMAIL],
       [

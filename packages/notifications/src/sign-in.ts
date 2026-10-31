@@ -229,13 +229,19 @@ export async function deliverSignInEmail(
       await remove()
       return
     }
-    // Serialize every notification send, then recheck credentials after any lock wait:
-    // the one-time link may have been used or expired while another SMTP send ran.
+    // Serialize every notification send, then recheck credentials and signup authority
+    // after any lock wait: a link may be consumed or its inviter may depart while waiting.
     await lockNotificationEmailBudget(trx)
     signal?.throwIfAborted()
     const current = await verification(trx, deps, request)
     const now = clock()
-    if (!current || current.expiresAt <= now || row.expires_at <= now) {
+    if (
+      !current ||
+      current.expiresAt <= now ||
+      row.expires_at <= now ||
+      (!(await maySignUp(trx, deps.signup, request.email)) &&
+        !(await hasAccount(trx, request.email)))
+    ) {
       await remove()
       return
     }

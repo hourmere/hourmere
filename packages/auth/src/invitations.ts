@@ -202,6 +202,22 @@ export async function manageInvitation(
       if (invitation && eligibilityDenial(invitation, now) === 'TEAM_MANAGEMENT_ACCESS_DENIED')
         throw denied()
       if (!invitation && (resend || input.invitationId !== undefined)) throw ineligible()
+      // The original inviter remains this link's authority even when another admin
+      // authorizes a delivery generation. The team lock serializes departure/removal.
+      if (
+        invitation &&
+        !(await trx
+          .selectFrom('auth.member')
+          .select('id')
+          .where('organizationId', '=', organizationId)
+          .where('userId', '=', invitation.inviterId)
+          .executeTakeFirst())
+      )
+        throw new APIError('CONFLICT', {
+          code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+          message:
+            'The original inviter is no longer a team member. Send a new invitation instead.',
+        })
       let delivery = invitation
         ? await trx
             .selectFrom('invitation_deliveries')

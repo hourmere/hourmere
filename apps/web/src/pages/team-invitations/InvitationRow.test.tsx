@@ -33,6 +33,7 @@ const INVITATION: Schemas['TeamInvitationSummary'] = {
   resendAllowed: true,
   resendDeniedReason: null,
   resendRetryAfterSeconds: null,
+  invalidReason: null,
   delivery: {
     state: 'smtp_accepted',
     attempts: 1,
@@ -500,6 +501,130 @@ function compileSource<T>(
   )
   return module.exports[exported] as T
 }
+
+it.each([
+  [
+    'en',
+    'No longer valid',
+    'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
+    'Cancel invitation',
+    'Confirm cancellation',
+  ],
+  [
+    'zh-CN',
+    '已失效',
+    '邀请人已不再是团队成员。请取消此邀请，再以你自己的名义发送一封全新邀请。',
+    '取消邀请',
+    '确认取消邀请',
+  ],
+] as const)(
+  'explains void invitations in %s, disables resend and keeps cancellation',
+  async (language, label, guidance, cancel, confirm) => {
+    chooseLanguage(language)
+    const api = fakeApi({
+      [CANCEL]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+      [READ]: () => json(200, { ...INVITATION, status: 'canceled', resendAllowed: false }),
+    })
+    display({
+      ...INVITATION,
+      invalidReason: 'inviter_left',
+      resendAllowed: false,
+      resendDeniedReason: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+    })
+    expect(screen.getByText(label, { selector: 'dd' })).toBeDefined()
+    expect(screen.getByText(guidance)).toBeDefined()
+    const resend = screen.getByRole<HTMLButtonElement>('button', {
+      name: language === 'en' ? 'Resend invitation' : '重新发送邀请',
+    })
+    expect(resend.disabled).toBe(true)
+    await userEvent.click(resend)
+    expect(api.to(RESEND)).toHaveLength(0)
+    await userEvent.click(screen.getByRole('button', { name: cancel }))
+    await userEvent.click(screen.getByRole('button', { name: confirm }))
+    await waitFor(() => expect(api.to(CANCEL)).toHaveLength(1))
+  },
+)
+
+async function verifyRefreshedVoidNotice(Row: typeof InvitationRow) {
+  fakeApi({
+    [READ]: () =>
+      json(200, {
+        ...INVITATION,
+        invalidReason: 'inviter_left',
+        resendAllowed: false,
+        resendDeniedReason: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+        delivery: { ...INVITATION.delivery, state: 'queued' },
+      }),
+  })
+  const view = display(INVITATION, Row)
+  try {
+    await userEvent.click(screen.getByRole('button', { name: 'Check invitation status' }))
+    expect((await screen.findByRole('status')).textContent).toBe('Invitation status refreshed.')
+    expect(screen.queryByText('Invitation queued for delivery.')).toBeNull()
+    expect(screen.queryByText('No longer valid', { selector: 'dd' })).not.toBeNull()
+  } finally {
+    view.unmount()
+  }
+}
+
+it('refreshes an invalid queued invitation without announcing delivery success', () =>
+  verifyRefreshedVoidNotice(InvitationRow))
+
+it('detects removal of the refreshed void-invitation notice guard in a production-source copy', async () => {
+  await verifyRefreshedVoidNotice(sourceCopy(rowSource))
+  const before = 'invitation.invalidReason === null &&'
+  expect(rowSource.split(before)).toHaveLength(2)
+  await expect(
+    verifyRefreshedVoidNotice(sourceCopy(rowSource.replace(before, ''))),
+  ).rejects.toMatchObject({ name: 'AssertionError' })
+  await verifyRefreshedVoidNotice(sourceCopy(rowSource))
+})
+
+it('detects removed void-state display and resend controls in production-source copies', async () => {
+  async function assertion(Row: typeof InvitationRow) {
+    const view = display(
+      {
+        ...INVITATION,
+        // The derived state itself must keep a stale positive eligibility from enabling resend.
+        invalidReason: 'inviter_left',
+      },
+      Row,
+    )
+    try {
+      expect(screen.queryByText('No longer valid', { selector: 'dd' })).not.toBeNull()
+      expect(
+        screen.getByText(
+          'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
+        ),
+      ).toBeDefined()
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Resend invitation' }).disabled,
+      ).toBe(true)
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Cancel invitation' }).disabled,
+      ).toBe(false)
+    } finally {
+      view.unmount()
+    }
+  }
+  await assertion(sourceCopy(rowSource))
+  for (const [before, after] of [
+    [
+      "invalid ? 'No longer valid' : statusLabels[invitation.status]",
+      'statusLabels[invitation.status]',
+    ],
+    [
+      'needsCheck || invalid || !invitation.resendAllowed',
+      'needsCheck || !invitation.resendAllowed',
+    ],
+  ] as const) {
+    expect(rowSource.split(before)).toHaveLength(2)
+    await expect(assertion(sourceCopy(rowSource.replace(before, after)))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  }
+  await assertion(sourceCopy(rowSource))
+})
 
 it('detects optimistic row removal in a production-source copy while cancellation waits', async () => {
   async function assertion(Row: typeof InvitationRow) {
