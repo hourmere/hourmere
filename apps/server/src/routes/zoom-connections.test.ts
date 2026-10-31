@@ -25,7 +25,12 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
       resolveCaller: async (headers) => {
         const current = headers.get('cookie') === 'other' ? other : owner
         const principal = headers.has('authorization')
-          ? { ...current, kind: 'api_key' as const, apiKeyId: current.sessionId }
+          ? {
+              ...current,
+              kind: 'api_key' as const,
+              apiKeyScope: 'full' as const,
+              apiKeyId: current.sessionId,
+            }
           : headers.has('x-oauth')
             ? {
                 ...current,

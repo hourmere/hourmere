@@ -65,6 +65,14 @@ async function data(pool: pg.Pool, inventory: Table[], applyBackfills = false, t
         return `CASE WHEN EXISTS (SELECT FROM calendar_connections cc
           WHERE cc.id=connection_id AND cc.provider='google')
           THEN NULL ELSE ${quote(column)} END AS ${quote(column)}`
+      // 0047 reserves scope while preserving every other parsed metadata property.
+      if (
+        applyBackfills &&
+        table.schema === 'auth' &&
+        table.name === 'apikey' &&
+        column === 'metadata'
+      )
+        return `(coalesce(metadata::jsonb, '{}'::jsonb) || '{"scope":"full"}'::jsonb)::text AS metadata`
       return quote(column)
     })
     if (tuples) columns.push('xmin::text AS "_xmin"', 'ctid::text AS "_ctid"')

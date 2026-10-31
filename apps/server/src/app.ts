@@ -3,6 +3,7 @@ import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import {
+  ApiKeyScopeError,
   type CallerResolver,
   escapeControlCharacters,
   InvalidApiKeyError,
@@ -24,6 +25,7 @@ import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
+import { installRestApiKeyScopes } from './rest-scopes.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
   securityHeaders,
@@ -270,6 +272,7 @@ export function createApp({
   mcp,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
+  const unclassifiedScopeGuard = installRestApiKeyScopes(app, resolveCaller)
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
@@ -299,6 +302,9 @@ export function createApp({
       if (err.res) return err.getResponse()
       const error = httpErrorCodes[err.status] ?? 'invalid_request'
       return c.json(err.message ? { error, message: err.message } : { error }, err.status)
+    }
+    if (err instanceof ApiKeyScopeError) {
+      return c.json({ error: err.error, message: err.message }, 403)
     }
     if (err instanceof InvalidApiKeyError) {
       c.header('WWW-Authenticate', 'Bearer')
@@ -351,6 +357,7 @@ export function createApp({
   // Checks the body while the route reads it. Not /api/auth: Better Auth reads the raw
   // request body itself.
   app.use('/api/v1/*', jsonTextGuard)
+  app.use('/api/v1/*', unclassifiedScopeGuard)
   // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
   // /api/v1, 413s included; it applies its own checks.
   app.use('/mcp/*', noStoreByDefault, requestLogger, clientIp(trustedProxies), apiBodyLimit())

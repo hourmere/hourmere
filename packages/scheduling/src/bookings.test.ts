@@ -642,7 +642,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
       ...ctx,
       principal: {
         ...(apiKeyId
-          ? { kind: 'api_key' as const, apiKeyId }
+          ? { kind: 'api_key' as const, apiKeyScope: 'full' as const, apiKeyId }
           : { kind: 'session' as const, sessionId: 'session' }),
         user: { id: s.userId, name: '', email: '' },
         organization: { id: s.organizationId, name: '', slug: '', personal: true },
@@ -1703,6 +1703,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
                 ...base,
                 principal: {
                   kind: 'api_key',
+                  apiKeyScope: 'full' as const,
                   apiKeyId: key,
                   user: base.principal.user,
                   organization: base.principal.organization,

@@ -237,7 +237,7 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     user: user.user,
     organization: owner.organization,
     ...(kind === 'api_key'
-      ? { kind, apiKeyId: user.sessionId }
+      ? { kind, apiKeyId: user.sessionId, apiKeyScope: 'full' as const }
       : {
           kind,
           oauthConsentId: user.sessionId,

@@ -47,6 +47,7 @@ export async function createTestUser(db: Db, name = 'Test User'): Promise<TestUs
     ...user,
     principal: {
       kind: 'api_key',
+      apiKeyScope: 'full' as const,
       apiKeyId: randomUUID(),
       user,
       organization: { ...organization, personal: true },

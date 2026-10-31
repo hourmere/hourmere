@@ -1,5 +1,11 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'This API key does not allow this operation.': '此 API 密钥不允许执行这项操作。',
+  'API key scope cannot be changed; create a replacement key.':
+    'API 密钥的权限范围无法修改；请创建新密钥来替换。',
+  'Use a browser session without an Authorization header.':
+    '请使用浏览器登录会话，并移除 Authorization 请求头。',
+  'Check the API key organization and scope.': '请检查 API 密钥的所属组织和权限范围。',
   'No longer valid': '已失效',
   'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
     '邀请人已不再是团队成员。请取消此邀请，再以你自己的名义发送一封全新邀请。',

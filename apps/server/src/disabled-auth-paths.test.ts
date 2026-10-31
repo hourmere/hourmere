@@ -217,7 +217,7 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
       expect(current.status).toBe(200)
       expect(await current.json()).toMatchObject({
         user: { email: email('microsoft') },
-        principal: { kind: 'api_key', apiKeyId: key.id },
+        principal: { kind: 'api_key', apiKeyScope: 'full' as const, apiKeyId: key.id },
       })
       const listed = await app.request('/api/auth/api-key/list', { headers: { cookie } })
       expect(listed.status).toBe(200)

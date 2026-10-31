@@ -1,6 +1,7 @@
 import type { CallerResolver, Principal } from '@hourmere/auth'
 import { createMiddleware } from 'hono/factory'
 import { withClientIpHeader } from './client-ip.ts'
+import { requireRestApiKeyOperation } from './rest-scopes.ts'
 
 export type CallerEnv = { Variables: { principal: Principal } }
 
@@ -58,6 +59,7 @@ export function requireCaller(
         403,
       )
     }
+    requireRestApiKeyOperation(c, result.principal)
     c.set('principal', result.principal)
     await next()
   })
