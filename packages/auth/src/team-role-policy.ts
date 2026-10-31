@@ -304,6 +304,21 @@ export function createTeamRolePolicy(
       .where('organization_id', '=', organization.id)
       .executeTakeFirst()
     if (personal) throw teamRoleDenied()
+    // Departures/removals hold this same organization lock. Read current membership
+    // after waiting for it and retain the original inviter without requiring their
+    // former management role: demotion alone does not invalidate an invitation.
+    const inviter = await trx
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', organization.id)
+      .where('userId', '=', stored.inviterId)
+      .executeTakeFirst()
+    if (!inviter) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+        message: 'Inviter is no longer a member of the organization',
+      })
+    }
     const member = await trx
       .selectFrom('auth.member')
       .select('id')

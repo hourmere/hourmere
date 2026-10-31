@@ -40,6 +40,7 @@ const INVITATION: Schemas['TeamInvitationSummary'] = {
   generation: 1,
   resendDeniedReason: null,
   resendRetryAfterSeconds: null,
+  invalidReason: null,
   resendAllowed: false,
   delivery: { state: 'queued', attempts: 0, lastAttemptAt: null, lastErrorCode: null },
 }

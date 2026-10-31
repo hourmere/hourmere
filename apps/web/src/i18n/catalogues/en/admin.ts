@@ -1,5 +1,8 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'No longer valid': 'No longer valid',
+  'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
+    'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
   'Filter invitations': 'Filter invitations',
   Joined: 'Joined',
   Rejected: 'Rejected',

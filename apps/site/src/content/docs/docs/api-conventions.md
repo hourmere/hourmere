@@ -41,6 +41,14 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   clients must follow that ID when reading the final state. Exact resend replay applies
   to an unexpired invitation's retained ID; a replaced, canceled ID is not revived.
 
+  The original inviter must still belong to the invitation's team. If they have left or
+  been removed, explicit resend (including exact replay) and expired-row replacement return
+  HTTP 409 `INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION` without renewing or replacing
+  the invitation. A current owner/admin must use the invite form to create a fresh invitation
+  in their own name, canceling any old unexpired pending invitation first.
+  Demotion while retaining membership does not invalidate an invitation. The generation's
+  authorizing administrator does not replace this original-inviter validity requirement.
+
   Resends wait 60 seconds after the later of the last explicit resend or worker update (`429 INVITATION_RESEND_COOLDOWN`,
   `retryAfterSeconds: 60`, `Retry-After: 60`); live sending leases return 409
   `INVITATION_DELIVERY_BUSY`, and generation 32 returns 409 `INVITATION_GENERATION_LIMIT`.
@@ -398,6 +406,14 @@ including when resending. Historical invitations with an elevated or custom stor
 cannot be resent or accepted. Revoke them and issue a new member invitation instead.
 Acceptance still requires the exact invited, verified email and does not depend on the
 session's active organization. Registration continues to follow the instance's signup policy.
+The original inviter must remain a member of the same team. If they left or were removed,
+native `get-invitation` and `accept-invitation` return HTTP 400
+`INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION`; trusted `auth.api.acceptInvitation`
+enforces the same rule.
+Acceptance checks this inside its user → organization → session → invitation transaction,
+sharing the organization lock with departure/removal. It either commits before departure or
+refuses without creating a member or rewriting the invitation. The recipient must ask the
+team for a new invitation. An inviter's role demotion alone does not invalidate it.
 
 Only a current verified team owner may assign the fixed `admin` or `member` role.
 Owner targets cannot be demoted, including by themselves; only their own safe departure
@@ -437,6 +453,10 @@ Owners and admins manage invitations in Settings → Team members. Each pending 
 **Send a new invitation**, which atomically cancels the expired invitation and creates a new
 ID under the acting administrator. The page follows the returned ID, rereads server state
 after actions and displays joined, cancelled or queued outcomes independently of the filter.
+Rows with `invalidReason: "inviter_left"` show **No longer valid** and explain that a current
+owner/admin must cancel the old invitation and send a fresh invitation using the invite form.
+Resend and the expired-row replacement action are unavailable for these rows;
+cancellation remains available.
 
 `GET /api/v1/team/invitations/{invitationId}` returns one current `TeamInvitationSummary`
 without list pagination or lifecycle filtering. `POST /api/v1/team/invitations/{invitationId}/cancel`
@@ -496,15 +516,16 @@ response objects remain extensible for additive v1 changes.
 | `id` | Invitation UUID. |
 | `email` | Invited recipient address, visible only to verified owners/admins of this team. |
 | `status` | `pending`, `accepted`, `canceled`, `rejected`, derived `expired` or `unknown`. Only stored pending invitations with `expiresAt <=` the database clock become expired; terminal statuses take precedence. Unrecognized stored statuses map to `unknown`, stay in pagination and never count as pending or allow resend. |
+| `invalidReason` | Additive derived validity: `inviter_left` when a pending or expired invitation's original inviter has no current membership in this team, otherwise null. Lifecycle status, pagination and status filters are unchanged, and the invitation row is not rewritten. Demotion while retaining membership keeps this null. |
 | `createdAt` | Stored invitation creation time in UTC. |
 | `expiresAt` | Stored invitation expiry in UTC. Reading does not renew expiry or change status. |
 | `delivery.state` | Current generation's `queued` (waiting to send, including retry), `sending` (submitting to the mail server), `smtp_accepted` (accepted by the mail server), `failed` or `skipped`; `unknown` if no delivery row remains. Mail server acceptance does not imply inbox delivery, reading or joining. |
 | `delivery.attempts` | Stored current-generation attempts (0–4), or null without a delivery row. |
 | `delivery.lastAttemptAt` | Database time when the latest attempt was recorded in the current generation. Null before any attempt, for unknown legacy attempt times or without a delivery row. Later outcome updates do not replace it. |
 | `delivery.lastErrorCode` | Fixed classification below, or null. No raw provider error text. |
-| `resendAllowed` | Current member-invitation eligibility and actor/team/recipient request budgets. Unexpired resend checks the 60-second cooldown, generation cap and live sending lease; expired replacement checks recipient membership, active duplicates and the team pending limit. This read spends no budget and reserves no permission; resend checks again. |
+| `resendAllowed` | Current member-invitation eligibility, original inviter membership and actor/team/recipient request budgets. Unexpired resend checks the 60-second cooldown, generation cap and live sending lease; expired replacement checks recipient membership, active duplicates and the team pending limit. This read spends no budget and reserves no permission; resend checks again. |
 | `generation` | Current generation (1–32), or 1 for legacy invitations without retained delivery metadata. |
-| `resendDeniedReason` | Null when allowed, otherwise the fixed admission code describing why resend or replacement is unavailable. |
+| `resendDeniedReason` | Null when allowed, otherwise the fixed admission code describing why resend or replacement is unavailable, including `INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION` for a void invitation. |
 | `resendRetryAfterSeconds` | Remaining cooldown seconds (1–60), otherwise null. |
 
 Delivery error codes are `transport_error`, `smtp_auth`, `smtp_temporary`, `smtp_permanent`,

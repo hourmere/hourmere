@@ -213,6 +213,10 @@ calendar-list access.
   connection or process death before commit publishes none of these writes. A lost
   response after commit can still require rereading the team or invitation; these
   operations do not add response replay or repair historical incomplete rows.
+  Acceptance also requires the original inviter's current membership in the same team,
+  checked inside that transaction after the organization lock. Departure/removal takes the
+  same organization lock, so acceptance either commits before that departure or refuses
+  without creating membership or rewriting the invitation. Demotion alone retains validity.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
@@ -333,6 +337,12 @@ checks and the invitation mail's name. Null legacy rows fall back to the invitat
 inviter. The recorded UUID has no user foreign key: deleting the actor keeps its identity,
 so the sender refuses it rather than falling back to a different administrator. The original
 `auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
+Its current team membership also determines invitation validity independently of the
+generation's authorizing administrator. If the original inviter no longer belongs to the
+team, acceptance, resend and expired-row replacement refuse the invitation; queued/retrying
+delivery becomes `skipped/invitation_ineligible`. Both claim and pre-SMTP checks enforce this.
+No invitation row rewrite or schema migration is needed. A current owner/admin can create
+a fresh invitation in their own name, and cancellation remains allowed.
 Stop old web/all/worker processes before applying this migration and restart every role
 with the new code: old senders do not read the generation's authorizing administrator.
 Expired invitations never renew in place. Under the team lock, the explicit expired-row

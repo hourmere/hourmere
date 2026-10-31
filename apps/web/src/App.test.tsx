@@ -25,11 +25,12 @@ function routePaths(routes: RouteObject[], parent = ''): string[] {
   })
 }
 const sessionRoute = appRoutes.find(
-  ({ element }) => isValidElement(element) && element.type === SessionLayout,
+  ({ element, handle }) =>
+    isValidElement(element) && element.type === SessionLayout && handle?.surface === 'admin',
 )
 
 describe('route loading language', () => {
-  it('finds the session subtree in the rendered route definitions', () => {
+  it('finds the admin session subtree in the rendered route definitions', () => {
     expect(sessionRoute?.children?.length).toBeGreaterThan(0)
   })
 
@@ -47,6 +48,29 @@ describe('route loading language', () => {
       expect(localStorage.getItem('hourmere-language')).toBe('de')
     },
   )
+
+  it('keeps the public language while the session-gated invitation route loads', () => {
+    const recipientRoute = appRoutes.find(
+      ({ element, children }) =>
+        isValidElement(element) &&
+        element.type === SessionLayout &&
+        children?.some(({ path }) => path === '/app/join'),
+    )
+    expect(recipientRoute).toBeDefined()
+    expect(recipientRoute?.handle?.surface).not.toBe('admin')
+    chooseLanguage('de')
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
+    render(
+      <MemoryRouter initialEntries={['/app/join']}>
+        <App />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('status').textContent).toBe('Wird geladen…')
+    expect(screen.getByLabelText<HTMLSelectElement>('Sprache der Benutzeroberfläche').value).toBe(
+      'de',
+    )
+    expect(localStorage.getItem('hourmere-language')).toBe('de')
+  })
 
   it('inherits the admin surface for a new session route outside existing URL groups', () => {
     const children = sessionRoute?.children

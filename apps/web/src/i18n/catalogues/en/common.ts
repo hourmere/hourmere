@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
+    'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
   'Your team context changed. Reload before making changes.':
     'Your team context changed. Reload before making changes.',
   '{count} min': '{count} min',

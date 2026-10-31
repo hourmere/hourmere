@@ -164,6 +164,15 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         .where('organizationId', '=', organizationId)
         .where('userId', '=', original.userId)
         .execute()
+    if (departed) {
+      const before = await delivery(row.id)
+      await expect(resend(row, manage)).rejects.toMatchObject({
+        body: { code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION' },
+      })
+      expect(await delivery(row.id)).toEqual(before)
+      expect(sent).toHaveLength(0)
+      return
+    }
     expect(invitationResendDenial(row, await delivery(row.id), now())).toBeNull()
     const renewed = await resend(row, manage)
     sent.length = 0
@@ -185,7 +194,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   }
 
   it.each([false, true])(
-    'delivers another admin resend when the original inviter departed=%s',
+    'enforces original inviter membership for another admin resend: departed=%s',
     async (departed) => {
       await verifyActor(manageInvitation, deliverInvitationEmail, departed)
     },

@@ -1,12 +1,26 @@
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Link, MemoryRouter } from 'react-router'
+import * as react from 'react'
+import {
+  createRoutesFromElements,
+  Link,
+  MemoryRouter,
+  matchRoutes,
+  Route,
+  type RouteObject,
+} from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import type { Schemas } from '../api/client.ts'
+import { errorMessage, RequestError } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { chooseLanguage } from '../i18n/store.ts'
+import { msg, translateMessage, type UiText } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
+import { PATHS } from '../paths.ts'
 import {
   emptyAccount,
   emptyTeamLists,
@@ -258,6 +272,159 @@ describe('accept invitation entry', () => {
       expect(api.to(acceptRoute)).toHaveLength(0)
     },
   )
+
+  it.each([
+    [
+      'en',
+      'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
+    ],
+    ['zh-CN', '此邀请已失效，因为发送邀请的人已不再是团队成员。请联系团队获取新邀请。'],
+    [
+      'de',
+      'Diese Einladung ist nicht mehr gültig, da die Person, die sie gesendet hat, nicht mehr zum Team gehört. Bitten Sie das Team um eine neue Einladung.',
+    ],
+    [
+      'fr',
+      'Cette invitation n’est plus valable, car la personne qui l’a envoyée ne fait plus partie de l’équipe. Demandez une nouvelle invitation à l’équipe.',
+    ],
+    [
+      'es',
+      'Esta invitación ya no es válida porque la persona que la envió ya no forma parte del equipo. Pide al equipo una nueva invitación.',
+    ],
+    [
+      'pt-BR',
+      'Este convite não é mais válido porque a pessoa que o enviou não faz mais parte da equipe. Peça um novo convite à equipe.',
+    ],
+  ] as const)(
+    'explains an inviter departure in the public %s locale',
+    async (language, guidance) => {
+      chooseLanguage(language)
+      const { api } = server({
+        [lookupRoute]: () =>
+          json(400, {
+            code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+            message: 'private server prose',
+          }),
+      })
+      renderApp(path)
+      expect((await screen.findByRole('alert')).textContent).toBe(guidance)
+      expect(
+        screen.getByLabelText<HTMLSelectElement>(
+          language === 'zh-CN'
+            ? '界面语言'
+            : language === 'de'
+              ? 'Sprache der Benutzeroberfläche'
+              : language === 'fr'
+                ? 'Langue de l’interface'
+                : language === 'es'
+                  ? 'Idioma de la interfaz'
+                  : language === 'pt-BR'
+                    ? 'Idioma da interface'
+                    : 'Interface language',
+        ).value,
+      ).toBe(language)
+      expect(api.to(acceptRoute)).toHaveLength(0)
+      expect(api.to(switchRoute)).toHaveLength(0)
+    },
+  )
+
+  it('detects restricting the recipient route to admin locales in a production-source copy', () => {
+    const source = readFileSync('apps/web/src/App.tsx', 'utf8')
+    const routes = source.slice(
+      source.indexOf('export const appRoutes'),
+      source.indexOf('function RouteLoadingStatus'),
+    )
+    const dependencies = {
+      createRoutesFromElements,
+      Route,
+      PATHS,
+      ...Object.fromEntries(
+        [...routes.matchAll(/<([A-Z]\w*)/g)]
+          .filter((match) => match[1] !== 'Route')
+          .map((match) => [match[1], () => null]),
+      ),
+    }
+    const copiedRoutes = (text: string) => {
+      const compiled = execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
+        ],
+        { input: text.replace('export const', 'const'), encoding: 'utf8' },
+      )
+      return new Function(
+        'reactRuntime',
+        ...Object.keys(dependencies),
+        `${compiled}; return appRoutes`,
+      )(react, ...Object.values(dependencies)) as RouteObject[]
+    }
+    const assertion = (value: RouteObject[]) => {
+      const match = matchRoutes(value, path)
+      expect(match?.some(({ route }) => route.path === PATHS.join)).toBe(true)
+      expect(match?.some(({ route }) => route.handle?.surface === 'admin')).toBe(false)
+    }
+    assertion(copiedRoutes(routes))
+    const before = '<Route element={<SessionLayout />}>'
+    expect(routes.split(before)).toHaveLength(2)
+    expect(() =>
+      assertion(
+        copiedRoutes(
+          routes.replace(
+            before,
+            `<Route element={<SessionLayout />} handle={{ surface: 'admin' }}>`,
+          ),
+        ),
+      ),
+    ).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
+    assertion(copiedRoutes(routes))
+  })
+
+  it('explains a departure detected at acceptance and asks for a fresh invitation', async () => {
+    const guidance =
+      'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.'
+    const { api } = server({
+      [acceptRoute]: () =>
+        json(400, {
+          code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+        }),
+    })
+    renderApp(path)
+    await userEvent.click(await screen.findByRole('button', { name: 'Join team' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(guidance)
+    noJoinButton()
+    expect(api.to(acceptRoute)).toHaveLength(1)
+    expect(api.to(switchRoute)).toHaveLength(0)
+  })
+
+  it('detects removal of the inviter-departure error mapping in a production-source copy', () => {
+    const source = readFileSync('apps/web/src/pages/AcceptInvitation.tsx', 'utf8')
+    const mapping = source.slice(
+      source.indexOf('const UNAVAILABLE'),
+      source.indexOf('/** Session-gated'),
+    )
+    const copy = (text: string) =>
+      new Function(
+        'RequestError',
+        'msg',
+        'errorMessage',
+        `${stripTypeScriptTypes(text)}; return invitationError`,
+      )(RequestError, msg, errorMessage) as (error: unknown) => UiText
+    const assertion = (mapper: (error: unknown) => UiText) => {
+      const error = new RequestError(400, 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION', '')
+      expect(translateMessage('en', mapper(error))).toBe(
+        'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
+      )
+    }
+    assertion(copy(mapping))
+    const before = "'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION'"
+    expect(mapping.split(before)).toHaveLength(2)
+    expect(() => assertion(copy(mapping.replace(before, "'unused'")))).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    assertion(copy(mapping))
+  })
 
   it.each([
     { status: 'canceled' },

@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
+    '此邀请已失效，因为发送邀请的人已不再是团队成员。请联系团队获取新邀请。',
   'Your team context changed. Reload before making changes.':
     '你的团队上下文已改变。请重新加载后再进行修改。',
   '{count} min': '{count}分钟',

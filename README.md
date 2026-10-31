@@ -236,6 +236,9 @@ page. Signing in does not join the team: review the team and signed-in account, 
 If you used a different account, **Change account** signs you out while keeping the invitation
 for your next sign-in. Invitation details remain restricted to the verified recipient.
 An existing member can open the team without accepting again.
+If the original inviter leaves or is removed from the team, their pending invitations are
+no longer valid. Ask a current team owner/admin for a new invitation; those old links cannot
+be accepted or resent. An inviter's demotion while remaining a member does not invalidate links.
 
 The signed-in header's space menu switches between **Personal** and your member organizations
 and shows your role in the current space. Switching asks before discarding unsaved changes
@@ -250,6 +253,9 @@ pending invitations never count as members or hosts. Owners/admins can resend or
 pending invitation, and select expired invitations to atomically cancel the old invitation
 and send a new invitation with a new link under the acting admin, without a duplicate pending
 row. Cancellation never removes a member who has already joined.
+Invitations from someone who no longer belongs to the team show **No longer valid**;
+cancel the old invitation and use the invite form to send a fresh invitation in your own name.
+The expired-row replacement action cannot reuse these invitations.
 Owners can promote members to admins or return admins to member access after reviewing
 the permission change. Only owners manage admins; owner roles cannot be changed, and
 ownership transfer is not available yet. A team must always retain at least one owner.

@@ -1,5 +1,8 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'No longer valid': '已失效',
+  'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
+    '邀请人已不再是团队成员。请取消此邀请，再以你自己的名义发送一封全新邀请。',
   'Filter invitations': '筛选邀请',
   Joined: '已加入',
   Rejected: '已拒绝',

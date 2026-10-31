@@ -55,12 +55,14 @@ export const appRoutes = createRoutesFromElements(
         </>
       }
     />
+    {/* Recipient invitations use public locales while retaining the session gate. */}
+    <Route element={<SessionLayout />}>
+      <Route path={PATHS.join} element={<AcceptInvitationPage />} />
+    </Route>
     <Route element={<SessionLayout />} handle={{ surface: 'admin' }}>
       <Route path="/oauth/authorize" element={<McpAuthorizePage />} />
       <Route path="/oauth/consent" element={<McpAuthorizePage />} />
       <Route path="/sign-in" element={<SignInPage />} />
-      {/* Keep the protected invitation entry ahead of the app shell and public booking routes. */}
-      <Route path={PATHS.join} element={<AcceptInvitationPage />} />
       <Route path="/app" element={<RequireSession />}>
         <Route element={<AppShell />}>
           <Route index element={<Navigate to={PATHS.eventTypes} replace />} />
