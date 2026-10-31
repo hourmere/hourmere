@@ -28,6 +28,11 @@
       "semicolons": "asNeeded"
     }
   },
+  "markdown": {
+    "formatter": {
+      "enabled": false
+    }
+  },
   "linter": {
     "rules": {
       "preset": "recommended"
