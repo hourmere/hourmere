@@ -364,6 +364,7 @@ function EventTypeForm({
           disabled={contextChanged}
           focusVersion={shareFocusVersion}
           readiness={shareReadiness}
+          retryReadiness={retryReadiness}
         />
       )}
       <form className="editor" onSubmit={submit} noValidate>
@@ -392,7 +393,12 @@ function EventTypeForm({
               )}
             </p>
           ) : readiness.status === 'unavailable' ? (
-            <p>{t('Readiness checks are unavailable for this account.')}</p>
+            <>
+              <p>{t('Readiness checks are unavailable for this account.')}</p>
+              <button type="button" className="button button-small" onClick={retryReadiness}>
+                {t('Retry checks')}
+              </button>
+            </>
           ) : (
             <>
               <p>
@@ -606,8 +612,8 @@ function EventTypeForm({
           )}
 
           {!me.organization.personal &&
-            canAssignHosts &&
-            draft.schedulingType === 'round_robin' && (
+            (saved?.schedulingType === 'round_robin' ||
+              (canAssignHosts && draft.schedulingType === 'round_robin')) && (
               <section className="panel" aria-labelledby="round-robin-heading">
                 <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
                 <p>
@@ -622,31 +628,36 @@ function EventTypeForm({
                     'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
                   )}
                 </p>
-                {saved?.schedulingType === 'round_robin' && !saved.roundRobinActive && (
-                  <>
-                    <p>
-                      {t(
-                        'This uses each selected host’s current default availability. Activation is a separate action.',
-                      )}
-                    </p>
-                    <button
-                      type="button"
-                      disabled={dirty || saving}
-                      onClick={() => roundRobinAction('defaults')}
-                    >
-                      {t('Use hosts’ default availability')}
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      disabled={dirty || saving}
-                      onClick={() => roundRobinAction('activate')}
-                    >
-                      {t('Activate round robin')}
-                    </button>
-                    {dirty && <p>{t('Save your changes before using these actions.')}</p>}
-                  </>
+                {!canAssignHosts && (
+                  <p>{t('Only team owners and admins can change host assignments.')}</p>
                 )}
+                {canAssignHosts &&
+                  saved?.schedulingType === 'round_robin' &&
+                  !saved.roundRobinActive && (
+                    <>
+                      <p>
+                        {t(
+                          'This uses each selected host’s current default availability. Activation is a separate action.',
+                        )}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={dirty || saving}
+                        onClick={() => roundRobinAction('defaults')}
+                      >
+                        {t('Use hosts’ default availability')}
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        disabled={dirty || saving}
+                        onClick={() => roundRobinAction('activate')}
+                      >
+                        {t('Activate round robin')}
+                      </button>
+                      {dirty && <p>{t('Save your changes before using these actions.')}</p>}
+                    </>
+                  )}
               </section>
             )}
 

@@ -15,7 +15,7 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
-import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
+import { EVENT_TYPE_ID, eventType, OTHER_SCHEDULE_ID, schedule } from '../../test/fixtures.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
 
 const CREATED_ID = 'e0000000-0000-7000-8000-000000000002'
@@ -32,6 +32,7 @@ const TEAM = {
   },
 }
 const TEAM_ROUTE = `GET /api/v1/teams/${TEAM.organization.id}/readiness`
+const MEMBER_ROUTE = 'GET /api/auth/organization/get-active-member'
 type TeamCheck = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
 
 function teamPage(
@@ -116,6 +117,27 @@ async function openNew() {
 function expectNoShareActions(region: HTMLElement = share()) {
   expect(within(region).queryByRole('link', { name: /View booking page/ })).toBeNull()
   expect(within(region).queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+}
+
+function expectShareHashTargets() {
+  const links = share().querySelectorAll<HTMLAnchorElement>('a[href^="#"]')
+  expect(links.length).toBeGreaterThan(0)
+  for (const link of links) {
+    expect(document.getElementById(link.hash.slice(1))).not.toBeNull()
+  }
+}
+
+function teamRole(role: 'owner' | 'member'): Routes {
+  return {
+    [MEMBER_ROUTE]: () =>
+      json(200, {
+        id: 'membership-1',
+        organizationId: TEAM.organization.id,
+        userId: TEAM.user.id,
+        role,
+        createdAt: '2026-10-01T09:00:00.000Z',
+      }),
+  }
 }
 
 describe('viewing and sharing the saved event type', () => {
@@ -234,6 +256,59 @@ describe('viewing and sharing the saved event type', () => {
   )
 
   it.each([
+    ['no default schedule', [schedule({ id: OTHER_SCHEDULE_ID, isDefault: false })]],
+    [
+      'an invalid default schedule',
+      [schedule({ weeklyHours: {} }), schedule({ id: OTHER_SCHEDULE_ID, isDefault: false })],
+    ],
+  ] satisfies [string, Schedule[]][])(
+    'shares a personal event using its valid explicit schedule despite %s',
+    async (_name, schedules) => {
+      server([eventType({ scheduleId: OTHER_SCHEDULE_ID })], {
+        'GET /api/v1/schedules': () => json(200, { data: schedules }),
+      })
+      await openExisting()
+      expect(
+        within(share())
+          .getByRole('link', { name: /View booking page/ })
+          .getAttribute('href'),
+      ).toBe(bookingUrl())
+      expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
+    },
+  )
+
+  it.each([
+    [
+      'invalid time zone',
+      [schedule({ id: OTHER_SCHEDULE_ID, isDefault: false, timeZone: 'Invalid/Zone' })],
+      `/app/availability/${OTHER_SCHEDULE_ID}`,
+    ],
+    [
+      'no weekly hours',
+      [schedule({ id: OTHER_SCHEDULE_ID, isDefault: false, weeklyHours: {} })],
+      `/app/availability/${OTHER_SCHEDULE_ID}`,
+    ],
+    ['missing schedule', [], '/app/availability'],
+  ] satisfies [string, Schedule[], string][])(
+    'withholds a personal event using an explicit schedule with %s despite a valid default',
+    async (_name, selectedSchedules, destination) => {
+      server([eventType({ scheduleId: OTHER_SCHEDULE_ID })], {
+        'GET /api/v1/schedules': () => json(200, { data: [schedule(), ...selectedSchedules] }),
+      })
+      await openExisting()
+      expectNoShareActions()
+      expect(
+        within(share()).getByText(
+          'Host availability needs attention before you share this event type.',
+        ),
+      ).toBeDefined()
+      expect(
+        within(share()).getByRole('link', { name: 'Review schedule' }).getAttribute('href'),
+      ).toBe(destination)
+    },
+  )
+
+  it.each([
     ['inactive', { isActive: false }, '#event-enablement'],
     ['hidden', { isHidden: true }, '#event-visibility'],
   ] as const)(
@@ -271,8 +346,10 @@ describe('viewing and sharing the saved event type', () => {
       await screen.findByRole('heading', { name: 'Edit “New saved event”', level: 1 })
       expectNoShareActions()
       expect(share().querySelector(`a[href="${target}"]`)).not.toBeNull()
-      expect(document.activeElement).toBe(
-        within(share()).getByRole('heading', { name: 'View and share' }),
+      await waitFor(() =>
+        expect(document.activeElement).toBe(
+          within(share()).getByRole('heading', { name: 'View and share' }),
+        ),
       )
       expect(api.to(CREATE_ROUTE)).toHaveLength(1)
     },
@@ -312,6 +389,7 @@ describe('viewing and sharing the saved event type', () => {
     expectNoShareActions()
     expect(share().textContent).toMatch(/activat/i)
     expect(share().querySelector('a[href="#round-robin-heading"]')).not.toBeNull()
+    expectShareHashTargets()
     expect(api.to(activationRoute)).toHaveLength(0)
     expect(api.to(CREATE_ROUTE)[0]?.body).toMatchObject({ schedulingType: 'round_robin' })
     expect(api.to(CREATE_ROUTE)[0]?.body).not.toHaveProperty('roundRobinActive')
@@ -326,6 +404,65 @@ describe('viewing and sharing the saved event type', () => {
     await user.click(within(share()).getByRole('button', { name: 'Copy booking link' }))
     expect(await navigator.clipboard.readText()).toBe(expected)
     expect(api.to(activationRoute)).toHaveLength(1)
+  })
+
+  it('keeps the saved round-robin repair target when its draft changes scheduling type', async () => {
+    const user = userEvent.setup()
+    const api = server(
+      [
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType: 'round_robin',
+        }),
+      ],
+      {},
+      TEAM,
+    )
+    await openExisting()
+    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+      'Configuration checks passed',
+    )
+    await user.selectOptions(screen.getByLabelText('Scheduling'), 'collective')
+    expectNoShareActions()
+    expect(share().querySelector('a[href="#round-robin-heading"]')).not.toBeNull()
+    expectShareHashTargets()
+    const activation = screen.getByRole('region', { name: 'Round-robin activation' })
+    expect(within(activation).getByText('Needs activation')).toBeDefined()
+    expect(
+      within(activation).getByRole<HTMLButtonElement>('button', { name: 'Activate round robin' })
+        .disabled,
+    ).toBe(true)
+    expect(api.to(PATCH_ROUTE)).toHaveLength(0)
+    expect(api.to(`POST /api/v1/event-types/${EVENT_TYPE_ID}/round-robin/activate`)).toHaveLength(0)
+  })
+
+  it('keeps saved round-robin repair targets in the read-only host view without management actions', async () => {
+    server(
+      [
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType: 'round_robin',
+          hosts: [{ userId: '00000000-0000-7000-8000-000000000004' }],
+        }),
+      ],
+      teamRole('member'),
+      TEAM,
+    )
+    await openExisting()
+    await within(screen.getByRole('region', { name: 'Hosts' })).findByText(
+      'Only team owners and admins can change host assignments.',
+    )
+    expectNoShareActions()
+    expect(share().querySelector('a[href="#round-robin-heading"]')).not.toBeNull()
+    expectShareHashTargets()
+    const activation = screen.getByRole('region', { name: 'Round-robin activation' })
+    expect(within(activation).getByText('Needs activation')).toBeDefined()
+    expect(within(activation).queryAllByRole('button')).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: 'Activate round robin' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use hosts’ default availability' })).toBeNull()
+    expect(screen.queryByLabelText('Scheduling')).toBeNull()
   })
 
   it('withholds a team link when a saved host needs default availability', async () => {
@@ -354,7 +491,8 @@ describe('viewing and sharing the saved event type', () => {
     )
     expectNoShareActions()
     expect(share().textContent).toMatch(/host|availability|working hours/i)
-    expect(share().querySelector('a[href="#hosts"]')).not.toBeNull()
+    expect(share().querySelector('a[href="#hosts-heading"]')).not.toBeNull()
+    expectShareHashTargets()
     await user.type(title(), ' unsaved')
     expectNoShareActions()
     expect(
@@ -362,7 +500,8 @@ describe('viewing and sharing the saved event type', () => {
         'Host availability needs attention before you share this event type.',
       ),
     ).toBeDefined()
-    expect(share().querySelector('a[href="#hosts"]')).not.toBeNull()
+    expect(share().querySelector('a[href="#hosts-heading"]')).not.toBeNull()
+    expectShareHashTargets()
   })
 
   it('waits for a complete team configuration check before offering its saved link', async () => {
@@ -384,27 +523,58 @@ describe('viewing and sharing the saved event type', () => {
     ).toBe(`${window.location.origin}/team/design-team/intro-call`)
   })
 
-  it.each([503, 403] as const)(
-    'keeps team sharing unavailable after a readiness HTTP %i response',
-    async (status) => {
-      server(
+  it.each([
+    [503, 'View and share'],
+    [403, 'View and share'],
+    [503, 'Saved version readiness'],
+    [403, 'Saved version readiness'],
+  ] as const)(
+    'recovers team sharing after readiness HTTP %i by retrying from %s',
+    async (status, retryRegion) => {
+      const user = userEvent.setup()
+      const recovery = later()
+      let attempts = 0
+      const api = server(
         [eventType({ organizationId: TEAM.organization.id, ownerUserId: null })],
         {
-          [TEAM_ROUTE]: () =>
-            json(status, {
-              error: status === 403 ? 'team_management_access_denied' : 'internal_error',
-            }),
+          [TEAM_ROUTE]: () => {
+            attempts += 1
+            return attempts === 1
+              ? json(status, {
+                  error: status === 403 ? 'team_management_access_denied' : 'internal_error',
+                })
+              : recovery.response
+          },
         },
         TEAM,
       )
       await openExisting()
-      await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+      const message =
         status === 403
           ? 'Readiness checks are unavailable for this account.'
-          : 'Configuration check failed',
-      )
+          : 'Configuration check failed'
+      await waitFor(() => expect(share().textContent).toContain(message))
+      expect(
+        within(screen.getByRole('region', { name: 'Saved version readiness' })).getByText(message),
+      ).toBeDefined()
       expectNoShareActions()
       expect(share().querySelector('a[href="#saved-readiness-heading"]')).not.toBeNull()
+      expectShareHashTargets()
+      await user.click(
+        within(screen.getByRole('region', { name: retryRegion })).getByRole('button', {
+          name: 'Retry checks',
+        }),
+      )
+      await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(2))
+      expect(within(share()).getByText('Checking configuration…')).toBeDefined()
+      expectNoShareActions()
+      await recovery.answer(json(200, teamPage()))
+      expect(
+        (await within(share()).findByRole('link', { name: /View booking page/ })).getAttribute(
+          'href',
+        ),
+      ).toBe(`${window.location.origin}/team/design-team/intro-call`)
+      expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
     },
   )
 
@@ -442,6 +612,7 @@ describe('viewing and sharing the saved event type', () => {
     await within(share()).findByText('Host settings need attention.')
     expectNoShareActions()
     expect(share().querySelector('a[href="#hosts-heading"]')).not.toBeNull()
+    expectShareHashTargets()
   })
 
   it('keeps an activated round-robin pool shareable when only part of the pool lacks default hours', async () => {
@@ -507,7 +678,7 @@ describe('viewing and sharing the saved event type', () => {
         'Host availability needs attention before you share this event type.',
       )
       expectNoShareActions()
-      expect(share().querySelector('a[href="#hosts"]')).not.toBeNull()
+      expect(share().querySelector('a[href="#hosts-heading"]')).not.toBeNull()
     },
   )
 
@@ -529,36 +700,53 @@ describe('viewing and sharing the saved event type', () => {
     },
   )
 
-  it.each([
-    ['individual', 0],
-    ['individual', 2],
-    ['collective', 1],
-    ['collective', 9],
-    ['round_robin', 0],
-    ['round_robin', 9],
-  ] as const)('withholds a %s team link with %i saved hosts', async (schedulingType, count) => {
-    server(
+  it.each(
+    (
       [
-        eventType({
-          organizationId: TEAM.organization.id,
-          ownerUserId: null,
-          schedulingType,
-          roundRobinActive: true,
-          hosts: Array.from({ length: count }, (_, index) => ({
-            userId: `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`,
-          })),
-        }),
-      ],
-      {},
-      TEAM,
-    )
-    await openExisting()
-    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
-      'Configuration checks passed',
-    )
-    expectNoShareActions()
-    expect(share().querySelector('a[href="#hosts"]')).not.toBeNull()
-  })
+        ['individual', 0],
+        ['individual', 2],
+        ['collective', 1],
+        ['collective', 9],
+        ['round_robin', 0],
+        ['round_robin', 9],
+      ] as const
+    ).flatMap(([schedulingType, count]) =>
+      (['owner', 'member'] as const).map((role) => ({ schedulingType, count, role })),
+    ),
+  )(
+    'withholds a $schedulingType team link with $count saved hosts in the $role host view',
+    async ({ schedulingType, count, role }) => {
+      server(
+        [
+          eventType({
+            organizationId: TEAM.organization.id,
+            ownerUserId: null,
+            schedulingType,
+            roundRobinActive: true,
+            hosts: Array.from({ length: count }, (_, index) => ({
+              userId: `00000000-0000-7000-8000-${String(index + 4).padStart(12, '0')}`,
+            })),
+          }),
+        ],
+        teamRole(role),
+        TEAM,
+      )
+      await openExisting()
+      if (role === 'owner') {
+        await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+          'Configuration checks passed',
+        )
+      } else {
+        await within(screen.getByRole('region', { name: 'Hosts' })).findByText(
+          'Only team owners and admins can change host assignments.',
+        )
+        expect(screen.queryByLabelText('Scheduling')).toBeNull()
+      }
+      expectNoShareActions()
+      expect(share().querySelector('a[href="#hosts-heading"]')).not.toBeNull()
+      expectShareHashTargets()
+    },
+  )
 
   it('keeps a failed create as a guarded draft without published actions', async () => {
     const user = userEvent.setup()

@@ -5,9 +5,15 @@ import type { EventType, Profile, Schedule } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { PROFILE } from '../../limits.ts'
-import { PATHS, publicPageUrl, publicTeamPageUrl, TEAM_LINK_SLUG_HINT } from '../../paths.ts'
+import {
+  PATHS,
+  publicPageUrl,
+  publicTeamPageUrl,
+  schedulePath,
+  TEAM_LINK_SLUG_HINT,
+} from '../../paths.ts'
 import type { Me } from '../../session.tsx'
-import { validDefault } from '../availability/valid-default.ts'
+import { validSchedule } from '../availability/valid-default.ts'
 import type { EditorReadiness } from './editor-readiness.ts'
 
 /** Sharing always describes a saved server response, independently of the editable draft. */
@@ -17,6 +23,7 @@ export function SavedEventShare({
   profile,
   schedules,
   readiness,
+  retryReadiness,
   disabled = false,
   focusVersion = 0,
 }: {
@@ -25,6 +32,7 @@ export function SavedEventShare({
   profile: Profile | null
   schedules: Schedule[]
   readiness: EditorReadiness
+  retryReadiness: () => void
   disabled?: boolean
   focusVersion?: number
 }) {
@@ -38,7 +46,10 @@ export function SavedEventShare({
   const team = event.ownerUserId === null && !me.organization.personal
   const handle = profile?.handle.toLowerCase() ?? ''
   const missingHandle = personal && (!PROFILE.handlePattern.test(handle) || isReservedName(handle))
-  const missingDefault = personal && !schedules.some(validDefault)
+  const effectiveSchedule = schedules.find((schedule) =>
+    event.scheduleId ? schedule.id === event.scheduleId : schedule.isDefault,
+  )
+  const missingAvailability = personal && (!effectiveSchedule || !validSchedule(effectiveSchedule))
   const invalidTeamSlug = team && !isPublicTeamSlug(me.organization.slug)
   const invalidHosts =
     team &&
@@ -65,7 +76,7 @@ export function SavedEventShare({
     !disabled &&
     (personal || team) &&
     !missingHandle &&
-    !missingDefault &&
+    !missingAvailability &&
     !invalidTeamSlug &&
     !invalidHosts &&
     !hostAvailabilityMissing &&
@@ -137,23 +148,33 @@ export function SavedEventShare({
               <Link to={PATHS.settings}>{t('Complete your profile')}</Link>
             </li>
           )}
-          {missingDefault && (
+          {missingAvailability && (
             <li>
               {t(
-                'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.',
+                event.scheduleId
+                  ? 'Host availability needs attention before you share this event type.'
+                  : 'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.',
               )}{' '}
-              <Link to={schedules.length === 0 ? PATHS.newSchedule : PATHS.availability}>
-                {t('Review default availability')}
+              <Link
+                to={
+                  event.scheduleId && effectiveSchedule
+                    ? schedulePath(event.scheduleId)
+                    : schedules.length === 0
+                      ? PATHS.newSchedule
+                      : PATHS.availability
+                }
+              >
+                {t(event.scheduleId ? 'Review schedule' : 'Review default availability')}
               </Link>
             </li>
           )}
-          {hostAvailabilityMissing && !missingDefault && (
+          {hostAvailabilityMissing && !missingAvailability && (
             <li>
               {t('Host availability needs attention before you share this event type.')}{' '}
               {personal ? (
                 <Link to={PATHS.availability}>{t('Set working hours')}</Link>
               ) : (
-                <a href="#hosts">{t('Review hosts')}</a>
+                <a href="#hosts-heading">{t('Review hosts')}</a>
               )}
             </li>
           )}
@@ -172,9 +193,18 @@ export function SavedEventShare({
               {t(
                 readiness.status === 'loading'
                   ? 'Checking configuration…'
-                  : 'Configuration not checked',
+                  : readiness.status === 'unavailable'
+                    ? 'Readiness checks are unavailable for this account.'
+                    : readiness.status === 'error'
+                      ? 'Configuration check failed'
+                      : 'Configuration not checked',
               )}{' '}
               <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+              {readiness.status !== 'loading' && (
+                <button type="button" className="button button-small" onClick={retryReadiness}>
+                  {t('Retry checks')}
+                </button>
+              )}
             </li>
           )}
           {invalidTeamSlug && (
@@ -184,7 +214,7 @@ export function SavedEventShare({
           )}
           {invalidHosts && (
             <li>
-              {t('Host settings need attention.')} <a href="#hosts">{t('Review hosts')}</a>
+              {t('Host settings need attention.')} <a href="#hosts-heading">{t('Review hosts')}</a>
             </li>
           )}
           {!personal && !team && (

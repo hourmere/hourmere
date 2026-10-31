@@ -205,7 +205,11 @@ describe('team host setup navigation', () => {
     await screen.findByText('Could not check member configuration.')
     expect(screen.queryByText('No default schedule')).toBeNull()
     fail = false
-    await user.click(screen.getByRole('button', { name: 'Retry checks' }))
+    await user.click(
+      within(screen.getByRole('region', { name: 'Hosts' })).getByRole('button', {
+        name: 'Retry checks',
+      }),
+    )
     await within(screen.getByRole('region', { name: 'Hosts' })).findByText(
       'Configuration not checked',
     )
