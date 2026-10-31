@@ -11,6 +11,7 @@ import {
   findSlots,
   type Location,
   parseLocation,
+  selectDurationMinutes,
   toInstant,
   toIso,
 } from './availability.ts'
@@ -316,6 +317,7 @@ const RESCHEDULE_COLUMNS = [
   'event_type_id',
   'status',
   'start_at',
+  'end_at',
   'title',
   'location',
   'responses',
@@ -626,6 +628,7 @@ async function requireOfferedSlot(
     start: Temporal.Instant
     end: Temporal.Instant
     now: Temporal.Instant
+    durationMinutes?: number | undefined
     excludeBookingId?: string
     useDefaultSchedule?: boolean
   },
@@ -636,6 +639,7 @@ async function requireOfferedSlot(
     rangeStart: q.start,
     rangeEnd: q.end,
     now: q.now,
+    durationMinutes: q.durationMinutes,
     excludeBookingId: q.excludeBookingId,
     useDefaultSchedule: q.useDefaultSchedule,
   })
@@ -796,6 +800,8 @@ export interface CreateBookingInput {
   handle: string
   slug: string
   start: Temporal.Instant
+  /** One of the event type's allowed durations; omitted uses its default. */
+  durationMinutes?: number | undefined
   invitee: InviteeInput
   guests?: readonly PersonInput[] | undefined
   responses?: Record<string, unknown> | undefined
@@ -873,6 +879,7 @@ async function publicBooking(
       canonicalJson({
         eventTypeId: et.id,
         start: input.start.toString(),
+        durationMinutes: input.durationMinutes,
         invitee: input.invitee,
         guests: input.guests ?? [],
         responses: input.responses ?? {},
@@ -923,7 +930,8 @@ async function publicBooking(
       }
       const now = ctx.now()
       const responses = validateResponses(current.questions, input.responses ?? {})
-      const end = input.start.add({ minutes: current.durationMinutes })
+      const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
+      const end = input.start.add({ minutes: durationMinutes })
       let selectedHostIds = current.hostUserIds
       if (current.schedulingType === 'round_robin') {
         await lockRoundRobinState(trx, current.id)
@@ -940,6 +948,7 @@ async function publicBooking(
               rangeStart: input.start,
               rangeEnd: end,
               now,
+              durationMinutes: input.durationMinutes,
               useDefaultSchedule: true,
             })
             if (slots.some((slot) => slot.start.equals(input.start) && slot.end.equals(end)))
@@ -965,6 +974,7 @@ async function publicBooking(
             start: input.start,
             end,
             now,
+            durationMinutes: input.durationMinutes,
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
@@ -1063,7 +1073,7 @@ export async function cancelManagedBooking(
 export async function rescheduleManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
-  { start }: { start: Temporal.Instant },
+  { start, durationMinutes }: { start: Temporal.Instant; durationMinutes?: number | undefined },
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<BookingWithToken> {
   const hash = manageTokenHash(token)
@@ -1081,7 +1091,7 @@ export async function rescheduleManagedBooking(
     await lockOrganization(trx, parent.organization_id)
     const old = await lockManagedBooking(trx, hash)
     if (!old) throw bookingNotFound()
-    return rescheduleLocked(ctx, trx, old, start, origin)
+    return rescheduleLocked(ctx, trx, old, start, origin, false, durationMinutes)
   })
 }
 
@@ -1093,6 +1103,7 @@ async function rescheduleLocked(
   start: Temporal.Instant,
   origin: BookingOrigin,
   carryManageToken = false,
+  selectedDuration?: number | undefined,
 ): Promise<BookingWithToken> {
   // The status cannot change while the row is locked; the time check waits for the locks.
   if (old.status === 'cancelled') throw bookingCancelled()
@@ -1122,7 +1133,7 @@ async function rescheduleLocked(
       ? undefined
       : await trx
           .selectFrom('event_types')
-          .select(['id', 'duration_minutes'])
+          .select(['id', 'duration_minutes', 'allowed_durations_minutes'])
           .where('id', '=', old.event_type_id)
           .where('is_active', '=', true)
           .where('deleted_at', 'is', null)
@@ -1135,7 +1146,19 @@ async function rescheduleLocked(
       'This event type no longer takes bookings',
     )
   }
-  const end = start.add({ minutes: eventType.duration_minutes })
+  // The persisted endpoints are the duration snapshot. A later default/list edit must
+  // not silently change a meeting when its invitee or host only chooses another time.
+  const durationMinutes =
+    selectedDuration === undefined
+      ? toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })
+      : selectDurationMinutes(
+          {
+            durationMinutes: eventType.duration_minutes,
+            allowedDurationsMinutes: eventType.allowed_durations_minutes,
+          },
+          selectedDuration,
+        )
+  const end = start.add({ minutes: durationMinutes })
   for (const hostUserId of hostUserIds) {
     await requireOfferedSlot(trx, {
       eventTypeId: eventType.id,
@@ -1143,6 +1166,7 @@ async function rescheduleLocked(
       start,
       end,
       now,
+      durationMinutes: selectedDuration,
       excludeBookingId: old.id,
       useDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     })
@@ -1259,7 +1283,7 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
 export async function rescheduleHostBooking(
   ctx: ServiceContext,
   id: string,
-  { start }: { start: Temporal.Instant },
+  { start, durationMinutes }: { start: Temporal.Instant; durationMinutes?: number | undefined },
   origin?: BookingOrigin,
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
@@ -1295,6 +1319,7 @@ export async function rescheduleHostBooking(
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
       true,
+      durationMinutes,
     )
   })
 }

@@ -73,6 +73,7 @@ const eventKeys = [
   'title',
   'description',
   'durationMinutes',
+  'allowedDurationsMinutes',
   'slotStepMinutes',
   'bufferBeforeMinutes',
   'bufferAfterMinutes',
