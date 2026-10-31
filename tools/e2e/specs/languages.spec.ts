@@ -389,7 +389,10 @@ for (const selected of ['en', 'zh-CN'] as const) {
         .fixtureMessages
       return messages.every(
         (message) =>
-          Object.keys(message).every((key) => ['type', 'id', 'height'].includes(key)) &&
+          (message.type === 'hourmere:ready'
+            ? Object.keys(message).sort().join(',') === 'allowEmbedParent,id,type' &&
+              typeof message.allowEmbedParent === 'boolean'
+            : Object.keys(message).every((key) => ['type', 'id', 'height'].includes(key))) &&
           !JSON.stringify(message).includes('fixture-invitee@hourmere.invalid'),
       )
     })

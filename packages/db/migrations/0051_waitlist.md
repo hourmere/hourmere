@@ -2,9 +2,11 @@
 
 Migration 0051 adds opt-in waitlist storage and transactional availability signals.
 Existing event types remain disabled. It does not import booking contacts, backfill
-mail accounting, change historical data, enqueue work or send email. Migration
-0050 is reserved by a separate change; the populated predecessor test starts at
-0049.
+mail accounting, change historical data, enqueue work or send email. The populated
+upgrade test starts at 0049, then applies the published 0050 success-redirect
+migration before 0051. It verifies preservation across both steps, including the
+0050 columns, and compares the result with a fresh installation containing every
+migration through 0051. Reapplying that complete chain must perform no writes.
 
 Build first, then stop every old web, all-role and worker process before applying
 the migration. Restart every role on the matching code before enabling waitlists.

@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRoute, z } from '@hono/zod-openapi'
@@ -16,6 +17,20 @@ const noAuth: Pick<AppDeps, 'authHandler' | 'resolveCaller' | 'publicUrl'> = {
   publicUrl: 'http://localhost:3000',
   authHandler: async () => new Response(null, { status: 404 }),
   resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+}
+
+// Mutate an isolated copy so parallel test workers always see the restored source.
+async function appSourceCopy(before: string, after: string): Promise<typeof createApp> {
+  const location = new URL('./app.ts', import.meta.url)
+  const original = await readFile(location, 'utf8')
+  expect(original.includes(before), 'mutation matches real source').toBe(true)
+  const source = stripTypeScriptTypes(original.replace(before, after)).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) =>
+      `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+  )
+  return (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`))
+    .createApp
 }
 
 describe('GET /api/health', () => {
@@ -153,6 +168,7 @@ describe('serving the built web app', () => {
     await mkdir(join(dist, 'assets'))
     await writeFile(join(dist, 'index.html'), '<title>Hourmere</title>')
     await writeFile(join(dist, 'assets', 'app-abc123.js'), 'console.log(1)')
+    await writeFile(join(dist, 'hourmere-embed.js'), 'window.Hourmere = { version: 1 }')
     app = createApp({ ...noAuth, checkDb: async () => {}, webDist: dist })
   })
 
@@ -184,6 +200,68 @@ describe('serving the built web app', () => {
     expect(res.status).toBe(404)
     expect(res.headers.get('cache-control')).toBeNull()
   })
+
+  it('revalidates the widget script and serves upgrades with a new ETag', async () => {
+    const path = '/hourmere-embed.js'
+    const initial = await app.request(path)
+    expect(initial.status).toBe(200)
+    expect(initial.headers.get('content-type')).toMatch(/javascript/)
+    expect(initial.headers.get('cache-control')).toBe('no-cache')
+    const tag = initial.headers.get('etag')
+    expect(tag).toMatch(/^".+"$/)
+    expect(await initial.text()).toBe('window.Hourmere = { version: 1 }')
+
+    const unchanged = await app.request(path, { headers: { 'If-None-Match': tag as string } })
+    expect(unchanged.status).toBe(304)
+    expect(unchanged.headers.get('etag')).toBe(tag)
+    expect(unchanged.headers.get('cache-control')).toBe('no-cache')
+    expect(await unchanged.text()).toBe('')
+
+    try {
+      await writeFile(join(dist, path), 'window.Hourmere = { version: 2 }')
+      const upgraded = await app.request(path, { headers: { 'If-None-Match': tag as string } })
+      expect(upgraded.status).toBe(200)
+      expect(upgraded.headers.get('etag')).not.toBe(tag)
+      expect(upgraded.headers.get('cache-control')).toBe('no-cache')
+      expect(await upgraded.text()).toBe('window.Hourmere = { version: 2 }')
+    } finally {
+      await writeFile(join(dist, path), 'window.Hourmere = { version: 1 }')
+    }
+  })
+
+  it.each([
+    [
+      "app.use('/hourmere-embed.js', async (c, next) => {\n      await next()\n      c.res.headers.set('Cache-Control', 'no-cache')\n    })",
+      '',
+      'cache-control',
+    ],
+    ["app.use('/hourmere-embed.js', etag())", '', 'validation'],
+  ])(
+    'detects removed widget cache protection with a source-copy assertion failure (%s)',
+    async (before, after, protection) => {
+      const copiedCreateApp = await appSourceCopy(before, after)
+      const copiedApp = copiedCreateApp({ ...noAuth, checkDb: async () => {}, webDist: dist })
+      const response = await copiedApp.request('/hourmere-embed.js')
+      if (protection === 'cache-control') {
+        expect(() => expect(response.headers.get('cache-control')).toBe('no-cache')).toThrow(
+          expect.objectContaining({ name: 'AssertionError' }),
+        )
+        await response.body?.cancel()
+      } else {
+        const original = await app.request('/hourmere-embed.js')
+        const tag = original.headers.get('etag') as string
+        await original.body?.cancel()
+        await response.body?.cancel()
+        const revalidated = await copiedApp.request('/hourmere-embed.js', {
+          headers: { 'If-None-Match': tag },
+        })
+        expect(() => expect(revalidated.status).toBe(304)).toThrow(
+          expect.objectContaining({ name: 'AssertionError' }),
+        )
+        await revalidated.body?.cancel()
+      }
+    },
+  )
 
   it('serves the sign-in confirm page itself, keeping its headers', async () => {
     const res = await app.request('/sign-in/confirm')

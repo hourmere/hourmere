@@ -107,6 +107,32 @@ describe.skipIf(!serverUrl)('public routes', () => {
       message: 'No such event type',
     })
   })
+  it.each([undefined, false, true, 'true'])(
+    'discloses only a saved boolean parent-redirect opt-in (%s)',
+    async (allowEmbedParent) => {
+      const id = await f.eventType(ada.organizationId, ada.userId)
+      const row = await db
+        .updateTable('event_types')
+        .set({
+          success_redirect: JSON.stringify({
+            url: 'https://host.example/private-target?inviteeEmail=private@example.test',
+            parameters: ['inviteeEmail'],
+            includeInviteePersonalData: true,
+            allowEmbedParent,
+          }),
+        })
+        .where('id', '=', id)
+        .returning('slug')
+        .executeTakeFirstOrThrow()
+      const response = await get(`/api/v1/public/ada/${row.slug}?allowEmbedParent=true`)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as Record<string, unknown>
+      expect(body.allowEmbedParentRedirect).toBe(allowEmbedParent === true ? true : undefined)
+      expect(body).not.toHaveProperty('successRedirect')
+      expect(JSON.stringify(body)).not.toContain('private-target')
+      expect(JSON.stringify(body)).not.toContain('private@example.test')
+    },
+  )
 
   it.each([
     { image: '/assets/avatars/host.png', expected: '/assets/avatars/host.png' },

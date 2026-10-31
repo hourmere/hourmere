@@ -13,6 +13,7 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0051_waitlist.sql'
+const interveningMigration = '0050_booking_success_redirect.sql'
 const newTables = [
   'waitlist_entries',
   'waitlist_capabilities',
@@ -55,7 +56,13 @@ async function records(pool: pg.Pool, tables: Table[]) {
   return result
 }
 
-async function predecessor(directory: string): Promise<TestDatabase> {
+async function predecessor(
+  directory: string,
+  includeInterveningMigration = true,
+): Promise<TestDatabase> {
+  // Mutation cases reuse their owned directory for a second database. Always seed
+  // the required populated 0049 checkpoint before applying the published 0050.
+  await rm(join(directory, interveningMigration), { force: true })
   const files = (await readdir(migrationsDir))
     .filter((file) => file.endsWith('.sql') && file.slice(0, 4) <= '0049')
     .sort()
@@ -92,6 +99,13 @@ async function predecessor(directory: string): Promise<TestDatabase> {
           start_at-interval '24 hours',start_at,start_at-interval '24 hours'
         FROM bookings WHERE status='confirmed' ORDER BY id LIMIT 1;
     `)
+    if (includeInterveningMigration) {
+      await copyFile(
+        join(migrationsDir, interveningMigration),
+        join(directory, interveningMigration),
+      )
+      expect(await runMigrations(owned.pool, directory)).toEqual([interveningMigration])
+    }
     return owned
   } catch (error) {
     await owned.drop()
@@ -690,7 +704,7 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
     })
     let jobs: ReturnType<typeof createJobs<readonly [typeof definition]>> | undefined
     try {
-      upgraded = await predecessor(directory)
+      upgraded = await predecessor(directory, false)
       const pool = upgraded.pool
       jobs = createJobs({
         connectionString: upgraded.url,
@@ -726,12 +740,32 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
       ).toEqual({ name: '0049_configurable_booking_messages.sql' })
+      await copyFile(
+        join(migrationsDir, interveningMigration),
+        join(directory, interveningMigration),
+      )
+      expect(await runMigrations(pool, directory)).toEqual([interveningMigration])
+      expect(await records(pool, tables), '0050 preserves all populated 0049 values').toEqual(
+        before,
+      )
+      expect((await pool.query('SELECT DISTINCT success_redirect FROM event_types')).rows).toEqual([
+        { success_redirect: null },
+      ])
+      expect((await pool.query('SELECT DISTINCT success_redirect FROM bookings')).rows).toEqual([
+        { success_redirect: null },
+      ])
+      const currentPredecessorTables = await inventory(pool)
+      const currentPredecessorRecords = await records(pool, currentPredecessorTables)
       await copyFile(join(migrationsDir, migration), join(directory, migration))
       expect(await runMigrations(pool, directory)).toEqual([migration])
       expect(
         await records(pool, tables),
         'all historical bytes and tuple identities are preserved',
       ).toEqual(before)
+      expect(
+        await records(pool, currentPredecessorTables),
+        '0051 also preserves the complete published 0050 schema data',
+      ).toEqual(currentPredecessorRecords)
       await verifyGuard(pool, 'default disabled')
       for (const table of newTables)
         expect((await pool.query(`SELECT * FROM ${quote(table)}`)).rows).toEqual([])
@@ -739,6 +773,11 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
         { id: jobId },
       ])
       const schema = await snapshotSchema(pool)
+      expect((await readdir(directory)).filter((file) => file.endsWith('.sql')).sort()).toEqual(
+        (await readdir(migrationsDir))
+          .filter((file) => file.endsWith('.sql') && file <= migration)
+          .sort(),
+      )
       fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'waitlist_fresh' })
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       const latest = await inventory(pool)

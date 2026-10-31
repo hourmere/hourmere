@@ -386,4 +386,10 @@ export const common = {
     'Você não tem mais acesso a esta equipe. Escolha outra equipe.',
   'Sign in with the email address that received this invitation. Signing in does not join the team.':
     'Entre com o endereço de e-mail que recebeu este convite. Entrar na conta não faz você participar da equipe.',
+  'Keep your booking details and link before continuing to the host’s website.':
+    'Salve os detalhes e o link da sua reserva antes de continuar para o site do anfitrião.',
+  'Continue to {host}': 'Continuar para {host}',
+  'Opens the host’s website in the parent page.': 'Abre o site do anfitrião na página principal.',
+  'Opens the host’s website in a new tab.': 'Abre o site do anfitrião em uma nova aba.',
+  'Opens the host’s website in this tab.': 'Abre o site do anfitrião nesta aba.',
 } as const

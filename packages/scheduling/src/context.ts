@@ -1,5 +1,6 @@
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import type { SuccessRedirectPolicy } from './success-redirect.ts'
 
 /**
  * A change to a booking that people are told about (https://hourmere.com/docs/notifications). Only ids and
@@ -27,6 +28,7 @@ export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Insta
  */
 export interface ServiceContext {
   db: Db
+  successRedirectPolicy?: SuccessRedirectPolicy | undefined
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -46,6 +48,7 @@ export interface PublicContext {
   db: Db
   /** Internal waitlist attribution; transports do not expose enrollment yet. */
   waitlistSecret?: string | undefined
+  successRedirectPolicy?: SuccessRedirectPolicy | undefined
   /** Maximum invitee moves across one booking chain; defaults to 5, and 0 disables them. */
   bookingMaxInviteeReschedules?: number | undefined
   /** Explicit instance capability; defaults off. */

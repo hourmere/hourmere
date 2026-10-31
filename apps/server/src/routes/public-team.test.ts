@@ -58,6 +58,28 @@ describe.skipIf(!serverUrl)('public single-host team booking', () => {
     await db.updateTable('event_types').set({ allow_guests: true }).where('id', '=', s.id).execute()
     expect((await post(app, `${s.path}/bookings`, body)).status).toBe(201)
   })
+  it.each([false, true])(
+    'discloses only the saved team parent-redirect opt-in (%s)',
+    async (allowEmbedParent) => {
+      const s = await setup()
+      await db
+        .updateTable('event_types')
+        .set({
+          success_redirect: JSON.stringify({
+            url: 'https://host.example/private-target',
+            allowEmbedParent,
+          }),
+        })
+        .where('id', '=', s.id)
+        .execute()
+      const response = await appWith().request(s.path)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as Record<string, unknown>
+      expect(body.allowEmbedParentRedirect).toBe(allowEmbedParent ? true : undefined)
+      expect(body).not.toHaveProperty('successRedirect')
+      expect(JSON.stringify(body)).not.toContain('private-target')
+    },
+  )
 
   async function setup({
     slug = 'intro',

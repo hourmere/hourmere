@@ -14,6 +14,7 @@ import {
 import { embedParent } from '@hourmere/core/embed'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
+import { etag } from 'hono/etag'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
@@ -472,6 +473,13 @@ export function createApp({
     })
     app.get('/assets/*', serveStatic({ root }))
     app.get('/assets/*', (c) => c.text('Not found', 404))
+    // The stable widget URL must pick up protocol upgrades on every visit. Keep an
+    // ETag so unchanged scripts can still be validated without downloading them again.
+    app.use('/hourmere-embed.js', async (c, next) => {
+      await next()
+      c.res.headers.set('Cache-Control', 'no-cache')
+    })
+    app.use('/hourmere-embed.js', etag())
     // The app shell must be revalidated on every load; a cached index.html would keep
     // pointing at bundles from the previous deploy, which now return 404.
     app.use('*', async (c, next) => {

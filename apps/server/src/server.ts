@@ -112,6 +112,7 @@ export function productRoutes({
   webhooks = { enabled: false },
   automaticMeet = false,
   automaticZoom = false,
+  successRedirectAllowIpHosts = false,
   bookingMaxInviteeReschedules,
   hostedSignupUrl,
   privacyPolicyUrl,
@@ -121,6 +122,7 @@ export function productRoutes({
   db: Db
   automaticMeet?: boolean
   automaticZoom?: boolean
+  successRedirectAllowIpHosts?: boolean
   bookingMaxInviteeReschedules?: number | undefined
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
@@ -167,8 +169,19 @@ export function productRoutes({
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
-    eventTypeRoutes({ db, automaticMeet, automaticZoom }),
-    publicRoutes({ db, notify, automaticMeet, automaticZoom }),
+    eventTypeRoutes({
+      db,
+      automaticMeet,
+      automaticZoom,
+      successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
+    }),
+    publicRoutes({
+      db,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
+    }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
@@ -555,6 +568,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+        successRedirectAllowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
         privacyPolicyUrl: config.PRIVACY_POLICY_URL,

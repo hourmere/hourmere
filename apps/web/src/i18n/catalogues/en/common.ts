@@ -381,4 +381,10 @@ export const common = {
     'You no longer have access to this team. Choose another team.',
   'Sign in with the email address that received this invitation. Signing in does not join the team.':
     'Sign in with the email address that received this invitation. Signing in does not join the team.',
+  'Keep your booking details and link before continuing to the host’s website.':
+    'Keep your booking details and link before continuing to the host’s website.',
+  'Continue to {host}': 'Continue to {host}',
+  'Opens the host’s website in the parent page.': 'Opens the host’s website in the parent page.',
+  'Opens the host’s website in a new tab.': 'Opens the host’s website in a new tab.',
+  'Opens the host’s website in this tab.': 'Opens the host’s website in this tab.',
 } as const

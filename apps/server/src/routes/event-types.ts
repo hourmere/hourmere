@@ -15,6 +15,7 @@ import {
   MAX_QUESTIONS,
   PHONE_NUMBER_PATTERN,
   QuestionSchema,
+  type EventType as ServiceEventType,
   SLUG_PATTERN,
   updateEventType,
 } from '@hourmere/scheduling'
@@ -43,6 +44,10 @@ import {
 // open, because fields may be added to them within /api/v1.
 
 const L = EVENT_TYPE_LIMITS
+
+// Redirect configuration is service-only until its REST/MCP/CLI contract is introduced.
+const eventTypeResponse = ({ successRedirect: _successRedirect, ...eventType }: ServiceEventType) =>
+  eventType
 
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
@@ -348,7 +353,14 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         },
       }),
       async (c) =>
-        c.json({ data: await listEventTypes(serviceContext(deps, c.var.principal)) }, 200),
+        c.json(
+          {
+            data: (await listEventTypes(serviceContext(deps, c.var.principal))).map(
+              eventTypeResponse,
+            ),
+          },
+          200,
+        ),
     )
 
     app.openapi(
@@ -376,9 +388,11 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await createEventType(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('json'),
+          eventTypeResponse(
+            await createEventType(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('json'),
+            ),
           ),
           201,
         ),
@@ -398,7 +412,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await getEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          eventTypeResponse(
+            await getEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          ),
           200,
         ),
     )
@@ -428,10 +444,12 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await updateEventType(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('param').id,
-            c.req.valid('json'),
+          eventTypeResponse(
+            await updateEventType(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('param').id,
+              c.req.valid('json'),
+            ),
           ),
           200,
         ),
@@ -464,9 +482,11 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await activateRoundRobin(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('param').id,
+          eventTypeResponse(
+            await activateRoundRobin(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('param').id,
+            ),
           ),
           200,
         ),

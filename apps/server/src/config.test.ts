@@ -8,6 +8,25 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('requires an explicit instance opt-in for IP-host booking continuations in every role', () => {
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const env = { ...base, HOURMERE_ROLE }
+      for (const value of [undefined, '', 'false'])
+        expect(
+          loadConfig({ ...env, SUCCESS_REDIRECT_ALLOW_IP_HOSTS: value })
+            .SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
+        ).toBe(false)
+      expect(
+        loadConfig({ ...env, SUCCESS_REDIRECT_ALLOW_IP_HOSTS: 'true' })
+          .SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
+      ).toBe(true)
+      for (const value of ['yes', '1', 'TRUE', ' '])
+        expect(() => loadConfig({ ...env, SUCCESS_REDIRECT_ALLOW_IP_HOSTS: value })).toThrow(
+          /SUCCESS_REDIRECT_ALLOW_IP_HOSTS/,
+        )
+    }
+  })
+
   describe.each([
     ['BOOKING_MAX_INVITEE_RESCHEDULES', 5, 0],
     ['MAIL_RECIPIENT_MAX_PER_HOUR', 5, 1],

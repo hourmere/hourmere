@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as browser from '../browser.ts'
 import { chooseLanguage } from '../i18n/store.ts'
 import { RouteErrorBoundary } from './RouteErrorBoundary.tsx'
@@ -14,6 +14,8 @@ function Draft() {
   const [value, setValue] = useState('')
   return <input aria-label="Draft" value={value} onChange={(e) => setValue(e.target.value)} />
 }
+
+beforeEach(() => window.history.replaceState(null, '', '/'))
 
 describe('route error recovery', () => {
   it.each([
@@ -67,6 +69,50 @@ describe('route error recovery', () => {
     )
     expect(document.documentElement.lang).toBe('zh-CN')
     expect(screen.getByRole('heading', { name: '出错了' })).toBeDefined()
+  })
+
+  it.each(['/embed/ada/intro', '/embed/team/Alpha/intro'])(
+    'announces restrictive readiness and keeps Reload usable after %s fails',
+    (path) => {
+      const postMessage = vi.fn()
+      const reload = vi.spyOn(browser, 'reloadPage').mockImplementation(() => {})
+      const address = `${path}?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234`
+      window.history.replaceState(null, '', address)
+      vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)
+      render(
+        <MemoryRouter initialEntries={[address]}>
+          <RouteErrorBoundary>
+            <Broken />
+          </RouteErrorBoundary>
+        </MemoryRouter>,
+        { onCaughtError: vi.fn() },
+      )
+      expect(postMessage.mock.calls).toEqual([
+        [
+          { type: 'hourmere:ready', id: 'abcdefghijklmnop1234', allowEmbedParent: false },
+          'https://parent.example',
+        ],
+      ])
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+      expect(reload).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('does not announce embed readiness for an ordinary route error', () => {
+    const postMessage = vi.fn()
+    const address =
+      '/ada/intro?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234'
+    window.history.replaceState(null, '', address)
+    vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)
+    render(
+      <MemoryRouter initialEntries={[address]}>
+        <RouteErrorBoundary>
+          <Broken />
+        </RouteErrorBoundary>
+      </MemoryRouter>,
+      { onCaughtError: vi.fn() },
+    )
+    expect(postMessage).not.toHaveBeenCalled()
   })
 
   it('recovers after navigating away from the failed route', () => {
