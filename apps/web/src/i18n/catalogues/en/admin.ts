@@ -620,6 +620,9 @@ export const admin = {
   Actions: 'Actions',
   Active: 'Active',
   'Active: invitees can book it': 'Active: invitees can book it',
+  'Enable this event type': 'Enable this event type',
+  'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.':
+    'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.',
   'Add a date override': 'Add a date override',
   'Add a question': 'Add a question',
   'Add an option': 'Add an option',

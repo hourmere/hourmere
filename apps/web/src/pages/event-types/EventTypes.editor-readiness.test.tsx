@@ -641,8 +641,328 @@ describe('saved event type readiness in the editor', () => {
     await open()
     await within(readiness()).findByText('Readiness checks are unavailable for this account.')
     expect(within(readiness()).queryByRole('link')).toBeNull()
+    expect(within(readiness()).queryByRole('button', { name: 'Retry checks' })).toBeNull()
     expect(api.to(TEAM_ROUTE)).toHaveLength(0)
     expect(api.to(SELF_ROUTE)).toHaveLength(0)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'hides unavailable checks retry for API-key callers in %s',
+    async (language) => {
+      chooseLanguage(language)
+      const api = server(
+        eventType({ organizationId: TEAM.organization.id, ownerUserId: null }),
+        {},
+        { ...TEAM, principal: { kind: 'api_key', apiKeyId: 'synthetic-api-key' } },
+      )
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const checks = await screen.findByRole('region', {
+        name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+      })
+      await within(checks).findByText(
+        language === 'en'
+          ? 'Readiness checks are unavailable for this account.'
+          : '此账号无法使用就绪检查。',
+      )
+      expect(within(checks).queryByRole('button')).toBeNull()
+      expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(0)
+      expect(api.to(TEAM_ROUTE)).toHaveLength(0)
+    },
+  )
+
+  it('lets a checked manager retry a readiness permission failure', async () => {
+    const user = userEvent.setup()
+    let checks = 0
+    const api = server(
+      eventType({ organizationId: TEAM.organization.id, ownerUserId: null }),
+      {
+        [TEAM_ROUTE]: () =>
+          ++checks === 1
+            ? json(403, { error: 'team_management_access_denied' })
+            : json(200, teamPage()),
+      },
+      TEAM,
+    )
+    await open()
+    await within(readiness()).findByText('Readiness checks are unavailable for this account.')
+    await user.click(within(readiness()).getByRole('button', { name: 'Retry checks' }))
+    await within(readiness()).findByText('Configuration checks passed')
+    expect(api.to(TEAM_ROUTE)).toHaveLength(2)
+  })
+
+  it.each(['individual', 'collective', 'round_robin'] as const)(
+    'uses the shared team summary and host next step for %s scheduling',
+    async (schedulingType) => {
+      const peer = '00000000-0000-7000-8000-000000000004'
+      const api = server(
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType,
+          hosts:
+            schedulingType === 'collective'
+              ? [{ userId: ME.user.id }, { userId: peer }]
+              : [{ userId: peer }],
+        }),
+        {
+          [TEAM_ROUTE]: () =>
+            json(
+              200,
+              teamPage(
+                teamCheck({
+                  activation: schedulingType === 'round_robin' ? 'inactive' : 'not_applicable',
+                  summary:
+                    schedulingType === 'round_robin' ? 'needs_activation' : 'configuration_blocked',
+                  reasonCodes: ['default_schedule_required'],
+                  fixKinds: ['ask_member'],
+                }),
+              ),
+            ),
+          'GET /api/v1/event-type-hosts': () =>
+            json(200, {
+              data: [
+                { id: ME.user.id, name: 'Ada' },
+                { id: peer, name: 'Grace' },
+              ],
+              nextAfter: null,
+            }),
+        },
+        TEAM,
+      )
+      await open()
+      const checks = within(readiness())
+      await checks.findByText('Working hours are missing.')
+      expect(checks.getByText('Configuration needs attention')).toBeDefined()
+      expect(checks.getByRole('link', { name: 'Review hosts' }).getAttribute('href')).toBe(
+        '#hosts-heading',
+      )
+      expect(checks.queryByText('Configuration checks passed')).toBeNull()
+      if (schedulingType === 'round_robin')
+        expect(
+          checks.getByRole('link', { name: 'Review round-robin activation' }).getAttribute('href'),
+        ).toBe('#round-robin-heading')
+      else expect(checks.queryByRole('link', { name: 'Review round-robin activation' })).toBeNull()
+      expect(api.to(TEAM_ROUTE)).toHaveLength(1)
+      expect(api.to(SELF_ROUTE)).toHaveLength(0)
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'waits for the team role before denying round-robin management in %s',
+    async (language) => {
+      chooseLanguage(language)
+      const membership = later()
+      server(
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType: 'round_robin',
+        }),
+        {
+          'GET /api/auth/organization/get-active-member': () =>
+            membership.response.then((response) => response.clone()),
+        },
+        TEAM,
+      )
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const activation = await screen.findByRole('region', {
+        name: language === 'en' ? 'Round-robin activation' : '轮询激活',
+      })
+      const denial =
+        language === 'en'
+          ? 'Only team owners and admins can change host assignments.'
+          : '只有团队所有者和管理员可以修改主持人配置。'
+      expect(within(activation).queryByText(denial)).toBeNull()
+      expect(within(activation).queryByRole('button')).toBeNull()
+      await membership.answer(
+        json(200, { organizationId: TEAM.organization.id, userId: ME.user.id, role: 'member' }),
+      )
+      await within(activation).findByText(denial)
+      expect(within(activation).queryByRole('button')).toBeNull()
+    },
+  )
+
+  it('does not describe a failed role check as denied round-robin management', async () => {
+    server(
+      eventType({
+        organizationId: TEAM.organization.id,
+        ownerUserId: null,
+        schedulingType: 'round_robin',
+      }),
+      { 'GET /api/auth/organization/get-active-member': () => json(503, { error: 'unavailable' }) },
+      TEAM,
+    )
+    await open()
+    await screen.findByText('Could not load your team role.')
+    const activation = screen.getByRole('region', { name: 'Round-robin activation' })
+    expect(
+      within(activation).queryByText('Only team owners and admins can change host assignments.'),
+    ).toBeNull()
+    expect(within(activation).queryByRole('button')).toBeNull()
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'labels team enablement separately from round-robin bookability in %s',
+    async (language) => {
+      chooseLanguage(language)
+      server(
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType: 'round_robin',
+        }),
+        {},
+        TEAM,
+      )
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      await screen.findByRole('heading', {
+        name: language === 'en' ? 'Edit “Intro call”' : '编辑“Intro call”',
+        level: 1,
+      })
+      await within(
+        screen.getByRole('region', {
+          name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+        }),
+      ).findByText(language === 'en' ? 'Configuration checks passed' : '配置检查通过')
+      const checkbox = screen.queryByRole<HTMLInputElement>('checkbox', {
+        name: language === 'en' ? 'Enable this event type' : '启用此预约类型',
+      })
+      expect(checkbox).not.toBeNull()
+      expect(checkbox?.checked).toBe(true)
+      expect(document.querySelector('.booking-link-path')).toBeNull()
+      expect(
+        screen.queryByRole('checkbox', {
+          name: language === 'en' ? 'Active: invitees can book it' : '启用：允许受邀人预约',
+        }),
+      ).toBeNull()
+      expect(screen.queryByRole('link', { name: /View booking page|查看预约页面/ })).toBeNull()
+    },
+  )
+
+  it.each([
+    { state: 'inactive', isActive: false, summary: 'checks_passed' },
+    { state: 'no eligible hosts', isActive: true, summary: 'configuration_blocked' },
+  ] as const)('withholds a round-robin preview URL when $state', async ({ isActive, summary }) => {
+    server(
+      eventType({
+        organizationId: TEAM.organization.id,
+        ownerUserId: null,
+        schedulingType: 'round_robin',
+        roundRobinActive: true,
+        isActive,
+      }),
+      {
+        [TEAM_ROUTE]: () =>
+          json(
+            200,
+            teamPage(
+              teamCheck({
+                enablement: isActive ? 'enabled' : 'disabled',
+                activation: 'active',
+                summary,
+                reasonCodes: isActive ? ['host_configuration_required'] : [],
+                fixKinds: isActive ? ['ask_member'] : [],
+              }),
+            ),
+          ),
+      },
+      TEAM,
+    )
+    await open()
+    await within(readiness()).findByText(
+      isActive ? 'Host settings need attention.' : 'Configuration checks passed',
+    )
+    expect(document.querySelector('.booking-link-path')).toBeNull()
+    expect(screen.queryByRole('link', { name: /View booking page/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+  })
+
+  it.each(['loading', 'error', 'unavailable'] as const)(
+    'withholds an activated round-robin preview while saved readiness is %s',
+    async (status) => {
+      const pending = later()
+      const api = server(
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType: 'round_robin',
+          roundRobinActive: true,
+        }),
+        {
+          [TEAM_ROUTE]: () =>
+            status === 'loading' ? pending.response : json(503, { error: 'unavailable' }),
+        },
+        status === 'unavailable'
+          ? { ...TEAM, principal: { kind: 'api_key', apiKeyId: 'synthetic-api-key' } }
+          : TEAM,
+      )
+      await open()
+      if (status === 'loading') await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(1))
+      else
+        await within(readiness()).findByText(
+          status === 'unavailable'
+            ? 'Readiness checks are unavailable for this account.'
+            : 'Configuration check failed',
+        )
+      expect(document.querySelector('.booking-link-path')).toBeNull()
+      expect(screen.queryByRole('link', { name: /View booking page/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+      if (status === 'loading') await pending.answer(json(200, teamPage()))
+    },
+  )
+
+  it('keeps a blocked saved round-robin preview unavailable after editing the draft', async () => {
+    const user = userEvent.setup()
+    server(
+      eventType({
+        organizationId: TEAM.organization.id,
+        ownerUserId: null,
+        schedulingType: 'round_robin',
+        roundRobinActive: true,
+      }),
+      {
+        [TEAM_ROUTE]: () =>
+          json(
+            200,
+            teamPage(
+              teamCheck({
+                activation: 'active',
+                summary: 'configuration_blocked',
+                reasonCodes: ['host_configuration_required'],
+                fixKinds: ['ask_member'],
+              }),
+            ),
+          ),
+      },
+      TEAM,
+    )
+    await open()
+    await within(readiness()).findByText('Host settings need attention.')
+    await user.type(title(), ' draft')
+    expect(within(readiness()).getByText(DIRTY)).toBeDefined()
+    expect(document.querySelector('.booking-link-path')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+  })
+
+  it('keeps a saved inactive round-robin preview unavailable after enabling the draft', async () => {
+    const user = userEvent.setup()
+    server(
+      eventType({
+        organizationId: TEAM.organization.id,
+        ownerUserId: null,
+        schedulingType: 'round_robin',
+        roundRobinActive: true,
+        isActive: false,
+      }),
+      {},
+      TEAM,
+    )
+    await open()
+    await within(readiness()).findByText('Configuration checks passed')
+    await user.click(screen.getByRole('checkbox', { name: 'Enable this event type' }))
+    expect(within(readiness()).getByText(DIRTY)).toBeDefined()
+    expect(document.querySelector('.booking-link-path')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
   })
 
   it('links personal identity and meeting problems to existing repair destinations', async () => {

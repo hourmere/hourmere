@@ -8,6 +8,19 @@ export type SelfEventReadiness = Schemas['SelfReadinessPage']['eventTypes']['dat
 export type TeamEventReadiness = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
 export type EventReadiness = SelfEventReadiness | TeamEventReadiness
 
+/** Use the service's team result; a partial pool still has an eligible candidate. */
+export function teamReadinessAllowsSharing(item: EventReadiness | undefined) {
+  return (
+    item !== undefined &&
+    'reasonCodes' in item &&
+    item.completeness === 'complete' &&
+    (item.summary === 'checks_passed' || item.summary === 'partial_pool') &&
+    !item.reasonCodes.some(
+      (reason) => reason === 'check_failed' || reason === 'check_not_performed',
+    )
+  )
+}
+
 export function readinessErrorStatus(me: Me, err: unknown): 'unavailable' | 'error' {
   return !me.organization.personal &&
     err instanceof RequestError &&

@@ -582,6 +582,9 @@ export const admin = {
   Actions: '操作',
   Active: '启用',
   'Active: invitees can book it': '启用：允许受邀人预约',
+  'Enable this event type': '启用此预约类型',
+  'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.':
+    '仅限链接不代表访问控制。此预约类型开放预约后，任何知道或猜到直达链接的人都可以预约。',
   'Add a date override': '添加特定日期安排',
   'Add a question': '添加问题',
   'Add an option': '添加选项',

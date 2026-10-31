@@ -13,8 +13,10 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import type { Me } from '../../session.tsx'
+import { useTeamManagementAccess } from '../../team-management.tsx'
 import { validSchedule } from '../availability/valid-default.ts'
 import type { EditorReadiness } from './editor-readiness.ts'
+import { teamReadinessAllowsSharing } from './event-readiness.ts'
 
 /** Sharing always describes a saved server response, independently of the editable draft. */
 export function SavedEventShare({
@@ -37,6 +39,9 @@ export function SavedEventShare({
   focusVersion?: number
 }) {
   const { t } = useI18n()
+  const access = useTeamManagementAccess()
+  const canRetryUnavailable =
+    me.principal.kind === 'session' && access.status === 'ready' && access.role !== null
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (focusVersion > 0) heading.current?.focus()
@@ -72,6 +77,18 @@ export function SavedEventShare({
   const hostConfigurationMissing =
     item && item.summary !== 'partial_pool' && reasons.includes('host_configuration_required')
   const checksMissing = team && !item
+  const checksBlocked = team && !teamReadinessAllowsSharing(item)
+  // The service can prioritize enablement/activation over otherwise complete checks.
+  const configurationNeedsReview =
+    checksBlocked &&
+    item &&
+    (!['disabled', 'needs_activation'].includes(item.summary) ||
+      reasons.some((reason) => reason !== 'activation_required'))
+  const checksRetryable =
+    item?.completeness !== 'complete' ||
+    item.summary === 'check_failed' ||
+    item.summary === 'not_checked' ||
+    reasons.some((reason) => reason === 'check_failed' || reason === 'check_not_performed')
   const shareable =
     !disabled &&
     (personal || team) &&
@@ -81,7 +98,7 @@ export function SavedEventShare({
     !invalidHosts &&
     !hostAvailabilityMissing &&
     !hostConfigurationMissing &&
-    !checksMissing &&
+    !checksBlocked &&
     event.isActive &&
     !event.isHidden &&
     !needsActivation
@@ -129,7 +146,9 @@ export function SavedEventShare({
           {event.isHidden && (
             <li>
               {t(
-                'This event type is unlisted. Anyone with its direct link can still book it. Review visibility before sharing.',
+                team
+                  ? 'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.'
+                  : 'This event type is unlisted. Anyone with its direct link can still book it. Review visibility before sharing.',
               )}{' '}
               <a href="#event-visibility">{t('Review visibility')}</a>
             </li>
@@ -188,23 +207,30 @@ export function SavedEventShare({
               )}
             </li>
           )}
-          {checksMissing && (
+          {(checksMissing ||
+            (configurationNeedsReview &&
+              !hostAvailabilityMissing &&
+              !hostConfigurationMissing)) && (
             <li>
               {t(
-                readiness.status === 'loading'
-                  ? 'Checking configuration…'
-                  : readiness.status === 'unavailable'
-                    ? 'Readiness checks are unavailable for this account.'
-                    : readiness.status === 'error'
-                      ? 'Configuration check failed'
-                      : 'Configuration not checked',
+                item
+                  ? 'Configuration needs attention'
+                  : readiness.status === 'loading'
+                    ? 'Checking configuration…'
+                    : readiness.status === 'unavailable'
+                      ? 'Readiness checks are unavailable for this account.'
+                      : readiness.status === 'error'
+                        ? 'Configuration check failed'
+                        : 'Configuration not checked',
               )}{' '}
               <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
-              {readiness.status !== 'loading' && (
-                <button type="button" className="button button-small" onClick={retryReadiness}>
-                  {t('Retry checks')}
-                </button>
-              )}
+              {checksRetryable &&
+                readiness.status !== 'loading' &&
+                (readiness.status !== 'unavailable' || canRetryUnavailable) && (
+                  <button type="button" className="button button-small" onClick={retryReadiness}>
+                    {t('Retry checks')}
+                  </button>
+                )}
             </li>
           )}
           {invalidTeamSlug && (

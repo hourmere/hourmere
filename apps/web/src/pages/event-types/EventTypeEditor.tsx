@@ -36,6 +36,7 @@ import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
+import { teamReadinessAllowsSharing } from './event-readiness.ts'
 import {
   comparable,
   draftFromEventType,
@@ -337,6 +338,9 @@ function EventTypeForm({
     draft.schedulingType,
     draft.hostUserIds.length,
     saved?.roundRobinActive ?? false,
+    draft.isActive && (saved?.isActive ?? true),
+    saved !== null &&
+      !(shareReadiness.status === 'ready' && teamReadinessAllowsSharing(shareReadiness.item)),
   )
   const previewUrl = slugPreview.startsWith(`${window.location.origin}/`) ? slugPreview : null
   const previewPath = previewUrl ? new URL(previewUrl).pathname : ''
@@ -395,9 +399,13 @@ function EventTypeForm({
           ) : readiness.status === 'unavailable' ? (
             <>
               <p>{t('Readiness checks are unavailable for this account.')}</p>
-              <button type="button" className="button button-small" onClick={retryReadiness}>
-                {t('Retry checks')}
-              </button>
+              {me.principal.kind === 'session' &&
+                access.status === 'ready' &&
+                access.role !== null && (
+                  <button type="button" className="button button-small" onClick={retryReadiness}>
+                    {t('Retry checks')}
+                  </button>
+                )}
             </>
           ) : (
             <>
@@ -536,7 +544,11 @@ function EventTypeForm({
                   checked={draft.isActive}
                   onChange={(e) => set('isActive', e.target.checked)}
                 />
-                {t('Active: invitees can book it')}
+                {t(
+                  me.organization.personal
+                    ? 'Active: invitees can book it'
+                    : 'Enable this event type',
+                )}
               </label>
               <label className="checkbox">
                 <input
@@ -554,7 +566,9 @@ function EventTypeForm({
               </label>
               <p className="hint" id="hidden-hint">
                 {t(
-                  'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.',
+                  me.organization.personal
+                    ? 'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.'
+                    : 'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.',
                 )}
               </p>
               {draft.isHidden && suggestedSlug && (
@@ -628,7 +642,7 @@ function EventTypeForm({
                     'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
                   )}
                 </p>
-                {!canAssignHosts && (
+                {access.status === 'ready' && !canAssignHosts && (
                   <p>{t('Only team owners and admins can change host assignments.')}</p>
                 )}
                 {canAssignHosts &&
@@ -925,6 +939,8 @@ function bookingLinkPreview(
   schedulingType: EventType['schedulingType'] = 'individual',
   hostCount = 1,
   roundRobinActive = false,
+  isActive = true,
+  configurationBlocked = false,
 ): string {
   if (
     !me.organization.personal &&
@@ -940,6 +956,9 @@ function bookingLinkPreview(
     return 'Choose two to eight required hosts to get a collective booking link.'
   if (!me.organization.personal && schedulingType === 'round_robin' && !roundRobinActive)
     return 'Activate round robin to get a public booking link.'
+  if (!me.organization.personal && !isActive)
+    return 'This event type is inactive. Enable it and save before sharing.'
+  if (!me.organization.personal && configurationBlocked) return 'Configuration needs attention'
   if (!me.organization.personal && !isPublicTeamSlug(me.organization.slug))
     return TEAM_LINK_SLUG_HINT
   if (!me.organization.personal) return publicTeamPageUrl(me.organization.slug, slug || 'your-link')

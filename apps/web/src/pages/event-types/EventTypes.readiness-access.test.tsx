@@ -108,7 +108,7 @@ describe.each([
 ])('$context event readiness without a browser session', ({ me: base }) => {
   // OAuth defensively covers the shared Me union; only sessions and API keys authenticate REST.
   it.each(['api_key', 'oauth'] as const)(
-    'keeps the list, copying and editing usable for an %s principal',
+    'keeps listing and editing usable while restricting unchecked team sharing for an %s principal',
     async (kind) => {
       const user = userEvent.setup()
       const me: Schemas['Me'] = {
@@ -149,10 +149,15 @@ describe.each([
       expect(screen.getByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
       expect(screen.getByTestId('location').textContent).toBe('/app/event-types')
       expect(screen.queryByRole('heading', { name: 'Sign in to Hourmere' })).toBeNull()
-      await user.click(screen.getByRole('button', { name: labels.en.copy }))
-      expect(await navigator.clipboard.readText()).toBe(
-        `${window.location.origin}${me.organization.personal ? '/ada' : '/team/design-team'}/intro-call`,
-      )
+      if (me.organization.personal) {
+        await user.click(screen.getByRole('button', { name: labels.en.copy }))
+        expect(await navigator.clipboard.readText()).toBe(
+          `${window.location.origin}/ada/intro-call`,
+        )
+      } else {
+        expect(screen.queryByRole('button', { name: labels.en.copy })).toBeNull()
+        expect(document.querySelector('a[href*="/team/design-team/"]')).toBeNull()
+      }
       await user.click(screen.getByRole('link', { name: 'Edit Intro call' }))
       await screen.findByRole('heading', { name: 'Edit “Intro call”', level: 1 })
       await user.clear(screen.getByLabelText('Title', { exact: true }))
@@ -174,7 +179,6 @@ describe('team event readiness access', () => {
     'skips readiness for a member and leaves the list usable without retry in %s',
     async (language) => {
       chooseLanguage(language)
-      const user = userEvent.setup()
       const membership = later()
       const api = server('member', {
         // The header and event list independently read the same live membership.
@@ -186,7 +190,8 @@ describe('team event readiness access', () => {
       await membership.answer(json(200, member('member')))
       expect(api.to(READINESS_ROUTE)).toHaveLength(0)
       await waitFor(() => expectChecksHidden(language))
-      await user.click(screen.getByRole('button', { name: labels[language].copy }))
+      expect(screen.queryByRole('button', { name: labels[language].copy })).toBeNull()
+      expect(document.querySelector('a[href*="/team/design-team/"]')).toBeNull()
       expectChecksHidden(language)
       expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
       expect(api.to(READINESS_ROUTE)).toHaveLength(0)
@@ -199,7 +204,6 @@ describe('team event readiness access', () => {
     'hides checks without a retry after a stale manager role is denied in %s',
     async (language) => {
       chooseLanguage(language)
-      const user = userEvent.setup()
       const check = later()
       const api = server('admin', { [READINESS_ROUTE]: () => check.response })
       await open()
@@ -207,7 +211,8 @@ describe('team event readiness access', () => {
       await check.answer(json(403, { error: 'team_management_access_denied' }))
       expect(screen.queryByText(labels[language].failed)).toBeNull()
       await waitFor(() => expectChecksHidden(language))
-      await user.click(screen.getByRole('button', { name: labels[language].copy }))
+      expect(screen.queryByRole('button', { name: labels[language].copy })).toBeNull()
+      expect(document.querySelector('a[href*="/team/design-team/"]')).toBeNull()
       expectChecksHidden(language)
       expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
       expect(api.to(READINESS_ROUTE)).toHaveLength(1)
@@ -302,7 +307,7 @@ describe('personal setup guide isolation', () => {
   )
 
   it.each(['en', 'zh-CN'] as const)(
-    'retains weekly hours guidance without a personal handle hint in %s',
+    'avoids unrelated personal working hours and handle guidance in a team in %s',
     async (language) => {
       chooseLanguage(language)
       server('member', {
@@ -310,9 +315,7 @@ describe('personal setup guide isolation', () => {
         'GET /api/v1/schedules': () => json(200, { data: [] }),
       })
       await open()
-      expect(screen.getByRole('link', { name: labels[language].hours }).getAttribute('href')).toBe(
-        '/app/availability/new',
-      )
+      expect(screen.queryByRole('link', { name: labels[language].hours })).toBeNull()
       expect(screen.queryByRole('link', { name: labels[language].handle })).toBeNull()
       expect(
         screen.queryByRole('region', {
@@ -329,14 +332,12 @@ describe('personal setup guide isolation', () => {
       kind: 'invalid default hours',
       schedules: [schedule({ weeklyHours: { monday: [{ start: '17:00', end: '09:00' }] } })],
     },
-  ])('retains weekly hours guidance for $kind', async ({ schedules }) => {
+  ])('does not infer team readiness from the viewer’s $kind', async ({ schedules }) => {
     const api = server('member', {
       'GET /api/v1/schedules': () => json(200, { data: schedules }),
     })
     await open()
-    expect(screen.getByRole('link', { name: labels.en.hours }).getAttribute('href')).toBe(
-      '/app/availability',
-    )
+    expect(screen.queryByRole('link', { name: labels.en.hours })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Set up your booking page' })).toBeNull()
     expect(api.to(READINESS_ROUTE)).toHaveLength(0)
   })

@@ -1153,13 +1153,16 @@ describe('team booking links', () => {
     )
     const url = `${window.location.origin}/team/Cobaltmere/intro-call`
     expect(
-      row.getByRole('link', { name: /team\/Cobaltmere\/intro-call/ }).getAttribute('href'),
+      (await row.findByRole('link', { name: /team\/Cobaltmere\/intro-call/ })).getAttribute('href'),
     ).toBe(url)
     await user.click(row.getByRole('button', { name: 'Copy link for Intro call' }))
     expect(await navigator.clipboard.readText()).toBe(url)
     expect(screen.queryByText(/Choose your handle/)).toBeNull()
     await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+      'Configuration checks passed',
+    )
     expect(document.querySelector('.booking-link .preview')?.textContent).toBe(
       new URL(url).pathname,
     )

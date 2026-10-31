@@ -23,9 +23,8 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
-import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
-import { useEventReadiness } from './event-readiness.ts'
+import { teamReadinessAllowsSharing, useEventReadiness } from './event-readiness.ts'
 import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
 
 async function loadPage(signal: AbortSignal) {
@@ -39,7 +38,6 @@ async function loadPage(signal: AbortSignal) {
 
 export function EventTypesPage() {
   const { t, uiText } = useI18n()
-  const scheduleHint = t('{0}, so there are times to book.').split('{0}')
 
   usePageTitle('Event types')
   const me = useMe()
@@ -91,19 +89,6 @@ export function EventTypesPage() {
               eventTypes={state.data.eventTypes}
               reload={reload}
             />
-          )}
-          {!me.organization.personal && !state.data.schedules.some(validDefault) && (
-            <div className="alert alert-info">
-              <p>
-                {scheduleHint[0]}
-                <Link
-                  to={state.data.schedules.length === 0 ? PATHS.newSchedule : PATHS.availability}
-                >
-                  {t('Set your weekly hours')}
-                </Link>
-                {scheduleHint[1]}
-              </p>
-            </div>
           )}
           {hostUserId && (
             <p>
@@ -176,9 +161,12 @@ function EventTypeTable({
         </thead>
         <tbody>
           {eventTypes.map((e) => {
+            const item = readiness.status === 'ready' ? readiness.data.get(e.id) : undefined
             const url =
               e.ownerUserId === null &&
               !me.organization.personal &&
+              e.isActive &&
+              teamReadinessAllowsSharing(item) &&
               ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
                 (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8) ||
                 (e.schedulingType === 'round_robin' &&
@@ -241,6 +229,10 @@ function EventTypeTable({
                     {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
                     {e.isActive ? (
                       <span className="badge badge-success">{t('Active')}</span>
+                    ) : e.ownerUserId === null ? (
+                      <Link to={`${eventTypePath(e.id)}#event-enablement`} className="badge">
+                        {t('Inactive')}
+                      </Link>
                     ) : (
                       <span className="badge">{t('Inactive')}</span>
                     )}
@@ -258,7 +250,7 @@ function EventTypeTable({
                   <td data-label={t('Configuration checks')}>
                     <ConfigurationChecks
                       event={e}
-                      item={readiness.status === 'ready' ? readiness.data.get(e.id) : undefined}
+                      item={item}
                       status={readiness.status}
                       retry={retryChecks}
                     />

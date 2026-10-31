@@ -27,7 +27,7 @@ const COPY = {
 } as const
 
 describe.each(['en', 'zh-CN'] as const)('setup and team host filtering in %s', (language) => {
-  it('shows only matching team events alongside weekly hours guidance', async () => {
+  it('shows only matching team events without treating the viewer as their host', async () => {
     chooseLanguage(language)
     const copy = COPY[language]
     const team = { ...ME, organization: { ...ME.organization, personal: false } }
@@ -53,10 +53,10 @@ describe.each(['en', 'zh-CN'] as const)('setup and team host filtering in %s', (
     await screen.findByRole('rowheader', { name: 'Peer meeting' })
     expect(screen.getAllByRole('rowheader')).toHaveLength(1)
     expect(screen.getByText(copy.banner)).toBeDefined()
-    expect(screen.getByRole('link', { name: copy.hours })).toBeDefined()
+    expect(screen.queryByRole('link', { name: copy.hours })).toBeNull()
   })
 
-  it('keeps team weekly hours guidance beside an empty host filter and restores the table', async () => {
+  it('restores the team table without unrelated personal weekly hours guidance', async () => {
     chooseLanguage(language)
     const copy = COPY[language]
     const team = { ...ME, organization: { ...ME.organization, personal: false } }
@@ -70,16 +70,14 @@ describe.each(['en', 'zh-CN'] as const)('setup and team host filtering in %s', (
     renderApp(`/app/event-types?hostUserId=${PEER_ID}`)
     await screen.findByText(copy.empty)
     expect(screen.getByText(copy.banner)).toBeDefined()
-    expect(screen.getByRole('link', { name: copy.hours }).getAttribute('href')).toBe(
-      '/app/availability/new',
-    )
+    expect(screen.queryByRole('link', { name: copy.hours })).toBeNull()
     expect(screen.queryByRole('region', { name: copy.guide })).toBeNull()
     expect(screen.queryByRole('link', { name: copy.create })).toBeNull()
     expect(screen.queryByRole('table')).toBeNull()
     await userEvent.click(screen.getByRole('link', { name: copy.all }))
     await screen.findByRole('rowheader', { name: 'Intro call' })
     expect(screen.queryByText(copy.banner)).toBeNull()
-    expect(screen.getByRole('link', { name: copy.hours })).toBeDefined()
+    expect(screen.queryByRole('link', { name: copy.hours })).toBeNull()
   })
 
   it('keeps one personal setup creation action when a team filter URL opens a personal space', async () => {
@@ -113,7 +111,7 @@ describe.each(['en', 'zh-CN'] as const)('setup and team host filtering in %s', (
     expect((await screen.findByRole('link', { name: copy.create })).getAttribute('href')).toBe(
       '/app/event-types/new',
     )
-    expect(screen.getByRole('link', { name: copy.hours })).toBeDefined()
+    expect(screen.queryByRole('link', { name: copy.hours })).toBeNull()
     expect(screen.queryByRole('region', { name: copy.guide })).toBeNull()
   })
 })
