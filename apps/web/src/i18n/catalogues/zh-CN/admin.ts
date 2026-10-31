@@ -6,6 +6,17 @@ export const admin = {
   'Use a browser session without an Authorization header.':
     '请使用浏览器登录会话，并移除 Authorization 请求头。',
   'Check the API key organization and scope.': '请检查 API 密钥的所属组织和权限范围。',
+  'View hosted team events': '查看主持的团队活动',
+  'Showing team events with this member as a host or pool candidate.':
+    '当前显示该成员主持或参与候选池的团队活动。',
+  'Show all event types': '显示全部活动类型',
+  'This member does not host any team events.': '该成员未主持任何团队活动。',
+  'Only team owners and admins can change host assignments.':
+    '只有团队所有者和管理员可以修改主持人配置。',
+  'You are a selected host.': '你是已选主持人。',
+  'Review member setup': '查看成员设置',
+  'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
+    '请该成员检查个人工作时间和日历。只有成员本人可以修改其私人时间表。',
   'No longer valid': '已失效',
   'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
     '邀请人已不再是团队成员。请取消此邀请，再以你自己的名义发送一封全新邀请。',

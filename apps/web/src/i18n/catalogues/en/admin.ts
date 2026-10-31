@@ -6,6 +6,17 @@ export const admin = {
   'Use a browser session without an Authorization header.':
     'Use a browser session without an Authorization header.',
   'Check the API key organization and scope.': 'Check the API key organization and scope.',
+  'View hosted team events': 'View hosted team events',
+  'Showing team events with this member as a host or pool candidate.':
+    'Showing team events with this member as a host or pool candidate.',
+  'Show all event types': 'Show all event types',
+  'This member does not host any team events.': 'This member does not host any team events.',
+  'Only team owners and admins can change host assignments.':
+    'Only team owners and admins can change host assignments.',
+  'You are a selected host.': 'You are a selected host.',
+  'Review member setup': 'Review member setup',
+  'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
+    'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
   'No longer valid': 'No longer valid',
   'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
     'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',

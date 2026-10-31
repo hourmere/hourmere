@@ -2548,6 +2548,8 @@ export interface paths {
                             data: {
                                 /** Format: uuid */
                                 id: string;
+                                /** Format: uuid */
+                                memberId: string;
                                 name: string;
                             }[];
                             nextAfter: string | null;

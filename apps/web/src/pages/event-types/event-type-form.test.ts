@@ -24,6 +24,23 @@ const renderedDraftErrors = (...args: Parameters<typeof validateDraft>) =>
       translateMessage('en', value),
     ]),
   )
+
+describe.each([
+  { mode: 'collective', min: 2, max: 8 },
+  { mode: 'round_robin', min: 1, max: 8 },
+] as const)('$mode host count boundaries', ({ mode, min, max }) => {
+  it.each([min - 1, min, max, max + 1])('validates %i selected hosts', (count) => {
+    const draft = {
+      ...emptyDraft(),
+      schedulingType: mode,
+      hostUserIds: Array.from(
+        { length: count },
+        (_, index) => `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`,
+      ),
+    }
+    expect(validateDraft(draft).hosts !== undefined).toBe(count < min || count > max)
+  })
+})
 describe('slugify', () => {
   it.each([
     ['Intro call', 'intro-call'],

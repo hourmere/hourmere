@@ -12,7 +12,7 @@ export function useMemberReadiness(
   organizationId: string,
   currentUserId: string | undefined,
   role: string | null,
-  members: ListedOrganizationMember[],
+  members: Pick<ListedOrganizationMember, 'id'>[],
 ) {
   const memberIds = members
     .map((member) => member.id)

@@ -492,7 +492,19 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       } else {
         const hosts = await body(response)
         keys(hosts, ['data', 'nextAfter'])
-        for (const host of hosts.data) keys(host, ['id', 'name'])
+        for (const host of hosts.data) {
+          keys(host, ['id', 'memberId', 'name'])
+          const membership = await db
+            .selectFrom('auth.member')
+            .select(['userId', 'organizationId'])
+            .where('id', '=', host.memberId)
+            .executeTakeFirstOrThrow()
+          expect(membership).toEqual({
+            userId: host.id,
+            organizationId:
+              index === 3 ? fixture.outsider.principal.organization.id : fixture.team.id,
+          })
+        }
         expect(hosts.data.map((host: Json) => host.id).sort()).toEqual(
           (index === 3
             ? [fixture.outsider.id]
