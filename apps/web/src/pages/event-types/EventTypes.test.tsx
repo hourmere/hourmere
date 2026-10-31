@@ -163,7 +163,7 @@ describe('the event types list', () => {
       '/app/event-types/e0000000-0000-7000-8000-000000000003',
     )
     // Nothing is missing before people can book.
-    expect(screen.queryByText(/Choose your handle/)).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Set up your booking page' })).toBeNull()
   })
 
   it('says what is missing before anyone can book', async () => {
@@ -175,12 +175,13 @@ describe('the event types list', () => {
         .getByRole('link', { name: 'Create your first event type' })
         .classList.contains('button'),
     ).toBe(true)
-    expect(screen.getByRole('link', { name: 'Choose your handle' }).getAttribute('href')).toBe(
+    expect(screen.getByRole('link', { name: 'Complete your profile' }).getAttribute('href')).toBe(
       '/app/settings',
     )
-    expect(screen.getByRole('link', { name: 'Set your weekly hours' }).getAttribute('href')).toBe(
-      '/app/availability/new',
-    )
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Use Monday–Friday, 09:00–17:00' })
+        .disabled,
+    ).toBe(true)
   })
 
   it('offers a retry when the list cannot be loaded', async () => {

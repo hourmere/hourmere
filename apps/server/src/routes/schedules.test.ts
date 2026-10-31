@@ -16,6 +16,7 @@ const serverUrl = process.env.DATABASE_URL
 
 const ROUTES = {
   '/api/v1/schedules': ['get', 'post'],
+  '/api/v1/schedules/default': ['post'],
   '/api/v1/schedules/{id}': ['get', 'patch', 'delete'],
   '/api/v1/schedules/{id}/overrides': ['get'],
   '/api/v1/schedules/{id}/overrides/{date}': ['put', 'delete'],
@@ -40,6 +41,7 @@ describe('schedule routes in the OpenAPI document', () => {
       expect.arrayContaining(['$', '$.weeklyHours', '$.weeklyHours.sunday[]']),
     )
     expect(body('/api/v1/schedules/{id}/overrides/{date}', 'put')).toEqual(['$', '$.intervals[]'])
+    expect(body('/api/v1/schedules/default', 'post')).toEqual(['$'])
   })
 
   it('lists every route as authenticated', async () => {
@@ -77,6 +79,105 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
   it('requires a caller', async () => {
     expect((await t.anonymous.get('/api/v1/schedules')).status).toBe(401)
     expect((await t.anonymous.post('/api/v1/schedules', body())).status).toBe(401)
+    expect((await t.anonymous.post('/api/v1/schedules/default', {})).status).toBe(401)
+  })
+
+  it('confirms starter availability once and rejects client customization', async () => {
+    const user = await createTestUser(t.db)
+    const client = api(user)
+    expect(await client.post('/api/v1/schedules/default', {})).toMatchObject({
+      status: 409,
+      body: { error: 'setup_profile_required' },
+    })
+    await client.put('/api/v1/profile', {
+      handle: `h-${user.id}`,
+      timeZone: 'America/Los_Angeles',
+      locale: 'en',
+    })
+    expect(await client.post('/api/v1/schedules/default', { timeZone: 'UTC' })).toMatchObject({
+      status: 400,
+      body: { error: 'invalid_request' },
+    })
+    const created = await client.post('/api/v1/schedules/default', {})
+    expect(created).toMatchObject({
+      status: 201,
+      body: {
+        name: 'Working hours',
+        isDefault: true,
+        timeZone: 'America/Los_Angeles',
+        weeklyHours: { friday: [{ start: '09:00', end: '17:00' }] },
+      },
+    })
+    expect(await client.post('/api/v1/schedules/default', {})).toEqual({
+      status: 200,
+      body: created.body,
+    })
+    expect(await client.get('/api/v1/schedules')).toEqual({
+      status: 200,
+      body: { data: [created.body] },
+    })
+  })
+
+  it.each([
+    ['zh-CN', 'en', '工作时间'],
+    ['en', 'zh-CN', 'Working hours'],
+  ] as const)(
+    'names starter availability for the %s interface despite a %s profile',
+    async (language, locale, name) => {
+      const user = await createTestUser(t.db)
+      const client = api(user)
+      await client.put('/api/v1/profile', {
+        handle: `h-${user.id}`,
+        timeZone: 'Asia/Shanghai',
+        locale,
+      })
+      const created = await client.post('/api/v1/schedules/default', { language })
+      expect(created).toMatchObject({ status: 201, body: { name, timeZone: 'Asia/Shanghai' } })
+      expect(
+        await client.post('/api/v1/schedules/default', {
+          language: language === 'en' ? 'zh-CN' : 'en',
+        }),
+      ).toEqual({ status: 200, body: created.body })
+    },
+  )
+
+  it('returns a safe conflict for schedules without a default', async () => {
+    const user = await createTestUser(t.db)
+    const client = api(user)
+    await client.put('/api/v1/profile', {
+      handle: `h-${user.id}`,
+      timeZone: 'Europe/Berlin',
+      locale: 'en',
+    })
+    const existing = await client.post('/api/v1/schedules', body())
+    const id = (existing.body as { id: string }).id
+    await t.db.updateTable('schedules').set({ is_default: false }).where('id', '=', id).execute()
+    const before = await client.get('/api/v1/schedules')
+    expect(await client.post('/api/v1/schedules/default', {})).toMatchObject({
+      status: 409,
+      body: { error: 'setup_default_schedule_required' },
+    })
+    expect(await client.get('/api/v1/schedules')).toEqual(before)
+  })
+
+  it('handles concurrent confirmation requests with one starter schedule', async () => {
+    const user = await createTestUser(t.db)
+    const client = api(user)
+    await client.put('/api/v1/profile', {
+      handle: `h-${user.id}`,
+      timeZone: 'Europe/Berlin',
+      locale: 'en',
+    })
+    const responses = await Promise.all([
+      client.post('/api/v1/schedules/default', {}),
+      client.post('/api/v1/schedules/default', {}),
+    ])
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 201])
+    expect(responses[0]?.body).toEqual(responses[1]?.body)
+    expect(await client.get('/api/v1/schedules')).toEqual({
+      status: 200,
+      body: { data: [responses[0]?.body] },
+    })
   })
 
   it('creates, lists, reads, changes and deletes schedules', async () => {

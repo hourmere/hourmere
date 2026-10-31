@@ -4919,6 +4919,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schedules/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm starter working hours
+         * @description After profile and display name setup, creates a default Mon–Fri 09:00–17:00 schedule in the stored profile time zone only when the caller has no schedules. An existing default is returned unchanged. Existing non-default schedules require an explicit default choice in Availability.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Current account interface language for the new schedule name; defaults to English. Existing schedules are never renamed.
+                         * @enum {string}
+                         */
+                        language?: "en" | "zh-CN";
+                    };
+                };
+            };
+            responses: {
+                /** @description The existing default, unchanged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                /** @description The confirmed starter schedule */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                /** @description invalid_request or invalid_time_zone */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description setup_profile_required: profile or display name is missing; setup_default_schedule_required: existing schedules have no default */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/bookings": {
         parameters: {
             query?: never;
