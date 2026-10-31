@@ -79,6 +79,7 @@ export {
   type EventTypeSummary,
   type EventTypeUpdate,
   getEventType,
+  getEventTypeNotifications,
   listEventTypeCatalog,
   listEventTypeHosts,
   listEventTypes,
@@ -86,6 +87,7 @@ export {
   type QuestionInput,
   type SchedulingType,
   SLUG_PATTERN,
+  setEventTypeNotifications,
   updateEventType,
 } from './event-types.ts'
 export { validTimeZone } from './internal.ts'
@@ -112,6 +114,7 @@ export {
   type MemberRemovalHandlingInput,
   MemberRemovalHandlingSchema,
 } from './member-removal.ts'
+export * from './notification-settings.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

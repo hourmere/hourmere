@@ -28,6 +28,7 @@ import * as availability from '../../../packages/scheduling/src/availability.ts'
 import * as bookingPage from '../../../packages/scheduling/src/booking-page.ts'
 import * as conferences from '../../../packages/scheduling/src/conferences.ts'
 import * as hosts from '../../../packages/scheduling/src/hosts.ts'
+import * as notificationSettings from '../../../packages/scheduling/src/notification-settings.ts'
 import * as questions from '../../../packages/scheduling/src/questions.ts'
 import * as roundRobin from '../../../packages/scheduling/src/round-robin.ts'
 import * as text from '../../../packages/scheduling/src/text.ts'
@@ -76,6 +77,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       ...bookingPage,
       ...conferences,
       ...hosts,
+      ...notificationSettings,
       ...questions,
       ...roundRobin,
       ...text,

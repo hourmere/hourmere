@@ -41,7 +41,11 @@ import {
   invitationEmailRepairJob,
   notificationEmailCleanupJob,
   queuedSignInEmail,
+  repairScheduledBookingEmails,
   reserveInvitationEmailBudget,
+  type ScheduledEmailQueue,
+  scheduledBookingEmailJob,
+  scheduledBookingEmailRepairJob,
   signInEmailJobs,
 } from '@hourmere/notifications'
 import { type BookingNotifier, leaveTeamMember } from '@hourmere/scheduling'
@@ -357,6 +361,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     hasLiveInvitationEmailJob: (identity, transaction) =>
       jobs.hasLiveInvitationEmailJob(identity, transaction),
   }
+  const scheduledQueue: ScheduledEmailQueue = {
+    enqueue: (name, payload, options) => jobs.enqueue(name, payload, options),
+    hasLiveScheduledBookingEmailJob: (identity, transaction) =>
+      jobs.hasLiveScheduledBookingEmailJob(identity, transaction),
+    retireExpiredScheduledBookingEmailJobs: (identity, transaction) =>
+      jobs.retireExpiredScheduledBookingEmailJobs(identity, transaction),
+  }
   const invitationDeliveryDeps = { db, queue: invitationQueue }
   const repairInvitations = createInvitationEmailRepairer(invitationDeliveryDeps)
   const invitationMailLimits = {
@@ -381,6 +392,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
       bookingNotificationJob(notificationDeps),
+      scheduledBookingEmailJob(notificationDeps),
+      scheduledBookingEmailRepairJob(notificationDeps, scheduledQueue),
       conferenceNotificationDispatchJob(notificationDeps),
       notificationEmailCleanupJob(notificationDeps),
       invitationEmailJob({
@@ -435,6 +448,11 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     throw err
   }
   if (role !== 'web') {
+    try {
+      await repairScheduledBookingEmails(notificationDeps, scheduledQueue)
+    } catch {
+      console.error('ERROR scheduled-booking-email-repair: startup_repair_unavailable')
+    }
     try {
       await repairInvitations()
     } catch {

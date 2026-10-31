@@ -599,8 +599,26 @@ export async function writeBookingConference(
         .values({ booking_id: c.booking_id, kind, due_at: now })
         .onConflict((oc) => oc.doNothing())
         .execute()
+      const savedPolicy = await trx
+        .selectFrom('bookings')
+        .select('notification_snapshot')
+        .where('id', '=', c.booking_id)
+        .executeTakeFirstOrThrow()
+      const configurable =
+        typeof savedPolicy.notification_snapshot === 'object' &&
+        savedPolicy.notification_snapshot !== null &&
+        !Array.isArray(savedPolicy.notification_snapshot) &&
+        savedPolicy.notification_snapshot.executionMode === 'configurable'
+      if (configurable) {
+        // Wake only durable existing rules; readiness cannot create another reminder,
+        // revive a terminal row or reset the finite attempt budget.
+        await sql`UPDATE booking_scheduled_messages SET next_attempt_at=LEAST(next_attempt_at,${now}),updated_at=clock_timestamp()
+          WHERE booking_id=${c.booking_id} AND kind='reminder' AND state='pending' AND attempts < 13 AND due_at <= ${now} AND expires_at > ${now}`.execute(
+          trx,
+        )
+      }
       const reminder = new Date(c.booking.start_at.getTime() - 86_400_000)
-      if (reminder.getTime() > now.getTime() + 60 * 60_000)
+      if (!configurable && reminder.getTime() > now.getTime() + 60 * 60_000)
         await trx
           .insertInto('booking_conference_notifications')
           .values({ booking_id: c.booking_id, kind: 'reminder', due_at: reminder })

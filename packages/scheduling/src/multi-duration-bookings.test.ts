@@ -24,6 +24,7 @@ import { DomainError } from './errors.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
 import * as hosts from './hosts.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
+import * as notificationSettings from './notification-settings.ts'
 import { validateResponses } from './questions.ts'
 import * as roundRobin from './round-robin.ts'
 import {
@@ -97,6 +98,7 @@ function sourceCopy(change?: Change): Api {
     ...conferences,
     DomainError,
     ...hosts,
+    ...notificationSettings,
     validateResponses,
     ...roundRobin,
     cleanText,
