@@ -54,6 +54,8 @@ function invitationError(error: unknown): UiText {
     INVITATION_CONFLICT:
       'A newer invitation exists for this address. Review the pending invitations.',
     INVITATION_INELIGIBLE: 'This invitation is no longer pending. Reload before trying again.',
+    INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION:
+      'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
     INVITATION_DELIVERY_BUSY: 'Invitation delivery is in progress. Try again shortly.',
     INVITATION_GENERATION_LIMIT: 'This invitation has reached its resend limit.',
   }

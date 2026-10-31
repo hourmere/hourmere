@@ -18,7 +18,7 @@ import {
   invitationEmailBudgetAvailable,
   reserveInvitationEmailBudget,
 } from '@hourmere/notifications'
-import { DomainError } from '@hourmere/scheduling'
+import { DomainError, leaveTeamMember } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
@@ -52,6 +52,7 @@ interface Summary {
   id: string
   email: string
   status: InvitationStatus
+  invalidReason: 'inviter_left' | null
   createdAt: string
   expiresAt: string
   delivery: {
@@ -127,6 +128,11 @@ describe.skipIf(!serverUrl)(
         baseURL: origin,
         secret,
         signup,
+        leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+          leaveTeamMember(
+            { db, principal, now: () => Temporal.Now.instant() },
+            { teamId, expectedOrganizationId },
+          ),
         mailer: { send: async () => {} },
         mcpOAuth: true,
         reserveInvitationEmail: (trx, input, now) =>
@@ -214,6 +220,7 @@ describe.skipIf(!serverUrl)(
     async function invitation(
       options: {
         organizationId?: string
+        inviterId?: string
         status?: string
         state?: DeliveryState | 'unknown'
         attempts?: number
@@ -236,7 +243,7 @@ describe.skipIf(!serverUrl)(
         .values({
           id: options.id ?? randomUUID(),
           organizationId: options.organizationId ?? seeded.team.id,
-          inviterId: seeded.owner.id,
+          inviterId: options.inviterId ?? seeded.owner.id,
           email: `${randomUUID()}@private-summary.example`,
           role: options.role ?? 'member',
           status: options.status ?? 'pending',
@@ -300,6 +307,7 @@ describe.skipIf(!serverUrl)(
           'expiresAt',
           'generation',
           'id',
+          'invalidReason',
           'resendAllowed',
           'resendDeniedReason',
           'resendRetryAfterSeconds',
@@ -877,6 +885,121 @@ describe.skipIf(!serverUrl)(
       expect(await response.json()).toMatchObject({ code: 'INVITATION_RECIPIENT_ALREADY_MEMBER' })
     })
 
+    async function verifyInviterMembership(
+      change: 'left' | 'removed' | 'demoted',
+      target = app,
+      cancel = true,
+    ) {
+      const pending = await invitation({ inviterId: seeded.admin.id })
+      const expired = await invitation({ inviterId: seeded.admin.id, expired: true })
+      const accepted = await invitation({ inviterId: seeded.admin.id, status: 'accepted' })
+      const before = await db.selectFrom('auth.invitation').selectAll().orderBy('id').execute()
+      if (change === 'demoted')
+        await db
+          .updateTable('auth.member')
+          .set({ role: 'member' })
+          .where('userId', '=', seeded.admin.id)
+          .where('organizationId', '=', seeded.team.id)
+          .execute()
+      else {
+        const membership = await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('userId', '=', seeded.admin.id)
+          .where('organizationId', '=', seeded.team.id)
+          .executeTakeFirstOrThrow()
+        const response = await app.request(
+          `/api/auth/organization/${change === 'left' ? 'leave' : 'remove-member'}`,
+          {
+            method: 'POST',
+            headers: {
+              origin,
+              cookie: change === 'left' ? seeded.adminSession.cookie : seeded.ownerSession.cookie,
+              'content-type': 'application/json',
+              'x-expected-organization-id': seeded.team.id,
+            },
+            body: JSON.stringify({
+              organizationId: seeded.team.id,
+              ...(change === 'removed' && { memberIdOrEmail: membership.id }),
+            }),
+          },
+        )
+        expect(response.status).toBe(200)
+      }
+      const result = await page(await get(seeded.ownerSession.cookie, '', {}, target))
+      for (const row of [pending, expired]) {
+        const summary = result.data.find((entry) => entry.id === row.id)
+        expect(summary).toMatchObject({
+          id: row.id,
+          status: row.id === expired.id ? 'expired' : 'pending',
+          invalidReason: change === 'demoted' ? null : 'inviter_left',
+          resendAllowed: change === 'demoted',
+          resendDeniedReason:
+            change === 'demoted' ? null : 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+        })
+        const single = await target.request(`${path}/${row.id}`, {
+          headers: { cookie: seeded.ownerSession.cookie },
+        })
+        expect(single.status).toBe(200)
+        expect(await single.json()).toEqual(summary)
+      }
+      expect(result.data.find((entry) => entry.id === accepted.id)).toMatchObject({
+        status: 'accepted',
+        invalidReason: null,
+        resendAllowed: false,
+      })
+      expect(await db.selectFrom('auth.invitation').selectAll().orderBy('id').execute()).toEqual(
+        before,
+      )
+      if (change !== 'demoted' && cancel) {
+        const response = await target.request(`${path}/${pending.id}/cancel`, {
+          method: 'POST',
+          headers: {
+            origin,
+            cookie: seeded.ownerSession.cookie,
+            'content-type': 'application/json',
+            'x-expected-organization-id': seeded.team.id,
+          },
+          body: '{}',
+        })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ status: 'canceled', invalidReason: null })
+      }
+    }
+
+    it.each(['left', 'removed', 'demoted'] as const)(
+      'derives validity from original inviter membership after they are %s and permits cancellation',
+      (change) => verifyInviterMembership(change),
+    )
+
+    it.each([
+      [
+        'original inviter membership projection',
+        "i.status = 'pending' AND NOT EXISTS (",
+        "i.status = 'pending' AND FALSE AND NOT EXISTS (",
+      ],
+      [
+        'same-team inviter membership correlation',
+        'WHERE inviter."organizationId" = i."organizationId"',
+        'WHERE TRUE',
+      ],
+      [
+        'original-inviter membership correlation',
+        'AND inviter."userId" = i."inviterId"',
+        'AND TRUE',
+      ],
+      ['void invitation resend denial', "if (row.invalidReason === 'inviter_left')", 'if (false)'],
+    ])(
+      'detects removed %s through a real HTTP assertion failure',
+      async (_label, before, after) => {
+        const factory = routeSourceCopy({ file: 'summary', before, after })
+        const target = application([factory({ db, invitationMailLimits: { ...limits, secret } })])
+        await expect(verifyInviterMembership('removed', target, false)).rejects.toMatchObject({
+          name: 'AssertionError',
+        })
+      },
+    )
+
     it('matches real request budget limits for the current reader without reserving capacity', async () => {
       const row = await invitation()
       limits.invitationInviterMaxPerHour = 1
@@ -1157,6 +1280,7 @@ describe.skipIf(!serverUrl)(
         'expiresAt',
         'generation',
         'id',
+        'invalidReason',
         'resendAllowed',
         'resendDeniedReason',
         'resendRetryAfterSeconds',

@@ -28,6 +28,8 @@ const statusLabels: Record<Summary['status'], MessageKey> = {
 const denialLabels: Record<NonNullable<Summary['resendDeniedReason']>, MessageKey> = {
   TEAM_MANAGEMENT_ACCESS_DENIED: 'You do not have permission to manage invitations.',
   INVITATION_INELIGIBLE: 'This invitation is no longer available for resending.',
+  INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION:
+    'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
   INVITATION_RECIPIENT_ALREADY_MEMBER: 'This address already belongs to a team member.',
   INVITATION_GENERATION_LIMIT: 'This invitation has reached its resend limit.',
   INVITATION_DELIVERY_BUSY: 'Invitation delivery is in progress. Try again shortly.',
@@ -77,12 +79,14 @@ export function InvitationRow({
               ? 'The recipient has joined. Their membership was not changed.'
               : invitation.status === 'canceled'
                 ? 'Invitation cancelled. Its link can no longer be used.'
-                : invitation.status === 'pending' && invitation.delivery.state === 'queued'
+                : invitation.status === 'pending' &&
+                    invitation.invalidReason === null &&
+                    invitation.delivery.state === 'queued'
                   ? 'Invitation queued for delivery.'
                   : 'Invitation status refreshed.',
           )
         : null,
-    [checked, invitation.status, invitation.delivery.state],
+    [checked, invitation.status, invitation.invalidReason, invitation.delivery.state],
   )
   const [remaining, setRemaining] = useState(invitation.resendRetryAfterSeconds)
   const requestIdentity = useMemo(
@@ -102,6 +106,7 @@ export function InvitationRow({
   const wasConfirming = useRef(false)
   const fmt = zoned(browserTimeZone(), locale)
   const conflict = isOrganizationContextChanged(error)
+  const invalid = invitation.invalidReason === 'inviter_left'
   const actionable = invitation.status === 'pending' || invitation.status === 'expired'
   useEffect(() => () => request.current?.abort(), [])
   useEffect(() => {
@@ -213,7 +218,7 @@ export function InvitationRow({
       </p>
       <dl className="details">
         <dt>{t('Status')}</dt>
-        <dd>{t(statusLabels[invitation.status])}</dd>
+        <dd>{t(invalid ? 'No longer valid' : statusLabels[invitation.status])}</dd>
         <dt>{t('Mail submission')}</dt>
         <dd>{t(deliveryLabels[invitation.delivery.state])}</dd>
         <dt>{t('Expires')}</dt>
@@ -228,7 +233,14 @@ export function InvitationRow({
           )}
         </p>
       )}
-      {actionable && !invitation.resendAllowed && (
+      {invalid && (
+        <p className="hint" id={`${id}-reason`}>
+          {t(
+            'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
+          )}
+        </p>
+      )}
+      {actionable && !invalid && !invitation.resendAllowed && (
         <p className="hint" id={`${id}-reason`}>
           {t(
             invitation.resendDeniedReason
@@ -276,8 +288,8 @@ export function InvitationRow({
           <button
             type="button"
             className="button button-small"
-            disabled={busy || conflict || needsCheck || !invitation.resendAllowed}
-            aria-describedby={!invitation.resendAllowed ? `${id}-reason` : undefined}
+            disabled={busy || conflict || needsCheck || invalid || !invitation.resendAllowed}
+            aria-describedby={invalid || !invitation.resendAllowed ? `${id}-reason` : undefined}
             onClick={() => void run('resend')}
           >
             {busy

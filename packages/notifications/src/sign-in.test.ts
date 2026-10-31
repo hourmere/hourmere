@@ -1,4 +1,6 @@
 import { createCipheriv, hkdfSync, randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createAuth, createAuthPool, type SignupPolicy } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -19,6 +21,35 @@ const serverUrl = process.env.DATABASE_URL
 const publicUrl = 'http://localhost:4189'
 const closed: SignupPolicy = { mode: 'closed', allowedDomains: [] }
 const secret = randomBytes(32).toString('base64')
+
+async function workerSourceCopy(
+  removeFinalEligibility = false,
+): Promise<typeof deliverSignInEmail> {
+  const location = new URL('./sign-in.ts', import.meta.url)
+  let source = readFileSync(location, 'utf8')
+  const guard = `if (
+      !current ||
+      current.expiresAt <= now ||
+      row.expires_at <= now ||
+      (!(await maySignUp(trx, deps.signup, request.email)) &&
+        !(await hasAccount(trx, request.email)))
+    )`
+  expect(source.includes(guard), 'source-copy mutation matches the final eligibility recheck').toBe(
+    true,
+  )
+  if (removeFinalEligibility)
+    source = source.replace(
+      guard,
+      'if (!current || current.expiresAt <= now || row.expires_at <= now)',
+    )
+  const javascript = stripTypeScriptTypes(source).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) =>
+      `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+  )
+  return (await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`))
+    .deliverSignInEmail
+}
 
 describe.skipIf(!serverUrl)('queued sign-in email', () => {
   let owned: TestDatabase
@@ -420,6 +451,10 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
       .returning('id')
       .executeTakeFirstOrThrow()
     await db
+      .insertInto('auth.member')
+      .values({ userId: owner.id, organizationId: org.id, role: 'owner', createdAt: new Date() })
+      .execute()
+    await db
       .insertInto('auth.invitation')
       .values({
         organizationId: org.id,
@@ -436,7 +471,7 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(sent.map((m) => m.to)).toEqual(['invited@example.com'])
     expect(
       await db.selectFrom('auth.member').selectAll().where('organizationId', '=', org.id).execute(),
-    ).toEqual([])
+    ).toHaveLength(1)
     expect((await request(auth, 'later@example.com')).status).toBe(200)
     await deliverSignInEmail(
       deps({ signup: { mode: 'open', allowedDomains: [] } }),
@@ -444,6 +479,84 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     )
     expect(sent.map((m) => m.to)).toEqual(['invited@example.com', 'later@example.com'])
   })
+
+  it.each(['admin', 'member', 'departed', 'other-team'] as const)(
+    'rechecks the original inviter membership before queued signup delivery: %s',
+    async (state) => {
+      await existing('first@outside.example')
+      const inviter = await existing('inviter@trusted.example')
+      const org = await db
+        .insertInto('auth.organization')
+        .values({ name: 'Synthetic signup team', slug: randomUUID(), createdAt: new Date() })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const member = await db
+        .insertInto('auth.member')
+        .values({
+          userId: inviter.id,
+          organizationId: org.id,
+          role: 'admin',
+          createdAt: new Date(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: org.id,
+          inviterId: inviter.id,
+          email: 'invited@outside.example',
+          role: 'member',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 60_000),
+        })
+        .execute()
+      const signup: SignupPolicy = { mode: 'closed', allowedDomains: ['trusted.example'] }
+      const response = await request(authWith({ policy: signup }), 'invited@outside.example')
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: true })
+      const pending = (await rows())[0]
+      expect(pending).toBeDefined()
+      if (state === 'departed' || state === 'other-team') {
+        await db.deleteFrom('auth.member').where('id', '=', member.id).execute()
+        if (state === 'other-team') {
+          const other = await db
+            .insertInto('auth.organization')
+            .values({ name: 'Other team', slug: randomUUID(), createdAt: new Date() })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          await db
+            .insertInto('auth.member')
+            .values({
+              userId: inviter.id,
+              organizationId: other.id,
+              role: 'owner',
+              createdAt: new Date(),
+            })
+            .execute()
+        }
+      } else if (state === 'member') {
+        await db
+          .updateTable('auth.member')
+          .set({ role: 'member' })
+          .where('id', '=', member.id)
+          .execute()
+      }
+      await deliverSignInEmail(deps({ signup }), pending?.id as string)
+      expect(sent.map((message) => message.to)).toEqual(
+        state === 'admin' || state === 'member' ? ['invited@outside.example'] : [],
+      )
+      expect(await rows()).toEqual([])
+      expect(
+        await db
+          .selectFrom('auth.user')
+          .select('id')
+          .where('email', '=', 'invited@outside.example')
+          .execute(),
+        'delivery never creates an account',
+      ).toEqual([])
+    },
+  )
 
   it('does not send an expired, consumed, mismatched or now-revoked link', async () => {
     await existing()
@@ -674,6 +787,97 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
       await delivery
       blocker.release()
     }
+  })
+
+  async function assertEligibilityAfterBudgetWait(
+    deliver = deliverSignInEmail,
+    existingRecipient = false,
+  ) {
+    const first = await existing(`${randomUUID()}@outside.example`)
+    const inviter = await existing(`${randomUUID()}@trusted.example`)
+    const invitedEmail = `${randomUUID()}@outside.example`
+    const org = await db
+      .insertInto('auth.organization')
+      .values({ name: 'Synthetic budget wait team', slug: randomUUID(), createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.member')
+      .values([
+        { userId: first.id, organizationId: org.id, role: 'owner', createdAt: new Date() },
+        { userId: inviter.id, organizationId: org.id, role: 'admin', createdAt: new Date() },
+      ])
+      .execute()
+    await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: org.id,
+        inviterId: inviter.id,
+        email: invitedEmail,
+        role: 'member',
+        status: 'pending',
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      .execute()
+    if (existingRecipient) await existing(invitedEmail)
+    const signup: SignupPolicy = { mode: 'closed', allowedDomains: ['trusted.example'] }
+    expect((await request(authWith({ policy: signup }), invitedEmail)).status).toBe(200)
+    const pending = (await rows())[0]
+    expect(pending).toBeDefined()
+    const before = sent.length
+    const holder = await owned.pool.connect()
+    let delivery: Promise<void> | undefined
+    try {
+      await holder.query('BEGIN')
+      await holder.query('SELECT pg_advisory_xact_lock(1852798057, 1835100524)')
+      const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid
+      delivery = deliver(deps({ signup }), pending?.id as string)
+      await vi.waitFor(async () => {
+        const waiting = await owned.pool.query(
+          'SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))',
+          [pid],
+        )
+        expect(
+          waiting.rows.length,
+          'delivery has reached the budget lock after its initial check',
+        ).toBeGreaterThan(0)
+      })
+      await db
+        .deleteFrom('auth.member')
+        .where('userId', '=', inviter.id)
+        .where('organizationId', '=', org.id)
+        .execute()
+      await holder.query('COMMIT')
+      await delivery
+      expect(
+        sent.length - before,
+        'a signup sign-in link must not be sent after inviter departure during the budget wait',
+      ).toBe(existingRecipient ? 1 : 0)
+      expect(await rows()).toEqual([])
+      expect(
+        await db.selectFrom('auth.user').select('id').where('email', '=', invitedEmail).execute(),
+      ).toHaveLength(existingRecipient ? 1 : 0)
+    } finally {
+      await holder.query('ROLLBACK')
+      await delivery
+      holder.release()
+    }
+  }
+
+  it.each([false, true])(
+    'rechecks inviter departure after a real budget lock wait, existing account=%s',
+    async (existingRecipient) =>
+      assertEligibilityAfterBudgetWait(deliverSignInEmail, existingRecipient),
+  )
+
+  it('detects removing the post-budget signup check with the same real database assertion', async () => {
+    const intact = await workerSourceCopy()
+    await assertEligibilityAfterBudgetWait(intact)
+    await expect(assertEligibilityAfterBudgetWait(await workerSourceCopy(true))).rejects.toThrow(
+      'a signup sign-in link must not be sent after inviter departure during the budget wait',
+    )
+    await assertEligibilityAfterBudgetWait(intact)
   })
 
   it('removes expired outbox data even if the job was lost, and preserves live data', async () => {

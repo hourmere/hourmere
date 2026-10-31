@@ -62,6 +62,7 @@ function invitation(
     generation: 1,
     resendDeniedReason: null,
     resendRetryAfterSeconds: null,
+    invalidReason: null,
     resendAllowed: false,
     delivery: { state, attempts: 1, lastAttemptAt: null, lastErrorCode: null },
   }
