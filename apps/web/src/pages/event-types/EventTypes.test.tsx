@@ -73,6 +73,29 @@ function eventTypeServer(
       return new Response(null, { status: 204 })
     },
     ...extra,
+    [`GET /api/v1/teams/${ME.organization.id}/readiness`]: () =>
+      json(200, {
+        organizationId: ME.organization.id,
+        members: { data: [], nextCursor: null },
+        eventTypes: {
+          data: list.map((event) => ({
+            eventTypeId: event.id,
+            enablement: event.isActive ? 'enabled' : 'disabled',
+            activation:
+              event.schedulingType === 'round_robin'
+                ? event.roundRobinActive
+                  ? 'active'
+                  : 'inactive'
+                : 'not_applicable',
+            summary: 'checks_passed',
+            completeness: 'complete',
+            evaluatedAt: '2026-10-30T12:00:00.000Z',
+            reasonCodes: [],
+            fixKinds: [],
+          })),
+          nextCursor: null,
+        },
+      }),
   })
 }
 
@@ -205,7 +228,7 @@ describe('the event types list', () => {
 
 describe('creating an event type', () => {
   it.each(['en', 'zh-CN'] as const)(
-    'keeps the editor preview handle and slug separate in %s with a complete URL to copy',
+    'keeps the saved editor address handle and slug separate in %s with a complete URL to copy',
     async (language) => {
       const user = userEvent.setup()
       chooseLanguage(language)
@@ -225,7 +248,9 @@ describe('creating an event type', () => {
       expect(preview?.getAttribute('title')).toBe(`${window.location.origin}/${handle}/${slug}`)
       expect(preview?.querySelector('wbr')).toBeNull()
       await user.click(
-        screen.getByRole('button', { name: language === 'en' ? 'Copy link' : '复制链接' }),
+        screen.getByRole('button', {
+          name: language === 'en' ? 'Copy booking link' : '复制预约链接',
+        }),
       )
       expect(await navigator.clipboard.readText()).toBe(
         `${window.location.origin}/${handle}/${slug}`,
@@ -311,8 +336,9 @@ describe('creating an event type', () => {
     // The link follows the title until edited.
     expect(field('Booking link').value).toBe('intro-call')
     expect(document.querySelector('.booking-link .preview')?.textContent).toBe('/ada/intro-call')
-    await user.click(screen.getByRole('button', { name: 'Copy link' }))
-    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
+    expect(screen.queryByRole('button', { name: 'Copy link' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+    expect(screen.getByText('Save your changes before sharing this address.')).toBeDefined()
     await user.type(field(/Description/), 'Let us talk.{Enter}Bring questions.')
     await user.clear(field('Duration (minutes)'))
     await user.type(field('Duration (minutes)'), '45')
@@ -1137,7 +1163,7 @@ describe('team booking links', () => {
     expect(document.querySelector('.booking-link .preview')?.textContent).toBe(
       new URL(url).pathname,
     )
-    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    await user.click(await screen.findByRole('button', { name: 'Copy booking link' }))
     expect(await navigator.clipboard.readText()).toBe(url)
   })
 })
@@ -1166,7 +1192,7 @@ describe('unavailable team booking links', () => {
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
     expect(screen.queryByText(`${window.location.origin}/team/${slug}/intro-call`)).toBeNull()
     expect(
-      screen.getByText(
+      within(document.getElementById('slug-hint') as HTMLElement).getByText(
         mode === 'individual'
           ? /Choose a non-reserved team slug/
           : mode === 'collective'
@@ -1312,7 +1338,11 @@ describe('round-robin pool and explicit activation', () => {
     expect(calls.to(`POST /api/v1/event-types/${EVENT_TYPE_ID}/round-robin/activate`)).toHaveLength(
       0,
     )
-    expect(screen.getByText('Needs activation')).toBeDefined()
+    expect(
+      within(screen.getByRole('region', { name: 'Round-robin activation' })).getByText(
+        'Needs activation',
+      ),
+    ).toBeDefined()
   })
 
   it('uses defaults explicitly, reports activation failure, then activates on a separate retry', async () => {
@@ -1576,8 +1606,7 @@ describe('event type booking link previews', () => {
     expect(preview?.textContent).toBe('/ada/intro-call')
     expect(preview.classList.contains('preview')).toBe(true)
     expect(preview.querySelectorAll('wbr')).toHaveLength(0)
-    expect(screen.queryByText(`${window.location.origin}/ada/intro-call`)).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    await user.click(screen.getByRole('button', { name: 'Copy booking link' }))
     expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
   })
 

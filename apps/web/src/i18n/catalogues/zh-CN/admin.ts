@@ -1384,4 +1384,21 @@ export const admin = {
   'Review enablement': '查看启用设置',
   'Review meeting settings': '查看会议设置',
   'Review round-robin activation': '查看轮询激活设置',
+  'Save your changes before sharing this address.': '分享此地址前，请先保存你的更改。',
+  'This booking link uses the saved version. Unsaved changes are not included.':
+    '此预约链接对应已保存的版本，不包含未保存的更改。',
+  'This event type is inactive. Enable it and save before sharing.':
+    '此活动类型尚未启用。分享前，请先启用并保存。',
+  'This event type is unlisted. Anyone with its direct link can still book it. Review visibility before sharing.':
+    '此活动类型已从预约页隐藏，但知道直接链接的人仍可预约。分享前，请先检查可见性设置。',
+  'Review visibility': '查看可见性设置',
+  'This round-robin event type is saved, but it is not activated. Activate it separately before sharing.':
+    '此轮询活动类型已保存，但尚未激活。分享前，请先单独激活。',
+  'Set a booking username in Settings before sharing this event type.':
+    '分享此活动类型前，请先在设置中填写你的预约用户名。',
+  'Host availability needs attention before you share this event type.':
+    '分享此活动类型前，请先检查主持人的可预约时间设置。',
+  'This event type has no public booking link in the current space.':
+    '此活动类型在当前空间中没有公开预约链接。',
+  'Review saved version readiness': '查看已保存版本的就绪检查',
 } as const

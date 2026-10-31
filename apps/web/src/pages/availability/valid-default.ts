@@ -3,7 +3,11 @@ import { draftFromSchedule, validateSchedule, WEEKDAYS } from './weekly-hours.ts
 
 /** A default with usable weekly hours, rather than merely any schedule on the account. */
 export function validDefault(schedule: Schedule): boolean {
-  if (!schedule.isDefault) return false
+  return schedule.isDefault && validSchedule(schedule)
+}
+
+/** Usable weekly hours, including when an event explicitly selects a non-default schedule. */
+export function validSchedule(schedule: Schedule): boolean {
   try {
     const hours = schedule.weeklyHours
     if (Object.keys(hours).some((day) => !WEEKDAYS.some((weekday) => weekday.day === day)))
