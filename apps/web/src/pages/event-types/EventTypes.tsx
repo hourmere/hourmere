@@ -119,7 +119,8 @@ export function EventTypesPage() {
                   : 'You have no event types yet. Create one to start taking bookings.',
               )}
               action={
-                !hostUserId && !me.organization.personal && (
+                !hostUserId &&
+                !me.organization.personal && (
                   <Link to={PATHS.newEventType} className="button">
                     {t('Create your first event type')}
                   </Link>

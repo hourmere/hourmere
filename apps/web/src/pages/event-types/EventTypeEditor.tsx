@@ -571,7 +571,22 @@ function EventTypeForm({
               set={set}
             />
           )}
-          {!me.organization.personal && !canAssignHosts && (
+          {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
+            <section className="panel" aria-labelledby="hosts-heading">
+              <h2 id="hosts-heading">{t('Hosts')}</h2>
+              {access.status === 'loading' ? (
+                <p role="status">{t('Loading your team role…')}</p>
+              ) : (
+                <div role="alert">
+                  <p>{t('Could not load your team role.')}</p>
+                  <button type="button" onClick={access.reload}>
+                    {t('Try again')}
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+          {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
             <ReadOnlyHosts draft={draft} me={me} role={role} onReload={confirmReload} />
           )}
 
@@ -694,6 +709,8 @@ function EventTypeForm({
                     'Each required host uses their current default schedule. Times are offered only when every host offers the same start and end.',
                   )}
                 </p>
+              ) : !me.organization.personal && draft.hostUserIds.length === 0 ? (
+                <p>{t('Choose exactly one required host.')}</p>
               ) : !ownSchedule ? (
                 <p>
                   {t(

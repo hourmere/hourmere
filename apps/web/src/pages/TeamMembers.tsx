@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { type ListedOrganizationMember, listOrganizationMembers } from '../api/auth.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
@@ -105,6 +105,19 @@ export function TeamMembers({
   onReload?: () => void
 }) {
   const { t } = useI18n()
+  const { hash, key } = useLocation()
+  const section = useRef<HTMLElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: repeat navigation to the same anchor requests focus again
+  useEffect(() => {
+    if (hash !== '#team-members') return
+    // The shell also focuses main after navigation; apply this destination afterwards.
+    const timer = setTimeout(() => {
+      section.current?.scrollIntoView?.({ block: 'start' })
+      heading.current?.focus({ preventScroll: true })
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [hash, key])
   const [offset, setOffset] = useState(0)
   const [selectedMember, setSelectedMember] = useState<ListedOrganizationMember | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -133,8 +146,15 @@ export function TeamMembers({
 
   return (
     <>
-      <section id="team-members" className="panel" aria-labelledby="team-members-heading">
-        <h2 id="team-members-heading">{t('Team members')}</h2>
+      <section
+        id="team-members"
+        className="panel"
+        aria-labelledby="team-members-heading"
+        ref={section}
+      >
+        <h2 id="team-members-heading" ref={heading} tabIndex={-1}>
+          {t('Team members')}
+        </h2>
         <p className="hint">{t('Pending invitations are not members or hosts.')}</p>
         <p className="hint">
           {t(

@@ -7,6 +7,7 @@ import { chooseLanguage } from '../../i18n/store.ts'
 import {
   fakeApi,
   json,
+  later,
   ME,
   profile,
   type Routes,
@@ -76,6 +77,11 @@ describe('team host setup navigation', () => {
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
       await screen.findByText(language === 'en' ? 'No default schedule' : '未设置默认时间表')
       const hosts = screen.getByRole('region', { name: language === 'en' ? 'Hosts' : '主持人' })
+      expect(
+        within(hosts).queryByText(
+          language === 'en' ? 'You are a selected host.' : '你是已选主持人。',
+        ),
+      ).not.toBeNull()
       expect(within(hosts).queryByRole('checkbox')).toBeNull()
       expect(within(hosts).queryByRole('combobox')).toBeNull()
       expect(screen.queryByLabelText(language === 'en' ? 'Scheduling' : '排期方式')).toBeNull()
@@ -89,6 +95,80 @@ describe('team host setup navigation', () => {
       expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(0)
       expect(calls.to(READINESS)[0]?.path).toContain(`memberIds=${MEMBER_ID}`)
       expect(calls.calls.some((call) => call.method === 'PATCH')).toBe(false)
+    },
+  )
+
+  it.each(['owner', 'admin'])(
+    'waits for the %s role before presenting host access',
+    async (role) => {
+      const membership = later()
+      const calls = server(role, ITEM, {
+        [MEMBERSHIP]: () => membership.response.then((response) => response.clone()),
+      })
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      await screen.findByRole('heading', { name: 'Edit “Intro call”', level: 1 })
+      const hosts = screen.getByRole('region', { name: 'Hosts' })
+      expect(within(hosts).queryByRole('status')?.textContent).toBe('Loading your team role…')
+      expect(
+        screen.queryByText('Only team owners and admins can change host assignments.'),
+      ).toBeNull()
+      expect(screen.queryByLabelText('Scheduling')).toBeNull()
+      expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(0)
+
+      await membership.answer(
+        json(200, {
+          id: MEMBER_ID,
+          organizationId: TEAM.organization.id,
+          userId: ME.user.id,
+          role,
+        }),
+      )
+      await screen.findByRole('checkbox', { name: 'Ada' })
+      expect(screen.queryByText('Loading your team role…')).toBeNull()
+      expect(
+        screen.queryByText('Only team owners and admins can change host assignments.'),
+      ).toBeNull()
+      expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(1)
+    },
+  )
+
+  it.each(['owner', 'admin'])(
+    'retries a failed %s role check without presenting read-only host access',
+    async (role) => {
+      const user = userEvent.setup()
+      let fail = true
+      const calls = server(role, ITEM, {
+        [MEMBERSHIP]: () =>
+          fail
+            ? json(503, { error: 'unavailable' })
+            : json(200, {
+                id: MEMBER_ID,
+                organizationId: TEAM.organization.id,
+                userId: ME.user.id,
+                role,
+              }),
+      })
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const hosts = await screen.findByRole('region', { name: 'Hosts' })
+      await waitFor(() =>
+        expect(within(hosts).queryByText('Could not load your team role.')).not.toBeNull(),
+      )
+      expect(
+        screen.queryByText('Only team owners and admins can change host assignments.'),
+      ).toBeNull()
+      expect(screen.queryByLabelText('Scheduling')).toBeNull()
+      expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(0)
+      const failedAttempts = calls.to(MEMBERSHIP).length
+
+      fail = false
+      await user.click(within(hosts).getByRole('button', { name: 'Try again' }))
+      await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Ada' })).not.toBeNull())
+      expect(screen.queryByText('Could not load your team role.')).toBeNull()
+      expect(
+        screen.queryByText('Only team owners and admins can change host assignments.'),
+      ).toBeNull()
+      expect(calls.to(MEMBERSHIP)).toHaveLength(failedAttempts + 1)
+      expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(1)
     },
   )
 
@@ -248,6 +328,46 @@ describe('team host setup navigation', () => {
       expect(calls.calls.some((call) => /schedules.*(?:userId|owner)/.test(call.path))).toBe(false)
     },
   )
+
+  it('updates individual working hours guidance as hosts are chosen and removed', async () => {
+    const user = userEvent.setup()
+    const calls = server('admin', eventType({ ...ITEM, hosts: [] }), {
+      'GET /api/v1/event-type-hosts': () =>
+        json(200, {
+          data: [
+            { id: ME.user.id, name: 'Ada', memberId: MEMBER_ID },
+            { id: PEER_ID, name: 'Grace', memberId: 'peer-member' },
+          ],
+          nextAfter: null,
+        }),
+    })
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    const grace = await screen.findByRole('checkbox', { name: 'Grace' })
+    const rules = screen.getByRole('region', { name: 'When people can book' })
+    const chooseHost = 'Choose exactly one required host.'
+    const askMember =
+      'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.'
+    expect(within(rules).queryByText(chooseHost)).not.toBeNull()
+    expect(within(rules).queryByText(askMember)).toBeNull()
+    expect(within(rules).queryByRole('link', { name: 'Review member setup' })).toBeNull()
+    expect(screen.queryByLabelText('Schedule', { exact: true })).toBeNull()
+
+    await user.click(grace)
+    expect(within(rules).getByText(askMember)).toBeDefined()
+    expect(within(rules).queryByText(chooseHost)).toBeNull()
+    expect(screen.queryByLabelText('Schedule', { exact: true })).toBeNull()
+    await user.click(grace)
+    expect(within(rules).queryByText(chooseHost)).not.toBeNull()
+    expect(within(rules).queryByText(askMember)).toBeNull()
+    expect(screen.queryByLabelText('Schedule', { exact: true })).toBeNull()
+
+    await user.click(screen.getByRole('checkbox', { name: 'Ada' }))
+    expect(screen.getByLabelText('Schedule', { exact: true })).toBeDefined()
+    expect(within(rules).queryByText(chooseHost)).toBeNull()
+    expect(within(rules).queryByText(askMember)).toBeNull()
+    expect(calls.to('GET /api/v1/schedules')).toHaveLength(1)
+    expect(calls.calls.some((call) => /schedules.*(?:userId|owner)/.test(call.path))).toBe(false)
+  })
 
   it('filters single, collective and dormant round-robin candidates and restores the list', async () => {
     const user = userEvent.setup()
