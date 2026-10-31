@@ -17,7 +17,9 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   getSelfReadiness,
+  getTeamMemberReadiness,
   getTeamReadiness,
+  MemberReadinessPageSchema,
   SelfReadinessPageSchema,
   TeamReadinessPageSchema,
 } from '@hourmere/scheduling'
@@ -46,6 +48,8 @@ import {
 
 const selfPath = '/api/v1/readiness/self'
 const teamPath = (id: string) => `/api/v1/teams/${id}/readiness`
+const memberPath = (id: string, memberIds: string[]) =>
+  `/api/v1/teams/${id}/member-readiness?memberIds=${memberIds.join(',')}`
 const denial = { error: 'team_management_access_denied' }
 const { signJWT } = createRequire(import.meta.resolve('@hourmere/auth'))('better-auth/plugins/jwt')
 
@@ -74,7 +78,11 @@ function sourceCopy<T>(
   ) as T
 }
 
-function readRouteCopy(mutation?: [string, string], routeMutation?: [string, string]) {
+function readRouteCopy(
+  mutation?: [string, string],
+  routeMutation?: [string, string],
+  accessMutation?: [string, string],
+) {
   const sharedAccess = sourceCopy<{
     checkTeamManagementAccess: typeof checkTeamManagementAccess
     TeamManagementError: typeof TeamManagementError
@@ -88,6 +96,7 @@ function readRouteCopy(mutation?: [string, string], routeMutation?: [string, str
     'apps/server/src/team-management.ts',
     { DomainError, createMiddleware, ...sharedAccess },
     'teamManagementAccess',
+    accessMutation,
   )
   return sourceCopy<typeof readinessRoutes>(
     'apps/server/src/routes/readiness.ts',
@@ -96,6 +105,8 @@ function readRouteCopy(mutation?: [string, string], routeMutation?: [string, str
       z,
       getSelfReadiness,
       getTeamReadiness,
+      getTeamMemberReadiness,
+      MemberReadinessPageSchema,
       SelfReadinessPageSchema,
       TeamReadinessPageSchema,
       DomainError,
@@ -114,7 +125,11 @@ function readRouteCopy(mutation?: [string, string], routeMutation?: [string, str
 describe('booking readiness OpenAPI', () => {
   it('documents both reads as web-session-only', async () => {
     const { paths } = await openApiDocument(productApp({} as Db))
-    for (const path of [selfPath, '/api/v1/teams/{teamId}/readiness'])
+    for (const path of [
+      selfPath,
+      '/api/v1/teams/{teamId}/readiness',
+      '/api/v1/teams/{teamId}/member-readiness',
+    ])
       expect(paths[path]?.get?.security).toEqual([{ session: [] }])
     expect(Object.keys(paths['/api/v1/teams/{teamId}/readiness']?.get?.responses ?? {})).toEqual([
       '200',
@@ -158,13 +173,16 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
     await owned?.drop()
   })
 
-  function application(resolveCaller = createCallerResolver({ auth, db })) {
+  function application(
+    resolveCaller = createCallerResolver({ auth, db }),
+    routes = readinessRoutes,
+  ) {
     return createApp({
       publicUrl: origin,
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller,
-      routes: [readinessRoutes({ db })],
+      routes: [routes({ db })],
     })
   }
 
@@ -254,6 +272,52 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
     const owner = await session(other, team.id)
     expect((await get(`${teamPath(team.id)}?userId=${user.id}`, owner.cookie)).status).toBe(400)
   })
+
+  async function verifyMemberExpectedTarget(
+    routes: typeof readinessRoutes,
+    role: 'owner' | 'admin' | 'member',
+  ) {
+    const user = await createTestUser(db)
+    const current = await createTestTeam(db, [{ user, role }])
+    const expected = await createTestTeam(db, [{ user, role }])
+    const login = await session(user, current.id)
+    const target = application(createCallerResolver({ auth, db }), routes)
+    const headers = { 'X-Expected-Organization-Id': expected.id }
+    // Authority over the expected team must not reveal drift for a different target.
+    for (const teamId of [current.id, randomUUID()]) {
+      const response = await get(memberPath(teamId, [randomUUID()]), login.cookie, headers, target)
+      expect(response.status).toBe(403)
+      expect(await answer(response)).toEqual({ status: 403, body: denial })
+    }
+    const matching = await get(
+      memberPath(expected.id, [randomUUID()]),
+      login.cookie,
+      headers,
+      target,
+    )
+    expect(matching.status).toBe(409)
+    expect(await matching.json()).toMatchObject({ error: 'organization_context_changed' })
+  }
+
+  it.each(['owner', 'admin', 'member'] as const)(
+    'binds the %s member-read target before checking expected-team drift, including source copies',
+    async (role) => {
+      await verifyMemberExpectedTarget(readinessRoutes, role)
+      await verifyMemberExpectedTarget(readRouteCopy(), role)
+      await expect(
+        verifyMemberExpectedTarget(
+          readRouteCopy(undefined, undefined, [
+            `      options.memberReadScope === 'own_row' &&
+      expectedOrganizationId !== undefined &&
+      expectedOrganizationId.toLowerCase() !== c.req.param('teamId')?.toLowerCase()`,
+            '      false',
+          ]),
+          role,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError', actual: 409, expected: 403 })
+      await verifyMemberExpectedTarget(readRouteCopy(), role)
+    },
+  )
 
   it.each(['owner', 'admin'])('accepts a real current-team %s cookie', async (role) => {
     const user = await createTestUser(db)
@@ -637,7 +701,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
           .set({ emailVerified: false })
           .where('id', '=', user.id)
           .execute()
-      for (const path of [selfPath, teamPath(team.id)])
+      for (const path of [selfPath, teamPath(team.id), memberPath(team.id, [randomUUID()])])
         expect((await client.get(path)).status).toBe(403)
     },
   )
@@ -769,6 +833,259 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
       'busy',
     ])
     expect(allKeys(response.body).filter((key) => forbiddenKeys.has(key))).toEqual([])
+  })
+
+  it.each(['owner', 'admin', 'member'])(
+    'returns only authorized coarse member rows to a current %s session',
+    async (role) => {
+      const user = await createTestUser(t.db)
+      const peer = await createTestUser(t.db)
+      const team = await createTestTeam(t.db, [
+        { user, role },
+        { user: peer, role: 'member' },
+      ])
+      const other = await createTestTeam(t.db, [{ user: peer, role: 'member' }])
+      const rows = await t.db
+        .selectFrom('auth.member')
+        .select(['id', 'userId'])
+        .where('organizationId', '=', team.id)
+        .execute()
+      const otherRow = await t.db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('organizationId', '=', other.id)
+        .executeTakeFirstOrThrow()
+      const schedule = await createFixtures(t.db).schedule(peer.id)
+      await t.db
+        .updateTable('schedules')
+        .set({ name: 'private-member-route-schedule' })
+        .where('id', '=', schedule)
+        .execute()
+      const connection = await t.db
+        .insertInto('calendar_connections')
+        .values({
+          user_id: peer.id,
+          provider: 'google',
+          external_account_id: randomUUID(),
+          account_email: 'private-member-route-account@example.com',
+          credentials: Buffer.from('synthetic'),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await t.db
+        .insertInto('calendars')
+        .values({
+          connection_id: connection.id,
+          external_id: randomUUID(),
+          name: 'private-member-route-calendar-title',
+          check_conflicts: true,
+        })
+        .execute()
+      const ids = [...rows.map((row) => row.id), otherRow.id, randomUUID()]
+      const response = await t
+        .as(await session(user, team.as(user)), { 'X-Expected-Organization-Id': team.id })
+        .get(memberPath(team.id, ids))
+      expect(response.status).toBe(200)
+      const raw = response.body as { organizationId: string; members: Record<string, unknown>[] }
+      const result = MemberReadinessPageSchema.parse(response.body)
+      const own = rows.find((row) => row.userId === user.id)
+      expect(result.members.map((row) => row.memberId).sort()).toEqual(
+        (role === 'member' ? [own?.id] : rows.map((row) => row.id)).sort(),
+      )
+      expect(Object.keys(raw).sort()).toEqual(['members', 'organizationId'])
+      for (const row of raw.members) {
+        expect(Object.keys(row).sort()).toEqual([
+          'completeness',
+          'displayName',
+          'evaluatedAt',
+          'fixKinds',
+          'health',
+          'memberId',
+          'reasonCodes',
+          'summary',
+        ])
+        expect(Object.keys(row.health as object).sort()).toEqual([
+          'conferenceAccounts',
+          'defaultSchedule',
+          'selectedCalendars',
+        ])
+      }
+      expect(response.body).toEqual(result)
+      for (const forbidden of [
+        'private-member-route-',
+        schedule,
+        connection.id,
+        peer.email,
+        otherRow.id,
+      ])
+        expect(JSON.stringify(response.body).includes(forbidden)).toBe(false)
+      const forbiddenKeys = new Set([
+        'details',
+        'signals',
+        'calendars',
+        'schedules',
+        'accountEmail',
+        'provider',
+        'calendarId',
+        'calendarName',
+        'scheduleId',
+        'weeklyHours',
+        'busy',
+        'title',
+        'description',
+      ])
+      expect(allKeys(response.body).filter((key) => forbiddenKeys.has(key))).toEqual([])
+    },
+  )
+
+  async function verifyMemberEntry(
+    routes: typeof readinessRoutes = readinessRoutes,
+    state: 'revoked' | 'switched' = 'revoked',
+  ) {
+    const user = await createTestUser(t.db)
+    const team = await createTestTeam(t.db, [{ user, role: 'member' }])
+    const principal = await session(user, team.as(user))
+    if (state === 'revoked')
+      await t.db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', team.id)
+        .where('userId', '=', user.id)
+        .execute()
+    else
+      await t.db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: user.principal.organization.id })
+        .where('id', '=', principal.sessionId)
+        .execute()
+    const app = productApp(t.db, new Map([['hm_member_entry', principal]]), [routes({ db: t.db })])
+    // Entry authority runs before query validation, independent of the projection service.
+    const response = await app.request(
+      `/api/v1/teams/${team.id}/member-readiness?memberIds=invalid`,
+      {
+        headers: {
+          cookie: syntheticSessionCookie('hm_member_entry'),
+          'X-Expected-Organization-Id': team.id,
+        },
+      },
+    )
+    expect(response.status).toBe(state === 'revoked' ? 403 : 409)
+    expect(await response.json()).toMatchObject({
+      error: state === 'revoked' ? denial.error : 'organization_context_changed',
+    })
+  }
+
+  it('checks shared member entry before validation, including ordinary-member context drift', async () => {
+    for (const state of ['revoked', 'switched'] as const) {
+      await verifyMemberEntry(readinessRoutes, state)
+      await verifyMemberEntry(readRouteCopy(), state)
+    }
+  })
+
+  it('detects removal of member-read middleware with a real HTTP denial assertion', async () => {
+    await expect(
+      verifyMemberEntry(
+        readRouteCopy(undefined, [
+          'middleware: memberAccess.memberReadMiddleware,',
+          'middleware: [caller] as [typeof caller],',
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 400, expected: 403 })
+    await verifyMemberEntry(readRouteCopy())
+  })
+
+  it('detects removal of the own-row expected-team opt-in for ordinary members', async () => {
+    await expect(
+      verifyMemberEntry(
+        readRouteCopy(undefined, undefined, [
+          "options.memberReadScope === 'own_row' ||",
+          'false ||',
+        ]),
+        'switched',
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 403, expected: 409 })
+    await verifyMemberEntry(readRouteCopy(), 'switched')
+  })
+
+  it('uniformly denies member summary credentials and inaccessible teams', async () => {
+    const user = await createTestUser(t.db)
+    const team = await createTestTeam(t.db, [{ user, role: 'member' }])
+    const other = await createTestTeam(t.db, [{ user, role: 'member' }])
+    const ids = [randomUUID()]
+    const principal = await session(user, team.as(user))
+    const deniedPaths = [
+      memberPath(other.id, ids),
+      memberPath(randomUUID(), ids),
+      memberPath(user.principal.organization.id, ids),
+    ]
+    for (const path of deniedPaths)
+      expect(await t.as(principal).get(path)).toEqual({ status: 403, body: denial })
+    const ownPath = memberPath(team.id, ids)
+    expect(await t.anonymous.get(ownPath)).toEqual({ status: 403, body: denial })
+    expect(await t.as(team.as(user)).get(ownPath)).toEqual({ status: 403, body: denial })
+    expect(
+      await t
+        .as({
+          ...team.as(user),
+          kind: 'oauth',
+          oauthConsentId: randomUUID(),
+          clientId: 'synthetic-member-readiness',
+          scopes: ['bookings:read'],
+        })
+        .get(ownPath),
+    ).toEqual({ status: 403, body: denial })
+    await t.db
+      .updateTable('auth.member')
+      .set({ role: 'superadmin' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', user.id)
+      .execute()
+    expect(await t.as(principal).get(ownPath)).toEqual({ status: 403, body: denial })
+  })
+
+  it.each(['owner', 'admin', 'member'])(
+    'returns reload guidance after the %s session switches from its expected team',
+    async (role) => {
+      const user = await createTestUser(t.db)
+      const team = await createTestTeam(t.db, [{ user, role }])
+      const other = await createTestTeam(t.db, [{ user, role: 'member' }])
+      const principal = await session(user, team.as(user))
+      await t.db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: other.id })
+        .where('id', '=', principal.sessionId)
+        .execute()
+      const response = await t
+        .as(principal, { 'X-Expected-Organization-Id': team.id })
+        .get(memberPath(team.id, [randomUUID()]))
+      expect(response.status).toBe(409)
+      expect(response.body).toMatchObject({ error: 'organization_context_changed' })
+      await t.db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', team.id)
+        .where('userId', '=', user.id)
+        .execute()
+      expect(
+        await t
+          .as(principal, { 'X-Expected-Organization-Id': team.id })
+          .get(memberPath(team.id, [randomUUID()])),
+      ).toEqual({ status: 403, body: denial })
+    },
+  )
+
+  it('bounds the member batch and rejects query overrides before returning data', async () => {
+    const user = await createTestUser(t.db)
+    const team = await createTestTeam(t.db, [{ user, role: 'owner' }])
+    const client = t.as(await session(user, team.as(user)))
+    const base = `/api/v1/teams/${team.id}/member-readiness`
+    for (const query of [
+      '',
+      '?memberIds=',
+      '?memberIds=invalid',
+      `?memberIds=${Array.from({ length: 101 }, () => randomUUID()).join(',')}`,
+      `?memberIds=${randomUUID()}&userId=${user.id}`,
+      `?memberIds=${randomUUID()}&audience=self_detail`,
+    ])
+      expect((await client.get(`${base}${query}`)).status).toBe(400)
   })
 
   it('validates bounded pagination and refuses audience, user and organization overrides', async () => {
@@ -916,10 +1233,19 @@ describe.skipIf(!process.env.DATABASE_URL)('team readiness with real authenticat
       const permitted = await app.request(teamPath(f.teamId), { headers: { cookie: f.cookie } })
       expect(permitted.status).toBe(200)
       expect(((await permitted.json()) as { organizationId: string }).organizationId).toBe(f.teamId)
+      const memberSummary = await app.request(memberPath(f.teamId, [randomUUID()]), {
+        headers: { cookie: f.cookie },
+      })
+      expect(memberSummary.status).toBe(200)
       for (const authorization of [f.apiKey, f.oauth, '', 'Bearer invalid', 'Basic synthetic']) {
         for (const target of [f.teamId, randomUUID()]) {
           await expectDenied(teamPath(target), { authorization, cookie: f.cookie })
           await expectDenied(teamPath(target), { authorization })
+          await expectDenied(memberPath(target, [randomUUID()]), {
+            authorization,
+            cookie: f.cookie,
+          })
+          await expectDenied(memberPath(target, [randomUUID()]), { authorization })
         }
       }
     },

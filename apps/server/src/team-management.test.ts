@@ -274,6 +274,99 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     expect(operation).not.toHaveBeenCalled()
   })
 
+  async function verifyBoundMemberRead(accessFactory: Access = teamManagementAccess) {
+    const f = await fixture('member', false, accessFactory)
+    const operation = vi.fn(
+      async (_db: Db, actor: Awaited<ReturnType<typeof checkTeamManagementAccess>>) => actor,
+    )
+    expect(await f.access.readMember(f.principal, f.team.id, operation)).toEqual({
+      userId: f.user.id,
+      organizationId: f.team.id,
+      role: 'member',
+    })
+    operation.mockClear()
+    // These changes happen after entry/caller resolution; the bound read must recheck.
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: f.user.principal.organization.id })
+      .where('id', '=', f.sessionId)
+      .execute()
+    await expect(f.access.readMember(f.principal, f.team.id, operation)).rejects.toMatchObject({
+      code: 'organization_context_changed',
+    })
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.user.id)
+      .execute()
+    await expect(f.access.readMember(f.principal, f.team.id, operation)).rejects.toMatchObject({
+      code: denied.error,
+    })
+    expect(operation).not.toHaveBeenCalled()
+  }
+
+  it('rechecks a bound member read before its projection callback', async () => {
+    await verifyBoundMemberRead()
+    await verifyBoundMemberRead(accessCopy())
+  })
+
+  it('detects removal of the bound member read recheck in a source copy', async () => {
+    await expect(
+      verifyBoundMemberRead(
+        accessCopy(undefined, [
+          `const actor = await check(
+        db,
+        principal,
+        teamId,
+        false,
+        { expectedOrganizationId: expectedOrganizationId ?? teamId, allowPersonal: false },
+        true,
+      )`,
+          "const actor = { userId: principal.user.id, organizationId: teamId, role: 'member' }",
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verifyBoundMemberRead(accessCopy())
+  })
+
+  async function verifyMemberReadBinding(
+    accessFactory: Access = teamManagementAccess,
+    expected = false,
+  ) {
+    const f = await fixture('member', false, accessFactory)
+    const other = await createTestTeam(db, [{ user: f.user, role: 'member' }])
+    const operation = vi.fn(async () => 'unexpected')
+    await expect(
+      f.access.readMember(
+        f.principal,
+        expected ? f.team.id : other.id,
+        operation,
+        expected ? other.id : undefined,
+      ),
+    ).rejects.toMatchObject({ code: denied.error })
+    expect(operation).not.toHaveBeenCalled()
+  }
+
+  it.each([false, true])(
+    'keeps the member read bound to its explicit team (expected header: %s)',
+    async (expected) => {
+      await verifyMemberReadBinding(teamManagementAccess, expected)
+      await verifyMemberReadBinding(accessCopy(), expected)
+      await expect(
+        verifyMemberReadBinding(
+          accessCopy(undefined, [
+            expected
+              ? 'expectedOrganizationId.toLowerCase() !== teamId.toLowerCase()'
+              : 'teamId.toLowerCase() !== principal.organization.id.toLowerCase()',
+            'false',
+          ]),
+          expected,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await verifyMemberReadBinding(accessCopy(), expected)
+    },
+  )
+
   async function verifyMemberEntries(accessFactory: Access, role = 'member') {
     const f = await fixture(role, false, accessFactory)
     const entry = (path: string) =>

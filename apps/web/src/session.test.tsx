@@ -201,11 +201,11 @@ describe('the session gate', () => {
   })
 
   it('checks the session again when the window regains focus', async () => {
-    let me: Schemas['Me'] = ME
+    let me: Schemas['Me'] | null = ME
     const api = fakeApi({
       ...emptyTeamLists,
       ...profile(),
-      'GET /api/v1/me': () => json(200, me),
+      'GET /api/v1/me': () => (me ? json(200, me) : json(401, { error: 'unauthorized' })),
       'GET /api/auth/organization/get-active-member': () =>
         json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'owner' }),
       ...instance(),
@@ -223,10 +223,13 @@ describe('the session gate', () => {
       window.dispatchEvent(new Event('focus'))
     })
     await vi.waitFor(() => expect(organization()).toBe('Acme'))
+    await screen.findByText('No pending invitations on this page.')
+    expect(
+      api.to('GET /api/v1/team/invitations')[0]?.headers.get('X-Expected-Organization-Id'),
+    ).toBe(TEAM_ID)
 
     // Back in a hidden-then-visible tab, the session is gone: sign-in, with a notice.
-    me = ME
-    fakeApi({ ...signedOut, ...instance() })
+    me = null
     act(() => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
