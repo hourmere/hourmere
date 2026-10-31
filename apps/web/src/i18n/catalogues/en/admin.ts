@@ -51,6 +51,36 @@ export const admin = {
     'Complete your profile and display name in Settings first.',
   'Review your existing schedules and choose a valid default in Availability.':
     'Review your existing schedules and choose a valid default in Availability.',
+  'Member readiness': 'Member readiness',
+  'Default schedule set': 'Default schedule set',
+  'No default schedule': 'No default schedule',
+  'Default schedule not checked': 'Default schedule not checked',
+  'Default schedule needs attention': 'Default schedule needs attention',
+  'Default schedule check failed': 'Default schedule check failed',
+  'Selected calendar checks passed': 'Selected calendar checks passed',
+  'No external conflict calendar required for basic bookings':
+    'No external conflict calendar required for basic bookings',
+  'Selected calendars need attention': 'Selected calendars need attention',
+  'Selected calendars not checked': 'Selected calendars not checked',
+  'Selected calendar check failed': 'Selected calendar check failed',
+  'Conference account connected': 'Conference account connected',
+  'No conference account connected; basic bookings do not require one':
+    'No conference account connected; basic bookings do not require one',
+  'Conference accounts need attention': 'Conference accounts need attention',
+  'Conference accounts not checked': 'Conference accounts not checked',
+  'Conference account check failed': 'Conference account check failed',
+  'Only team owners and admins can view other members’ readiness.':
+    'Only team owners and admins can view other members’ readiness.',
+  'Your default schedule is reused in every team you belong to.':
+    'Your default schedule is reused in every team you belong to.',
+  'Configure default schedule': 'Configure default schedule',
+  'Configure calendars': 'Configure calendars',
+  'A missing default schedule is a configuration gap, not a report of no free time.':
+    'A missing default schedule is a configuration gap, not a report of no free time.',
+  'An external calendar is optional for basic bookings.':
+    'An external calendar is optional for basic bookings.',
+  'Checking member configuration…': 'Checking member configuration…',
+  'Could not check member configuration.': 'Could not check member configuration.',
   'Filter invitations': 'Filter invitations',
   Joined: 'Joined',
   Rejected: 'Rejected',
