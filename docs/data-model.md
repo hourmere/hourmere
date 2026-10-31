@@ -119,6 +119,7 @@ calendar-list access.
 | `calendar_busy` | user | Timed busy intervals or all-day date ranges mirrored by incremental sync (recurring events expanded) |
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
+| `one_time_booking_links` | event type + organization | Hash-only booking capabilities, optional expiry and invitee prefill, terminal lifecycle and the confirmed booking that consumed them |
 | `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |
 | `organization_operations` | organization | Minimal actual-actor records for cancellation, member removal/leave and role changes; identifiers, origin, role transition and time only |
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
@@ -232,6 +233,66 @@ calendar-list access.
   connection (e.g. when it deletes a user).
 - **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
   objects shifted by the server's time zone.
+
+## One-time booking link contract
+
+Migration 0053 adds `one_time_booking_links`. Each link belongs to exactly one event type
+and its organization, with the creating user recorded separately. Personal links belong
+to the event type's owner; team links belong to the team, rather than to whichever admin
+created them. The service returns a cryptographically random 256-bit bearer token exactly
+once, on creation. Only its SHA-256 digest is stored, under a unique index. Reads and
+revocation return metadata without either the raw token or its digest. Callers must keep
+the creation result private; later transports must not log it or place it in analytics.
+
+An optional `expires_at` is an absolute instant. Database wall time decides eligibility,
+including after lock waits, independently of the application clock or transaction start.
+A link with no expiry remains eligible until consumption or revocation. Optional invitee
+name and email are editable booking-form prefill only: they do not prove identity,
+verify an address, restrict who can book, or bypass the normal booking validations.
+
+| State | Meaning |
+|---|---|
+| `active` | Unconsumed, unrevoked and before its optional expiry |
+| `used` | A confirmed booking through this link committed with its claim |
+| `expired` | The expiry instant has passed; reads derive this even if the stored state is still `active` |
+| `revoked` | An authorized owner/admin explicitly withdrew an unused link |
+
+Resolving a token is read-only and never consumes it. Unknown, malformed, expired,
+revoked and used tokens return the same `one_time_link_not_found` error, with no lifecycle
+details. A digest lookup and constant-time digest comparison avoid comparing raw secrets.
+An inactive or deleted event type has the same unavailable result. Hidden event types
+remain eligible through their direct one-time links. Links do not bypass event readiness,
+host membership, availability, notice, daily limits or any other booking rule.
+
+`claimOneTimeBookingLink` accepts the caller's booking transaction. The caller must create
+the confirmed booking and claim the link in that same transaction, and propagate a failed
+claim so the booking rolls back. Only a confirmed booking for the exact event type and
+organization can consume a link. A conditional row update serializes competing claims;
+database constraints and a transition trigger also prevent terminal links from returning
+to active or changing their consuming booking. The unique booking reference prevents one
+booking from consuming multiple links. A rolled-back booking leaves the link available.
+Cancelling or rescheduling the consuming booking never reactivates the link; the original
+booking reference remains as evidence of consumption.
+
+Creation and revocation recheck current verified membership and permissions inside their
+write transaction. For team-owned event types, only current team owners and admins may
+create or revoke links. Ordinary members may manage links only for event types they own;
+being a host or the creator of a team link grants no team management permission. The
+current organization scopes every operation. For the next REST/MCP/CLI task, creation and
+revocation are account-configuration writes requiring API key scope `full`; neither
+`read` nor `bookings` authorizes minting or withdrawing these capabilities. The internal
+services already enforce this classification. Existing session and MCP OAuth permissions
+still apply. Transport registration and public-page consumption follow separately.
+
+Each personal owner or team organization may have at most 1000 active, unexpired links
+across all its event types and creators. Creation serializes this check under an owner or
+organization lock. Used, expired and revoked rows do not consume this allowance. They are
+retained without automatic expiry-based deletion, including their digest and prefill,
+for lifecycle history and to prevent accidental reuse. Physical deletion of the creator,
+event type or organization cascades to its link rows; soft-deleting an event type retains
+its links while making them unavailable. A consuming booking cannot be
+deleted on its own while its link evidence remains; deletion of the organization removes
+both together. No retention worker or administrative list is introduced here.
 
 ## Event duration contract
 
