@@ -34,21 +34,21 @@ const MEMBER: OrganizationMember = {
   createdAt: '2026-10-27T10:00:00.000Z',
 }
 
+function StateProbe({ observe }: { observe: (location: ReturnType<typeof useLocation>) => void }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  observe(location)
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Test previous page
+    </button>
+  )
+}
+
 function renderSettingsWithState(state: unknown, path: string = PATHS.settings) {
   let latestState = state
   let latestUrl = path
   const { pathname, search, hash } = new URL(path, window.location.origin)
-  function StateProbe() {
-    const location = useLocation()
-    const navigate = useNavigate()
-    latestState = location.state
-    latestUrl = location.pathname + location.search + location.hash
-    return (
-      <button type="button" onClick={() => navigate(-1)}>
-        Test previous page
-      </button>
-    )
-  }
   return {
     ...render(
       <MemoryRouter
@@ -56,7 +56,12 @@ function renderSettingsWithState(state: unknown, path: string = PATHS.settings) 
         initialIndex={1}
       >
         <App />
-        <StateProbe />
+        <StateProbe
+          observe={(location) => {
+            latestState = location.state
+            latestUrl = location.pathname + location.search + location.hash
+          }}
+        />
       </MemoryRouter>,
     ),
     state: () => latestState,

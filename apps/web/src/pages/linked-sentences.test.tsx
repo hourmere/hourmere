@@ -144,23 +144,19 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
     expect(link.getAttribute('href')).toBe('/app/availability')
   })
 
-  it('keeps setup hint clauses and their links together without extra Chinese spaces', async () => {
+  it('keeps profile guidance and its action readable in the ordered setup guide', async () => {
     chooseLanguage(language)
     pageApi({ schedules: [], hasProfile: false })
     renderApp('/app/event-types')
     const handle = await screen.findByRole('link', {
-      name: language === 'en' ? 'Choose your handle' : '选择用户名',
+      name: language === 'en' ? 'Complete your profile' : '完善个人资料',
     })
-    const hours = screen.getByRole('link', {
-      name: language === 'en' ? 'Set your weekly hours' : '设置每周时间段',
-    })
-    expect(handle.closest('li')?.textContent).toBe(
-      language === 'en' ? 'Choose your handle to get booking links.' : '选择用户名以获取预约链接。',
-    )
-    expect(hours.closest('li')?.textContent).toBe(
+    expect(handle.closest('li')?.querySelector('p')?.textContent).toBe(
       language === 'en'
-        ? 'Set your weekly hours, so there are times to book.'
-        : '设置每周时间段，这样才会有可预约时间。',
+        ? 'Choose your display name, booking username and time zone in Settings.'
+        : '在设置中填写显示名称、预约用户名和时区。',
     )
+    expect(handle.getAttribute('href')).toBe('/app/settings')
+    expect(handle.closest('ol')).not.toBeNull()
   })
 })

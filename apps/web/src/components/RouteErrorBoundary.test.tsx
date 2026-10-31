@@ -10,6 +10,11 @@ function Broken(): never {
   throw new Error('Private route error details')
 }
 
+function Draft() {
+  const [value, setValue] = useState('')
+  return <input aria-label="Draft" value={value} onChange={(e) => setValue(e.target.value)} />
+}
+
 describe('route error recovery', () => {
   it.each([
     [
@@ -84,10 +89,6 @@ describe('route error recovery', () => {
   })
 
   it('preserves an existing route subtree during normal navigation', () => {
-    function Draft() {
-      const [value, setValue] = useState('')
-      return <input aria-label="Draft" value={value} onChange={(e) => setValue(e.target.value)} />
-    }
     render(
       <MemoryRouter>
         <Link to="/another">Navigate</Link>

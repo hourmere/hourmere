@@ -7,7 +7,7 @@ import { literal } from '../i18n/translate.ts'
 import { codeOf, failureMessage, getHost } from './api.ts'
 import { locationLabel } from './BookingDetails.tsx'
 import { collapseBlankLines } from './description.ts'
-import { PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
+import { HostAvatar, PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
 import { normalizedHandle, useRequest } from './paths.ts'
 
 /** /{handle}: the host and the event types people can book with them. */
@@ -51,6 +51,7 @@ function HostPageContent({ handle }: { handle: string }) {
   return (
     <PublicLayout>
       <header className="host-header">
+        <HostAvatar name={host.name} image={host.image} />
         <h1>{host.name}</h1>
         {eventTypes.length > 0 && (
           <p className="muted">{t('Pick an event to see available times.')}</p>

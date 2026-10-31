@@ -35,6 +35,10 @@ export const PublicEventType = z
       .openapi({ description: 'Booking-form fields beyond name and email' }),
     host: z.object({
       name: z.string(),
+      image: z.string().optional().openapi({
+        description:
+          'An existing first-party raster image path; external profile pictures are omitted',
+      }),
       timeZone: z
         .string()
         .optional()
@@ -59,6 +63,10 @@ export const PublicHost = z
     handle: z.string(),
     host: z.object({
       name: z.string(),
+      image: z.string().optional().openapi({
+        description:
+          'An existing first-party raster image path; external profile pictures are omitted',
+      }),
       timeZone: z.string().openapi({ description: "The host's IANA time zone" }),
     }),
     eventTypes: z

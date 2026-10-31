@@ -564,6 +564,14 @@ describe('complete public documentation', () => {
           '',
         ].join('\n'),
       )
+    } else if (guide === 'mcp') {
+      // Retain the requested client setup excerpt; the complete guide stays canonical.
+      const excerpt = read(original)
+      expect(excerpt).toContain('[MCP quickstart](https://hourmere.com/docs/mcp)')
+      const codeBlocks = (markdown: string) => markdown.match(/^```[^\n]*\n[\s\S]*?^```/gm) ?? []
+      const quickstart = source.split('\n## Discover your configuration\n')[0] ?? ''
+      expect(codeBlocks(excerpt)).toHaveLength(2)
+      expect(codeBlocks(excerpt)).toEqual(codeBlocks(quickstart))
     } else {
       expect(existsSync(join(root, original)), original).toBe(false)
     }
