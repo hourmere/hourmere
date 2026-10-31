@@ -16,7 +16,7 @@ import { createFixtures, createTestTeam, createTestUser } from '@hourmere/schedu
 import { createMiddleware } from 'hono/factory'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
-import { teamManagementAccess, teamManagementSessionCaller } from '../team-management.ts'
+import { teamManagementAccess } from '../team-management.ts'
 import { readinessRoutes } from './readiness.ts'
 import {
   createTestApp,
@@ -177,7 +177,6 @@ function routeCopy(mutation: [string, string]) {
     json,
     serviceContext,
     teamManagementAccess,
-    teamManagementSessionCaller,
   }
   return new Function(...Object.keys(bindings), `${script}; return readinessRoutes`)(
     ...Object.values(bindings),

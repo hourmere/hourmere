@@ -227,6 +227,11 @@ export function teamManagementSessionCaller(caller: CallerMiddleware) {
  * owner/admin may receive a context-change conflict after switching to another space.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
+ * Member reads use `memberReadMiddleware` and `readMember` instead. Set
+ * `{ memberReadScope: 'own_row' }` only for batch services that constrain ordinary members
+ * to their own rows; otherwise expected-team membership is allowed only for a self target.
+ * `readMember` rechecks the explicit team and live context before passing an actor to the
+ * projection service, which must scope targets by that actor's organization and role.
  * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
  * the shared check also verifies the session's current organization under its locks.
  *
@@ -243,7 +248,11 @@ export function teamManagementSessionCaller(caller: CallerMiddleware) {
  * never be silently replaced by the active organization. Existing API-key/OAuth routes keep
  * their own authorization and organization bindings.
  */
-export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
+export function teamManagementAccess(
+  db: Db,
+  caller: CallerMiddleware,
+  options: { memberReadScope?: 'own_row' } = {},
+) {
   const sessionCaller = teamManagementSessionCaller(caller)
   async function expectedContext(
     principal: Principal,
@@ -266,13 +275,14 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
   })
-  // Entry to self-impact reads only. The service must still scope the target to the
-  // caller for ordinary members and recheck the current session organization.
+  // Ordinary members can inspect a self target or a batch whose service always
+  // restricts them to their own row. Consumers must still bind/recheck the team.
   const memberRead = createMiddleware<CallerEnv>(async (c, next) => {
     await expectedContext(
       c.var.principal,
       c.req.header(EXPECTED_ORGANIZATION_HEADER),
-      c.req.param('memberUserId')?.toLowerCase() === c.var.principal.user.id.toLowerCase(),
+      options.memberReadScope === 'own_row' ||
+        c.req.param('memberUserId')?.toLowerCase() === c.var.principal.user.id.toLowerCase(),
     )
     await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)
     await next()
@@ -289,6 +299,31 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
       const actor = await check(db, principal, teamId)
       if (actor.role === 'member') throw denied()
       return operation(db, { ...actor, role: actor.role })
+    },
+    /** Recheck a member read's explicit team and current browser context before data. */
+    async readMember<T>(
+      principal: Principal,
+      teamId: string,
+      operation: (db: Db, actor: Awaited<ReturnType<typeof check>>) => Promise<T>,
+      expectedOrganizationId?: string,
+    ): Promise<T> {
+      // The expected space cannot redirect a read to a different target team.
+      if (
+        (expectedOrganizationId === undefined &&
+          teamId.toLowerCase() !== principal.organization.id.toLowerCase()) ||
+        (expectedOrganizationId !== undefined &&
+          expectedOrganizationId.toLowerCase() !== teamId.toLowerCase())
+      )
+        throw denied()
+      const actor = await check(
+        db,
+        principal,
+        teamId,
+        false,
+        { expectedOrganizationId: expectedOrganizationId ?? teamId, allowPersonal: false },
+        true,
+      )
+      return operation(db, actor)
     },
     write<T>(
       principal: Principal,

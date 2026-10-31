@@ -36,7 +36,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
 import { createApp } from '../app.ts'
 import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
-import { type teamManagementAccess, teamManagementSessionCaller } from '../team-management.ts'
+import type { teamManagementAccess } from '../team-management.ts'
 import { readinessRoutes } from './readiness.ts'
 import {
   createTestApp,
@@ -78,7 +78,11 @@ function sourceCopy<T>(
   ) as T
 }
 
-function readRouteCopy(mutation?: [string, string], routeMutation?: [string, string]) {
+function readRouteCopy(
+  mutation?: [string, string],
+  routeMutation?: [string, string],
+  accessMutation?: [string, string],
+) {
   const sharedAccess = sourceCopy<{
     checkTeamManagementAccess: typeof checkTeamManagementAccess
     TeamManagementError: typeof TeamManagementError
@@ -92,6 +96,7 @@ function readRouteCopy(mutation?: [string, string], routeMutation?: [string, str
     'apps/server/src/team-management.ts',
     { DomainError, createMiddleware, ...sharedAccess },
     'teamManagementAccess',
+    accessMutation,
   )
   return sourceCopy<typeof readinessRoutes>(
     'apps/server/src/routes/readiness.ts',
@@ -111,7 +116,6 @@ function readRouteCopy(mutation?: [string, string], routeMutation?: [string, str
       json,
       serviceContext,
       teamManagementAccess: access,
-      teamManagementSessionCaller,
     },
     'readinessRoutes',
     routeMutation,
@@ -884,6 +888,74 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
       expect(allKeys(response.body).filter((key) => forbiddenKeys.has(key))).toEqual([])
     },
   )
+
+  async function verifyMemberEntry(
+    routes: typeof readinessRoutes = readinessRoutes,
+    state: 'revoked' | 'switched' = 'revoked',
+  ) {
+    const user = await createTestUser(t.db)
+    const team = await createTestTeam(t.db, [{ user, role: 'member' }])
+    const principal = await session(user, team.as(user))
+    if (state === 'revoked')
+      await t.db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', team.id)
+        .where('userId', '=', user.id)
+        .execute()
+    else
+      await t.db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: user.principal.organization.id })
+        .where('id', '=', principal.sessionId)
+        .execute()
+    const app = productApp(t.db, new Map([['hm_member_entry', principal]]), [routes({ db: t.db })])
+    // Entry authority runs before query validation, independent of the projection service.
+    const response = await app.request(
+      `/api/v1/teams/${team.id}/member-readiness?memberIds=invalid`,
+      {
+        headers: {
+          cookie: syntheticSessionCookie('hm_member_entry'),
+          'X-Expected-Organization-Id': team.id,
+        },
+      },
+    )
+    expect(response.status).toBe(state === 'revoked' ? 403 : 409)
+    expect(await response.json()).toMatchObject({
+      error: state === 'revoked' ? denial.error : 'organization_context_changed',
+    })
+  }
+
+  it('checks shared member entry before validation, including ordinary-member context drift', async () => {
+    for (const state of ['revoked', 'switched'] as const) {
+      await verifyMemberEntry(readinessRoutes, state)
+      await verifyMemberEntry(readRouteCopy(), state)
+    }
+  })
+
+  it('detects removal of member-read middleware with a real HTTP denial assertion', async () => {
+    await expect(
+      verifyMemberEntry(
+        readRouteCopy(undefined, [
+          'middleware: memberAccess.memberReadMiddleware,',
+          'middleware: [caller] as [typeof caller],',
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 400, expected: 403 })
+    await verifyMemberEntry(readRouteCopy())
+  })
+
+  it('detects removal of the own-row expected-team opt-in for ordinary members', async () => {
+    await expect(
+      verifyMemberEntry(
+        readRouteCopy(undefined, undefined, [
+          "options.memberReadScope === 'own_row' ||",
+          'false ||',
+        ]),
+        'switched',
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 403, expected: 409 })
+    await verifyMemberEntry(readRouteCopy(), 'switched')
+  })
 
   it('uniformly denies member summary credentials and inaccessible teams', async () => {
     const user = await createTestUser(t.db)

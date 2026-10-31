@@ -801,8 +801,11 @@ and `health.defaultSchedule`, `health.selectedCalendars` and
 `health.conferenceAccounts`. Schedule and calendar fields use the shared readiness
 states. Conference account health is `connected`, `not_connected`,
 `attention_required` or `check_failed`; connection alone does not establish eligibility
-for automatic meetings. No private schedule or calendar names, account emails, event
-details or busy maps are returned. Default schedules belong to the user across teams.
+for automatic meetings. Owners and admins may see these coarse health fields for other
+members, including whether a conflict calendar is selected or a conference account is
+connected. Providers, calendar and connection IDs, account counts, private schedule or
+calendar names, account emails, event details and busy maps are excluded. Default
+schedules belong to the user across teams.
 These cached checks do not search slots or promise bookability, and basic bookings
 do not require an external calendar or conference account.
 

@@ -1,4 +1,3 @@
-import { checkTeamManagementAccess, TeamManagementError } from '@hourmere/auth'
 import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import type { Db, EventTypeHosts, EventTypes, Schedules } from '@hourmere/db'
 import { type Selectable, sql } from 'kysely'
@@ -217,6 +216,12 @@ export interface ReadinessTeamContext {
   automaticZoom?: boolean | undefined
 }
 
+/** Construct only from teamManagementAccess.readMember's freshly authorized actor. */
+export interface ReadinessMemberContext extends ReadinessTeamContext {
+  userId: string
+  role: 'owner' | 'admin' | 'member'
+}
+
 function checkedPage(input: ReadinessPageInput) {
   const { limit } = checkedCatalogPage({ limit: input.limit ?? 50, after: input.eventTypeCursor })
   if (input.memberCursor !== undefined && !isUuid(input.memberCursor))
@@ -394,42 +399,12 @@ export async function getTeamReadiness(
 
 /** Coarse shared member checks; ordinary members may summarize only their own row. */
 export async function getTeamMemberReadiness(
-  ctx: ServiceContext,
-  teamId: string,
+  ctx: ReadinessMemberContext,
   memberIds: string[],
-  expectedOrganizationId?: string,
 ): Promise<MemberReadinessPage> {
-  const denied = () => new DomainError('forbidden', 'team_management_access_denied')
-  if (
-    expectedOrganizationId === undefined &&
-    teamId.toLowerCase() !== ctx.principal.organization.id.toLowerCase()
-  )
-    throw denied()
-  if (
-    expectedOrganizationId !== undefined &&
-    expectedOrganizationId.toLowerCase() !== teamId.toLowerCase()
-  )
-    throw denied()
-  let actor: Awaited<ReturnType<typeof checkTeamManagementAccess>>
-  try {
-    actor = await checkTeamManagementAccess(
-      ctx.db,
-      ctx.principal,
-      teamId,
-      false,
-      { expectedOrganizationId: expectedOrganizationId ?? teamId, allowPersonal: false },
-      true,
-    )
-  } catch (error) {
-    if (!(error instanceof TeamManagementError)) throw error
-    if (error.code === 'organization_context_changed')
-      throw new DomainError(
-        'conflict',
-        error.code,
-        'Your team context changed. Reload the page before trying again.',
-      )
-    throw denied()
-  }
+  const actor = ctx
+  if (!isUuid(actor.organizationId) || !isUuid(actor.userId))
+    throw new DomainError('forbidden', 'team_management_access_denied')
   if (!memberIds.length || memberIds.length > 100 || memberIds.some((id) => !isUuid(id)))
     throw new DomainError('invalid', 'invalid_member_ids')
   const members = await ctx.db

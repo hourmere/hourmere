@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { checkTeamManagementAccess, type Principal, TeamManagementError } from '@hourmere/auth'
+import type { Principal } from '@hourmere/auth'
 import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import { createDb, type Db, type Json } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -21,7 +21,12 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { eligibleHostIds, hasValidHostShape } from './hosts.ts'
 import { isUuid } from './internal.ts'
-import { getSelfReadiness, getTeamMemberReadiness, getTeamReadiness } from './readiness.ts'
+import {
+  getSelfReadiness,
+  getTeamMemberReadiness,
+  getTeamReadiness,
+  type ReadinessMemberContext,
+} from './readiness.ts'
 import { createFixtures, createTestTeam, createTestUser, type TestUser } from './testing.ts'
 import { cleanText } from './text.ts'
 
@@ -96,8 +101,6 @@ function sourceCopy(
     hasValidHostShape,
     isUuid,
     cleanText,
-    checkTeamManagementAccess,
-    TeamManagementError,
   }
   return new Function(
     ...Object.keys(bindings),
@@ -1732,6 +1735,36 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     expect(owned.pool.totalCount).toBeLessThanOrEqual(10)
   })
 
+  function memberContext(
+    user: TestUser,
+    organizationId: string,
+    role: ReadinessMemberContext['role'],
+  ): ReadinessMemberContext {
+    return { db, now, organizationId, userId: user.id, role }
+  }
+
+  it('detects invalid authorized actor identifiers in source-copy member projections', async () => {
+    const user = await createTestUser(db)
+    const organization = await createTestTeam(db, [{ user, role: 'owner' }])
+    const ctx = memberContext(user, organization.id, 'owner')
+    const verify = async (read = getTeamMemberReadiness) => {
+      for (const invalid of [{ userId: 'invalid' }, { organizationId: 'invalid' }])
+        await expect(read({ ...ctx, ...invalid }, [randomUUID()])).rejects.toMatchObject({
+          code: 'team_management_access_denied',
+        })
+    }
+    await verify(sourceCopy().getTeamMemberReadiness)
+    await expect(
+      verify(
+        sourceCopy([
+          '  if (!isUuid(actor.organizationId) || !isUuid(actor.userId))',
+          '  if (false)',
+        ]).getTeamMemberReadiness,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(sourceCopy().getTeamMemberReadiness)
+  })
+
   async function membershipIds(organizationId: string) {
     return db
       .selectFrom('auth.member')
@@ -1741,7 +1774,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       .execute()
   }
 
-  it.each(['owner', 'admin', 'member'])(
+  it.each(['owner', 'admin', 'member'] as const)(
     'projects only permitted member health for a %s without fetching private metadata',
     async (role) => {
       const actor = await createTestUser(db)
@@ -1750,7 +1783,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
         { user: actor, role },
         { user: peer, role: 'member' },
       ])
-      const ctx = await session(actor, organization.as(actor))
+      const ctx = memberContext(actor, organization.id, role)
       const schedules = createFixtures(db)
       const scheduleId = await schedules.schedule(peer.id, { timeZone: 'UTC' })
       await db
@@ -1783,7 +1816,6 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       const queries: string[] = []
       const response = await getTeamMemberReadiness(
         { ...ctx, db: db.withPlugin(queryPlugin((node) => queries.push(JSON.stringify(node)))) },
-        organization.id,
         rows.map((row) => row.id),
       )
       expect(response.members).toHaveLength(role === 'member' ? 1 : 2)
@@ -1861,8 +1893,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     const read = async (team: typeof first) => {
       const ids = await membershipIds(team.id)
       return getTeamMemberReadiness(
-        await session(user, team.as(user)),
-        team.id,
+        memberContext(user, team.id, 'member'),
         ids.map((row) => row.id),
       )
     }
@@ -1882,7 +1913,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
   it('reports member dependency read failures without inventing missing configuration', async () => {
     const user = await createTestUser(db)
     const organization = await createTestTeam(db, [{ user, role: 'owner' }])
-    const ctx = await session(user, organization.as(user))
+    const ctx = memberContext(user, organization.id, 'owner')
     const ids = (await membershipIds(organization.id)).map((row) => row.id)
     const broken = db.withPlugin(
       queryPlugin((node) => {
@@ -1894,7 +1925,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
           throw new Error('Synthetic member dependency failure')
       }),
     )
-    const result = await getTeamMemberReadiness({ ...ctx, db: broken }, organization.id, ids)
+    const result = await getTeamMemberReadiness({ ...ctx, db: broken }, ids)
     expect(result.members[0]?.health).toEqual({
       defaultSchedule: 'check_failed',
       selectedCalendars: 'check_failed',
@@ -1907,7 +1938,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
   it('summarizes optional conference accounts without claiming automatic-meeting eligibility', async () => {
     const user = await createTestUser(db)
     const organization = await createTestTeam(db, [{ user, role: 'member' }])
-    const ctx = await session(user, organization.as(user))
+    const ctx = memberContext(user, organization.id, 'member')
     const ids = (await membershipIds(organization.id)).map((row) => row.id)
     const connection = await db
       .insertInto('conference_connections')
@@ -1922,7 +1953,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    const connected = await getTeamMemberReadiness(ctx, organization.id, ids)
+    const connected = await getTeamMemberReadiness(ctx, ids)
     expect(connected.members[0]?.health.conferenceAccounts).toBe('connected')
     expect(connected.members[0]?.health.defaultSchedule).toBe('configuration_blocker')
     await db
@@ -1930,7 +1961,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       .set({ status: 'disconnected', credentials: null, scopes: [] })
       .where('id', '=', connection.id)
       .execute()
-    const disconnected = await getTeamMemberReadiness(ctx, organization.id, ids)
+    const disconnected = await getTeamMemberReadiness(ctx, ids)
     expect(disconnected.members[0]?.health.conferenceAccounts).toBe('not_connected')
   })
 
@@ -1945,7 +1976,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     async (original, mutation) => {
       const user = await createTestUser(db)
       const organization = await createTestTeam(db, [{ user, role: 'owner' }])
-      const ctx = await session(user, organization.as(user))
+      const ctx = memberContext(user, organization.id, 'owner')
       const ids = (await membershipIds(organization.id)).map((row) => row.id)
       const verify = async (read = getTeamMemberReadiness) => {
         const facts: string[] = []
@@ -1963,7 +1994,6 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
               }),
             ),
           },
-          organization.id,
           ids,
         )
         expect(
@@ -1981,7 +2011,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
   it('uses a constant bounded query count for the displayed member batch', async () => {
     const user = await createTestUser(db)
     const organization = await createTestTeam(db, [{ user, role: 'owner' }])
-    const ctx = await session(user, organization.as(user))
+    const ctx = memberContext(user, organization.id, 'owner')
     const measure = async () => {
       const ids = (await membershipIds(organization.id)).map((row) => row.id)
       let count = 0
@@ -1994,7 +2024,6 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
             }),
           ),
         },
-        organization.id,
         ids,
       )
       return { result, count }
@@ -2019,10 +2048,10 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       { user, role: 'member' },
       { user: peer, role: 'member' },
     ])
-    const ctx = await session(user, organization.as(user))
+    const ctx = memberContext(user, organization.id, 'member')
     const ids = (await membershipIds(organization.id)).map((row) => row.id)
     const verifyOwn = async (read = getTeamMemberReadiness) => {
-      const result = await read(ctx, organization.id, ids)
+      const result = await read(ctx, ids)
       expect(result.members).toHaveLength(1)
     }
     await verifyOwn(sourceCopy().getTeamMemberReadiness)
@@ -2037,7 +2066,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     const otherTeam = await createTestTeam(db, [{ user, role: 'member' }])
     const otherIds = (await membershipIds(otherTeam.id)).map((row) => row.id)
     const verifyTeam = async (read = getTeamMemberReadiness) => {
-      const result = await read(ctx, organization.id, otherIds)
+      const result = await read(ctx, otherIds)
       expect(result.members).toHaveLength(0)
     }
     await verifyTeam(sourceCopy().getTeamMemberReadiness)
