@@ -789,7 +789,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect(posts()).toHaveLength(1)
   })
   it('allows own API-key configuration and ordinary metadata/disable changes while rejecting unavailable connections and round robin', async () => {
-    const key = { ...owner, kind: 'api_key' as const, apiKeyId }
+    const key = { ...owner, kind: 'api_key' as const, apiKeyScope: 'full' as const, apiKeyId }
     await expect(
       updateEventType({ db, principal: key, automaticZoom: true, now: () => NOW }, eventId, {
         zoomConnectionId: null,
@@ -893,7 +893,10 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           .execute()
         principal = { ...owner, sessionId }
       }
-      const actor = kind === 'key' ? { ...owner, kind: 'api_key' as const, apiKeyId } : principal
+      const actor =
+        kind === 'key'
+          ? { ...owner, kind: 'api_key' as const, apiKeyScope: 'full' as const, apiKeyId }
+          : principal
       await updateEventType({ db, principal: actor, now: () => NOW }, id, { isActive: false })
       const reactivation = updateEventType(
         { db, principal: actor, automaticZoom: true, now: () => NOW },

@@ -676,7 +676,11 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       }>(await call('whoami', {}))
       expect(me.user.id).toBe(agent.userId)
       expect(me.organization.personal).toBe(true)
-      expect(me.principal).toEqual({ kind: 'api_key', apiKeyId: agent.keyId })
+      expect(me.principal).toEqual({
+        kind: 'api_key',
+        apiKeyId: agent.keyId,
+        apiKeyScope: 'full',
+      })
     })
 
     it('refuses disabled and deleted keys with 401', async () => {

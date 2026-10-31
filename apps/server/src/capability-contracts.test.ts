@@ -1,13 +1,15 @@
 import { readFile } from 'node:fs/promises'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
+import { apiKeyScopeParityErrors } from '../../../scripts/api-key-scope-parity.ts'
+import { COMMANDS } from '../../../tools/cli/src/cli.ts'
 import { CROSS_ORIGIN_WRITE } from './openapi.ts'
-import { openApiDocument } from './openapi-document.ts'
+import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productTools } from './server.ts'
 
 const rootFile = (path: string) => readFile(new URL(`../../../${path}`, import.meta.url), 'utf8')
 
-type Method = 'get' | 'post' | 'put' | 'patch' | 'delete'
+type Method = 'get' | 'head' | 'options' | 'trace' | 'post' | 'put' | 'patch' | 'delete'
 interface Operation {
   security?: Record<string, string[]>[]
   responses: Record<string, { description?: string }>
@@ -27,41 +29,21 @@ describe('REST and MCP capability contract', () => {
     expect(description).toContain('session_required')
   })
 
-  it('gives every registered MCP mutation an existing public REST mutation', async () => {
+  it('classifies every REST route, MCP tool/mode and CLI command with equivalent scopes', async () => {
     // Use the same registry as the running server, without connecting to a database.
     const db = createDb(createPool('postgres://synthetic@127.0.0.1:9/parity-contract'))
     try {
       const tools = productTools({ db })
-      const mutations = tools.filter((tool) => !tool.annotations.readOnlyHint)
-      const equivalents: Record<string, [Method, string][]> = {
-        create_booking: [
-          ['post', '/api/v1/public/{handle}/{slug}/bookings'],
-          ['post', '/api/v1/public/teams/{handle}/{slug}/bookings'],
-        ],
-        // The current REST equivalent is the invitee-token mode. The missing host-ID
-        // reschedule route is a separate follow-up; this guard covers tools, not modes.
-        reschedule_booking: [['post', '/api/v1/bookings/manage/reschedule']],
-        cancel_booking: [
-          ['post', '/api/v1/bookings/manage/cancel'],
-          ['post', '/api/v1/bookings/{id}/cancel'],
-        ],
-        retry_conference: [['post', '/api/v1/bookings/{id}/conference/retry']],
-        retry_calendar_copy: [['post', '/api/v1/bookings/{id}/calendar-copy/retry']],
-      }
-      expect(mutations.map((tool) => tool.name).sort()).toEqual(Object.keys(equivalents).sort())
-      const { paths } = (await openApiDocument()) as { paths: Paths }
-      for (const tool of mutations) {
-        for (const [method, path] of equivalents[tool.name] ?? []) {
-          expect(method, tool.name).not.toBe('get')
-          const operation = paths[path]?.[method]
-          expect(operation, `${tool.name} must have REST ${method.toUpperCase()} ${path}`).toEqual(
-            expect.any(Object),
-          )
-          expect(Object.keys(operation?.responses ?? {}), `${tool.name} REST success`).toEqual(
-            expect.arrayContaining([expect.stringMatching(/^2\d\d$/)]),
-          )
-        }
-      }
+      const { document, routes: registeredRest } = await openApiRouteInventory()
+      const { paths } = document as { paths: Paths }
+      const rest = Object.entries(paths).flatMap(([path, item]) =>
+        (['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'delete'] as const).flatMap(
+          (method) => (item[method] ? [{ method, path, security: item[method]?.security }] : []),
+        ),
+      )
+      expect(apiKeyScopeParityErrors({ rest, registeredRest, mcp: tools, cli: COMMANDS })).toEqual(
+        [],
+      )
     } finally {
       await db.destroy()
     }

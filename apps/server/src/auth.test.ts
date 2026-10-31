@@ -1315,13 +1315,17 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(res.status).toBe(200)
       const key = (await res.json()) as { id: string; key: string; metadata: unknown }
       expect(key.key).toMatch(/^hm_[A-Za-z]{64}$/)
-      expect(key.metadata).toEqual({ organizationId: personal.id })
+      expect(key.metadata).toEqual({ organizationId: personal.id, scope: 'full' })
 
       const { res: meRes, body } = await me({ authorization: `Bearer ${key.key}` })
       expect(meRes.status).toBe(200)
       expect(body.user.email).toBe('agent-owner@example.com')
       expect(body.organization).toEqual(personal)
-      expect(body.principal).toEqual({ kind: 'api_key', apiKeyId: key.id })
+      expect(body.principal).toEqual({
+        kind: 'api_key',
+        apiKeyScope: 'full' as const,
+        apiKeyId: key.id,
+      })
     })
 
     it('get a per-key rate limit that normal use stays well within', async () => {
@@ -1452,7 +1456,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect((await me({ authorization: `Bearer ${key.key}` })).body.organization).toEqual(personal)
     })
 
-    it('accept only { organizationId } as metadata', async () => {
+    it('accept only organizationId and scope as metadata', async () => {
       const raw = (metadata: string) => `{"name":"agent","metadata":${metadata}}`
       for (const metadata of [
         `{"__proto__":{"organizationId":"${personal.id}"}}`,
@@ -1485,6 +1489,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(reset.status).toBe(200)
       expect(((await reset.json()) as { metadata: unknown }).metadata).toEqual({
         organizationId: personal.id,
+        scope: 'full',
       })
     })
 

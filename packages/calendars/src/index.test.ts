@@ -403,6 +403,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
     await expect(
       beginGoogleConnection(deps, {
         kind: 'api_key',
+        apiKeyScope: 'full' as const,
         apiKeyId: owner.sessionId,
         user: owner.user,
         organization: owner.organization,

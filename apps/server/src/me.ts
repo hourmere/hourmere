@@ -26,6 +26,9 @@ export const Me = z
         .optional()
         .openapi({ description: 'The organization-bound consent used, for kind oauth' }),
       apiKeyId: z.uuid().nullable().openapi({ description: 'The key used, for kind api_key' }),
+      apiKeyScope: z.enum(['full', 'read', 'bookings']).optional().openapi({
+        description: 'The immutable API key scope, included only for kind api_key',
+      }),
     }),
   })
   .openapi('Me')
@@ -38,6 +41,7 @@ export function describeCaller(p: Principal): z.infer<typeof Me> {
     principal: {
       kind: p.kind,
       apiKeyId: p.kind === 'api_key' ? p.apiKeyId : null,
+      ...(p.kind === 'api_key' && { apiKeyScope: p.apiKeyScope }),
       ...(p.kind === 'oauth' && { oauthConsentId: p.oauthConsentId }),
     },
   }

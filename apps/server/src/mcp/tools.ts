@@ -3,12 +3,19 @@
 // error codes and messages as the REST API.
 import { getOpenApiMetadata } from '@asteasolutions/zod-to-openapi'
 import { z } from '@hono/zod-openapi'
-import type { Principal } from '@hourmere/auth'
+import {
+  ApiKeyScopeError,
+  apiKeyAllows,
+  type Principal,
+  requireApiKeyOperation,
+} from '@hourmere/auth'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
-import type {
-  CallToolResult,
-  McpServer,
-  StandardSchemaWithJSON,
+import {
+  type CallToolResult,
+  type McpServer,
+  ProtocolError,
+  ProtocolErrorCode,
+  type StandardSchemaWithJSON,
 } from '@modelcontextprotocol/server'
 import { hasUnsafeJsonText } from '../app.ts'
 import type { RateLimiter } from '../rate-limit.ts'
@@ -60,6 +67,10 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   /** The result (structuredContent). Only its fields are sent. */
   output: O
   annotations: ToolAnnotations
+  /** Explicit dispatch modes, checked against the shared scope policy by interface parity. */
+  scopeModes?: readonly string[]
+  /** Identifies a dispatch branch only; permission decisions belong to the shared policy. */
+  scopeMode?(args: unknown): string
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
 }
@@ -139,6 +150,9 @@ export async function runTool(
   logError: ToolErrorLog,
 ): Promise<CallToolResult> {
   try {
+    requireApiKeyOperation(call.caller, `mcp:${tool.name}`)
+    if (tool.scopeMode)
+      requireApiKeyOperation(call.caller, `mcp:${tool.name}:${tool.scopeMode(args)}`)
     if (hasUnsafeJsonText(args))
       return errorResult({ error: 'invalid_request', message: UNSAFE_TEXT })
     const parsed = tool.input.safeParse(args ?? {})
@@ -156,6 +170,8 @@ export async function runTool(
       structuredContent: result.data as Record<string, unknown>,
     }
   } catch (err) {
+    if (err instanceof ApiKeyScopeError)
+      return errorResult({ error: err.error, message: err.message })
     if (err instanceof RateLimited) {
       return errorResult({
         error: 'rate_limited',
@@ -268,7 +284,11 @@ export function registerTools(
       if (retryAfter !== undefined) throw new RateLimited(retryAfter)
     },
   }
-  for (const { tool, inputSchema, outputSchema } of tools) {
+  const visible = new Map<string, PreparedTool>()
+  for (const prepared of tools) {
+    const { tool, inputSchema, outputSchema } = prepared
+    if (!apiKeyAllows(caller, `mcp:${tool.name}`)) continue
+    visible.set(tool.name, prepared)
     server.registerTool(
       tool.name,
       {
@@ -281,4 +301,29 @@ export function registerTools(
       (args: unknown) => runTool(tool, args, call, logError),
     )
   }
+  // Use the SDK's public dispatch seam: protocol/envelope validation still happens in
+  // Server before this callback, while a hidden catalog tool is checked before lookup in
+  // the SDK's visible registry. Unknown names retain its native protocol error.
+  const catalog = new Map(tools.map((prepared) => [prepared.tool.name, prepared]))
+  server.server.setRequestHandler('tools/call', async (request) => {
+    const known = catalog.get(request.params.name)
+    try {
+      if (known) requireApiKeyOperation(caller, `mcp:${known.tool.name}`)
+    } catch (err) {
+      if (err instanceof ApiKeyScopeError)
+        return errorResult({ error: err.error, message: err.message })
+      throw err
+    }
+    const prepared = visible.get(request.params.name)
+    if (!prepared)
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        `Tool ${clip(request.params.name, 100)} not found`,
+      )
+    const result = await runTool(prepared.tool, request.params.arguments, call, logError)
+    return server.server.projectCallToolResult(
+      result,
+      prepared.outputSchema['~standard'].jsonSchema.output({ target: 'draft-2020-12' }),
+    )
+  })
 }

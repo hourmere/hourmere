@@ -73,6 +73,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
     ])
     teamOwner = {
       kind: 'api_key',
+      apiKeyScope: 'full',
       apiKeyId: randomUUID(),
       user: owner.user,
       organization: team.as({ ...owner.user, principal: owner }).organization,

@@ -34,6 +34,18 @@ Times are RFC 3339: results give each time in UTC (Z) and, where you pass a time
 create_booking returns a manageToken once for a new booking (idempotent replays return null): keep it to reschedule or cancel as the invitee. reschedule_booking with manageToken returns a new token; the previous response token stays on the cancelled booking. Tokens from invitee emails follow the meeting.
 For host flows, use bookingId from list_bookings to reschedule or cancel a booking you host in this organization. Host reschedules return manageToken: null and preserve the invitee's existing token on the successor; they never reveal an invitee token. Rescheduling is not idempotent: never retry automatically after a lost response.`
 
+const REFRESH_DISCOVERY =
+  'Reconnect or refresh tool discovery when switching API keys; the available tools depend on the key scope.'
+
+function instructionsFor(caller: McpCaller): string {
+  if (caller.kind !== 'api_key') return INSTRUCTIONS
+  if (caller.apiKeyScope === 'read')
+    return `Hourmere schedules meetings. This API key allows discovery and inspection only. Use whoami to inspect the bound user, organization and API key scope. Use the available tools to inspect profiles, event types, schedules, integrations, bookings and available slots. This connection cannot change bookings or configuration. Times are RFC 3339; returned times are UTC unless an IANA time zone is requested. ${REFRESH_DISCOVERY}`
+  if (caller.apiKeyScope === 'bookings')
+    return `${INSTRUCTIONS}\nThis API key allows booking workflows, including retries for an existing booking's meeting and your own calendar copy. It does not allow raw schedule or integration-account discovery or configuration changes. ${REFRESH_DISCOVERY}`
+  return `${INSTRUCTIONS}\n${REFRESH_DISCOVERY}`
+}
+
 /** The MCP module as createApp mounts it. */
 export interface McpModule {
   /**
@@ -238,12 +250,13 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
   const prepared = prepareTools(tools)
   const handler = createMcpHandler(
     ({ authInfo }) => {
+      const caller = callerOf(authInfo)
       const server = new McpServer(SERVER_INFO, {
         // The tools never change while the server runs, so there is nothing to subscribe to.
         capabilities: { tools: { listChanged: false } },
-        instructions: INSTRUCTIONS,
+        instructions: instructionsFor(caller),
       })
-      registerTools(server, prepared, callerOf(authInfo), (what, detail) =>
+      registerTools(server, prepared, caller, (what, detail) =>
         logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
       )
       return server

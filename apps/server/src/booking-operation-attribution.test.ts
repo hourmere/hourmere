@@ -221,7 +221,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
         kind === 'session'
           ? { ...base, kind, sessionId: randomUUID() }
           : kind === 'api_key'
-            ? { ...base, kind, apiKeyId: credential }
+            ? { ...base, kind, apiKeyId: credential, apiKeyScope: 'full' }
             : {
                 ...base,
                 kind,
