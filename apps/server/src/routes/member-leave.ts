@@ -23,6 +23,7 @@ export function memberLeaveRoutes(deps: ServiceDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/teams/{teamId}/leave',
+        operationId: 'leaveTeam',
         summary: 'Leave a team after resolving event types and unfinished bookings',
         description:
           'Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied before credentials are resolved, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. A caller who still belongs to the expected team in any role receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Missing context retains the 409 reload response. Rechecks owner continuity and departure impact inside the locked membership transaction. A sole owner must arrange another owner before leaving. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.',

@@ -1,0 +1,22 @@
+{
+  "activateRoundRobin": "round-robin pool activation has no MCP tool or CLI command yet.",
+  "configureCalendar": "calendar conflict-selection writes have no MCP tool or CLI command yet.",
+  "confirmDefaultSchedule": "confirming starter working hours has no MCP tool or CLI command yet.",
+  "createEventType": "event-type creation has no MCP tool or CLI command yet.",
+  "createSchedule": "schedule creation has no MCP tool or CLI command yet.",
+  "createWebhook": "webhook creation and one-time signing-secret delivery have no MCP tool or CLI command yet.",
+  "deleteEventType": "event-type deletion has no MCP tool or CLI command yet.",
+  "deleteSchedule": "schedule deletion has no MCP tool or CLI command yet.",
+  "deleteScheduleOverride": "removing a date's schedule override has no MCP tool or CLI command yet.",
+  "deleteWebhook": "webhook deletion has no MCP tool or CLI command yet.",
+  "refreshCalendarList": "refreshing a connected account's calendar list has no MCP tool or CLI command yet.",
+  "rotateWebhookSecret": "webhook signing-secret rotation and one-time secret delivery have no MCP tool or CLI command yet.",
+  "setCalendarDestination": "choosing a calendar writeback destination has no MCP tool or CLI command yet.",
+  "setScheduleOverride": "setting a date's schedule override has no MCP tool or CLI command yet.",
+  "syncCalendar": "requesting a calendar busy-time sync has no MCP tool or CLI command yet.",
+  "updateDisplayName": "account display-name updates have no MCP tool or CLI command yet.",
+  "updateEventType": "event-type updates have no MCP tool or CLI command yet.",
+  "updateProfile": "profile creation and replacement have no MCP tool or CLI command yet.",
+  "updateSchedule": "schedule updates have no MCP tool or CLI command yet.",
+  "updateWebhook": "webhook subscription and pause updates have no MCP tool or CLI command yet."
+}
