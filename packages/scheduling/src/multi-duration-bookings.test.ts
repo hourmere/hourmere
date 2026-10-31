@@ -27,6 +27,7 @@ import { listHostBookingSlots, listManagedSlots } from './manage.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { validateResponses } from './questions.ts'
 import * as roundRobin from './round-robin.ts'
+import * as successRedirect from './success-redirect.ts'
 import {
   createFixtures,
   createTestTeam,
@@ -101,6 +102,7 @@ function sourceCopy(change?: Change): Api {
     ...notificationSettings,
     validateResponses,
     ...roundRobin,
+    ...successRedirect,
     cleanText,
   }
   return new Function(

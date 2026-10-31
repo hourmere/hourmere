@@ -1,9 +1,91 @@
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
+import { EMBED_ID, embedOrigin } from '@hourmere/core/embed'
+import { explicitLanguage } from '@hourmere/core/language'
+import { createContext, useContext } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { embedMessageContext, notifyEmbedBooked } from './embed-context.ts'
+import {
+  embedMessageContext,
+  embedParentRedirectAllowed,
+  notifyEmbedBooked,
+  notifyEmbedReady,
+} from './embed-context.ts'
 
 afterEach(() => window.history.replaceState(null, '', '/'))
 
 describe('child embed message context', () => {
+  it.each([
+    ['', true],
+    ['?embedId=abcdefghijklmnop1234', false],
+    ['?embedId=', false],
+    ['?embedId=abcdefghijklmnop1234&embedId=abcdefghijklmnop1234', false],
+    ['?parentRedirect=enabled', true],
+    ['?embedId=abcdefghijklmnop1234&parentRedirect=enabled', true],
+    ['?parentRedirect=disabled', false],
+    ['?parentRedirect=true', false],
+    ['?parentRedirect=', false],
+    ['?parentRedirect=enabled&parentRedirect=enabled', false],
+  ])('only honors a manual iframe or one enabled widget marker (%s)', (query, allowed) => {
+    window.history.replaceState(null, '', `/embed/ada/intro${query}`)
+    expect(embedParentRedirectAllowed()).toBe(allowed)
+  })
+  it.each([
+    [
+      "(values.length === 0 && !query.has('embedId')) ||\n    (values.length === 1 && values[0] === 'enabled')",
+      'true',
+      '?parentRedirect=disabled',
+    ],
+    [" && !query.has('embedId')", '', '?embedId=abcdefghijklmnop1234'],
+  ])(
+    'detects removal of a widget restriction with a real source-copy assertion failure (%s)',
+    (before, after, query) => {
+      const original = readFileSync('apps/web/src/public/embed-context.ts', 'utf8')
+      const modified = original.replace(before, after)
+      expect(modified).not.toBe(original)
+      const source = stripTypeScriptTypes(modified)
+        .replace(/^import .*\n/gm, '')
+        .replace(/^export /gm, '')
+      const copy = new Function(
+        'EMBED_ID',
+        'embedOrigin',
+        'explicitLanguage',
+        'createContext',
+        'useContext',
+        `${source}\nreturn { embedParentRedirectAllowed }`,
+      )(EMBED_ID, embedOrigin, explicitLanguage, createContext, useContext) as {
+        embedParentRedirectAllowed: typeof embedParentRedirectAllowed
+      }
+      window.history.replaceState(null, '', `/embed/ada/intro${query}`)
+      expect(embedParentRedirectAllowed()).toBe(false)
+      expect(() => expect(copy.embedParentRedirectAllowed()).toBe(false)).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    },
+  )
+  it('discloses only the saved capability and correlation ID to the exact parent', () => {
+    const postMessage = vi.fn()
+    vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)
+    window.history.replaceState(
+      null,
+      '',
+      '/embed/ada/intro?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234',
+    )
+    notifyEmbedReady(false)
+    notifyEmbedReady(true)
+    expect(postMessage.mock.calls).toEqual([
+      [
+        { type: 'hourmere:ready', id: 'abcdefghijklmnop1234', allowEmbedParent: false },
+        'https://parent.example',
+      ],
+      [
+        { type: 'hourmere:ready', id: 'abcdefghijklmnop1234', allowEmbedParent: true },
+        'https://parent.example',
+      ],
+    ])
+    window.history.replaceState(null, '', '/embed/ada/intro')
+    notifyEmbedReady(true)
+    expect(postMessage).toHaveBeenCalledTimes(2)
+  })
   it('refuses duplicate parent origins before posting any completion signal', () => {
     const postMessage = vi.fn()
     vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)

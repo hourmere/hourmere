@@ -114,6 +114,29 @@ Window and correlation identifier before dispatching this event. This is a UI si
 trusted booking, billing or analytics record, and repeated confirmations do not necessarily
 mean new bookings. The popup stays open for the visitor to copy their private manage link.
 
+An event type can have a host-configured continuation link after the normal confirmation,
+calendar information and private manage link. Visitors choose **Continue**; there is no
+automatic navigation. Embedded continuations open a new tab with `noopener noreferrer`
+unless the event type separately opts in to opening the parent page. The widget grants
+user-activated top navigation only for that saved opt-in. It checks the capability before
+allowing input and reloads the same booking route when sandbox permissions change,
+before visitors can enter form data. Loading and server-error text remains visible.
+Error and unavailable pages signal readiness without granting parent navigation. If a page
+cannot finish loading or send readiness within five seconds, the widget enables input with
+the restricted sandbox; a stalled permission upgrade first replaces the frame with the
+restricted route, removing the old document's navigation permission.
+Late readiness never reloads a frame after input has been enabled.
+Enabling the opt-in after a restrictive frame has loaded keeps Continue in a new tab for
+that visit. Older widgets that send an embed identifier without the permission marker also
+keep Continue in a new tab. The stable `hourmere-embed.js` URL is revalidated on every visit
+using `Cache-Control: no-cache` and an ETag. Manual iframes must provide their own matching sandbox
+permission to support this opt-in; the widget is recommended.
+
+If the operator tightens the redirect-host policy or changes the instance's public host,
+a previously saved target may become ineligible. Booking still succeeds with the normal
+confirmation and no continuation. The operator can identify the event type from the safe
+`success_redirect_disabled` log and help its host replace or clear the target.
+
 ## JavaScript and single-page apps
 
 After the script loads, `window.Hourmere` provides:
@@ -148,14 +171,17 @@ parent. Normal booking pages, signed-in pages, sign-in, OAuth and invitee manage
 selected parent. The browser checks every ancestor, so nesting within a different-origin
 outer frame is not supported. Invalid/missing embedding parameters receive 403.
 
-The iframe is sandboxed without top navigation, sends no Referer, and never loads a web
+The iframe is sandboxed without top navigation by default; only a saved event-type opt-in
+adds `allow-top-navigation-by-user-activation`. It sends no Referer and never loads a web
 session or account page. Scripts/forms, user-requested calendar downloads, and separate
 calendar-site popups are allowed. Clipboard writing is delegated for the one-time private
 manage-link copy button. Meeting links and brand links open separately with `noopener`
 and `noreferrer`.
 
-Child-to-parent messages contain only a correlation identifier plus a bounded height or a
-confirmation or popup-close signal. Both sides use exact origins; the widget checks the sender Window,
+Child-to-parent messages contain only a correlation identifier plus a bounded height, a
+saved parent-navigation capability, or a confirmation or popup-close signal. A permission
+reload rotates the identifier to reject messages from the retiring document. Both sides
+use exact origins; the widget checks the sender Window,
 origin, identifier and message shape. No booking ID, attendee, answer, email or manage token
 is sent to the parent. Manage links remain within the Hourmere frame, with their token in
 the fragment when the visitor copies them. The parent website must be trusted by visitors;

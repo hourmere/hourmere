@@ -35,6 +35,12 @@ import {
 } from './internal.ts'
 import { type NotificationSettings, validateNotifications } from './notification-settings.ts'
 import { parseQuestions, type Question, validateQuestions } from './questions.ts'
+import {
+  type SuccessRedirect,
+  type SuccessRedirectInput,
+  type SuccessRedirectPolicy,
+  validateSuccessRedirect,
+} from './success-redirect.ts'
 import { cleanText } from './text.ts'
 
 /** Where the meeting happens. Meet and Zoom links are generated per booking. */
@@ -80,6 +86,7 @@ export interface EventType {
   zoomConnectionId?: string | null | undefined
   conferenceOrganizer: { userId: string } | null
   location: EventTypeLocation | null
+  successRedirect: SuccessRedirect | null
   questions: Question[]
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
@@ -111,6 +118,7 @@ export interface EventTypeInput {
   bookingWindowDays?: number | null | undefined
   maxBookingsPerDay?: number | null | undefined
   location?: EventTypeLocation | null | undefined
+  successRedirect?: SuccessRedirectInput | null | undefined
   questions?: QuestionInput[] | undefined
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
@@ -157,6 +165,7 @@ interface Fields {
   bookingWindowDays: number | null
   maxBookingsPerDay: number | null
   location: EventTypeLocation | null
+  successRedirect: SuccessRedirect | null
   questions: Question[]
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
@@ -179,6 +188,7 @@ const FIELD_NAMES = [
   'bookingWindowDays',
   'maxBookingsPerDay',
   'location',
+  'successRedirect',
   'questions',
   'isActive',
   'isHidden',
@@ -195,6 +205,7 @@ const DEFAULTS = {
   bookingWindowDays: null,
   maxBookingsPerDay: null,
   location: null,
+  successRedirect: null,
   questions: [],
   isActive: true,
   isHidden: false,
@@ -338,7 +349,7 @@ export async function createEventType(
   ctx: ServiceContext,
   input: EventTypeInput,
 ): Promise<EventType> {
-  const fields = validFields({ ...DEFAULTS, ...defined(input) })
+  const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
@@ -447,16 +458,20 @@ export async function updateEventType(
         organizer !== undefined ||
         zoomConnection !== undefined
       ) {
-        const fields = validFields({
-          ...fieldsOf(row),
-          ...changes,
-          // A legacy duration-only edit keeps a single-duration type single-duration.
-          ...(changes.durationMinutes !== undefined &&
-          changes.allowedDurationsMinutes === undefined &&
-          row.allowed_durations_minutes.length === 1
-            ? { allowedDurationsMinutes: [changes.durationMinutes] }
-            : {}),
-        })
+        const fields = validFields(
+          {
+            ...fieldsOf(row),
+            ...changes,
+            // A legacy duration-only edit keeps a single-duration type single-duration.
+            ...(changes.durationMinutes !== undefined &&
+            changes.allowedDurationsMinutes === undefined &&
+            row.allowed_durations_minutes.length === 1
+              ? { allowedDurationsMinutes: [changes.durationMinutes] }
+              : {}),
+          },
+          ctx.successRedirectPolicy,
+          input.successRedirect !== undefined,
+        )
         if (
           zoomConnection &&
           zoomConnection !== row.zoom_connection_id &&
@@ -705,7 +720,11 @@ function defined(input: EventTypeUpdate): Partial<Record<keyof Fields, unknown>>
 
 const invalid = (message: string) => new DomainError('invalid', 'invalid_event_type', message)
 
-function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields {
+function validFields(
+  candidate: Partial<Record<keyof Fields, unknown>>,
+  policy?: SuccessRedirectPolicy,
+  validateRedirect = true,
+): Fields {
   const c = candidate
   const allowedDurationsMinutes =
     c.allowedDurationsMinutes === undefined ? [c.durationMinutes] : c.allowedDurationsMinutes
@@ -749,6 +768,11 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
     bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
     location: validLocation(c.location),
+    // A policy change must not block unrelated edits. Only an explicitly supplied
+    // redirect needs current-policy validation; otherwise preserve the saved value.
+    successRedirect: validateRedirect
+      ? validateSuccessRedirect(c.successRedirect, policy)
+      : (c.successRedirect as SuccessRedirect | null),
     questions: validateQuestions(c.questions),
     isActive: c.isActive,
     isHidden: c.isHidden,
@@ -889,6 +913,7 @@ function fieldsOf(row: {
   booking_window_days: number | null
   max_bookings_per_day: number | null
   location: Json | null
+  success_redirect: Json | null
   questions: Json
   is_active: boolean
   is_hidden: boolean
@@ -908,6 +933,7 @@ function fieldsOf(row: {
     bookingWindowDays: row.booking_window_days,
     maxBookingsPerDay: row.max_bookings_per_day,
     location: row.location as EventTypeLocation | null,
+    successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     questions: parseQuestions(row.questions),
     isActive: row.is_active,
     isHidden: row.is_hidden,
@@ -930,6 +956,7 @@ function columns(fields: Fields) {
     booking_window_days: fields.bookingWindowDays,
     max_bookings_per_day: fields.maxBookingsPerDay,
     location: fields.location === null ? null : jsonb(fields.location),
+    success_redirect: fields.successRedirect === null ? null : jsonb(fields.successRedirect),
     questions: jsonb(fields.questions),
     is_active: fields.isActive,
     is_hidden: fields.isHidden,

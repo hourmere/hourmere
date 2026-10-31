@@ -4094,7 +4094,21 @@ export interface components {
              */
             timeZone: string;
         };
+        PublicBookingResult: components["schemas"]["BookingWithToken"] & {
+            /** @description Present only after successful creation of a booking with saved redirect settings. Show the normal confirmation and an explicit Continue link; do not automatically navigate. */
+            successRedirect?: {
+                /** @description Explicit event-type opt-in for a user-activated continuation in the embedding parent. Otherwise embedded pages open a new tab with noopener noreferrer. */
+                allowEmbedParent: boolean;
+                /**
+                 * Format: uri
+                 * @description Saved booking-time continuation URL, with only explicitly selected parameters. Never taken from request parameters. The same idempotent creation replay returns the same URL.
+                 */
+                url: string;
+            };
+        };
         PublicEventType: {
+            /** @description Whether saved event-type settings permit user-activated continuation in the embedding parent. Omitted means false. No redirect URL or parameters are exposed. */
+            allowEmbedParentRedirect?: boolean;
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
             description: string | null;
@@ -6850,7 +6864,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookingWithToken"];
+                    "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
             /** @description Booked */
@@ -6859,7 +6873,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookingWithToken"];
+                    "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
             /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
@@ -6944,7 +6958,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookingWithToken"];
+                    "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
             /** @description Booked */
@@ -6953,7 +6967,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookingWithToken"];
+                    "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
             /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */

@@ -329,7 +329,10 @@ test('popup booking keeps completion data private and supports cross-frame Escap
     return {
       booked: values.filter((value) => value.type === 'hourmere:booked').length,
       keys: values.every((value) =>
-        Object.keys(value).every((key) => ['type', 'id', 'height'].includes(key)),
+        value.type === 'hourmere:ready'
+          ? Object.keys(value).sort().join(',') === 'allowEmbedParent,id,type' &&
+            typeof value.allowEmbedParent === 'boolean'
+          : Object.keys(value).every((key) => ['type', 'id', 'height'].includes(key)),
       ),
       privateEmail: JSON.stringify(values).includes('fixture-invitee@hourmere.invalid'),
     }

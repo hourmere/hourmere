@@ -295,6 +295,81 @@ Validated by the application (zod), not by the database:
   in; set when the key is created (the owner's personal organization unless they name
   another one they belong to) and re-checked against membership on every request.
 
+## Booking continuation contract
+
+Migration 0050 adds nullable `event_types.success_redirect` configuration and
+`bookings.success_redirect` snapshots. Existing event types and bookings remain unset;
+their data and confirmation behavior are preserved. The service accepts optional
+`successRedirect: { url, parameters?, includeInviteePersonalData?, allowEmbedParent? }`
+(or null to clear it). Configuration UI and REST/MCP/CLI writes are a later change.
+
+URLs must be absolute HTTPS, without userinfo, whitespace/control characters or malformed
+Unicode, and at most 2000 characters both before and after URL normalization. IDN hosts
+are stored as ASCII and Unicode paths are percent-encoded. IP-literal hosts, including
+alternate IPv4 spellings normalized by the URL parser, `localhost`, its subdomains and
+single-label hosts (such as `intranet`) are refused unless the operator
+sets `SUCCESS_REDIRECT_ALLOW_IP_HOSTS=true` or the host equals the instance's `PUBLIC_URL`
+host. These exceptions still require HTTPS. Validation lives in the scheduling service;
+the browser never supplies or chooses the target. No server-side destination request is made.
+
+The service validates newly supplied configuration against the current instance policy.
+Unrelated event-type updates preserve the saved redirect without revalidating it. If an
+operator later tightens `SUCCESS_REDIRECT_ALLOW_IP_HOSTS` or changes `PUBLIC_URL`, a saved
+target may no longer qualify. New public bookings still succeed with their normal
+confirmation and no redirect snapshot. The server logs `success_redirect_disabled` with
+only the event-type ID so the operator can help the host replace or clear the setting;
+it never logs the target URL, query or invitee data. Restoring policy cannot add a redirect
+to an already-created booking that had none. An explicitly supplied redirect, even an
+unchanged value, must pass current policy; null always clears it.
+
+`parameters` defaults to an empty array. Its complete whitelist is `eventTypeSlug`,
+`start`, `end` (ISO instants), `timeZone` (invitee IANA zone), `hostName` (selected hosts'
+display names), `inviteeName` and `inviteeEmail`. The last two additionally require
+`includeInviteePersonalData: true`, which defaults to false. **Warning: opting in sends the
+invitee's selected name/email to the target site and its analytics, and can place them in
+browser history.** Custom answers, guest addresses, phone numbers, management/reschedule
+tokens and internal identifiers are never added. Existing target query text (including
+valueless flags, percent sequences and separators) and fragments are preserved verbatim;
+only selected new parameters are URL-encoded using URLSearchParams and
+appended after existing values, including existing parameters with the same name.
+
+Only successful initial public web/embed booking creation captures a final
+`{ url, allowEmbedParent }` snapshot in the booking transaction, from the locked saved
+configuration and booking-time values. The additive `successRedirect` creation response
+offers that snapshot; an idempotent replay returns the identical target even after
+configuration or host-name changes. An unset initial configuration stays unset on replay.
+Request body targets are rejected and query targets are ignored. API/MCP-origin creation,
+management reads, rescheduling and cancellation do not offer continuations. A rescheduled
+successor has no snapshot. Replaying the original creation does not turn a cancellation
+or reschedule into a new booking or a new continuation.
+
+The confirmation keeps its calendar information and private manage link, then offers an
+accessible, explicit **Continue** link. There is no timed or automatic navigation.
+`allowEmbedParent` is a separate opt-in, default false: embeds normally open the target
+in a new tab with `rel="noopener noreferrer"`; true permits the invitee's click to open
+the parent using `target="_top"`. The public event-type response exposes only the optional
+`allowEmbedParentRedirect` capability, never the target or selected parameters. The widget
+initially withholds top-navigation permission. After an origin/source/instance-checked
+ready message confirms the saved event-type opt-in, it enables
+`allow-top-navigation-by-user-activation` and reloads the same booking route before
+allowing input in the iframe; sandbox changes apply only to a new document. Reloads rotate the
+internal embed instance ID so stale messages cannot complete that handshake. A removed
+opt-in triggers a restrictive reload, with further upgrades disabled for that instance.
+Ordinary event types retain the default sandbox. A widget marker records the active
+permission, so enabling the saved opt-in after loading a restrictive frame still opens
+Continue in a new tab. Loading and server-error text remains visible during the handshake.
+Error, not-found and unavailable embedded pages signal readiness with the capability false.
+If readiness does not arrive within five seconds, the widget enables input with the
+restrictive sandbox, replacing the iframe first if a permission upgrade was in progress
+so the retiring document cannot retain navigation permission.
+Later readiness cannot trigger a reload after input becomes available. An embed instance
+ID without the permission marker identifies a legacy widget and keeps Continue in a new
+tab. The widget script is served with `Cache-Control: no-cache` and ETag validation so
+protocol upgrades reach returning visitors.
+The ready message carries only that
+capability; no redirect URL or personal data is added to the embed completion message.
+Canceling from the confirmation removes the continuation link.
+
 ## Planned additions (each a new migration)
 
 | When | Change |

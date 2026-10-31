@@ -177,26 +177,71 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   )
     throw new Error('Invalid Hourmere embed container or height')
   const selectedLanguage = widgetLanguage(language)
-  const id = randomHex(16),
-    target = iframeUrl(url, window.location.origin, id, selectedLanguage)
+  let id = randomHex(16)
+  const target = iframeUrl(url, window.location.origin, id, selectedLanguage)
+  target.searchParams.set('parentRedirect', 'disabled')
   mounted.get(element)?.destroy()
-  const iframe = document.createElement('iframe')
+  let iframe = document.createElement('iframe')
   iframe.title = widgetMessages(selectedLanguage).iframe
   iframe.referrerPolicy = 'no-referrer'
   iframe.setAttribute('allow', 'clipboard-write')
-  iframe.setAttribute(
-    'sandbox',
-    'allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox',
-  )
+  const sandbox =
+    'allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox'
+  iframe.setAttribute('sandbox', sandbox)
   iframe.setAttribute('loading', 'lazy')
+  iframe.inert = true
+  iframe.tabIndex = -1
   Object.assign(iframe.style, {
     width: '100%',
     height: `${height}px`,
     border: '0',
     display: 'block',
+    // Keep loading/error text visible and lazy loading eligible, while blocking input
+    // until saved settings are known and a possible reload can no longer discard it.
+    pointerEvents: 'none',
   })
   iframe.src = target.href
   let destroyed = false
+  let ready = false
+  let parentNavigation = false
+  let downgraded = false
+  let readyTimeout: ReturnType<typeof setTimeout>
+  const enableInput = () => {
+    clearTimeout(readyTimeout)
+    ready = true
+    iframe.inert = false
+    iframe.removeAttribute('tabindex')
+    iframe.style.removeProperty('pointer-events')
+  }
+  const awaitReady = () => {
+    clearTimeout(readyTimeout)
+    readyTimeout = setTimeout(() => {
+      // A failed bundle or stalled request must not disable the error page's controls.
+      // Once input is available, a late opt-in must never reload away visitor input.
+      if (parentNavigation || downgraded) {
+        parentNavigation = false
+        // A sandbox change or src assignment cannot revoke the active document's
+        // permissions. Remove its browsing context before enabling the replacement.
+        const retiring = iframe
+        iframe = retiring.cloneNode(false) as HTMLIFrameElement
+        iframe.setAttribute('sandbox', sandbox)
+        target.searchParams.set('parentRedirect', 'disabled')
+        id = randomHex(16)
+        target.searchParams.set('embedId', id)
+        iframe.src = target.href
+        retiring.replaceWith(iframe)
+      }
+      enableInput()
+    }, 5000)
+  }
+  const reload = () => {
+    // Window identity survives navigation. Rotate the correlation ID so queued messages
+    // from the retiring document cannot enable input in the new frame before it is ready.
+    id = randomHex(16)
+    target.searchParams.set('embedId', id)
+    iframe.src = target.href
+    awaitReady()
+  }
   const receive = (event: MessageEvent<unknown>) => {
     if (
       destroyed ||
@@ -209,6 +254,31 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
       return
     const data = event.data as Record<string, unknown>
     if (data.id !== id) return
+    if (data.type === 'hourmere:ready') {
+      if (ready || Object.keys(data).length !== 3 || typeof data.allowEmbedParent !== 'boolean')
+        return
+      if (data.allowEmbedParent && !parentNavigation && !downgraded) {
+        parentNavigation = true
+        iframe.setAttribute('sandbox', `${sandbox} allow-top-navigation-by-user-activation`)
+        target.searchParams.set('parentRedirect', 'enabled')
+        // Sandbox changes affect the next document, not the active one. Reload only this
+        // validated URL before enabling input; ready messages never supply a URL.
+        reload()
+        return
+      }
+      if (!data.allowEmbedParent && parentNavigation) {
+        parentNavigation = false
+        downgraded = true
+        iframe.setAttribute('sandbox', sandbox)
+        target.searchParams.set('parentRedirect', 'disabled')
+        // A setting changed during the reload: activate the restrictive sandbox once.
+        // Further upgrades are ignored so changing settings cannot cause a reload loop.
+        reload()
+        return
+      }
+      enableInput()
+      return
+    }
     if (
       data.type === 'hourmere:resize' &&
       typeof data.height === 'number' &&
@@ -232,10 +302,13 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
     }
   }
   const handle: EmbedHandle = {
-    iframe,
+    get iframe() {
+      return iframe
+    },
     destroy() {
       if (destroyed) return
       destroyed = true
+      clearTimeout(readyTimeout)
       window.removeEventListener('message', receive)
       iframe.remove()
       if (mounted.get(element) === handle) mounted.delete(element)
@@ -243,6 +316,7 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   }
   window.addEventListener('message', receive)
   element.append(iframe)
+  awaitReady()
   mounted.set(element, handle)
   return handle
 }

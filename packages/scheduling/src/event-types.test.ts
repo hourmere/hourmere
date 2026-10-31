@@ -145,6 +145,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         conferenceOrganizer: null,
         hosts: [{ userId: user.id }],
         location: null,
+        successRedirect: null,
         questions: [],
         isActive: true,
         isHidden: false,

@@ -11,6 +11,7 @@ export type Slot = Schemas['Slot']
 export type Booking = Schemas['Booking']
 export type ManagedBooking = Schemas['ManagedBooking']
 export type BookingWithToken = Schemas['BookingWithToken']
+export type PublicBookingResult = Schemas['PublicBookingResult']
 export type CreateBooking = Schemas['CreateBooking']
 
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
@@ -167,7 +168,7 @@ export async function createBooking(
   body: CreateBooking,
   idempotencyKey: string,
   team = false,
-): Promise<{ result: BookingWithToken; replayed: boolean }> {
+): Promise<{ result: PublicBookingResult; replayed: boolean }> {
   const { data, status } = await call(() =>
     team
       ? api.POST('/api/v1/public/teams/{handle}/{slug}/bookings', {
