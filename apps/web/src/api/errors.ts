@@ -147,6 +147,9 @@ export function errorMessage(err: unknown): UiText {
     invalid_calendar_settings: 'Check your calendar settings and try again.',
     invalid_calendar_access: 'Choose calendar-list access or calendar synchronization.',
     profile_not_found: 'Create your profile in Settings first.',
+    setup_profile_required: 'Complete your profile and display name in Settings first.',
+    setup_default_schedule_required:
+      'Review your existing schedules and choose a valid default in Availability.',
     session_required: 'Your session has ended. Sign in again.',
     ORGANIZATION_ALREADY_EXISTS: 'This team address is already in use. Choose another one.',
     ORGANIZATION_SLUG_RESERVED: 'This team address is reserved. Choose another one.',

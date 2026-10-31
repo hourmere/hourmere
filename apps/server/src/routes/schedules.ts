@@ -1,5 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import {
+  confirmDefaultSchedule,
   createSchedule,
   deleteSchedule,
   deleteScheduleOverride,
@@ -153,6 +154,34 @@ export const SCHEDULE_OVERRIDE_BODY_LIMIT = 256 * 1024
 export function scheduleRoutes(deps: ServiceDeps): RouteModule {
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
+
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
+        method: 'post',
+        path: '/api/v1/schedules/default',
+        summary: 'Confirm starter working hours',
+        description:
+          'After profile and display name setup, creates a default Mon–Fri 09:00–17:00 schedule in the stored profile time zone only when the caller has no schedules. An existing default is returned unchanged. Existing non-default schedules require an explicit default choice in Availability.',
+        request: { body: { content: json(z.strictObject({})), required: true } },
+        responses: {
+          200: { description: 'The existing default, unchanged', content: json(Schedule) },
+          201: { description: 'The confirmed starter schedule', content: json(Schedule) },
+          ...errorResponses({
+            400: 'invalid_request or invalid_time_zone',
+            403: CROSS_ORIGIN_WRITE,
+            409: 'setup_profile_required: profile or display name is missing; setup_default_schedule_required: existing schedules have no default',
+          }),
+        },
+      }),
+      async (c) => {
+        const { schedule, created } = await confirmDefaultSchedule(
+          serviceContext(deps, c.var.principal),
+        )
+        return created ? c.json(schedule, 201) : c.json(schedule, 200)
+      },
+    )
 
     app.openapi(
       createRoute({

@@ -282,9 +282,9 @@ describe('team event readiness access', () => {
   )
 })
 
-describe('team event setup hints', () => {
+describe('personal setup guide isolation', () => {
   it.each(['en', 'zh-CN'] as const)(
-    'retains weekly hours guidance without a personal handle hint in %s',
+    'keeps personal setup guidance out of team spaces in %s',
     async (language) => {
       chooseLanguage(language)
       server('member', {
@@ -292,10 +292,13 @@ describe('team event setup hints', () => {
         'GET /api/v1/schedules': () => json(200, { data: [] }),
       })
       await open()
-      expect(screen.getByRole('link', { name: labels[language].hours }).getAttribute('href')).toBe(
-        '/app/availability/new',
-      )
+      expect(screen.queryByRole('link', { name: labels[language].hours })).toBeNull()
       expect(screen.queryByRole('link', { name: labels[language].handle })).toBeNull()
+      expect(
+        screen.queryByRole('region', {
+          name: language === 'en' ? 'Set up your booking page' : '设置你的预约页面',
+        }),
+      ).toBeNull()
     },
   )
 })

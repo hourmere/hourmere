@@ -134,6 +134,67 @@ export async function createSchedule(ctx: ServiceContext, input: ScheduleInput):
 }
 
 /**
+ * Confirms starter working hours after personal profile setup. Repeated confirmations
+ * return the existing default unchanged; any existing schedules without a default need
+ * the user's explicit choice in the availability editor instead.
+ */
+export async function confirmDefaultSchedule(
+  ctx: ServiceContext,
+): Promise<{ schedule: Schedule; created: boolean }> {
+  const userId = ctx.principal.user.id
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockSchedulesOf(trx, userId)
+    // Read stored identity and time zone: a caller's session/API-key name can be stale.
+    const profile = await trx
+      .selectFrom('profiles')
+      .innerJoin('auth.user', 'auth.user.id', 'profiles.user_id')
+      .select(['auth.user.name', 'profiles.time_zone', 'profiles.locale'])
+      .where('profiles.user_id', '=', userId)
+      .executeTakeFirst()
+    if (!profile?.name.trim()) {
+      throw new DomainError(
+        'conflict',
+        'setup_profile_required',
+        'Complete your profile and display name before confirming working hours',
+      )
+    }
+    const schedules = await trx
+      .selectFrom('schedules')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .execute()
+    const existing = schedules.find((schedule) => schedule.is_default)
+    if (existing) return { schedule: toSchedule(existing), created: false }
+    if (schedules.length > 0) {
+      throw new DomainError(
+        'conflict',
+        'setup_default_schedule_required',
+        'Choose an existing schedule as your default in Availability',
+      )
+    }
+    const weeklyHours: WeeklyHours = {
+      monday: [{ start: '09:00', end: '17:00' }],
+      tuesday: [{ start: '09:00', end: '17:00' }],
+      wednesday: [{ start: '09:00', end: '17:00' }],
+      thursday: [{ start: '09:00', end: '17:00' }],
+      friday: [{ start: '09:00', end: '17:00' }],
+    }
+    const row = await trx
+      .insertInto('schedules')
+      .values({
+        user_id: userId,
+        name: profile.locale.toLowerCase() === 'zh-cn' ? '工作时间' : 'Working hours',
+        time_zone: validTimeZone(profile.time_zone),
+        weekly_hours: jsonb(weeklyHours),
+        is_default: true,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    return { schedule: toSchedule(row), created: true }
+  })
+}
+
+/**
  * Changes the given fields. `isDefault: true` makes this the default (and the previous
  * default an ordinary schedule); the default cannot be unset directly, only replaced
  * (409 `schedule_is_default`), so event types always have a schedule to fall back to.

@@ -1,5 +1,51 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Set up your booking page': '设置你的预约页面',
+  'Complete these steps at your own pace. You can keep using the app as you go.':
+    '按自己的节奏完成这些步骤。设置过程中仍可继续使用应用。',
+  'Your display name and booking address are set.': '你的显示名称和预约地址已设置。',
+  'Choose your display name, booking username and time zone in Settings.':
+    '在设置中填写显示名称、预约用户名和时区。',
+  'Without a display name, your booking page, emails and calendar invitations show your username instead.':
+    '如果未填写显示名称，预约页面、邮件和日历邀请将显示你的用户名。',
+  'Complete your profile': '完善个人资料',
+  'Default availability': '默认可预约时间',
+  'Your default schedule has weekly hours ready for bookings.':
+    '你的默认日程已设置每周可预约时间。',
+  'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.':
+    '先使用个人资料时区的周一至周五 09:00–17:00：{0}。',
+  'not set': '未设置',
+  'Complete your profile before confirming these hours.': '请先完善个人资料，再确认这些时间。',
+  'Use Monday–Friday, 09:00–17:00': '使用周一至周五 09:00–17:00',
+  'You can change these hours later in Availability.': '之后可在可预约时间页面调整这些时间。',
+  'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.':
+    '请选择每周时间有效的默认日程。其他日程不计入此步骤。',
+  'Review default availability': '检查默认可预约时间',
+  'Could not confirm your default availability.': '无法确认你的默认可预约时间。',
+  'Refresh setup status': '刷新设置状态',
+  'First event type': '首个活动类型',
+  'An event type sets the meeting length and gives invitees a booking link.':
+    '活动类型决定会议时长，并为受邀者提供预约链接。',
+  'View and share': '查看与分享',
+  'Open your booking page to check the available times, then copy its link to share.':
+    '打开预约页面检查可预约时间，然后复制链接进行分享。',
+  'View booking page': '查看预约页面',
+  'Copy booking link': '复制预约链接',
+  'Activate your first event type': '启用首个活动类型',
+  'Your link will appear after you create an active event type and a profile.':
+    '创建已启用的活动类型并完善个人资料后，链接将显示在此处。',
+  'Calendar connection (optional)': '连接日历（可选）',
+  'Skipped for now. You can connect a calendar later.': '已暂时跳过。之后随时可以连接日历。',
+  'You can take bookings without connecting an external calendar.':
+    '无需连接外部日历，也可以接受预约。',
+  'Connect a calendar': '连接日历',
+  'Skip for now': '暂时跳过',
+  Complete: '已完成',
+  Missing: '待完成',
+  'Complete your profile and display name in Settings first.':
+    '请先在设置中完善个人资料和显示名称。',
+  'Review your existing schedules and choose a valid default in Availability.':
+    '请在可预约时间页面检查已有日程，并选择有效的默认日程。',
   'Filter invitations': '筛选邀请',
   Joined: '已加入',
   Rejected: '已拒绝',

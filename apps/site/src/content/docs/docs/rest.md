@@ -5,9 +5,21 @@ description: Use an Hourmere API key to find a slot, book it and manage the book
 
 ## Prepare a host and key
 
-Run your own [instance](/docs/self-hosting), sign in, and use Settings, Availability and Event
-types to set a profile handle, working hours and an active individual event type. For the
-examples below the booking page is `/ada/intro`. Replace it with your own handle/slug.
+Run your own [instance](/docs/self-hosting), sign in, and open **Event types** in your personal
+space. The setup guide orders your profile (including display name), default availability,
+first event type and booking link. Calendar connection is optional. After completing your
+profile, you can confirm Monday–Friday 09:00–17:00 in its time zone directly in the guide;
+adjust existing schedules in **Availability**. The guide hides when these basics are ready,
+and the event list keeps the links to open and copy. For the examples below the booking
+page is `/ada/intro`. Replace it with your own handle/slug.
+
+For API setup, `POST /api/v1/schedules/default` with `{}` confirms those starter hours after
+the stored profile and display name are set. It returns 201 for creation or 200 with the
+unchanged existing default on retries, including concurrent submissions. It never overwrites
+an existing schedule; schedules without a default require an explicit default choice
+(`409 setup_default_schedule_required`). A missing profile or display name returns
+`409 setup_profile_required`. An existing default still needs valid weekly hours before the
+guide counts availability as complete.
 
 Open **API keys** at `/app/api-keys`, create a key for the intended organization and copy it
 once into your secret store. It acts as its creator in that organization. Keep API keys and

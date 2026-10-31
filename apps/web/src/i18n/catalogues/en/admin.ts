@@ -1,5 +1,55 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Set up your booking page': 'Set up your booking page',
+  'Complete these steps at your own pace. You can keep using the app as you go.':
+    'Complete these steps at your own pace. You can keep using the app as you go.',
+  'Your display name and booking address are set.':
+    'Your display name and booking address are set.',
+  'Choose your display name, booking username and time zone in Settings.':
+    'Choose your display name, booking username and time zone in Settings.',
+  'Without a display name, your booking page, emails and calendar invitations show your username instead.':
+    'Without a display name, your booking page, emails and calendar invitations show your username instead.',
+  'Complete your profile': 'Complete your profile',
+  'Default availability': 'Default availability',
+  'Your default schedule has weekly hours ready for bookings.':
+    'Your default schedule has weekly hours ready for bookings.',
+  'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.':
+    'Start with Monday–Friday, 09:00–17:00 in your profile time zone: {0}.',
+  'not set': 'not set',
+  'Complete your profile before confirming these hours.':
+    'Complete your profile before confirming these hours.',
+  'Use Monday–Friday, 09:00–17:00': 'Use Monday–Friday, 09:00–17:00',
+  'You can change these hours later in Availability.':
+    'You can change these hours later in Availability.',
+  'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.':
+    'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.',
+  'Review default availability': 'Review default availability',
+  'Could not confirm your default availability.': 'Could not confirm your default availability.',
+  'Refresh setup status': 'Refresh setup status',
+  'First event type': 'First event type',
+  'An event type sets the meeting length and gives invitees a booking link.':
+    'An event type sets the meeting length and gives invitees a booking link.',
+  'View and share': 'View and share',
+  'Open your booking page to check the available times, then copy its link to share.':
+    'Open your booking page to check the available times, then copy its link to share.',
+  'View booking page': 'View booking page',
+  'Copy booking link': 'Copy booking link',
+  'Activate your first event type': 'Activate your first event type',
+  'Your link will appear after you create an active event type and a profile.':
+    'Your link will appear after you create an active event type and a profile.',
+  'Calendar connection (optional)': 'Calendar connection (optional)',
+  'Skipped for now. You can connect a calendar later.':
+    'Skipped for now. You can connect a calendar later.',
+  'You can take bookings without connecting an external calendar.':
+    'You can take bookings without connecting an external calendar.',
+  'Connect a calendar': 'Connect a calendar',
+  'Skip for now': 'Skip for now',
+  Complete: 'Complete',
+  Missing: 'Missing',
+  'Complete your profile and display name in Settings first.':
+    'Complete your profile and display name in Settings first.',
+  'Review your existing schedules and choose a valid default in Availability.':
+    'Review your existing schedules and choose a valid default in Availability.',
   'Filter invitations': 'Filter invitations',
   Joined: 'Joined',
   Rejected: 'Rejected',

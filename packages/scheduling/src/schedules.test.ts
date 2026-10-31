@@ -3,6 +3,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  confirmDefaultSchedule,
   createSchedule,
   deleteSchedule,
   deleteScheduleOverride,
@@ -48,6 +49,133 @@ describe.skipIf(!serverUrl)('schedule service', () => {
   })
   const defaults = async (user: TestUser) =>
     (await listSchedules(ctx(user))).filter((s) => s.isDefault).map((s) => s.name)
+  const profile = (user: TestUser, timeZone = 'Asia/Tokyo', locale = 'en') =>
+    db
+      .insertInto('profiles')
+      .values({ user_id: user.id, handle: `h-${user.id}`, time_zone: timeZone, locale })
+      .execute()
+
+  describe('starter default confirmation', () => {
+    it('creates weekdays 09:00–17:00 in the stored profile time zone', async () => {
+      const user = await createTestUser(db)
+      await profile(user)
+      const result = await confirmDefaultSchedule(ctx(user))
+      expect(result).toEqual({
+        created: true,
+        schedule: {
+          id: expect.any(String),
+          name: 'Working hours',
+          timeZone: 'Asia/Tokyo',
+          weeklyHours: {
+            monday: [{ start: '09:00', end: '17:00' }],
+            tuesday: [{ start: '09:00', end: '17:00' }],
+            wednesday: [{ start: '09:00', end: '17:00' }],
+            thursday: [{ start: '09:00', end: '17:00' }],
+            friday: [{ start: '09:00', end: '17:00' }],
+          },
+          isDefault: true,
+          createdAt: expect.stringMatching(/Z$/),
+          updatedAt: expect.stringMatching(/Z$/),
+        },
+      })
+      expect(await listSchedules(ctx(user))).toEqual([result.schedule])
+      expect(await confirmDefaultSchedule(ctx(user))).toEqual({
+        created: false,
+        schedule: result.schedule,
+      })
+    })
+
+    it('uses the Simplified Chinese schedule name for a Chinese profile', async () => {
+      const user = await createTestUser(db)
+      await profile(user, 'Asia/Shanghai', 'zh-CN')
+      expect((await confirmDefaultSchedule(ctx(user))).schedule.name).toBe('工作时间')
+    })
+
+    it('requires a profile and the current stored display name, even with a stale principal', async () => {
+      const user = await createTestUser(db)
+      await expect(confirmDefaultSchedule(ctx(user))).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'setup_profile_required',
+      })
+      await profile(user)
+      await db.updateTable('auth.user').set({ name: '   ' }).where('id', '=', user.id).execute()
+      await expect(confirmDefaultSchedule(ctx(user))).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'setup_profile_required',
+      })
+      expect(await listSchedules(ctx(user))).toEqual([])
+      await db
+        .updateTable('auth.user')
+        .set({ name: 'Current name' })
+        .where('id', '=', user.id)
+        .execute()
+      const stale = {
+        ...user,
+        principal: { ...user.principal, user: { ...user.principal.user, name: '' } },
+      }
+      expect((await confirmDefaultSchedule(ctx(stale))).created).toBe(true)
+    })
+
+    it('preserves an existing default, its overrides and all other schedules', async () => {
+      const user = await createTestUser(db)
+      await profile(user)
+      const existing = await createSchedule(ctx(user), input({ weeklyHours: {} }))
+      await createSchedule(ctx(user), input({ name: 'Evenings' }))
+      await putScheduleOverride(ctx(user), existing.id, '2026-12-24', [])
+      const before = await listSchedules(ctx(user))
+      expect(await confirmDefaultSchedule(ctx(user))).toEqual({
+        created: false,
+        schedule: existing,
+      })
+      expect(await listSchedules(ctx(user))).toEqual(before)
+      expect(await listScheduleOverrides(ctx(user), existing.id)).toEqual([
+        { date: '2026-12-24', intervals: [] },
+      ])
+    })
+
+    it('refuses existing non-default-only schedules without changing them', async () => {
+      const user = await createTestUser(db)
+      await profile(user)
+      const existing = await createSchedule(ctx(user), input())
+      // A legacy/incomplete state that the normal schedule editor does not produce.
+      await db
+        .updateTable('schedules')
+        .set({ is_default: false })
+        .where('id', '=', existing.id)
+        .execute()
+      const before = await listSchedules(ctx(user))
+      await expect(confirmDefaultSchedule(ctx(user))).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'setup_default_schedule_required',
+      })
+      expect(await listSchedules(ctx(user))).toEqual(before)
+    })
+
+    it('never returns or changes another user’s schedules or profile time zone', async () => {
+      const owner = await createTestUser(db)
+      const other = await createTestUser(db)
+      await profile(owner, 'Pacific/Auckland')
+      await profile(other, 'America/New_York')
+      const existing = await createSchedule(ctx(owner), input())
+      const result = await confirmDefaultSchedule(ctx(other))
+      expect(result.created).toBe(true)
+      expect(result.schedule.timeZone).toBe('America/New_York')
+      expect(result.schedule.id).not.toBe(existing.id)
+      expect(await listSchedules(ctx(owner))).toEqual([existing])
+    })
+
+    it('requires the caller’s own profile even when another host has one', async () => {
+      const owner = await createTestUser(db)
+      const other = await createTestUser(db)
+      await profile(owner)
+      await expect(confirmDefaultSchedule(ctx(other))).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'setup_profile_required',
+      })
+      expect(await listSchedules(ctx(other))).toEqual([])
+      expect(await listSchedules(ctx(owner))).toEqual([])
+    })
+  })
 
   describe('defaults', () => {
     it('makes the first schedule the default, even when asked not to', async () => {
@@ -174,6 +302,24 @@ describe.skipIf(!serverUrl)('schedule service', () => {
 
     const userRow = 'SELECT 1 FROM auth."user" WHERE id = $1 FOR UPDATE'
     const ok = { ok: true, value: expect.anything() }
+
+    it('two starter confirmations return one schedule without overwriting it', async () => {
+      const user = await createTestUser(db)
+      await profile(user)
+      const outcomes = await interleave(
+        userRow,
+        [user.id],
+        () => confirmDefaultSchedule(ctx(user)),
+        () => confirmDefaultSchedule(ctx(user)),
+      )
+      expect(outcomes).toEqual([ok, ok])
+      const schedules = await listSchedules(ctx(user))
+      expect(schedules).toHaveLength(1)
+      expect(outcomes).toEqual([
+        { ok: true, value: { created: true, schedule: schedules[0] } },
+        { ok: true, value: { created: false, schedule: schedules[0] } },
+      ])
+    })
 
     it('two first schedules: the first to commit is the default, both succeed', async () => {
       const user = await createTestUser(db)

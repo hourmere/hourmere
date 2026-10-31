@@ -25,6 +25,7 @@ import {
 import { type Me, useMe } from '../../session.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { useEventReadiness } from './event-readiness.ts'
+import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
 
 async function loadPage(signal: AbortSignal) {
   const [eventTypes, profile, schedules] = await Promise.all([
@@ -32,7 +33,7 @@ async function loadPage(signal: AbortSignal) {
     loadProfile(signal),
     loadSchedules(signal),
   ])
-  return { eventTypes, profile, hasSchedule: schedules.length > 0 }
+  return { eventTypes, profile, schedules }
 }
 
 export function EventTypesPage() {
@@ -70,14 +71,24 @@ export function EventTypesPage() {
       )}
       {state.status === 'ready' && (
         <>
-          <SetupHints me={me} profile={state.data.profile} hasSchedule={state.data.hasSchedule} />
+          {me.organization.personal && (
+            <PersonalSetupGuide
+              me={me}
+              profile={state.data.profile}
+              schedules={state.data.schedules}
+              eventTypes={state.data.eventTypes}
+              reload={reload}
+            />
+          )}
           {state.data.eventTypes.length === 0 ? (
             <EmptyState
               title={t('You have no event types yet. Create one to start taking bookings.')}
               action={
-                <Link to={PATHS.newEventType} className="button">
-                  {t('Create your first event type')}
-                </Link>
+                !me.organization.personal && (
+                  <Link to={PATHS.newEventType} className="button">
+                    {t('Create your first event type')}
+                  </Link>
+                )
               }
             />
           ) : (
@@ -90,44 +101,6 @@ export function EventTypesPage() {
         </>
       )}
     </>
-  )
-}
-
-/** What is missing before anyone can book: a handle (for links) and a schedule (for times). */
-function SetupHints({
-  me,
-  profile,
-  hasSchedule,
-}: {
-  me: Me
-  profile: Profile | null
-  hasSchedule: boolean
-}) {
-  const { t } = useI18n()
-
-  const handleHint = t('{0} to get booking links.').split('{0}')
-  const scheduleHint = t('{0}, so there are times to book.').split('{0}')
-  const needsHandle = me.organization.personal && !profile
-  if (!needsHandle && hasSchedule) return null
-  return (
-    <div className="alert alert-info">
-      <ul className="plain-list">
-        {needsHandle && (
-          <li>
-            {handleHint[0]}
-            <Link to={PATHS.settings}>{t('Choose your handle')}</Link>
-            {handleHint[1]}
-          </li>
-        )}
-        {!hasSchedule && (
-          <li>
-            {scheduleHint[0]}
-            <Link to={PATHS.newSchedule}>{t('Set your weekly hours')}</Link>
-            {scheduleHint[1]}
-          </li>
-        )}
-      </ul>
-    </div>
   )
 }
 
