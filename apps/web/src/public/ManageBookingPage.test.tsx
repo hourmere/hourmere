@@ -1254,7 +1254,7 @@ describe('the invitee’s manage page', () => {
     expect(screen.getByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
   })
 
-  it('offers a long meeting at the month boundary for rescheduling, in a zone behind UTC', async () => {
+  it('keeps the original duration at the month boundary after the event default changes', async () => {
     const user = userEvent.setup()
     env.zone = 'Pacific/Pago_Pago'
     env.now = Date.parse('2026-11-20T00:00:00Z')
@@ -1264,7 +1264,7 @@ describe('the invitee’s manage page', () => {
         end: '2026-11-24T17:00:00.000Z',
         attendees: [bookerIn(env.zone)],
       }),
-      eventType: { title: 'Workshop', durationMinutes: 480 },
+      eventType: { title: 'Workshop', durationMinutes: 30 },
     }
     manageServer(long, {
       more: { 'GET /api/v1/bookings/manage/slots': slotsAnswer(['2026-12-01T09:00:00Z'], 480) },
@@ -1276,6 +1276,45 @@ describe('the invitee’s manage page', () => {
         .getAllByRole('button')
         .map((b) => plain(b.textContent)),
     ).toEqual(['10:00 PM'])
+  })
+
+  it('overlaps split reschedule requests by the original duration after the event default changes', async () => {
+    const user = userEvent.setup()
+    const original = managed({ end: '2026-11-02T22:00:00.000Z' })
+    let crossing: string | undefined
+    const api = manageServer(original, {
+      more: {
+        'GET /api/v1/bookings/manage/slots': (call) => {
+          if (crossing === undefined) {
+            const query = new URL(call.path, 'http://x').searchParams
+            const start = Date.parse(query.get('start') ?? '')
+            const end = Date.parse(query.get('end') ?? '')
+            const middle = start + Math.floor((end - start) / 2 / 60_000) * 60_000
+            crossing = new Date(middle - 240 * 60_000).toISOString()
+            return json(400, { error: 'range_too_long' })
+          }
+          return slotsAnswer([crossing], 480)(call)
+        },
+      },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    const available = await screen.findByRole('button', { name: /, available$/ })
+    await user.click(available)
+    expect(
+      within(screen.getByRole('list', { name: /^Times on/ })).getAllByRole('button'),
+    ).toHaveLength(1)
+    const calls = api.to('GET /api/v1/bookings/manage/slots')
+    expect(calls).toHaveLength(3)
+    const firstEnd = Date.parse(
+      new URL(calls[1]?.path ?? '', 'http://x').searchParams.get('end') ?? '',
+    )
+    const secondStart = Date.parse(
+      new URL(calls[2]?.path ?? '', 'http://x').searchParams.get('start') ?? '',
+    )
+    expect(firstEnd - secondStart).toBe(480 * 60_000)
+    expect(new URL(calls[0]?.path ?? '', 'http://x').searchParams.has('durationMinutes')).toBe(
+      false,
+    )
   })
 
   it('shows the booking in the Gregorian calendar whatever the locale’s default', async () => {

@@ -252,9 +252,7 @@ function ManageView({
   const loadSlots = useMemo(() => rescheduleSlots(token), [token])
   const title = booking.eventType?.title ?? booking.title
   const hosts = formatList(booking.hosts.map((h) => h.name).filter(Boolean), language)
-  const durationMinutes =
-    booking.eventType?.durationMinutes ??
-    Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000)
+  const durationMinutes = Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000)
 
   // Why an action from the email link cannot be offered.
   const unavailable =

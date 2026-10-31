@@ -301,6 +301,84 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
 
   const to = (address: string) => (m: MailMessage) => m.to === address
 
+  it('uses the chosen and rescheduled lengths in email times and calendar invitations', async () => {
+    const f = createFixtures(db)
+    const host = await f.host({ timeZone: 'UTC' })
+    await f.schedule(host.userId, { timeZone: 'UTC' })
+    const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+      slug: 'meeting-length',
+      durationMinutes: 30,
+    })
+    await db
+      .updateTable('event_types')
+      .set({ allowed_durations_minutes: [15, 30, 60] })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const created = await rest('POST', `/api/v1/public/${host.handle}/meeting-length/bookings`, {
+      body: {
+        start: '2026-11-02T09:00:00Z',
+        durationMinutes: 15,
+        invitee: {
+          name: 'Duration invitee',
+          email: 'duration@example.com',
+          timeZone: 'UTC',
+          locale: 'en',
+        },
+      },
+    })
+    expect(created.status).toBe(201)
+
+    async function verify(result: typeof created, start: string, end: string, range: string) {
+      const { booking, manageToken } = result.body as unknown as Booked
+      const times = result.body.booking as { start: string; end: string }
+      expect({ start: times.start, end: times.end }).toEqual({ start, end })
+      const shown = await manage(manageToken as string)
+      expect(shown).toMatchObject({ status: 200, body: { start, end } })
+      const messages = await drain((p) => p.bookingId === booking.id && p.kind !== 'reminder')
+      expect(messages).toHaveLength(2)
+      for (const message of messages) {
+        expect(message.text).toContain(range)
+        const ics = message.attachments?.[0]?.content.replace(/\r\n[ \t]/g, '')
+        const stamp = (value: string) => value.replace(/[-:]/g, '').replace('.000', '')
+        expect(ics).toContain(`DTSTART:${stamp(start)}\r\n`)
+        expect(ics).toContain(`DTEND:${stamp(end)}\r\n`)
+      }
+      return manageToken as string
+    }
+
+    const originalToken = await verify(
+      created,
+      '2026-11-02T09:00:00.000Z',
+      '2026-11-02T09:15:00.000Z',
+      '9:00 AM – 9:15 AM',
+    )
+    // The original option can disappear; an omitted reschedule still keeps that interval.
+    await db
+      .updateTable('event_types')
+      .set({ duration_minutes: 60, allowed_durations_minutes: [30, 60] })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const preserved = await manage(originalToken, 'reschedule', { start: '2026-11-02T10:00:00Z' })
+    expect(preserved.status).toBe(200)
+    const successorToken = await verify(
+      preserved,
+      '2026-11-02T10:00:00.000Z',
+      '2026-11-02T10:15:00.000Z',
+      '10:00 AM – 10:15 AM',
+    )
+    const changed = await manage(successorToken, 'reschedule', {
+      start: '2026-11-02T11:00:00Z',
+      durationMinutes: 30,
+    })
+    expect(changed.status).toBe(200)
+    await verify(
+      changed,
+      '2026-11-02T11:00:00.000Z',
+      '2026-11-02T11:30:00.000Z',
+      '11:00 AM – 11:30 AM',
+    )
+  })
+
   it('refuses disabled guest recipients over REST and MCP before queuing any email', async () => {
     const before = (await testDb.pool.query('SELECT id FROM pgboss.job ORDER BY id')).rows
     const beforeBookings = (await testDb.pool.query('SELECT id FROM bookings ORDER BY id')).rows

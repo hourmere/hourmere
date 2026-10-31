@@ -161,6 +161,8 @@ function BookingFlow({
   const locale = formatLocale ?? browserFormatLocale
   const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
+  const [durationMinutes, setDurationMinutes] = useState(event.durationMinutes)
+  const hasDurationChoices = (event.allowedDurationsMinutes?.length ?? 0) > 1
   const [slot, setSlot] = useState<Slot | null>(null)
   const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const [version, setVersion] = useState(0)
@@ -178,7 +180,10 @@ function BookingFlow({
   // have made instead of booking twice. Language changes preserve that attempt; changing
   // booking details starts a new attempt in the interface language selected at submission.
   const attempt = useRef<{ key: string; details: string; body: CreateBooking } | null>(null)
-  const loadSlots = useMemo(() => eventSlots(handle, slug, team), [handle, slug, team])
+  const loadSlots = useMemo(
+    () => eventSlots(handle, slug, team, hasDurationChoices ? durationMinutes : undefined),
+    [handle, slug, team, durationMinutes, hasDurationChoices],
+  )
 
   if (gone) return <PublicNotFound what="event" />
   if (confirmed)
@@ -205,6 +210,7 @@ function BookingFlow({
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
+      ...(hasDurationChoices && { durationMinutes }),
       invitee: {
         name: values.name.trim(),
         email: values.email.trim(),
@@ -320,7 +326,7 @@ function BookingFlow({
             </p>
           )}
           <ul className="event-facts">
-            <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
+            <li>{formatDuration(durationMinutes, displayLocale)}</li>
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
             {hostTimeZone && (
               <li className="user-content">
@@ -393,7 +399,33 @@ function BookingFlow({
           ) : (
             <SlotPicker
               load={loadSlots}
-              durationMinutes={event.durationMinutes}
+              durationMinutes={durationMinutes}
+              afterTitle={
+                hasDurationChoices ? (
+                  <fieldset className="duration-picker">
+                    <legend>{t('Meeting length')}</legend>
+                    <div className="duration-options">
+                      {event.allowedDurationsMinutes?.map((minutes) => (
+                        <label key={minutes} className="duration-option">
+                          <input
+                            type="radio"
+                            name="durationMinutes"
+                            value={minutes}
+                            checked={durationMinutes === minutes}
+                            onChange={() => {
+                              attempt.current = null
+                              setDurationMinutes(minutes)
+                              setNotice(null)
+                              setFormError(null)
+                            }}
+                          />
+                          <span>{formatDuration(minutes, displayLocale)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : undefined
+              }
               timeZone={timeZone}
               onTimeZoneChange={(zone) => {
                 rememberVisitorTimeZone(zone)
@@ -501,6 +533,17 @@ function Confirmation({
         <DetailList
           items={[
             ['What', event.title],
+            ...((event.allowedDurationsMinutes?.length ?? 0) > 1
+              ? ([
+                  [
+                    'Meeting length',
+                    formatDuration(
+                      Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000),
+                      language,
+                    ),
+                  ],
+                ] as [string, string][])
+              : []),
             [
               'When',
               <When

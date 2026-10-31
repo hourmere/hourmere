@@ -53,6 +53,18 @@ export const LocationKind = z.enum(LOCATION_KINDS)
 /** A bookable time: public slots and the times a booking can move to. */
 export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
 
+/** A selected length is checked against the event type's current allowed list by the service. */
+export const SelectedDurationMinutes = z.number().int().min(1).max(1440).openapi({
+  description:
+    "Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling.",
+})
+
+const SlotRange = z.object({
+  start: Instant,
+  end: Instant,
+  durationMinutes: z.coerce.number().pipe(SelectedDurationMinutes).optional(),
+})
+
 const ExpectedOrganizationHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
     description:
@@ -146,9 +158,17 @@ export const Booking = z
   .openapi('Booking')
 
 export const ManagedBooking = Booking.extend({
-  eventType: z.object({ title: z.string(), durationMinutes: z.number().int() }).nullable().openapi({
-    description: 'The event type as it is now; null once it is deleted',
-  }),
+  eventType: z
+    .object({
+      title: z.string(),
+      durationMinutes: z.number().int(),
+      allowedDurationsMinutes: z.array(SelectedDurationMinutes).min(1).max(12).optional(),
+    })
+    .nullable()
+    .openapi({
+      description:
+        'The event type as it is now; null once it is deleted. The booking start and end retain its actual length even if the default changes.',
+    }),
   hosts: z.array(z.object({ name: z.string() })).openapi({
     description: "Who the invitee meets: each host's name",
   }),
@@ -168,7 +188,9 @@ export const CancelBody = z
   .strictObject({ reason: z.string().max(1000).optional() })
   .openapi('CancelBooking')
 
-export const RescheduleBody = z.strictObject({ start: Instant }).openapi('Reschedule')
+export const RescheduleBody = z
+  .strictObject({ start: Instant, durationMinutes: SelectedDurationMinutes.optional() })
+  .openapi('Reschedule')
 
 export const BookingPage = z
   .object({
@@ -419,7 +441,7 @@ export function bookingRoutes({
         middleware: manageSlotsLimit,
         request: {
           headers: ManageToken,
-          query: z.object({ start: Instant, end: Instant }),
+          query: SlotRange,
         },
         responses: {
           200: {
@@ -427,7 +449,7 @@ export function bookingRoutes({
             content: json(z.object({ data: z.array(Slot) })),
           },
           400: error(
-            'Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`)',
+            'Invalid parameters (`invalid_request`), a length outside the allowed list (`invalid_duration`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`)',
           ),
           404: manageNotFound,
           409: error(
@@ -437,13 +459,14 @@ export function bookingRoutes({
         },
       }),
       async (c) => {
-        const { start, end } = c.req.valid('query')
+        const { start, end, durationMinutes } = c.req.valid('query')
         const slots = await listManagedSlots(
           publicContext,
           c.req.valid('header')['x-manage-token'],
           {
             start: Temporal.Instant.from(start),
             end: Temporal.Instant.from(end),
+            durationMinutes,
           },
         )
         return c.json({ data: slots }, 200)
@@ -500,7 +523,9 @@ export function bookingRoutes({
         },
         responses: {
           200: { description: 'The new booking', content: json(BookingWithToken) },
-          400: error('Invalid request'),
+          400: error(
+            'Invalid request (`invalid_request`) or length outside the allowed list (`invalid_duration`)',
+          ),
           404: manageNotFound,
           409: error(
             "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
@@ -512,7 +537,10 @@ export function bookingRoutes({
         const result = await rescheduleManagedBooking(
           publicContext,
           c.req.valid('header')['x-manage-token'],
-          { start: Temporal.Instant.from(c.req.valid('json').start) },
+          {
+            start: Temporal.Instant.from(c.req.valid('json').start),
+            durationMinutes: c.req.valid('json').durationMinutes,
+          },
         )
         return c.json(result, 200)
       },
@@ -528,14 +556,16 @@ export function bookingRoutes({
         middleware: hostSlots,
         request: {
           params: z.object({ id: z.uuid() }),
-          query: z.object({ start: Instant, end: Instant }),
+          query: SlotRange,
         },
         responses: {
           200: {
             description: 'Slots, sorted by start',
             content: json(z.object({ data: z.array(Slot) })),
           },
-          400: error('Invalid parameters (`invalid_request`, `invalid_range`, `range_too_long`)'),
+          400: error(
+            'Invalid parameters (`invalid_request`, `invalid_duration`, `invalid_range`, `range_too_long`)',
+          ),
           401: unauthorized,
           404: hostNotFound,
           409: error(
@@ -545,13 +575,14 @@ export function bookingRoutes({
         },
       }),
       async (c) => {
-        const { start, end } = c.req.valid('query')
+        const { start, end, durationMinutes } = c.req.valid('query')
         const slots = await listHostBookingSlots(
           context(c.var.principal),
           c.req.valid('param').id,
           {
             start: Temporal.Instant.from(start),
             end: Temporal.Instant.from(end),
+            durationMinutes,
           },
         )
         return c.json({ data: slots }, 200)
@@ -578,7 +609,9 @@ export function bookingRoutes({
             description: 'The successor booking, with manageToken null',
             content: json(BookingWithToken),
           },
-          400: error('Invalid request (`invalid_request`)'),
+          400: error(
+            'Invalid request (`invalid_request`) or length outside the allowed list (`invalid_duration`)',
+          ),
           401: unauthorized,
           403: crossOrigin,
           404: hostNotFound,
@@ -594,6 +627,7 @@ export function bookingRoutes({
           c.req.valid('param').id,
           {
             start: Temporal.Instant.from(c.req.valid('json').start),
+            durationMinutes: c.req.valid('json').durationMinutes,
           },
         )
         return c.json(result, 200)

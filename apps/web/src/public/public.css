@@ -435,6 +435,51 @@
   font-size: 1.2rem;
 }
 
+.public .duration-picker {
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.public .duration-picker legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-weight: 600;
+}
+
+.public .duration-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.public .duration-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+
+.public .duration-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+.public .duration-option input {
+  flex: none;
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0;
+}
+
 /* Booking form */
 
 .public .booking-form .guests,

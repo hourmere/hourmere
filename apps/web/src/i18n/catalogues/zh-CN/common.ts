@@ -123,6 +123,7 @@ export const common = {
   ' ({zone}, {offset})': '（{zone}，{offset}）',
   ' ({offset})': '（{offset}）',
   '{date}, {time}': '{date}，{time}',
+  'Meeting length': '会议时长',
   'About this event': '关于此活动',
   'Add a guest': '添加来宾',
   'Add at most {0} guests.': '最多添加{0}位来宾。',

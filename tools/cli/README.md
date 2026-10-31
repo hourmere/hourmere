@@ -63,6 +63,14 @@ request file. Retain that exact input and key before booking:
 hourmere book --input booking-request.json --output booking-result.json
 ```
 
+For an event with several lengths, choose from `allowedDurationsMinutes` using JSON
+`durationMinutes` or `--duration-minutes 60` on `slots`, `book` and `reschedule`. Keep the
+same length when finding and booking a slot. The flag accepts 1–1440 whole minutes;
+the instance validates its allowed list, and a flag must match any JSON selection.
+Omission uses the default for slots and new bookings. Rescheduling without a selection
+keeps the booking's actual length, even if that option was removed; a new explicit
+selection must belong to the event type's current list.
+
 `--output` reserves a new private file (`0600`) before the request, saves the returned
 management token, and writes only `{"outputWritten":true}` to stdout. Existing files and
 symlinks are refused. Keep request/result files private and out of Git. Without `--output`,

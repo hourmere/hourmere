@@ -120,6 +120,7 @@ export const common = {
   ' ({zone}, {offset})': ' ({zone}, {offset})',
   ' ({offset})': ' ({offset})',
   '{date}, {time}': '{date}, {time}',
+  'Meeting length': 'Duración de la reunión',
   'About this event': 'Acerca de este evento',
   'Add a guest': 'Añadir un invitado',
   'Add at most {0} guests.': 'Añada como máximo {0} invitados.',
