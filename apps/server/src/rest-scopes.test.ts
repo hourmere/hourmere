@@ -69,6 +69,33 @@ const cases = API_KEY_REST_OPERATIONS.flatMap((operation) =>
 )
 
 describe('REST scoped-key operation matrix', () => {
+  it.each(scopes)('%s preserves the API 404 for unregistered paths and methods', async (scope) => {
+    const f = fixture(scope)
+    for (const [method, path] of [
+      ['GET', '/api/v1/does-not-exist'],
+      ['POST', '/api/v1/does-not-exist'],
+      ['OPTIONS', '/api/v1/does-not-exist'],
+      ['HEAD', '/api/v1/does-not-exist'],
+      ['OPTIONS', '/api/v1/webhooks'],
+      ['PUT', '/api/v1/webhooks'],
+      ['POST', '/api/v1/me'],
+      ['OPTIONS', '/api/v1/me'],
+    ] as const) {
+      for (const authenticated of [false, true]) {
+        const response = await f.app.request(path, {
+          method,
+          headers: authenticated ? { authorization: 'Bearer hm_synthetic' } : {},
+        })
+        expect(response.status, `${method} ${path}`).toBe(404)
+        expect(response.headers.get('cache-control')).toBe('no-store')
+        if (method === 'HEAD') expect(await response.text()).toBe('')
+        else expect(await response.json()).toEqual({ error: 'not_found' })
+      }
+    }
+    expect(f.resource).not.toHaveBeenCalled()
+    expect(f.notify).not.toHaveBeenCalled()
+  })
+
   it.each(cases)(
     '$scope denies $operation.id before validation and resource access',
     async ({ scope, operation }) => {
@@ -116,6 +143,7 @@ describe('REST scoped-key operation matrix', () => {
                 path: '/api/v1/unclassified/{id}',
                 security: authenticated,
                 middleware: withCaller ? caller : [],
+                request: { params: z.object({ id: z.uuid() }) },
                 responses: {
                   200: { description: 'Probe', content: json(z.object({ ok: z.boolean() })) },
                 },
@@ -133,7 +161,8 @@ describe('REST scoped-key operation matrix', () => {
             publicUrl: 'http://localhost',
             routes: [routes],
           })
-          const response = await app.request('/api/v1/unclassified/present', {
+          const id = scope === 'full' ? randomUUID() : 'invalid-identifier'
+          const response = await app.request(`/api/v1/unclassified/${id}`, {
             method,
             headers: { authorization: 'Bearer hm_synthetic' },
           })
@@ -145,9 +174,14 @@ describe('REST scoped-key operation matrix', () => {
     },
   )
 
-  it.each(['GET', 'POST', 'ALL'] as const)(
-    'default denies an unclassified bare Hono %s handler at runtime',
-    async (method) => {
+  it.each([
+    { method: 'GET', path: '/api/v1/unclassified-bare' },
+    { method: 'POST', path: '/api/v1/unclassified-bare' },
+    { method: 'ALL', path: '/api/v1/unclassified-bare' },
+    { method: 'ALL', path: '/api/*' },
+  ])(
+    'default denies an unclassified bare Hono $method $path handler at runtime',
+    async ({ method, path }) => {
       for (const scope of scopes) {
         const run = vi.fn()
         const app = createApp({
@@ -161,8 +195,8 @@ describe('REST scoped-key operation matrix', () => {
                 run()
                 return Response.json({ ok: true })
               }
-              if (method === 'ALL') app.all('/api/v1/unclassified-bare', handler)
-              else app.on(method, '/api/v1/unclassified-bare', handler)
+              if (method === 'ALL') app.all(path, handler)
+              else app.on(method, path, handler)
             },
           ],
         })

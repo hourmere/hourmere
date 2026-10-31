@@ -4,10 +4,13 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from './api-key-errors.ts'
 import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 import { requireActiveApiKey } from './api-key-principal.ts'
 import { createCallerResolver } from './caller.ts'
+import { beforeHook } from './hooks.ts'
 import { type Auth, createAuth, createAuthPool, ensurePersonalOrganization } from './index.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -15,6 +18,7 @@ const signup = { mode: 'open', allowedDomains: [] } as const
 const secret = 'synthetic-scoped-key-storage-test-secret-at-least-32-characters'
 const origin = 'http://localhost:43829'
 const scopes: ApiKeyScope[] = ['full', 'read', 'bookings']
+const configIds = [undefined, '', 'bogus'] as const
 
 function moduleUrl(source: string, location: URL, replacements: Record<string, string> = {}) {
   const javascript = stripTypeScriptTypes(source).replace(
@@ -268,6 +272,183 @@ describe.skipIf(!serverUrl)('scoped API key storage and lifecycle', () => {
     }
     expect((await metadata(key.id)).scope).toBe('read')
   })
+
+  it.each(configIds)('validates owned updates with configId %j', async (configId) => {
+    const user = await owner()
+    const foreign = await owner()
+    const key = await create(user.userId, 'read')
+    for (const [replacement, status, error] of [
+      [{ scope: 'full' }, 400, { code: 'API_KEY_SCOPE_IMMUTABLE' }],
+      [
+        { organizationId: foreign.organizationId },
+        403,
+        { message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE },
+      ],
+      [{ extra: { arbitrary: true } }, 400, { code: 'INVALID_METADATA' }],
+    ] as const) {
+      const response = await http('update', user.cookie, {
+        keyId: key.id,
+        configId,
+        metadata: replacement,
+      })
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject(error)
+      expect(await metadata(key.id)).toEqual({ organizationId: user.organizationId, scope: 'read' })
+    }
+    const valid = await http('update', user.cookie, { keyId: key.id, configId, metadata: {} })
+    expect(valid.status).toBe(200)
+    expect(await metadata(key.id)).toEqual({ organizationId: user.organizationId, scope: 'read' })
+  })
+
+  async function unverifiedReenable(configId: string | undefined, selectedAuth = auth) {
+    const user = await owner(false)
+    const keyId = randomUUID()
+    await owned.pool.query(
+      'INSERT INTO auth.apikey (id,"configId","referenceId",key,"createdAt","updatedAt",metadata,enabled) VALUES ($1,$2,$3,$4,now(),now(),$5,true)',
+      [
+        keyId,
+        'default',
+        user.userId,
+        `synthetic-unverified-${keyId}`,
+        JSON.stringify({ scope: 'read', organizationId: user.organizationId }),
+      ],
+    )
+    expect(
+      (
+        await http(
+          'update',
+          user.cookie,
+          { keyId, configId, enabled: false },
+          undefined,
+          selectedAuth,
+        )
+      ).status,
+    ).toBe(200)
+    const response = await http(
+      'update',
+      user.cookie,
+      { keyId, configId, enabled: true },
+      undefined,
+      selectedAuth,
+    )
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
+    expect(
+      (await owned.pool.query('SELECT enabled FROM auth.apikey WHERE id=$1', [keyId])).rows,
+    ).toEqual([{ enabled: false }])
+  }
+
+  it.each(configIds)('requires email proof to reenable with configId %j', async (configId) => {
+    await unverifiedReenable(configId)
+  })
+
+  it.each(configIds)(
+    'requires the loaded session to remain live with configId %j',
+    async (configId) => {
+      const user = await owner()
+      const key = await create(user.userId, 'read')
+      expect((await http('update', user.cookie, { keyId: key.id, enabled: false })).status).toBe(
+        200,
+      )
+      const selected = createAuth({
+        pool: authPool,
+        db,
+        baseURL: origin,
+        secret,
+        signup,
+        mailer: { send: async () => {} },
+      })
+      const before = beforeHook(db, async () => {})
+      selected.options.hooks = {
+        before: createAuthMiddleware(async (ctx) => {
+          // Revoke after Better Auth loads the cookie, before Hourmere's live-session check.
+          const session = await getSessionFromCtx(ctx)
+          expect(session?.user.id).toBe(user.userId)
+          await owned.pool.query('DELETE FROM auth.session WHERE id=$1', [session?.session.id])
+          return before(ctx)
+        }),
+      }
+      const response = await http(
+        'update',
+        user.cookie,
+        { keyId: key.id, configId, enabled: true },
+        undefined,
+        selected,
+      )
+      expect(response.status).toBe(401)
+      expect(await response.json()).toMatchObject({ code: 'UNAUTHORIZED_SESSION' })
+      expect(
+        (await owned.pool.query('SELECT enabled FROM auth.apikey WHERE id=$1', [key.id])).rows,
+      ).toEqual([{ enabled: false }])
+    },
+  )
+
+  it.each(configIds)(
+    'preserves native get/update/delete ownership failures with configId %j',
+    async (configId) => {
+      const user = await owner()
+      const foreign = await owner()
+      const key = await create(user.userId, 'read')
+      const query = configId === undefined ? '' : `&configId=${encodeURIComponent(configId)}`
+      for (const keyId of [key.id, randomUUID()]) {
+        for (const path of ['get', 'update', 'delete']) {
+          const response = await http(
+            path === 'get' ? `get?id=${keyId}${query}` : path,
+            foreign.cookie,
+            path === 'get' ? undefined : { keyId, configId, metadata: { scope: 'full' } },
+          )
+          expect(response.status).toBe(404)
+          expect(await response.json()).toEqual({
+            code: 'KEY_NOT_FOUND',
+            message: 'API Key not found',
+          })
+        }
+      }
+      const get = await http(`get?id=${key.id}${query}`, user.cookie)
+      expect(get.status).toBe(200)
+      expect(((await get.json()) as { metadata: unknown }).metadata).toEqual({
+        organizationId: user.organizationId,
+        scope: 'read',
+      })
+      expect((await http('delete', user.cookie, { keyId: key.id, configId })).status).toBe(200)
+      expect(await metadata(key.id)).toBeUndefined()
+    },
+  )
+
+  it.each(['', 'bogus'])(
+    'detects a source-copy configId %j ownership-filter regression',
+    async (configId) => {
+      const location = new URL('./api-keys.ts', import.meta.url)
+      const source = readFileSync(location, 'utf8')
+      const mutant = source.replace(
+        ".where('referenceId', '=', userId)",
+        ".where('referenceId', '=', userId)\n          .where('configId', '=', typeof body.configId === 'string' ? body.configId : 'default')",
+      )
+      expect(mutant).not.toBe(source)
+      const hookLocation = new URL('./hooks.ts', import.meta.url)
+      const copy = await import(
+        moduleUrl(readFileSync(hookLocation, 'utf8'), hookLocation, {
+          './api-keys.ts': moduleUrl(mutant, location),
+        })
+      )
+      const selected = createAuth({
+        pool: authPool,
+        db,
+        baseURL: origin,
+        secret,
+        signup,
+        mailer: { send: async () => {} },
+      })
+      selected.options.hooks = { before: copy.beforeHook(db, async () => {}) }
+      await unverifiedReenable(configId)
+      await expect(unverifiedReenable(configId, selected)).rejects.toMatchObject({
+        name: 'AssertionError',
+        actual: 200,
+        expected: 403,
+      })
+      await unverifiedReenable(configId)
+    },
+  )
 
   it.each(['create', 'get', 'list', 'update', 'delete'])(
     'refuses all Authorization values on native %s with and without a valid cookie',

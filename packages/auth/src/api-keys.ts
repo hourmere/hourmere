@@ -130,6 +130,8 @@ export async function apiKeyRules(ctx: AuthMiddlewareContext, db: Db) {
   if (!userId || !isUuid(userId)) return
   if (session && body.userId !== undefined && body.userId !== session.user.id) return
   // Leave ownership failures to the native endpoint, without revealing a key's scope.
+  // Better Auth resolves empty and unknown config IDs to its default configuration, so
+  // the caller's raw configId must never exclude an owned key from these checks.
   const owned =
     !creating && typeof body.keyId === 'string' && isUuid(body.keyId)
       ? await db
@@ -137,7 +139,6 @@ export async function apiKeyRules(ctx: AuthMiddlewareContext, db: Db) {
           .select('metadata')
           .where('id', '=', body.keyId)
           .where('referenceId', '=', userId)
-          .where('configId', '=', typeof body.configId === 'string' ? body.configId : 'default')
           .executeTakeFirst()
       : undefined
   if (!creating && !owned) return

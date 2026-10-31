@@ -272,7 +272,8 @@ export function createApp({
   mcp,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
-  const unclassifiedScopeGuard = installRestApiKeyScopes(app, resolveCaller)
+  const apiNotFound = (c: Context) => c.json({ error: 'not_found' }, 404)
+  const unclassifiedScopeGuard = installRestApiKeyScopes(app, resolveCaller, apiNotFound)
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
@@ -450,7 +451,7 @@ export function createApp({
     info: { title: 'Hourmere API', version: VERSION },
   })
 
-  app.all('/api/*', (c) => c.json({ error: 'not_found' }, 404))
+  app.all('/api/*', apiNotFound)
 
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)

@@ -11,7 +11,7 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0047_api_key_scopes.sql'
+const migration = '0048_api_key_scopes.sql'
 const userId = '00000000-0000-4000-8000-000000000001'
 const teamId = 'abcdef01-0000-4000-8000-000000000002'
 const personalId = '00000000-0000-4000-8000-000000000003'
@@ -117,6 +117,12 @@ async function seed(pool: pg.Pool) {
         '2026-01-02T03:04:05.654321Z','2026-01-01T01:02:03.123456Z');
     INSERT INTO mcp_oauth_client_activity (client_id,consented_at,last_used_at)
       VALUES ('synthetic-scoped-migration-mcp','2026-01-01T01:02:03.123456Z','2026-01-02T03:04:05.654321Z');
+    INSERT INTO event_types (organization_id,slug,title,duration_minutes,allowed_durations_minutes,
+      location,created_at,updated_at)
+      VALUES ('abcdef01-0000-4000-8000-000000000002','historical-multiple-durations',
+        'Synthetic existing duration choices',45,ARRAY[90,45,15],
+        '{"kind":"phone","number":"+15555550148"}',
+        '2026-01-01T01:02:03.123456Z','2026-01-02T03:04:05.654321Z');
     INSERT INTO bookings (id,organization_id,status,start_at,end_at,title,location,responses,manage_token_hash,
       cancelled_at,cancel_reason,source,api_key_id,cancelled_source,cancelled_api_key_id,
       oauth_consent_id,cancelled_oauth_consent_id,idempotency_key,idempotency_fingerprint,created_at,updated_at)
@@ -160,6 +166,7 @@ async function sentinelRecords(pool: pg.Pool) {
     ['public', 'mcp_oauth_grants'],
     ['public', 'mcp_oauth_intents'],
     ['public', 'mcp_oauth_client_activity'],
+    ['public', 'event_types'],
     ['public', 'bookings'],
     ['public', 'booking_hosts'],
     ['public', 'booking_attendees'],
@@ -377,6 +384,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
     'session preservation',
     'OAuth grant preservation',
     'booking attribution preservation',
+    'duration configuration preservation',
   ] as const)(
     'detects a source-copy %s migration mutation and verifies restored SQL',
     async (protection) => {
@@ -413,6 +421,8 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
         if (protection === 'booking attribution preservation')
           mutant +=
             '\nUPDATE bookings SET api_key_id=null,cancelled_api_key_id=null,idempotency_key=null,idempotency_fingerprint=null;'
+        if (protection === 'duration configuration preservation')
+          mutant += '\nUPDATE event_types SET allowed_durations_minutes=ARRAY[duration_minutes];'
         expect(mutant).not.toBe(source)
         await writeFile(join(directory, migration), mutant)
         await runMigrations(database.pool, directory)

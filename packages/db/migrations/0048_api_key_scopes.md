@@ -3,6 +3,9 @@ can read or write authentication data, including separately managed web, all and
 roles. Apply the migration and start only the upgraded code before issuing scoped keys.
 Old binaries ignore scope and must never overlap with usable read or bookings keys.
 
+Migration 0048 follows 0047_event_type_durations.sql and preserves existing duration choices,
+event configuration, bookings and timestamps.
+
 The migration aborts atomically if any non-null metadata is malformed JSON or is not an
 object. Its error contains a safe count only; repair those rows under operator review
 without changing key hashes or organization bindings, then retry. Existing object metadata

@@ -65,7 +65,7 @@ async function data(pool: pg.Pool, inventory: Table[], applyBackfills = false, t
         return `CASE WHEN EXISTS (SELECT FROM calendar_connections cc
           WHERE cc.id=connection_id AND cc.provider='google')
           THEN NULL ELSE ${quote(column)} END AS ${quote(column)}`
-      // 0047 reserves scope while preserving every other parsed metadata property.
+      // 0048 reserves scope while preserving every other parsed metadata property.
       if (
         applyBackfills &&
         table.schema === 'auth' &&

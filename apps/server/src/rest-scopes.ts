@@ -6,7 +6,7 @@ import {
   type Principal,
   requireApiKeyOperation,
 } from '@hourmere/auth'
-import type { Context } from 'hono'
+import type { Context, Handler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { matchedRoutes } from 'hono/route'
 import { withClientIpHeader } from './client-ip.ts'
@@ -53,7 +53,11 @@ export function requireRestApiKeyOperation(c: Context, principal: Principal) {
  * manage-link operations additionally validate a supplied bearer before their validators.
  * Anonymous calls keep their original capability, source and idempotency semantics.
  */
-export function installRestApiKeyScopes(app: OpenAPIHono, resolveCaller: CallerResolver) {
+export function installRestApiKeyScopes(
+  app: OpenAPIHono,
+  resolveCaller: CallerResolver,
+  notFoundHandler: Handler,
+) {
   const boundHandlers = new WeakSet()
   const register = app.openapi
   app.openapi = (route, handler, hook) => {
@@ -109,7 +113,10 @@ export function installRestApiKeyScopes(app: OpenAPIHono, resolveCaller: CallerR
   // closed at runtime. Inspect registered handlers, never infer permission from a URL.
   // Mount this after transport/rate guards and before product handlers in createApp.
   return createMiddleware(async (c, next) => {
-    const first = matchedRoutes(c).find((route) => route.method !== 'ALL')
+    // Earlier matches are transport middleware. The next registered handler is either
+    // a real operation (including bare ALL handlers) or the explicit API 404 fallback.
+    const first = matchedRoutes(c)[c.req.routeIndex + 1]
+    if (first?.handler === notFoundHandler) return next()
     if (first && boundHandlers.has(first.handler)) return next()
     const id = first ? `${first.method} ${first.path}` : ''
     if (restPolicies.get(id)?.authentication === 'public_metadata') return next()

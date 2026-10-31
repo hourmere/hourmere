@@ -131,6 +131,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await owned?.drop()
     })
 
+    it.each(scopes)('%s preserves 404 for unknown routes and methods', async (scope) => {
+      for (const space of ['personal', 'team']) {
+        for (const [method, path] of [
+          ['GET', '/api/v1/does-not-exist'],
+          ['POST', '/api/v1/does-not-exist'],
+          ['OPTIONS', '/api/v1/does-not-exist'],
+          ['OPTIONS', '/api/v1/schedules'],
+          ['PUT', '/api/v1/bookings'],
+        ] as const) {
+          const response = await request(path, method, undefined, headers(space, scope))
+          expect(response.status, `${method} ${path}`).toBe(404)
+          expect(await response.json()).toEqual({ error: 'not_found' })
+          expect(response.headers.get('cache-control')).toBe('no-store')
+        }
+      }
+    })
+
     it.each(scopes)(
       '%s retains identity, event and booking reads in both spaces and private organization pinning',
       async (scope) => {
