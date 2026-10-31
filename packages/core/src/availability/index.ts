@@ -15,6 +15,8 @@ export type {
 export {
   AvailabilityInputError,
   EVENT_TYPE_RULE_BOUNDS,
+  MAX_ALLOWED_DURATIONS,
+  resolveDurationMinutes,
   validateDate,
   validateDayIntervals,
   validateEventTypeRules,

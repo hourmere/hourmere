@@ -100,6 +100,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/calendar-connections/google/authorize',
+        operationId: 'authorizeGoogleCalendarConnection',
         tags: ['Calendars'],
         summary: 'Start a separate Google Calendar connection',
         description:
@@ -132,6 +133,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/calendar-connections/microsoft/authorize',
+        operationId: 'authorizeMicrosoftCalendarConnection',
         tags: ['Calendars'],
         summary: 'Start a separate Microsoft Calendar connection',
         description:
@@ -159,6 +161,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'patch',
         path: '/api/v1/calendars/{id}',
+        operationId: 'configureCalendar',
         tags: ['Calendars'],
         summary: 'Select a calendar for busy-time conflict checks',
         description: 'Sessions and API keys can select only the caller’s own calendars.',
@@ -192,6 +195,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/calendars/{id}/sync',
+        operationId: 'syncCalendar',
         tags: ['Calendars'],
         summary: 'Synchronize selected calendar busy intervals now',
         description: 'Sessions and API keys can synchronize only the caller’s own calendars.',
@@ -216,6 +220,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'put',
         path: '/api/v1/calendar-destination',
+        operationId: 'setCalendarDestination',
         tags: ['Calendars'],
         summary: 'Choose the owned Google calendar for new booking events',
         description: 'Sessions and API keys change only the caller’s own writeback destination.',
@@ -246,6 +251,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'delete',
         path: '/api/v1/calendar-connections/{id}',
+        operationId: 'disconnectCalendarConnection',
         tags: ['Calendars'],
         summary: 'Disconnect a calendar account and delete its local credentials and calendars',
         description:
@@ -272,6 +278,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       createRoute({
         method: 'post',
         path: '/api/v1/calendar-connections/{id}/refresh',
+        operationId: 'refreshCalendarList',
         tags: ['Calendars'],
         summary: 'Refresh the connected account’s calendar list',
         description:

@@ -35,8 +35,12 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      HOURMERE_PARITY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || (startsWith(github.ref, 'refs/heads/') && github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'origin/main' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Compare known parity gaps to the event's base, including multi-commit pushes.
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version

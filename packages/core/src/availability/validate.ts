@@ -56,6 +56,10 @@ const WEEKDAYS: readonly Weekday[] = [
 ]
 
 const MINUTES_PER_DAY = 24 * 60
+export const MAX_ALLOWED_DURATIONS = 12
+
+type NumericEventTypeRule = Exclude<keyof EventTypeRules, 'allowedDurationsMinutes'>
+
 const NS_PER_DAY = 86_400_000_000_000n
 
 /**
@@ -72,7 +76,7 @@ export const EVENT_TYPE_RULE_BOUNDS = {
   minimumNoticeMinutes: { min: 0, max: 365 * MINUTES_PER_DAY },
   maxBookingsPerDay: { min: 1, max: 1000 },
   bookingWindowDays: { min: 1, max: 3650 },
-} as const satisfies Record<keyof EventTypeRules, { min: number; max: number }>
+} as const satisfies Record<NumericEventTypeRule, { min: number; max: number }>
 
 /** The engine visits every local day in the range. */
 const MAX_RANGE_DAYS = 400
@@ -87,7 +91,7 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
   if (typeof schedule !== 'object' || schedule === null) fail('schedule must be an object')
   if (typeof eventType !== 'object' || eventType === null) fail('eventType must be an object')
 
-  const durationMinutes = bounded(eventType.durationMinutes, 'eventType', 'durationMinutes')
+  const durationMinutes = resolveDurationMinutes(eventType, input.durationMinutes)
   const rangeStart = queryInstant(input.rangeStart, 'rangeStart')
   const rangeEnd = queryInstant(input.rangeEnd, 'rangeEnd')
   if (Temporal.Instant.compare(rangeEnd, rangeStart) <= 0) {
@@ -118,7 +122,7 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
 
 /** The optional event type rules, with defaults applied. */
 function optionalRules(eventType: EventTypeRules, path: string, durationMinutes: number) {
-  const rule = (name: keyof EventTypeRules) => (v: unknown) => bounded(v, path, name)
+  const rule = (name: NumericEventTypeRule) => (v: unknown) => bounded(v, path, name)
   return {
     slotStepMinutes: optional(eventType.slotStepMinutes, durationMinutes, rule('slotStepMinutes')),
     bufferBeforeMinutes: optional(eventType.bufferBeforeMinutes, 0, rule('bufferBeforeMinutes')),
@@ -172,7 +176,33 @@ export function validateEventTypeRules(
 ): asserts value is EventTypeRules {
   if (!isPlainObject(value)) fail(`${path || 'rules'} must be a plain object, got ${show(value)}`)
   const rules = value as unknown as EventTypeRules
-  optionalRules(rules, path, bounded(rules.durationMinutes, path, 'durationMinutes'))
+  optionalRules(rules, path, resolveDurationMinutes(rules, undefined, path))
+}
+
+/** Validates the offered lengths and returns the explicit choice or default. */
+export function resolveDurationMinutes(
+  rules: Pick<EventTypeRules, 'durationMinutes' | 'allowedDurationsMinutes'>,
+  selected?: number,
+  path = 'eventType',
+): number {
+  const duration = bounded(rules.durationMinutes, path, 'durationMinutes')
+  const allowed =
+    rules.allowedDurationsMinutes === undefined ? [duration] : rules.allowedDurationsMinutes
+  const field = path ? `${path}.allowedDurationsMinutes` : 'allowedDurationsMinutes'
+  if (!Array.isArray(allowed) || allowed.length < 1 || allowed.length > MAX_ALLOWED_DURATIONS) {
+    fail(`${field} must contain from 1 to ${MAX_ALLOWED_DURATIONS} durations`)
+  }
+  const seen = new Set<number>()
+  for (const value of allowed) {
+    const item = bounded(value, path, 'durationMinutes')
+    if (seen.has(item)) fail(`${field} must contain distinct durations`)
+    seen.add(item)
+  }
+  if (!seen.has(duration)) fail(`${field} must include durationMinutes`)
+  if (selected === undefined) return duration
+  const choice = bounded(selected, '', 'durationMinutes')
+  if (!seen.has(choice)) fail('durationMinutes must be one of allowedDurationsMinutes')
+  return choice
 }
 
 function fail(message: string): never {
@@ -217,7 +247,7 @@ function optional<T, D>(value: T | undefined, fallback: D, parse: (value: T) => 
 }
 
 /** `path` is the event type's own path; '' names the rule alone. */
-function bounded(value: unknown, path: string, rule: keyof EventTypeRules): number {
+function bounded(value: unknown, path: string, rule: NumericEventTypeRule): number {
   const { min, max } = EVENT_TYPE_RULE_BOUNDS[rule]
   return wholeNumber(value, path ? `${path}.${rule}` : rule, min, max)
 }

@@ -53,6 +53,74 @@ describe.skipIf(!serverUrl)('event type service', () => {
       .where('event_type_id', '=', eventTypeId)
       .execute()
 
+  describe('duration options', () => {
+    it('persists options and edits the default without changing the list', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const created = await createEventType(ctx, input({ allowedDurationsMinutes: [15, 30, 60] }))
+      expect(created.allowedDurationsMinutes).toEqual([15, 30, 60])
+      expect((await getEventType(ctx, created.id)).allowedDurationsMinutes).toEqual([15, 30, 60])
+      expect((await listEventTypes(ctx))[0]?.allowedDurationsMinutes).toEqual([15, 30, 60])
+      const changed = await updateEventType(ctx, created.id, { durationMinutes: 60 })
+      expect(changed.durationMinutes).toBe(60)
+      expect(changed.allowedDurationsMinutes).toEqual([15, 30, 60])
+      await expect(updateEventType(ctx, created.id, { durationMinutes: 45 })).rejects.toMatchObject(
+        { code: 'invalid_event_type' },
+      )
+      expect((await getEventType(ctx, created.id)).durationMinutes).toBe(60)
+      const replaced = await updateEventType(ctx, created.id, {
+        durationMinutes: 45,
+        allowedDurationsMinutes: [45, 90],
+      })
+      expect(replaced.allowedDurationsMinutes).toEqual([45, 90])
+      const metadata = await updateEventType(ctx, created.id, { title: 'Renamed' })
+      expect(metadata.allowedDurationsMinutes).toEqual([45, 90])
+    })
+
+    it('keeps legacy creation and duration-only edits as singleton options', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const created = await createEventType(ctx, input())
+      expect(created.allowedDurationsMinutes).toEqual([30])
+      await expect(
+        updateEventType(ctx, created.id, { durationMinutes: 45 }),
+      ).resolves.toMatchObject({ durationMinutes: 45, allowedDurationsMinutes: [45] })
+      const bounds = await createEventType(
+        ctx,
+        input({ slug: 'bounds', durationMinutes: 1, allowedDurationsMinutes: [1, 1440] }),
+      )
+      expect(bounds.allowedDurationsMinutes).toEqual([1, 1440])
+    })
+
+    it.each(
+      [
+        [],
+        [15, 60],
+        [30, 30],
+        [0, 30],
+        [30, 1441],
+        [30, 15.5],
+        Array.from({ length: 13 }, (_, i) => i + 30),
+        null,
+        '30',
+        [30, undefined],
+      ].map((value) => [value]),
+    )('rejects invalid duration options %j before writing', async (allowedDurationsMinutes) => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const bad = { allowedDurationsMinutes } as unknown as Partial<EventTypeInput>
+      await expect(createEventType(ctx, input(bad))).rejects.toMatchObject({
+        code: 'invalid_event_type',
+      })
+      expect(await listEventTypes(ctx)).toEqual([])
+      const created = await createEventType(ctx, input())
+      await expect(updateEventType(ctx, created.id, bad)).rejects.toMatchObject({
+        code: 'invalid_event_type',
+      })
+      expect((await getEventType(ctx, created.id)).allowedDurationsMinutes).toEqual([30])
+    })
+  })
+
   describe('in a personal organization', () => {
     it('creates an event type on the personal page with defaults, hosted by the user', async () => {
       const user = await createTestUser(db)
@@ -65,6 +133,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         title: 'Intro call',
         description: null,
         durationMinutes: 30,
+        allowedDurationsMinutes: [30],
         slotStepMinutes: null,
         bufferBeforeMinutes: 0,
         bufferAfterMinutes: 0,

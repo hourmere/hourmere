@@ -1387,24 +1387,28 @@ describe.skipIf(!serverUrl)('bookings', () => {
       },
     )
 
-    it('reschedules with the event type as it is once the lock is held', SERIALIZED, async () => {
-      const s = await setup()
-      const { manageToken } = await s.book('2026-11-02T10:00:00Z')
-      const { booking } = await whileWaiting(
-        s.userId,
-        () =>
-          rescheduleManagedBooking(ctx, manageToken as string, {
-            start: instant('2026-11-02T13:00:00Z'),
-          }),
-        () =>
-          db
-            .updateTable('event_types')
-            .set({ duration_minutes: 60 })
-            .where('id', '=', s.eventTypeId)
-            .execute(),
-      )
-      expect(booking.end).toBe('2026-11-02T14:00:00.000Z')
-    })
+    it(
+      'preserves the original duration when the default changes while rescheduling waits',
+      SERIALIZED,
+      async () => {
+        const s = await setup()
+        const { manageToken } = await s.book('2026-11-02T10:00:00Z')
+        const { booking } = await whileWaiting(
+          s.userId,
+          () =>
+            rescheduleManagedBooking(ctx, manageToken as string, {
+              start: instant('2026-11-02T13:00:00Z'),
+            }),
+          () =>
+            db
+              .updateTable('event_types')
+              .set({ duration_minutes: 60 })
+              .where('id', '=', s.eventTypeId)
+              .execute(),
+        )
+        expect(booking.end).toBe('2026-11-02T13:30:00.000Z')
+      },
+    )
 
     it('reads the clock after waiting when booking', SERIALIZED, async () => {
       const s = await setup()

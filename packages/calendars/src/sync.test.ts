@@ -132,17 +132,18 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
       .execute((trx) =>
         calendarBookingNotifier({ enqueue: async () => null })(trx, { bookingId: id }),
       )
-  const booking = async () => {
+  const booking = async (eventTypeId?: string) => {
     const id = await f.booking(
       owner.organization.id,
       [owner.user.id],
       '2026-11-02T10:00:00Z',
       '2026-11-02T10:30:00Z',
+      { eventTypeId },
     )
     await snapshot(id)
     return id
   }
-  async function reschedule(id: string) {
+  async function reschedule(id: string, eventTypeId?: string) {
     await db
       .updateTable('bookings')
       .set({ status: 'cancelled', cancelled_at: new Date(now) })
@@ -153,6 +154,7 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
       [owner.user.id],
       '2026-11-02T11:00:00Z',
       '2026-11-02T11:30:00Z',
+      { eventTypeId },
     )
     await db
       .updateTable('bookings')
@@ -877,9 +879,9 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     await setCalendarDestination(deps, owner, calendarId)
     await f.schedule(owner.user.id, { timeZone: 'UTC' })
     const eventType = await f.eventType(owner.organization.id, owner.user.id, {})
-    const id = await booking()
+    const id = await booking(eventType)
     await writeBookingCalendar(deps, id)
-    const next = await reschedule(id)
+    const next = await reschedule(id, eventType)
     const input = await buildAvailabilityInput(db, {
       eventTypeId: eventType,
       hostUserId: owner.user.id,
@@ -897,7 +899,7 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     await setCalendarDestination(deps, owner, calendarId)
     await f.schedule(owner.user.id, { timeZone: 'UTC' })
     const eventType = await f.eventType(owner.organization.id, owner.user.id, {})
-    const id = await booking()
+    const id = await booking(eventType)
     await writeBookingCalendar(deps, id)
     const source = await db
       .selectFrom('calendars')

@@ -438,6 +438,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         ...common,
         method: 'post',
         path: `${prefix}/request`,
+        operationId: 'createMcpOAuthRequest',
         request: {
           body: { required: true, content: json(Input.extend({ intentId: z.uuid().optional() })) },
         },
@@ -462,6 +463,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         ...common,
         method: 'post',
         path: `${prefix}/select`,
+        operationId: 'selectMcpOAuthOrganization',
         request: {
           body: { required: true, content: json(Input.extend({ organizationId: z.uuid() })) },
         },
@@ -485,6 +487,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         ...common,
         method: 'post',
         path: `${prefix}/consent`,
+        operationId: 'submitMcpOAuthConsent',
         request: {
           body: { required: true, content: json(IntentInput.extend({ accept: z.boolean() })) },
         },
@@ -530,6 +533,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         ...common,
         method: 'delete',
         path: `${prefix}/connections/{id}`,
+        operationId: 'revokeMcpOAuthConnection',
         request: { params: z.object({ id: z.uuid() }) },
         responses: responses(z.object({ success: z.boolean() })),
       }),

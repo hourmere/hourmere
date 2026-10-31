@@ -4,12 +4,14 @@
 // buildAvailabilityInput, so they all see the same rules.
 import {
   type AvailabilityInput,
+  AvailabilityInputError,
   type DateOverride,
   type ExistingBooking,
   getAvailableSlots,
   type InstantInterval,
   isPublicTeamSlug,
   isReservedName,
+  resolveDurationMinutes,
   type Slot,
   type WeeklyHours,
 } from '@hourmere/core'
@@ -104,8 +106,10 @@ export interface PublicEventTypeRecord {
   title: string
   description: string | null
   durationMinutes: number
+  allowedDurationsMinutes: number[]
   /** Distance between candidate starts (the duration unless set). */
   slotStepMinutes: number
+  configuredSlotStepMinutes: number | null
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   location: Location | null
@@ -155,6 +159,7 @@ export async function findPublicEventType(
       'et.title',
       'et.description',
       'et.duration_minutes',
+      'et.allowed_durations_minutes',
       'et.slot_step_minutes',
       'et.minimum_notice_minutes',
       'et.booking_window_days',
@@ -192,7 +197,9 @@ export async function findPublicEventType(
     title: row.title,
     description: row.description,
     durationMinutes: row.duration_minutes,
+    allowedDurationsMinutes: row.allowed_durations_minutes,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
+    configuredSlotStepMinutes: row.slot_step_minutes,
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
@@ -316,7 +323,9 @@ export async function findPublicTeamEventType(
     title: row.title,
     description: row.description,
     durationMinutes: row.duration_minutes,
+    allowedDurationsMinutes: row.allowed_durations_minutes,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
+    configuredSlotStepMinutes: row.slot_step_minutes,
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
@@ -524,26 +533,45 @@ export function hasBookablePart(
  */
 export async function listPublicSlots(
   ctx: PublicContext,
-  input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
+  input: {
+    handle: string
+    slug: string
+    start: Temporal.Instant
+    end: Temporal.Instant
+    durationMinutes?: number
+  },
 ): Promise<SlotView[]> {
   return publicSlots(ctx, input, findPublicEventType)
 }
 
 export async function listPublicTeamSlots(
   ctx: PublicContext,
-  input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
+  input: {
+    handle: string
+    slug: string
+    start: Temporal.Instant
+    end: Temporal.Instant
+    durationMinutes?: number
+  },
 ): Promise<SlotView[]> {
   return publicSlots(ctx, input, findPublicTeamEventType)
 }
 
 async function publicSlots(
   ctx: PublicContext,
-  input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
+  input: {
+    handle: string
+    slug: string
+    start: Temporal.Instant
+    end: Temporal.Instant
+    durationMinutes?: number
+  },
   resolve: typeof findPublicEventType,
 ): Promise<SlotView[]> {
   checkSlotRange(input.start, input.end)
   const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
+  const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
   if (automaticZoom(et.location)) {
     if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
@@ -566,17 +594,52 @@ async function publicSlots(
         ctx.automaticMeet,
       )
   }
-  if (!hasBookablePart(et, input.start, input.end, now, et.hostUserIds.length)) return []
+  // Without an explicit step, each selected duration supplies its own start grid.
+  const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
+  if (!hasBookablePart(rules, input.start, input.end, now, et.hostUserIds.length)) return []
   if (et.schedulingType === 'round_robin')
-    return unionRoundRobinSlots(ctx.db, et.id, et.eligibleHostUserIds, input.start, input.end, now)
-  return intersectSlots(ctx.db, et.id, et.hostUserIds, input.start, input.end, now)
+    return unionRoundRobinSlots(
+      ctx.db,
+      et.id,
+      et.eligibleHostUserIds,
+      input.start,
+      input.end,
+      now,
+      durationMinutes,
+    )
+  return intersectSlots(
+    ctx.db,
+    et.id,
+    et.hostUserIds,
+    input.start,
+    input.end,
+    now,
+    undefined,
+    et.hostUserIds.length > 1,
+    durationMinutes,
+  )
 }
 
 // --- The database → engine mapping ------------------------------------------------------
 
+/** Shared service validation for an explicit selected duration or the default. */
+export function selectDurationMinutes(
+  eventType: { durationMinutes: number; allowedDurationsMinutes?: readonly number[] },
+  selected?: number,
+): number {
+  try {
+    return resolveDurationMinutes(eventType, selected)
+  } catch (error) {
+    if (!(error instanceof AvailabilityInputError)) throw error
+    throw new DomainError('invalid', 'invalid_duration', error.message)
+  }
+}
+
 export interface AvailabilityQuery {
   /** The event type whose rules (duration, step, buffers, notice, window, limit) apply. */
   eventTypeId: string
+  /** Explicit selected duration; omitted = default, or original when rescheduling. */
+  durationMinutes?: number | undefined
   /** The host whose time is checked. */
   hostUserId: string
   /**
@@ -681,6 +744,7 @@ export async function buildAvailabilityInput(
     )
     .select([
       'et.duration_minutes',
+      'et.allowed_durations_minutes',
       'et.slot_step_minutes',
       'et.buffer_before_minutes',
       'et.buffer_after_minutes',
@@ -692,6 +756,26 @@ export async function buildAvailabilityInput(
     .where('et.id', '=', eventTypeId)
     .executeTakeFirst()
   if (!eventType) throw eventTypeNotFound()
+  let durationMinutes: number
+  if (excludeBookingId !== undefined && query.durationMinutes === undefined) {
+    const original = await db
+      .selectFrom('bookings')
+      .select(['start_at', 'end_at'])
+      .where('id', '=', excludeBookingId)
+      .where('event_type_id', '=', eventTypeId)
+      .executeTakeFirstOrThrow()
+    durationMinutes = toInstant(original.end_at)
+      .since(toInstant(original.start_at))
+      .total('minutes')
+  } else {
+    durationMinutes = selectDurationMinutes(
+      {
+        durationMinutes: eventType.duration_minutes,
+        allowedDurationsMinutes: eventType.allowed_durations_minutes,
+      },
+      query.durationMinutes,
+    )
+  }
 
   const scheduleId = query.useDefaultSchedule ? null : eventType.schedule_id
   const schedule = await db
@@ -878,7 +962,7 @@ export async function buildAvailabilityInput(
       ),
     },
     eventType: {
-      durationMinutes: eventType.duration_minutes,
+      durationMinutes,
       slotStepMinutes: eventType.slot_step_minutes ?? undefined,
       bufferBeforeMinutes: eventType.buffer_before_minutes,
       bufferAfterMinutes: eventType.buffer_after_minutes,
@@ -925,6 +1009,7 @@ export async function intersectSlots(
   now: Temporal.Instant,
   excludeBookingId?: string,
   useDefaultSchedule = hostUserIds.length > 1,
+  durationMinutes?: number,
 ): Promise<SlotView[]> {
   let offered: SlotView[] | undefined
   for (const hostUserId of hostUserIds) {
@@ -936,6 +1021,7 @@ export async function intersectSlots(
       now,
       excludeBookingId,
       useDefaultSchedule,
+      durationMinutes,
     })
     const views = slots.map((s) => ({ start: toIso(s.start), end: toIso(s.end) }))
     if (offered === undefined) offered = views
@@ -955,6 +1041,7 @@ export async function unionRoundRobinSlots(
   rangeStart: Temporal.Instant,
   rangeEnd: Temporal.Instant,
   now: Temporal.Instant,
+  durationMinutes?: number,
 ): Promise<SlotView[]> {
   const offered = new Map<string, SlotView>()
   let stale = false
@@ -967,6 +1054,7 @@ export async function unionRoundRobinSlots(
         rangeEnd,
         now,
         useDefaultSchedule: true,
+        durationMinutes,
       })
       for (const slot of slots) {
         const view = { start: toIso(slot.start), end: toIso(slot.end) }

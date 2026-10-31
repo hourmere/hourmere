@@ -102,6 +102,7 @@ export function teamBookingRoutes(
       createRoute({
         method: 'post',
         path: '/api/v1/team/bookings/{id}/cancel',
+        operationId: 'cancelTeamBooking',
         summary: "Cancel a booking of the session's current team",
         description:
           'Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.',
