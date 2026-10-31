@@ -7,6 +7,7 @@ import { requireActiveApiKey } from '@hourmere/auth'
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
+import { z } from 'zod'
 import { LOCATION_KINDS } from './availability.ts'
 import {
   type CatalogPage,
@@ -272,6 +273,106 @@ export async function setEventTypeNotifications(
         .execute()
     }
     return notifications
+  })
+}
+
+export const WaitlistSettingsSchema = z.strictObject({ enabled: z.boolean() })
+export type WaitlistSettings = z.infer<typeof WaitlistSettingsSchema>
+
+async function waitlistManager(db: Db, ctx: ServiceContext, row: { owner_user_id: string | null }) {
+  const current = await access(db, ctx, true)
+  if (row.owner_user_id !== null) {
+    if (current.personalOwnerId !== ctx.principal.user.id) throw notFound()
+  } else if (!current.canManageTeam) throw insufficientRole()
+}
+
+/** Internal only: the same role boundary protects settings and contact-free summaries. */
+export async function getEventTypeWaitlist(
+  ctx: ServiceContext,
+  id: string,
+): Promise<WaitlistSettings> {
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id)
+    await waitlistManager(trx, ctx, row)
+    return { enabled: row.waitlist_enabled }
+  })
+}
+
+/** Narrow replacement; disabling atomically erases contacts and revokes pending work. */
+export async function setEventTypeWaitlist(
+  ctx: ServiceContext,
+  id: string,
+  value: unknown,
+): Promise<WaitlistSettings> {
+  const settings = WaitlistSettingsSchema.parse(value)
+  return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id, { lock: true })
+    await waitlistManager(trx, ctx, row)
+    if (settings.enabled) {
+      const hosts = await trx
+        .selectFrom('event_type_hosts')
+        .select('user_id')
+        .where('event_type_id', '=', row.id)
+        .execute()
+      if (
+        row.scheduling_type !== 'individual' ||
+        hosts.length !== 1 ||
+        (row.owner_user_id !== null && hosts[0]?.user_id !== row.owner_user_id)
+      ) {
+        throw new DomainError('invalid', 'waitlist_unsupported')
+      }
+      try {
+        await assertHosts(
+          trx,
+          row.organization_id,
+          hosts.map((host) => host.user_id),
+          true,
+        )
+      } catch (error) {
+        if (error instanceof DomainError) throw new DomainError('invalid', 'waitlist_unsupported')
+        throw error
+      }
+    }
+    if (row.waitlist_enabled !== settings.enabled)
+      await trx
+        .updateTable('event_types')
+        .set({ waitlist_enabled: settings.enabled })
+        .where('id', '=', row.id)
+        .execute()
+    return settings
+  })
+}
+
+/** Only aggregate lifecycle/delivery results, with no per-entry identity or preferences. */
+export async function getEventTypeWaitlistSummary(ctx: ServiceContext, id: string) {
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id)
+    await waitlistManager(trx, ctx, row)
+    const counts = await sql<{
+      pending: number
+      active: number
+      notified: number
+      suppressed: number
+      failed: number
+    }>`
+      WITH instant AS MATERIALIZED (SELECT clock_timestamp() AS at)
+      SELECT
+        (SELECT count(*)::int FROM waitlist_entries e, instant t WHERE e.event_type_id=${id}
+          AND e.status='pending_verification' AND e.expires_at>t.at AND e.pending_expires_at>t.at) AS pending,
+        (SELECT count(*)::int FROM waitlist_entries e, instant t WHERE e.event_type_id=${id}
+          AND e.status='active' AND e.expires_at>t.at) AS active,
+        (SELECT count(*)::int FROM waitlist_entries e, instant t WHERE e.event_type_id=${id}
+          AND e.status='notified' AND e.expires_at>t.at) AS notified,
+        (SELECT count(*)::int FROM waitlist_candidates c WHERE c.event_type_id=${id} AND c.state='suppressed') AS suppressed,
+        (SELECT count(*)::int FROM waitlist_candidates c WHERE c.event_type_id=${id} AND c.state IN ('failed','rejected')) AS failed
+    `.execute(trx)
+    const summary = counts.rows[0]
+    if (!summary) throw new Error('Missing waitlist aggregate')
+    return summary
   })
 }
 

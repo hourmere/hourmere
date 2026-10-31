@@ -29,6 +29,7 @@ import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
+import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
   bookingNotificationJob,
@@ -48,7 +49,13 @@ import {
   scheduledBookingEmailRepairJob,
   signInEmailJobs,
 } from '@hourmere/notifications'
-import { type BookingNotifier, leaveTeamMember } from '@hourmere/scheduling'
+import {
+  type BookingNotifier,
+  cleanupWaitlist,
+  ensureWaitlistKey,
+  leaveTeamMember,
+  scanWaitlists,
+} from '@hourmere/scheduling'
 import { webhookBookingNotifier, webhookCleanupJob, webhookDeliveryJob } from '@hourmere/webhooks'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
@@ -250,6 +257,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     if (applied.length) console.log(`migrations applied: ${applied.join(', ')}`)
   }
 
+  try {
+    await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
+  } catch (error) {
+    await db.destroy()
+    throw error
+  }
+
   let mailer: Mailer
   if (config.SMTP_URL && config.MAIL_FROM) {
     mailer = createSmtpMailer({ url: config.SMTP_URL, from: config.MAIL_FROM })
@@ -390,9 +404,22 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
     invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
   }
+  const waitlistDeps = {
+    db,
+    secret: config.BETTER_AUTH_SECRET,
+    publicUrl: config.PUBLIC_URL,
+    automaticMeet: config.GOOGLE_MEET_ENABLED,
+    automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+  }
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
+      ...waitlistMaintenanceJobs({
+        scan: () => scanWaitlists(waitlistDeps),
+        cleanup: () => cleanupWaitlist(waitlistDeps, { limit: 1000 }),
+        continueCleanup: (): Promise<string | null> =>
+          jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' }),
+      }),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,
@@ -461,6 +488,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     throw err
   }
   if (role !== 'web') {
+    try {
+      await scanWaitlists(waitlistDeps)
+      await jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' })
+    } catch {
+      console.error('ERROR waitlist-maintenance: startup_scan_unavailable')
+    }
     try {
       await repairScheduledBookingEmails(notificationDeps, scheduledQueue)
     } catch {

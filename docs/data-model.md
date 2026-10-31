@@ -808,6 +808,55 @@ fresh install and verifies no-op reruns. See
 [the 0049 upgrade note](../packages/db/migrations/0049_configurable_booking_messages.md)
 for the required coordinated worker rollout.
 
+## Internal full-booking waitlists
+
+Migration 0051 adds an opt-in `waitlist_enabled` flag, defaulting to false without importing
+historical booking contacts. The internal services support personal and team individual
+event types with exactly one eligible host. Public routes, UI, MCP, CLI and email sending
+are separate work; this layer stores encrypted verification intents and availability
+candidates without dispatching either kind of mail.
+
+`waitlist_entries` keeps fixed UTC preference windows and consent, with pending verification,
+active, notified, booked, expired and removed states. Deadlines never renew: verification
+lasts thirty elapsed minutes, pending enrollment at most twenty-four hours, and enrollment
+at most thirty days or the preference end. Purpose-bound capability digests authorize
+verification or self-management. A valid management capability can attribute a new ordinary
+booking only when event, verified mailbox and complete preferred interval match. The
+existing host locks, availability checks and exclusion constraint decide booking success;
+replays do not attach an entry and losing a booking race leaves it waiting.
+
+Admission checks durable rolling mailbox, IP and event limits under database locks, as
+well as the fifteen-minute resend cooldown and one hundred pending/live entries per event.
+`waitlist_verification_requests` has no cascading foreign keys and retains purpose-separated
+mailbox/IP HMACs for two elapsed days. IPv6 addresses share their /64 bucket; the service
+accepts only an IP resolved by a trusted transport and stores no raw address.
+
+Transactional triggers record shared-host invalidations for bookings, event rules, schedules,
+overrides, profiles and cached calendars. Startup/minute maintenance scans committed ordinary
+availability only, in bounded seven-day pages with persisted cursors and fair event scheduling.
+Every eligible verified recipient in a pass enters the same cohort. Each immutable candidate
+contains at most three full matching UTC intervals and expires at the earliest of discovery
+plus twenty-four hours, entry expiry or the first slot's current notice cutoff. There is no
+hold, rank or intentional delay awaiting another invitee. Future senders must recheck current
+lifecycle, exact availability and the shared ordinary-recipient mail budget before sending;
+candidate creation is not evidence of SMTP acceptance or inbox delivery.
+
+Independent `waitlist_slot_tombstones` uniquely identify event, mailbox HMAC and exact UTC
+start/end. They survive removal, rejoining, event deletion and delivery cleanup until slot
+end plus forty-eight elapsed hours, at most about sixty-four days for newly admitted windows.
+Self-removal and event disable/identity changes immediately erase contacts and revoke work;
+hourly bounded cleanup erases booked/expired contact data, expires old entries and removes
+minimal terminal metadata within seven days. Rotating the accounting secret retires and
+erases old entries/ciphertext/capabilities before admission or workers resume. Old secrets
+are not retained; mailbox limits and slot dedupe cannot span that explicit key-rotation
+exception. Existing global send accounting remains unchanged.
+
+The populated 0049 predecessor test verifies historical contacts, management hashes,
+reschedule chains, calendars, conferences, mail ledgers and retained jobs byte-for-byte,
+then compares upgraded/fresh schemas and a no-op rerun. See the
+[0051 rollout note](../packages/db/migrations/0051_waitlist.md) for the coordinated process
+upgrade requirement; additive storage does not make mixed writer/worker versions safe.
+
 ## Booking webhooks
 
 Migration 0017 adds organization-owned `webhooks` (bounded subscriptions, active flag and

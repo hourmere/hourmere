@@ -5,6 +5,7 @@ import { createAuth, createAuthPool, type Principal, removeTeamMember } from '@h
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { catalogPage, checkedCatalogPage } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -41,7 +42,7 @@ function sourceCopy(replacement?: Replacement): SourceCopy {
     /\bexport /g,
     '',
   )
-  const bindings = { DomainError, catalogPage, checkedCatalogPage, isUuid }
+  const bindings = { DomainError, catalogPage, checkedCatalogPage, isUuid, z }
   return new Function(
     ...Object.keys(bindings),
     `${source}; return { directory: listEventTypeHosts, hosts: validHosts, write: assertCanWrite }`,

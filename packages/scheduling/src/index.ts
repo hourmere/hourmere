@@ -80,6 +80,8 @@ export {
   type EventTypeUpdate,
   getEventType,
   getEventTypeNotifications,
+  getEventTypeWaitlist,
+  getEventTypeWaitlistSummary,
   listEventTypeCatalog,
   listEventTypeHosts,
   listEventTypes,
@@ -88,7 +90,10 @@ export {
   type SchedulingType,
   SLUG_PATTERN,
   setEventTypeNotifications,
+  setEventTypeWaitlist,
   updateEventType,
+  type WaitlistSettings,
+  WaitlistSettingsSchema,
 } from './event-types.ts'
 export { validTimeZone } from './internal.ts'
 export {
@@ -207,3 +212,5 @@ export {
   type TextRules,
   textSchema,
 } from './text.ts'
+export * from './waitlist.ts'
+export { scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
