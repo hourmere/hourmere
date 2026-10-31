@@ -21,6 +21,23 @@ export function teamReadinessAllowsSharing(item: EventReadiness | undefined) {
   )
 }
 
+/** Preserve existing links unless the service reports a configuration problem. */
+export function teamReadinessBlocksSharing(item: EventReadiness | undefined) {
+  if (!item || !('reasonCodes' in item) || item.summary === 'partial_pool') return false
+  return (
+    item.summary === 'configuration_blocked' ||
+    item.summary === 'dependency_unavailable' ||
+    item.reasonCodes.some((reason) =>
+      [
+        'default_schedule_required',
+        'host_configuration_required',
+        'calendar_attention_required',
+        'optional_feature_attention_required',
+      ].includes(reason),
+    )
+  )
+}
+
 export function readinessErrorStatus(me: Me, err: unknown): 'unavailable' | 'error' {
   return !me.organization.personal &&
     err instanceof RequestError &&

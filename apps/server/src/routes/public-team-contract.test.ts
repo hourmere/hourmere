@@ -158,10 +158,22 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
     expect((await app.request(`${lower}/slots?${range}`)).status).toBe(404)
   })
 
-  it.each(['saved', 'inactive', 'no-eligible-hosts'] as const)(
+  it.each(['saved', 'activation-disabled', 'inactive', 'no-eligible-hosts'] as const)(
     'does not expose a bookable round-robin page or slots when %s',
     async (mode) => {
       const s = await setup('round_robin', mode !== 'saved')
+      if (mode === 'activation-disabled') {
+        const hosts = s.users.map((user) => ({ userId: user.id }))
+        await updateEventType(s.ctx, s.event.id, { schedulingType: 'collective', hosts })
+        await updateEventType(s.ctx, s.event.id, { schedulingType: 'round_robin', hosts })
+        expect(
+          await db
+            .selectFrom('round_robin_state')
+            .select('enabled')
+            .where('event_type_id', '=', s.event.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ enabled: false })
+      }
       if (mode === 'inactive') await updateEventType(s.ctx, s.event.id, { isActive: false })
       if (mode === 'no-eligible-hosts') {
         await db

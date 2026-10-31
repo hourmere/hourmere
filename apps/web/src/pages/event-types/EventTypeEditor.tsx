@@ -36,7 +36,7 @@ import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
-import { teamReadinessAllowsSharing } from './event-readiness.ts'
+import { teamReadinessBlocksSharing } from './event-readiness.ts'
 import {
   comparable,
   draftFromEventType,
@@ -331,20 +331,41 @@ function EventTypeForm({
     navigate(PATHS.eventTypes, { state: flash(msg('Deleted “{0}”.', { '0': saved.title })) })
   }
 
+  const previewItem = shareReadiness.status === 'ready' ? shareReadiness.item : undefined
+  const previewReasons = previewItem && 'reasonCodes' in previewItem ? previewItem.reasonCodes : []
   const slugPreview = bookingLinkPreview(
     me,
     profile,
     draft.slug.trim(),
     draft.schedulingType,
     draft.hostUserIds.length,
-    saved?.roundRobinActive ?? false,
-    draft.isActive && (saved?.isActive ?? true),
+    saved?.roundRobinActive === true && previewItem?.activation !== 'inactive',
+    draft.isActive && (saved?.isActive ?? true) && previewItem?.enablement !== 'disabled',
     saved !== null &&
-      !(shareReadiness.status === 'ready' && teamReadinessAllowsSharing(shareReadiness.item)),
+      shareReadiness.status === 'ready' &&
+      teamReadinessBlocksSharing(shareReadiness.item),
   )
   const previewUrl = slugPreview.startsWith(`${window.location.origin}/`) ? slugPreview : null
   const previewPath = previewUrl ? new URL(previewUrl).pathname : ''
-  const bookingLinkHint = t('Lowercase letters, digits and hyphens. {0}').split('{0}')
+  const previewReadinessMessage: MessageKey | null =
+    !me.organization.personal &&
+    saved !== null &&
+    (previewItem?.completeness !== 'complete' ||
+      previewItem.summary === 'not_checked' ||
+      previewItem.summary === 'check_failed' ||
+      previewReasons.some(
+        (reason) => reason === 'check_failed' || reason === 'check_not_performed',
+      ))
+      ? shareReadiness.status === 'loading'
+        ? 'Checking configuration…'
+        : shareReadiness.status === 'unavailable'
+          ? 'Readiness checks are unavailable for this account.'
+          : shareReadiness.status === 'error' ||
+              previewItem?.summary === 'check_failed' ||
+              previewReasons.includes('check_failed')
+            ? 'Configuration check failed'
+            : 'Configuration not checked'
+      : null
   const duration = parseWhole(draft.durationMinutes)
   const suggestedSlug = slugSuffix
     ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
@@ -457,33 +478,12 @@ function EventTypeForm({
                 id="slug"
                 label={t('Booking link')}
                 error={errors.slug}
-                hint={
-                  <>
-                    {bookingLinkHint[0]}
-                    {previewUrl ? (
-                      <span className="booking-link">
-                        <span className="mono preview booking-link-path" title={previewUrl}>
-                          <span className="booking-link-handle">
-                            {previewPath.slice(0, previewPath.lastIndexOf('/'))}
-                          </span>
-                          <span className="booking-link-slug">
-                            {previewPath.slice(previewPath.lastIndexOf('/'))}
-                          </span>
-                        </span>
-                        {(dirty || !saved) && (
-                          <span>{t('Save your changes before sharing this address.')}</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span>{ui(slugPreview)}</span>
-                    )}
-                    {bookingLinkHint[1]}
-                  </>
-                }
+                hint={t('Lowercase letters, digits and hyphens.')}
               >
                 {(props) => (
                   <input
                     {...props}
+                    aria-describedby={`${props['aria-describedby']} booking-link-status`}
                     className="mono"
                     value={draft.slug}
                     autoComplete="off"
@@ -496,6 +496,31 @@ function EventTypeForm({
                   />
                 )}
               </Field>
+              <div id="booking-link-status" className="hint" role="status">
+                {previewUrl ? (
+                  <span className="booking-link">
+                    <span className="mono preview booking-link-path" title={previewUrl}>
+                      <span className="booking-link-handle">
+                        {previewPath.slice(0, previewPath.lastIndexOf('/'))}
+                      </span>
+                      <span className="booking-link-slug">
+                        {previewPath.slice(previewPath.lastIndexOf('/'))}
+                      </span>
+                    </span>
+                    {(dirty || !saved) && (
+                      <span>{t('Save your changes before sharing this address.')}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span>{ui(slugPreview)}</span>
+                )}
+                {previewReadinessMessage && (
+                  <p>
+                    {t(previewReadinessMessage)}{' '}
+                    <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+                  </p>
+                )}
+              </div>
               <Field
                 id="description"
                 label={t('Description')}

@@ -8,10 +8,16 @@ import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
+import { Field } from '../../components/forms.tsx'
 import * as paths from '../../paths.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
-import { type TeamEventReadiness, teamReadinessAllowsSharing } from './event-readiness.ts'
+import type { EditorReadiness } from './editor-readiness.ts'
+import {
+  type TeamEventReadiness,
+  teamReadinessAllowsSharing,
+  teamReadinessBlocksSharing,
+} from './event-readiness.ts'
 import type { SavedEventShare } from './SavedEventShare.tsx'
 
 const TEAM = { ...ME, organization: { ...ME.organization, personal: false, slug: 'Design-TEAM' } }
@@ -65,6 +71,7 @@ const common = {
   isPublicTeamSlug,
   useI18n: () => ({ t: (text: string) => text, locale: 'en' }),
   teamReadinessAllowsSharing,
+  teamReadinessBlocksSharing,
 }
 const ConfigurationChecks = () => null
 
@@ -135,6 +142,221 @@ function assertShareHidden(source: string, event = EVENT, item: TeamEventReadine
 }
 
 describe('team sharing production-source negative controls', () => {
+  it.each([
+    {
+      item: { ...CHECK, enablement: 'disabled' as const, summary: 'disabled' as const },
+      shareGuard: " || item?.enablement === 'disabled'",
+      previewGuard: " && previewItem?.enablement !== 'disabled'",
+      preview: 'This event type is inactive. Enable it and save before sharing.',
+      repair: 'Review enablement',
+    },
+    {
+      item: { ...CHECK, activation: 'inactive' as const, summary: 'needs_activation' as const },
+      shareGuard: " || item?.activation === 'inactive'",
+      previewGuard: " && previewItem?.activation !== 'inactive'",
+      preview: 'Activate round robin to get a public booking link.',
+      repair: 'Review round-robin activation',
+    },
+  ])(
+    'detects ignoring the observed $item.summary axis',
+    ({ item, shareGuard, previewGuard, preview, repair }) => {
+      function assertShare(source: string) {
+        const Share = share(source)
+        const view = render(
+          <MemoryRouter>
+            <Share
+              event={EVENT}
+              me={TEAM}
+              profile={null}
+              schedules={[]}
+              readiness={{ status: 'ready', item }}
+              retryReadiness={() => {}}
+            />
+          </MemoryRouter>,
+        )
+        try {
+          expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+          expect(screen.queryByRole('link', { name: repair })).not.toBeNull()
+          expect(screen.queryByText('Configuration not checked')).toBeNull()
+        } finally {
+          view.unmount()
+        }
+      }
+      assertShare(shareFunction)
+      expect(() => assertShare(mutate(shareFunction, shareGuard))).toThrowError(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+      assertShare(shareFunction)
+      expect(() =>
+        assertShare(mutate(shareFunction, "item?.completeness !== 'complete' ||", 'true ||')),
+      ).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
+      assertShare(shareFunction)
+
+      const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
+      const previewState = editor.slice(
+        editor.indexOf('  const previewItem ='),
+        editor.indexOf('  const duration ='),
+      )
+      const bookingPreview = editor.slice(
+        editor.indexOf('function bookingLinkPreview('),
+        editor.indexOf('/** A whole number of minutes'),
+      )
+      function assertPreview(source: string) {
+        const Preview = copy<() => { slugPreview: string; previewReadinessMessage: string | null }>(
+          `${bookingPreview}\nfunction Preview() { ${source}; return { slugPreview, previewReadinessMessage } }`,
+          'Preview',
+          {
+            ...common,
+            me: TEAM,
+            profile: null,
+            saved: EVENT,
+            draft: { ...EVENT, hostUserIds: EVENT.hosts.map((host) => host.userId) },
+            shareReadiness: { status: 'ready', item },
+          },
+        )
+        expect(Preview()).toEqual({ slugPreview: preview, previewReadinessMessage: null })
+      }
+      assertPreview(previewState)
+      expect(() => assertPreview(mutate(previewState, previewGuard))).toThrowError(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+      assertPreview(previewState)
+    },
+  )
+
+  it.each([
+    { status: 'unchecked' },
+    { status: 'loading' },
+    { status: 'error' },
+    { status: 'unavailable' },
+    { status: 'ready', item: undefined },
+    { status: 'ready', item: { ...CHECK, completeness: 'partial' } },
+    { status: 'ready', item: { ...CHECK, summary: 'check_failed' } },
+    { status: 'ready', item: { ...CHECK, summary: 'not_checked' } },
+  ] satisfies EditorReadiness[])(
+    'detects removing saved links for unknown readiness: %j',
+    (readiness) => {
+      function assertion(source: string) {
+        const Share = share(source)
+        const view = render(
+          <MemoryRouter>
+            <Share
+              event={EVENT}
+              me={TEAM}
+              profile={null}
+              schedules={[]}
+              readiness={readiness}
+              retryReadiness={() => {}}
+            />
+          </MemoryRouter>,
+        )
+        try {
+          expect(screen.queryByRole('button', { name: 'Copy booking link' })).not.toBeNull()
+          expect(screen.queryByText('Configuration needs attention')).toBeNull()
+        } finally {
+          view.unmount()
+        }
+      }
+      assertion(shareFunction)
+      const mutant = mutate(
+        shareFunction,
+        'team && teamReadinessBlocksSharing(item)',
+        'team && !teamReadinessAllowsSharing(item)',
+      )
+      expect(() => assertion(mutant)).toThrowError(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+      assertion(shareFunction)
+    },
+  )
+
+  it.each([
+    { status: 'loading', message: 'Checking configuration…' },
+    { status: 'error', message: 'Configuration check failed' },
+    { status: 'unavailable', message: 'Readiness checks are unavailable for this account.' },
+  ] as const)('detects false configuration warnings while $status', ({ status, message }) => {
+    function assertion(source: string) {
+      const Share = share(source)
+      const view = render(
+        <MemoryRouter>
+          <Share
+            event={EVENT}
+            me={TEAM}
+            profile={null}
+            schedules={[]}
+            readiness={{ status }}
+            retryReadiness={() => {}}
+          />
+        </MemoryRouter>,
+      )
+      try {
+        expect(screen.queryByText(message)).not.toBeNull()
+        expect(screen.queryByText('Configuration needs attention')).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    }
+    assertion(shareFunction)
+    const mutant = mutate(shareFunction, `'${message}'`, "'Configuration needs attention'")
+    expect(() => assertion(mutant)).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    assertion(shareFunction)
+  })
+
+  it('detects moving readiness status into the slug format hint', () => {
+    const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
+    const fragment = editor.slice(
+      editor.indexOf('<Field\n                id="slug"'),
+      editor.indexOf('<Field\n                id="description"'),
+    )
+    function assertion(source: string) {
+      const Preview = copy<ComponentType>(
+        `function Preview() { return <>${source}</> }`,
+        'Preview',
+        {
+          Field,
+          t: (text: string) => text,
+          ui: (text: string) => text,
+          errors: {},
+          draft: { slug: EVENT.slug },
+          previewUrl: null,
+          previewPath: '',
+          slugPreview: 'Configuration check failed',
+          previewReadinessMessage: 'Configuration check failed',
+          saved: EVENT,
+          dirty: false,
+          setSlugTouched: () => {},
+          set: () => {},
+        },
+      )
+      const view = render(<Preview />)
+      try {
+        expect(view.container.querySelector('#slug-hint')?.textContent).toBe(
+          'Lowercase letters, digits and hyphens.',
+        )
+        const status = view.container.querySelector('#booking-link-status')
+        expect(status?.textContent).toContain('Configuration check failed')
+        expect(view.container.querySelector('#slug-hint')?.contains(status)).toBe(false)
+        expect(view.container.querySelector('#slug')?.getAttribute('aria-describedby')).toContain(
+          'booking-link-status',
+        )
+      } finally {
+        view.unmount()
+      }
+    }
+    assertion(fragment)
+    const mutant = mutate(
+      fragment,
+      "hint={t('Lowercase letters, digits and hyphens.')}",
+      "hint={<>{t('Lowercase letters, digits and hyphens.')} {t(previewReadinessMessage)}</>}",
+    )
+    expect(() => assertion(mutant)).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    assertion(fragment)
+  })
+
   it('detects an unconditional booking promise in the team editor visibility hint', () => {
     const source = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
     const start = source.indexOf(
@@ -224,7 +446,7 @@ describe('team sharing production-source negative controls', () => {
       }
     }
     assertion(shareFunction)
-    const mutant = mutate(shareFunction, 'configurationNeedsReview &&', 'checksBlocked &&')
+    const mutant = mutate(shareFunction, 'configurationNeedsReview &&', 'true &&')
     expect(() => assertion(mutant)).toThrowError(
       expect.objectContaining({ name: 'AssertionError' }),
     )
@@ -235,7 +457,7 @@ describe('team sharing production-source negative controls', () => {
     { guard: 'e.isActive &&', event: { ...EVENT, isActive: false }, item: CHECK },
     { guard: 'e.roundRobinActive &&', event: { ...EVENT, roundRobinActive: false }, item: CHECK },
     {
-      guard: 'teamReadinessAllowsSharing(item) &&',
+      guard: '!teamReadinessBlocksSharing(item) &&',
       event: EVENT,
       item: { ...CHECK, summary: 'configuration_blocked' as const },
     },
@@ -250,11 +472,11 @@ describe('team sharing production-source negative controls', () => {
 
   it.each([
     {
-      guard: '!checksBlocked &&',
+      guard: '    !checksBlocked &&',
       event: EVENT,
-      item: { ...CHECK, summary: 'check_failed' as const },
+      item: { ...CHECK, summary: 'configuration_blocked' as const },
     },
-    { guard: '    event.isActive &&', event: { ...EVENT, isActive: false }, item: CHECK },
+    { guard: '    !inactive &&', event: { ...EVENT, isActive: false }, item: CHECK },
     { guard: '!needsActivation', event: { ...EVENT, roundRobinActive: false }, item: CHECK },
   ])('detects removal of share $guard', ({ guard, event, item }) => {
     assertShareHidden(shareFunction, event, item)
@@ -310,6 +532,72 @@ describe('team sharing production-source negative controls', () => {
     readinessSource.indexOf('export function teamReadinessAllowsSharing'),
     readinessSource.indexOf('export function readinessErrorStatus'),
   )
+  const blockingSource = readinessSource.slice(
+    readinessSource.indexOf('export function teamReadinessBlocksSharing'),
+    readinessSource.indexOf('export function readinessErrorStatus'),
+  )
+  it.each([
+    {
+      before: "item.summary === 'configuration_blocked' ||",
+      after: '',
+      item: { ...CHECK, summary: 'configuration_blocked' as const },
+      blocked: true,
+    },
+    {
+      before: "item.summary === 'dependency_unavailable' ||",
+      after: '',
+      item: { ...CHECK, summary: 'dependency_unavailable' as const },
+      blocked: true,
+    },
+    ...(
+      [
+        'default_schedule_required',
+        'host_configuration_required',
+        'calendar_attention_required',
+        'optional_feature_attention_required',
+      ] as const
+    ).map((reason) => ({
+      before: `'${reason}',`,
+      after: '',
+      item: {
+        ...CHECK,
+        summary: 'check_failed' as const,
+        completeness: 'partial' as const,
+        reasonCodes: [reason],
+      },
+      blocked: true,
+    })),
+    {
+      before: " || item.summary === 'partial_pool'",
+      after: '',
+      item: {
+        ...CHECK,
+        summary: 'partial_pool' as const,
+        reasonCodes: ['default_schedule_required' as const],
+      },
+      blocked: false,
+    },
+  ])('detects known service result guard removal: $before', ({ before, after, item, blocked }) => {
+    function assertion(source: string) {
+      const blocks = copy<typeof teamReadinessBlocksSharing>(
+        source,
+        'teamReadinessBlocksSharing',
+        {},
+      )
+      expect(blocks(item)).toBe(blocked)
+      expect(blocks(undefined)).toBe(false)
+      expect(blocks({ ...CHECK, summary: 'not_checked' })).toBe(false)
+      expect(blocks({ ...CHECK, summary: 'check_failed' })).toBe(false)
+      expect(blocks({ ...CHECK, completeness: 'partial' })).toBe(false)
+    }
+    assertion(blockingSource)
+    const mutant = mutate(blockingSource, before, after)
+    expect(() => assertion(mutant)).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    assertion(blockingSource)
+  })
+
   it.each([
     {
       before: "item.completeness === 'complete' &&",

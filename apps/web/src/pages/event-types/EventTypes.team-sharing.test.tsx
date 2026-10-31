@@ -88,7 +88,7 @@ describe('team list readiness and saved sharing', () => {
       const hint =
         language === 'en'
           ? 'Unlisted is not access control. Once this event type is bookable, anyone who knows or guesses its direct link can book it.'
-          : '仅限链接不代表访问控制。此预约类型开放预约后，任何知道或猜到直达链接的人都可以预约。'
+          : '仅限链接不代表访问控制。此活动类型开放预约后，任何知道或猜到直接链接的人都可以预约。'
       expect(within(share).getByText(hint)).toBeDefined()
       expect(screen.getAllByText(hint)).toHaveLength(2)
       expect(
@@ -132,6 +132,10 @@ describe('team list readiness and saved sharing', () => {
       )
       expect(within(share).getByRole('link', { name: repair })).toBeDefined()
       expect(within(share).queryByText('Configuration needs attention')).toBeNull()
+      expect(within(share).queryByText('Configuration not checked')).toBeNull()
+      expect(document.getElementById('booking-link-status')?.textContent).not.toContain(
+        'Configuration not checked',
+      )
       expect(within(share).queryByRole('button', { name: 'Retry checks' })).toBeNull()
       expect(within(share).queryByRole('link', { name: /View booking page/ })).toBeNull()
     },
@@ -140,7 +144,7 @@ describe('team list readiness and saved sharing', () => {
   it.each(
     types.flatMap((type) => (['en', 'zh-CN'] as const).map((language) => ({ type, language }))),
   )(
-    'uses shared readiness for the $type next step in $language without prescribing the viewer’s hours',
+    'uses shared readiness for the $type next step beside the viewer’s weekly hours in $language',
     async ({ type, language }) => {
       chooseLanguage(language)
       server(
@@ -162,16 +166,30 @@ describe('team list readiness and saved sharing', () => {
       expect(within(row()).queryByRole('button', { name: /Copy link|复制.*链接/ })).toBeNull()
       expect(within(row()).queryByRole('link', { name: /\/team\// })).toBeNull()
       expect(
-        screen.queryByRole('link', {
+        screen.getByRole('link', {
           name: language === 'en' ? 'Set your weekly hours' : '设置每周时间段',
         }),
-      ).toBeNull()
+      ).toBeDefined()
     },
   )
 
   it.each([
     { name: 'disabled', event: { isActive: false }, item: check() },
     { name: 'dormant', event: { roundRobinActive: false }, item: check() },
+    {
+      name: 'disabled readiness after an active event snapshot',
+      event: {},
+      item: check({ summary: 'disabled', enablement: 'disabled' }),
+    },
+    {
+      name: 'inactive readiness after an activated event snapshot',
+      event: {},
+      item: check({
+        summary: 'needs_activation',
+        activation: 'inactive',
+        reasonCodes: ['activation_required'],
+      }),
+    },
     {
       name: 'no eligible hosts',
       event: {},
@@ -182,11 +200,15 @@ describe('team list readiness and saved sharing', () => {
       }),
     },
     {
-      name: 'failed eligibility check',
+      name: 'known missing hours alongside a failed check',
       event: {},
-      item: check({ summary: 'check_failed', fixKinds: ['retry_summary'] }),
+      item: check({
+        summary: 'check_failed',
+        completeness: 'partial',
+        reasonCodes: ['default_schedule_required', 'check_failed'],
+        fixKinds: ['ask_member', 'retry_summary'],
+      }),
     },
-    { name: 'partial eligibility check', event: {}, item: check({ completeness: 'partial' }) },
   ])('withholds list and share actions for a $name round-robin pool', async ({ event, item }) => {
     const user = userEvent.setup()
     server(teamEvent('round_robin', event), item)
@@ -213,6 +235,28 @@ describe('team list readiness and saved sharing', () => {
     expect(within(share).queryByRole('link', { name: /View booking page/ })).toBeNull()
     expect(within(share).queryByRole('button', { name: 'Copy booking link' })).toBeNull()
     expect(share.querySelector('a[href^="#"]')).not.toBeNull()
+  })
+
+  it.each([
+    {
+      label: 'Configuration check failed',
+      item: check({ summary: 'check_failed', fixKinds: ['retry_summary'] }),
+    },
+    { label: 'Configuration not checked', item: check({ completeness: 'partial' }) },
+    { label: 'Configuration not checked', item: check({ summary: 'not_checked' }) },
+  ])('keeps activated links copyable when readiness says $label', async ({ label, item }) => {
+    const user = userEvent.setup()
+    server(teamEvent('round_robin'), item)
+    renderApp('/app/event-types')
+    await screen.findByText(label)
+    expect(within(row()).queryByText('Configuration needs attention')).toBeNull()
+    expect(within(row()).queryByText('No public booking link')).toBeNull()
+    await user.click(within(row()).getByRole('button', { name: 'Copy link for Intro call' }))
+    expect(await navigator.clipboard.readText()).toBe(url())
+    await user.click(within(row()).getByRole('link', { name: 'Edit Intro call' }))
+    const share = await screen.findByRole('region', { name: 'View and share' })
+    await within(share).findByRole('button', { name: 'Copy booking link' })
+    expect(within(share).queryByText('Configuration needs attention')).toBeNull()
   })
 
   it.each(types)(
@@ -254,15 +298,17 @@ describe('team list readiness and saved sharing', () => {
     expect(
       (await screen.findByRole('button', { name: 'Copy link for Intro call' })).textContent,
     ).toContain('Copy link')
-    expect(within(row()).getByText('Some hosts need attention')).toBeDefined()
+    expect(await within(row()).findByText('Some hosts need attention')).toBeDefined()
   })
 
-  it('waits for readiness before presenting a team list link', async () => {
+  it('keeps the team list link copyable while readiness loads', async () => {
     const pending = later()
     server(teamEvent('round_robin'), check(), pending)
     renderApp('/app/event-types')
     await screen.findByRole('rowheader', { name: 'Intro call' })
-    expect(within(row()).queryByRole('button', { name: 'Copy link for Intro call' })).toBeNull()
+    expect(within(row()).getByRole('button', { name: 'Copy link for Intro call' })).toBeDefined()
+    expect(within(row()).getByText('Checking configuration…')).toBeDefined()
+    expect(within(row()).queryByText('No public booking link')).toBeNull()
     await pending.answer(
       json(200, {
         organizationId: TEAM.organization.id,

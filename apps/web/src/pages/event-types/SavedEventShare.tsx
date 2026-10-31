@@ -16,7 +16,7 @@ import type { Me } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { validSchedule } from '../availability/valid-default.ts'
 import type { EditorReadiness } from './editor-readiness.ts'
-import { teamReadinessAllowsSharing } from './event-readiness.ts'
+import { teamReadinessBlocksSharing } from './event-readiness.ts'
 
 /** Sharing always describes a saved server response, independently of the editable draft. */
 export function SavedEventShare({
@@ -65,19 +65,27 @@ export function SavedEventShare({
         event.hosts.length <= 8) ||
       (event.schedulingType === 'round_robin' && event.hosts.length >= 1 && event.hosts.length <= 8)
     )
-  const needsActivation = event.schedulingType === 'round_robin' && !event.roundRobinActive
   const item = readiness.status === 'ready' ? readiness.item : undefined
+  const inactive = !event.isActive || item?.enablement === 'disabled'
+  const needsActivation =
+    event.schedulingType === 'round_robin' &&
+    (!event.roundRobinActive || item?.activation === 'inactive')
   const reasons = item
     ? 'signals' in item
       ? item.signals.map((signal) => signal.reasonCode)
       : item.reasonCodes
     : []
+  const checksBlocked = team && teamReadinessBlocksSharing(item)
   const hostAvailabilityMissing =
     item && item.summary !== 'partial_pool' && reasons.includes('default_schedule_required')
   const hostConfigurationMissing =
     item && item.summary !== 'partial_pool' && reasons.includes('host_configuration_required')
-  const checksMissing = team && !item
-  const checksBlocked = team && !teamReadinessAllowsSharing(item)
+  const checksMissing =
+    team &&
+    (item?.completeness !== 'complete' ||
+      item.summary === 'not_checked' ||
+      item.summary === 'check_failed' ||
+      reasons.some((reason) => reason === 'check_failed' || reason === 'check_not_performed'))
   // The service can prioritize enablement/activation over otherwise complete checks.
   const configurationNeedsReview =
     checksBlocked &&
@@ -99,7 +107,7 @@ export function SavedEventShare({
     !hostAvailabilityMissing &&
     !hostConfigurationMissing &&
     !checksBlocked &&
-    event.isActive &&
+    !inactive &&
     !event.isHidden &&
     !needsActivation
   const url = shareable
@@ -113,6 +121,29 @@ export function SavedEventShare({
       <h2 id="view-and-share" ref={heading} tabIndex={-1}>
         {t('View and share')}
       </h2>
+      {!disabled && checksMissing && (
+        <p>
+          {t(
+            readiness.status === 'loading'
+              ? 'Checking configuration…'
+              : readiness.status === 'unavailable'
+                ? 'Readiness checks are unavailable for this account.'
+                : readiness.status === 'error' ||
+                    item?.summary === 'check_failed' ||
+                    reasons.includes('check_failed')
+                  ? 'Configuration check failed'
+                  : 'Configuration not checked',
+          )}{' '}
+          <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+          {checksRetryable &&
+            readiness.status !== 'loading' &&
+            (readiness.status !== 'unavailable' || canRetryUnavailable) && (
+              <button type="button" className="button button-small" onClick={retryReadiness}>
+                {t('Retry checks')}
+              </button>
+            )}
+        </p>
+      )}
       {disabled ? (
         <p>{t('Your team context changed. Reload before making changes.')}</p>
       ) : url ? (
@@ -137,7 +168,7 @@ export function SavedEventShare({
         </>
       ) : (
         <ul>
-          {!event.isActive && (
+          {inactive && (
             <li>
               {t('This event type is inactive. Enable it and save before sharing.')}{' '}
               <a href="#event-enablement">{t('Review enablement')}</a>
@@ -207,30 +238,10 @@ export function SavedEventShare({
               )}
             </li>
           )}
-          {(checksMissing ||
-            (configurationNeedsReview &&
-              !hostAvailabilityMissing &&
-              !hostConfigurationMissing)) && (
+          {configurationNeedsReview && !hostAvailabilityMissing && !hostConfigurationMissing && (
             <li>
-              {t(
-                item
-                  ? 'Configuration needs attention'
-                  : readiness.status === 'loading'
-                    ? 'Checking configuration…'
-                    : readiness.status === 'unavailable'
-                      ? 'Readiness checks are unavailable for this account.'
-                      : readiness.status === 'error'
-                        ? 'Configuration check failed'
-                        : 'Configuration not checked',
-              )}{' '}
+              {t('Configuration needs attention')}{' '}
               <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
-              {checksRetryable &&
-                readiness.status !== 'loading' &&
-                (readiness.status !== 'unavailable' || canRetryUnavailable) && (
-                  <button type="button" className="button button-small" onClick={retryReadiness}>
-                    {t('Retry checks')}
-                  </button>
-                )}
             </li>
           )}
           {invalidTeamSlug && (

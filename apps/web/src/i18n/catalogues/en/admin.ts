@@ -907,6 +907,7 @@ export const admin = {
   'Long text': 'Long text',
   'Lower numbers come first on your booking page.':
     'Lower numbers come first on your booking page.',
+  'Lowercase letters, digits and hyphens.': 'Lowercase letters, digits and hyphens.',
   'Lowercase letters, digits and hyphens. {0}': 'Lowercase letters, digits and hyphens. {0}',
   'Make default': 'Make default',
   'Make default: {0}': 'Make default: {0}',

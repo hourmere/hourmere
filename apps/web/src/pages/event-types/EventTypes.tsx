@@ -23,8 +23,9 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
+import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
-import { teamReadinessAllowsSharing, useEventReadiness } from './event-readiness.ts'
+import { teamReadinessBlocksSharing, useEventReadiness } from './event-readiness.ts'
 import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
 
 async function loadPage(signal: AbortSignal) {
@@ -38,6 +39,7 @@ async function loadPage(signal: AbortSignal) {
 
 export function EventTypesPage() {
   const { t, uiText } = useI18n()
+  const scheduleHint = t('{0}, so there are times to book.').split('{0}')
 
   usePageTitle('Event types')
   const me = useMe()
@@ -89,6 +91,19 @@ export function EventTypesPage() {
               eventTypes={state.data.eventTypes}
               reload={reload}
             />
+          )}
+          {!me.organization.personal && !state.data.schedules.some(validDefault) && (
+            <div className="alert alert-info">
+              <p>
+                {scheduleHint[0]}
+                <Link
+                  to={state.data.schedules.length === 0 ? PATHS.newSchedule : PATHS.availability}
+                >
+                  {t('Set your weekly hours')}
+                </Link>
+                {scheduleHint[1]}
+              </p>
+            </div>
           )}
           {hostUserId && (
             <p>
@@ -162,15 +177,18 @@ function EventTypeTable({
         <tbody>
           {eventTypes.map((e) => {
             const item = readiness.status === 'ready' ? readiness.data.get(e.id) : undefined
+            const isActive =
+              e.isActive && (e.ownerUserId !== null || item?.enablement !== 'disabled')
+            const roundRobinActive = e.roundRobinActive && item?.activation !== 'inactive'
             const url =
               e.ownerUserId === null &&
               !me.organization.personal &&
-              e.isActive &&
-              teamReadinessAllowsSharing(item) &&
+              isActive &&
+              !teamReadinessBlocksSharing(item) &&
               ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
                 (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8) ||
                 (e.schedulingType === 'round_robin' &&
-                  e.roundRobinActive &&
+                  roundRobinActive &&
                   e.hosts.length >= 1 &&
                   e.hosts.length <= 8)) &&
               isPublicTeamSlug(me.organization.slug)
@@ -180,7 +198,7 @@ function EventTypeTable({
                   : null
             const pathname = url ? new URL(url).pathname : ''
             return (
-              <tr key={e.id} className={!e.isActive ? 'event-type-inactive' : undefined}>
+              <tr key={e.id} className={!isActive ? 'event-type-inactive' : undefined}>
                 <th scope="row" data-label={t('Title')} className="user-content">
                   <Link to={eventTypePath(e.id)}>{e.title}</Link>
                 </th>
@@ -222,12 +240,17 @@ function EventTypeTable({
                           : `/${e.slug}`}
                       </span>
                     )}
+                    {e.ownerUserId === null && readiness.status === 'unavailable' && (
+                      <span className="muted">
+                        {t('Readiness checks are unavailable for this account.')}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td data-label={t('Status')} className="fit">
                   <div className="table-value event-enablement">
                     {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
-                    {e.isActive ? (
+                    {isActive ? (
                       <span className="badge badge-success">{t('Active')}</span>
                     ) : e.ownerUserId === null ? (
                       <Link to={`${eventTypePath(e.id)}#event-enablement`} className="badge">
@@ -237,7 +260,7 @@ function EventTypeTable({
                       <span className="badge">{t('Inactive')}</span>
                     )}
                     {e.schedulingType === 'round_robin' &&
-                      (e.roundRobinActive ? (
+                      (roundRobinActive ? (
                         <span className="badge">{t('Round robin activated')}</span>
                       ) : (
                         <Link to={eventTypePath(e.id)} className="badge">

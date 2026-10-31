@@ -1195,7 +1195,7 @@ describe('unavailable team booking links', () => {
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
     expect(screen.queryByText(`${window.location.origin}/team/${slug}/intro-call`)).toBeNull()
     expect(
-      within(document.getElementById('slug-hint') as HTMLElement).getByText(
+      within(document.getElementById('booking-link-status') as HTMLElement).getByText(
         mode === 'individual'
           ? /Choose a non-reserved team slug/
           : mode === 'collective'

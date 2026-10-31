@@ -825,7 +825,7 @@ describe('saved event type readiness in the editor', () => {
         }),
       ).findByText(language === 'en' ? 'Configuration checks passed' : '配置检查通过')
       const checkbox = screen.queryByRole<HTMLInputElement>('checkbox', {
-        name: language === 'en' ? 'Enable this event type' : '启用此预约类型',
+        name: language === 'en' ? 'Enable this event type' : '启用此活动类型',
       })
       expect(checkbox).not.toBeNull()
       expect(checkbox?.checked).toBe(true)
@@ -842,6 +842,7 @@ describe('saved event type readiness in the editor', () => {
   it.each([
     { state: 'inactive', isActive: false, summary: 'checks_passed' },
     { state: 'no eligible hosts', isActive: true, summary: 'configuration_blocked' },
+    { state: 'failed check with known missing hosts', isActive: true, summary: 'check_failed' },
   ] as const)('withholds a round-robin preview URL when $state', async ({ isActive, summary }) => {
     server(
       eventType({
@@ -877,9 +878,59 @@ describe('saved event type readiness in the editor', () => {
     expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
   })
 
-  it.each(['loading', 'error', 'unavailable'] as const)(
-    'withholds an activated round-robin preview while saved readiness is %s',
-    async (status) => {
+  it.each([
+    {
+      enablement: 'disabled',
+      activation: 'active',
+      summary: 'disabled',
+      preview: 'This event type is inactive. Enable it and save before sharing.',
+      repair: 'Review enablement',
+    },
+    {
+      enablement: 'enabled',
+      activation: 'inactive',
+      summary: 'needs_activation',
+      preview: 'Activate round robin to get a public booking link.',
+      repair: 'Review round-robin activation',
+    },
+  ] as const)(
+    'uses readiness $summary when the earlier saved event response is still active',
+    async ({ enablement, activation, summary, preview, repair }) => {
+      server(
+        eventType({
+          organizationId: TEAM.organization.id,
+          ownerUserId: null,
+          schedulingType: 'round_robin',
+          roundRobinActive: true,
+          isActive: true,
+        }),
+        {
+          [TEAM_ROUTE]: () => json(200, teamPage(teamCheck({ enablement, activation, summary }))),
+        },
+        TEAM,
+      )
+      await open()
+      await within(readiness()).findByText('Configuration checks passed')
+      expect(document.getElementById('booking-link-status')?.textContent).toBe(preview)
+      expect(document.querySelector('.booking-link-path')).toBeNull()
+      const share = screen.getByRole('region', { name: 'View and share' })
+      expect(within(share).getByRole('link', { name: repair })).toBeDefined()
+      expect(within(share).queryByText('Configuration not checked')).toBeNull()
+      expect(within(share).queryByText('Configuration needs attention')).toBeNull()
+      expect(within(share).queryByRole('button', { name: 'Copy booking link' })).toBeNull()
+      expect(within(share).queryByRole('link', { name: /View booking page/ })).toBeNull()
+    },
+  )
+
+  it.each(
+    (['en', 'zh-CN'] as const).flatMap((language) =>
+      (['member', 'api_key', 'loading', 'error'] as const).map((state) => ({ language, state })),
+    ),
+  )(
+    'keeps an activated team link copyable with neutral $state readiness in $language',
+    async ({ language, state }) => {
+      chooseLanguage(language)
+      const user = userEvent.setup()
       const pending = later()
       const api = server(
         eventType({
@@ -890,24 +941,77 @@ describe('saved event type readiness in the editor', () => {
         }),
         {
           [TEAM_ROUTE]: () =>
-            status === 'loading' ? pending.response : json(503, { error: 'unavailable' }),
+            state === 'loading' ? pending.response : json(503, { error: 'unavailable' }),
+          ...(state === 'member' && {
+            'GET /api/auth/organization/get-active-member': () =>
+              json(200, {
+                organizationId: TEAM.organization.id,
+                userId: ME.user.id,
+                role: 'member',
+              }),
+          }),
         },
-        status === 'unavailable'
+        state === 'api_key'
           ? { ...TEAM, principal: { kind: 'api_key', apiKeyId: 'synthetic-api-key' } }
           : TEAM,
       )
-      await open()
-      if (status === 'loading') await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(1))
-      else
-        await within(readiness()).findByText(
-          status === 'unavailable'
-            ? 'Readiness checks are unavailable for this account.'
-            : 'Configuration check failed',
-        )
-      expect(document.querySelector('.booking-link-path')).toBeNull()
-      expect(screen.queryByRole('link', { name: /View booking page/ })).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
-      if (status === 'loading') await pending.answer(json(200, teamPage()))
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const checks = await screen.findByRole('region', {
+        name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+      })
+      const message =
+        state === 'loading'
+          ? language === 'en'
+            ? 'Checking configuration…'
+            : '正在检查配置…'
+          : state === 'error'
+            ? language === 'en'
+              ? 'Configuration check failed'
+              : '配置检查失败'
+            : language === 'en'
+              ? 'Readiness checks are unavailable for this account.'
+              : '此账号无法使用就绪检查。'
+      await within(checks).findByText(message)
+      const preview = document.getElementById('booking-link-status') as HTMLElement
+      expect(within(preview).getByText(message)).toBeDefined()
+      expect(preview.textContent).not.toContain(
+        language === 'en' ? 'Configuration needs attention' : '配置需要处理',
+      )
+      const hint = document.getElementById('slug-hint') as HTMLElement
+      expect(hint.textContent).toBe(
+        language === 'en'
+          ? 'Lowercase letters, digits and hyphens.'
+          : '使用小写字母、数字和连字符。',
+      )
+      expect(hint.contains(preview)).toBe(false)
+      expect(
+        document.getElementById('slug')?.getAttribute('aria-describedby')?.split(' '),
+      ).toContain('booking-link-status')
+      expect(preview.querySelector('.booking-link-path')?.textContent).toBe(
+        '/team/design-team/intro-call',
+      )
+      const share = screen.getByRole('region', {
+        name: language === 'en' ? 'View and share' : '查看与分享',
+      })
+      expect(within(share).getByText(message)).toBeDefined()
+      const link = within(share).getByRole('link', { name: /View booking page|查看预约页面/ })
+      const url = `${window.location.origin}/team/design-team/intro-call`
+      expect(link.getAttribute('href')).toBe(url)
+      await user.click(
+        within(share).getByRole('button', {
+          name: language === 'en' ? 'Copy booking link' : '复制预约链接',
+        }),
+      )
+      expect(await navigator.clipboard.readText()).toBe(url)
+      if (state === 'member' || state === 'api_key') {
+        expect(
+          within(share).queryByRole('button', {
+            name: language === 'en' ? 'Retry checks' : '重试检查',
+          }),
+        ).toBeNull()
+        expect(api.to(TEAM_ROUTE)).toHaveLength(0)
+      }
+      if (state === 'loading') await pending.answer(json(200, teamPage()))
     },
   )
 
