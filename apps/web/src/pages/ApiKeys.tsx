@@ -2,9 +2,11 @@ import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import {
   API_KEY_NAME_MAX_LENGTH,
   type ApiKey,
+  type ApiKeyScope,
   type CreatedApiKey,
   createApiKey,
   deleteApiKey,
+  isApiKeyScope,
   listApiKeys,
   listOrganizations,
 } from '../api/auth.ts'
@@ -19,7 +21,7 @@ import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { type Me, useMe } from '../session.tsx'
-import { useUnsavedChanges } from '../unsaved-changes.tsx'
+import { useConfirmLeave, useUnsavedChanges } from '../unsaved-changes.tsx'
 
 const DAY = 24 * 60 * 60
 
@@ -30,6 +32,72 @@ const EXPIRY_OPTIONS = [
   { value: String(90 * DAY), label: 'In 90 days' },
   { value: String(365 * DAY), label: 'In 1 year' },
 ] as const
+
+const SCOPE_OPTIONS = [
+  {
+    value: 'bookings',
+    name: 'Bookings (read/write)',
+    label: 'Bookings — recommended for AI agents',
+    description:
+      'View event types, available times and bookings you can access. Create, reschedule or cancel bookings, and retry their conference or your calendar copy. Cannot change settings or read analytics, raw schedules or integration accounts.',
+    abilities:
+      'Your agent can view event types, available times and bookings you can access, including attendee details and answers. It can create, reschedule or cancel bookings and retry their conference or your calendar copy. It cannot change settings or read analytics, raw schedules or integration accounts.',
+  },
+  {
+    value: 'read',
+    name: 'Read only',
+    label: 'Read — analytics and reporting',
+    description:
+      'Read data you can access, including bookings and attendee details, schedules, analytics and integration metadata. Cannot create, change or cancel bookings, or change settings.',
+    abilities:
+      'Your agent can read data you can access, including bookings, attendee details, schedules and analytics through the API. MCP offers the permitted read tools. It cannot create, change or cancel bookings, or change settings.',
+  },
+  {
+    value: 'full',
+    name: 'Full account access',
+    label: 'Full account access',
+    description:
+      'Use all operations available to API keys with your permissions. This includes changing settings and cancelling bookings. Only choose this for a client you trust with full account access.',
+    abilities:
+      'Your agent can use every MCP tool and all API operations available to API keys with your permissions, including changing settings and cancelling bookings. Browser-only actions, including managing API keys, still require you to sign in.',
+  },
+] as const satisfies readonly {
+  value: ApiKeyScope
+  name: string
+  label: string
+  description: string
+  abilities: string
+}[]
+
+function scopeOf(apiKey: ApiKey) {
+  const scope = apiKey.metadata?.scope
+  return isApiKeyScope(scope) ? SCOPE_OPTIONS.find((option) => option.value === scope) : undefined
+}
+
+interface Replacement {
+  id: string
+  name: string
+  scope: ApiKeyScope
+  expiresIn: string
+}
+
+/**
+ * Use the longest offered lifetime that does not exceed the original, even if the source key
+ * has already expired. Lifetimes shorter than every option fall back to the shortest one.
+ */
+function replacementExpiry(apiKey: ApiKey) {
+  if (apiKey.expiresAt === null) return ''
+  const lifetime = (Date.parse(apiKey.expiresAt) - Date.parse(apiKey.createdAt)) / 1000
+  const finiteOptions = EXPIRY_OPTIONS.slice(1)
+  const fitting = finiteOptions.filter((option) => Number(option.value) <= lifetime)
+  return (fitting.at(-1) ?? EXPIRY_OPTIONS[1]).value
+}
+
+function clipKeyName(name: string, limit: number) {
+  const clipped = name.toWellFormed().slice(0, limit)
+  // Keep the UTF-16 length limit without leaving half of an emoji at the boundary.
+  return (clipped.isWellFormed() ? clipped : clipped.slice(0, -1)).trimEnd()
+}
 
 function formatDate(iso: string, locale: string | undefined) {
   const date = new Date(iso)
@@ -66,12 +134,24 @@ const curlExample = (key: string, publicUrl = window.location.origin) =>
 
 export function ApiKeysPage() {
   const { t, uiText: ui } = useI18n()
+  const confirmLeave = useConfirmLeave()
 
   usePageTitle('API keys')
   const me = useMe()
   const [keys, reload] = useLoad(loadKeys)
   const [instance, reloadInstance] = useLoad(loadInstance)
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
+  const [createdReplacement, setCreatedReplacement] = useState<ApiKey | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [replacement, setReplacement] = useState<Replacement | null>(null)
+  const [replacedKeyIds, setReplacedKeyIds] = useState<string[]>([])
+  const previousReplacement = useRef(replacement)
+  useEffect(() => {
+    if (previousReplacement.current && !replacement && !created) {
+      document.getElementById('key-name')?.focus()
+    }
+    previousReplacement.current = replacement
+  }, [replacement, created])
   // Keep only metadata in the list, even while the follow-up request is pending.
   const [recentKeys, setRecentKeys] = useState<ApiKey[]>([])
   const [status, setStatus] = useState<UiText>('')
@@ -102,27 +182,42 @@ export function ApiKeysPage() {
       <PageHeader
         title={t('API keys')}
         lede={t(
-          'API keys let AI agents and scripts use Hourmere for you, through the same API as this app. Each key acts in one organization and can do anything you can do there, so treat it like a password.',
+          'API keys let AI agents and scripts use Hourmere for you. Each key acts in one organization, limited by its scope and your permissions. Treat it like a password.',
         )}
       />
 
       {created ? (
         <NewKey
           apiKey={created}
+          replacedKey={createdReplacement}
+          organizations={organizations}
           publicUrl={publicUrl}
           configStatus={instance.status}
           onRetry={reloadInstance}
           onDone={() => {
             setCreated(null)
+            setCreatedReplacement(null)
             // The panel (and the focused button) goes away; the new key is in the list.
             keysHeading.current?.focus()
           }}
         />
       ) : (
         <CreateKeyForm
+          key={replacement?.id ?? 'new'}
           organization={me.organization}
+          replacement={replacement}
+          onCancelReplacement={() => {
+            if (confirmLeave()) setReplacement(null)
+          }}
+          onCreatingChange={setCreating}
           onCreated={(key) => {
             setStatus('')
+            if (replacement) {
+              setReplacedKeyIds((previous) => [...new Set([...previous, replacement.id])])
+            }
+            setCreatedReplacement(visibleKeys.find((old) => old.id === replacement?.id) ?? null)
+            setReplacement(null)
+            setCreating(false)
             setCreated(key)
             const { key: _secret, ...metadata } = key
             setRecentKeys((previous) => [metadata, ...previous])
@@ -165,7 +260,23 @@ export function ApiKeysPage() {
             <KeyTable
               keys={visibleKeys}
               organizations={organizations}
+              organization={me.organization}
+              canReplace={!created}
+              creating={creating}
+              replacedKeyIds={replacedKeyIds}
+              onReplace={(key) => {
+                const scope = scopeOf(key)
+                if (!scope || key.id === replacement?.id || !confirmLeave()) return
+                setReplacement({
+                  id: key.id,
+                  name: key.name ?? '',
+                  scope: scope.value,
+                  expiresIn: replacementExpiry(key),
+                })
+              }}
               onRevoked={(key) => {
+                setCreatedReplacement((old) => (old?.id === key.id ? null : old))
+                setReplacedKeyIds((previous) => previous.filter((id) => id !== key.id))
                 setRecentKeys((previous) => previous.filter((recent) => recent.id !== key.id))
                 setStatus(msg('Revoked “{0}”.', { '0': key.name || key.start || 'the key' }))
                 reload()
@@ -208,25 +319,47 @@ export function ApiKeysPage() {
 
 function CreateKeyForm({
   organization: openedOrganization,
+  replacement,
+  onCancelReplacement,
+  onCreatingChange,
   onCreated,
 }: {
   /** The organization the person is working in (GET /api/v1/me); new keys act in it. */
   organization: Me['organization']
+  replacement: Replacement | null
+  onCancelReplacement: () => void
+  onCreatingChange: (creating: boolean) => void
   onCreated: (key: CreatedApiKey) => void
 }) {
   const { t, text, uiText: ui } = useI18n()
   const [organization] = useState(openedOrganization)
-  const [name, setName] = useState('')
-  const [expiresIn, setExpiresIn] = useState('')
+  const [name, setName] = useState(() => {
+    if (!replacement) return ''
+    const suffix = t(' (replacement)')
+    let base = clipKeyName(replacement.name, API_KEY_NAME_MAX_LENGTH - suffix.length)
+    // A maximum-length name may already end in the suffix; keep the new name distinct.
+    if (base + suffix === replacement.name) base = clipKeyName(base, base.length - 1)
+    return base + suffix
+  })
+  const [scope, setScope] = useState<ApiKeyScope>(replacement?.scope ?? 'bookings')
+  const [expiresIn, setExpiresIn] = useState(replacement?.expiresIn ?? '')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<UiText | null>(null)
   const [contextError, setContextError] = useState<unknown>(null)
   const nameHint = useId()
-  useUnsavedChanges(Boolean(name || expiresIn))
+  const scopeHint = useId()
+  const nameInput = useRef<HTMLInputElement>(null)
+  useUnsavedChanges(Boolean(name || expiresIn || scope !== 'bookings'))
+
+  useEffect(() => {
+    if (replacement) nameInput.current?.focus()
+  }, [replacement])
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (creating) return
     setCreating(true)
+    onCreatingChange(true)
     setError(null)
     setContextError(null)
     try {
@@ -234,6 +367,7 @@ function CreateKeyForm({
         name.trim(),
         expiresIn ? Number(expiresIn) : null,
         organization.id,
+        scope,
       )
       onCreated(key)
     } catch (err) {
@@ -256,22 +390,73 @@ function CreateKeyForm({
         setContextError(err)
       }
       setCreating(false)
+      onCreatingChange(false)
     }
   }
 
   return (
     <section aria-labelledby="create-heading" className="panel">
       <h2 id="create-heading">{t('Create a key')}</h2>
+      {replacement && (
+        <div className="alert" role="status">
+          <p>
+            {t(
+              'Review the scope and expiration, create and test the new key, then revoke the old one.',
+            )}
+          </p>
+          <p>
+            {t('Replacement expires: {0}', {
+              '0': t(EXPIRY_OPTIONS.find((option) => option.value === expiresIn)?.label ?? 'Never'),
+            })}
+          </p>
+          <button
+            type="button"
+            className="button button-small"
+            onClick={onCancelReplacement}
+            disabled={creating}
+          >
+            {t('Cancel replacement')}
+          </button>
+        </div>
+      )}
       <p>
         {t('The key will act in')} <strong>{organization.name}</strong>
         {organization.personal && t(', your personal organization')}
         {t('.')}
       </p>
       <form className="form-row" onSubmit={submit}>
+        <fieldset className="api-key-scopes" aria-describedby={scopeHint} disabled={creating}>
+          <legend>{t('Scope')}</legend>
+          <p id={scopeHint} className="hint">
+            {t(
+              'Scope cannot be changed after creation. To change it, create a new key and revoke the old one.',
+            )}
+          </p>
+          {SCOPE_OPTIONS.map((option) => (
+            <div className="api-key-scope" key={option.value}>
+              <label htmlFor={`key-scope-${option.value}`}>
+                <input
+                  id={`key-scope-${option.value}`}
+                  type="radio"
+                  name="scope"
+                  value={option.value}
+                  checked={scope === option.value}
+                  onChange={() => setScope(option.value)}
+                  aria-describedby={`key-scope-${option.value}-description`}
+                />
+                <strong>{t(option.label)}</strong>
+              </label>
+              <p id={`key-scope-${option.value}-description`} className="hint">
+                {t(option.description)}
+              </p>
+            </div>
+          ))}
+        </fieldset>
         <div className="field">
           <label htmlFor="key-name">{t('Name')}</label>
           <input
             id="key-name"
+            ref={nameInput}
             required
             maxLength={API_KEY_NAME_MAX_LENGTH}
             value={name}
@@ -310,18 +495,23 @@ function CreateKeyForm({
 /** The new key's secret, shown this once: Better Auth stores only a hash of it. */
 function NewKey({
   apiKey,
+  replacedKey,
+  organizations,
   publicUrl,
   configStatus,
   onRetry,
   onDone,
 }: {
   apiKey: CreatedApiKey
+  replacedKey: ApiKey | null
+  organizations: ReadonlyMap<string, string>
   publicUrl: string | undefined
   configStatus: 'loading' | 'ready' | 'error'
   onRetry: () => void
   onDone: () => void
 }) {
   const { t, text } = useI18n()
+  const scope = scopeOf(apiKey)
 
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => heading.current?.focus(), [])
@@ -331,6 +521,23 @@ function NewKey({
       <h2 id="new-key-heading" ref={heading} tabIndex={-1}>
         {text('Copy your new key “{name}”', { name: apiKey.name ?? '' })}
       </h2>
+      <p>
+        {t('The key will act in')} <strong>{organizationOf(apiKey, organizations, t)}</strong>
+        {t('.')}
+      </p>
+      <p>{t('Scope: {scope}', { scope: scope ? t(scope.name) : t('Unknown scope') })}</p>
+      {replacedKey && (
+        <p>
+          <a href={`#api-key-${replacedKey.id}`}>
+            <ReplacementReminder apiKey={replacedKey} />
+          </a>
+        </p>
+      )}
+      <p>
+        {scope
+          ? t(scope.abilities)
+          : t('This key’s scope is unavailable. Revoke it and create a new key.')}
+      </p>
       <p>
         <strong>{t('You won’t be able to see this key again.')}</strong>{' '}
         {t(
@@ -427,6 +634,15 @@ function McpConfig({ apiKey, publicUrl }: { apiKey: string; publicUrl: string })
   )
 }
 
+/** Identify the old key using only its safe list metadata. */
+function ReplacementReminder({ apiKey }: { apiKey: ApiKey }) {
+  const { t } = useI18n()
+  return t('After testing the new key, revoke the old key “{0}” ({1}).', {
+    '0': apiKey.name || t('Unnamed'),
+    '1': apiKey.start ? `${apiKey.start}…` : '…',
+  })
+}
+
 /** The name of the organization a key acts in. */
 function organizationOf(
   apiKey: ApiKey,
@@ -445,11 +661,21 @@ function organizationOf(
 function KeyTable({
   keys,
   organizations,
+  organization,
+  canReplace,
+  creating,
+  replacedKeyIds,
+  onReplace,
   onRevoked,
 }: {
   keys: ApiKey[]
   /** Organization names by id. */
   organizations: ReadonlyMap<string, string>
+  organization: Me['organization']
+  canReplace: boolean
+  creating: boolean
+  replacedKeyIds: readonly string[]
+  onReplace: (key: ApiKey) => void
   onRevoked: (key: ApiKey) => void
 }) {
   const { t, formatLocale: displayLocale } = useI18n()
@@ -465,6 +691,7 @@ function KeyTable({
               {t('Key')}
             </th>
             <th scope="col">{t('Organization')}</th>
+            <th scope="col">{t('Scope')}</th>
             <th scope="col" className="fit nowrap">
               {t('Created')}
             </th>
@@ -481,10 +708,15 @@ function KeyTable({
         </thead>
         <tbody>
           {keys.map((key) => (
-            <tr key={key.id}>
+            <tr key={key.id} id={`api-key-${key.id}`}>
               <th scope="row" data-label={t('Name')} className="user-content">
                 {key.name || <span className="muted">{t('Unnamed')}</span>}
                 {!key.enabled && <span className="badge">{t('Disabled')}</span>}
+                {replacedKeyIds.includes(key.id) && (
+                  <p className="hint" role="status">
+                    <ReplacementReminder apiKey={key} />
+                  </p>
+                )}
               </th>
               <td data-label={t('Key')} className="fit nowrap">
                 <div className="table-value">
@@ -493,6 +725,9 @@ function KeyTable({
               </td>
               <td data-label={t('Organization')} className="user-content">
                 <div className="table-value">{organizationOf(key, organizations, t)}</div>
+              </td>
+              <td data-label={t('Scope')}>
+                <div className="table-value">{t(scopeOf(key)?.name ?? 'Unknown scope')}</div>
               </td>
               <td data-label={t('Created')} className="fit">
                 <div className="table-value">{formatDate(key.createdAt, displayLocale)}</div>
@@ -521,12 +756,72 @@ function KeyTable({
                 </div>
               </td>
               <td className="actions">
+                <ReplacementButton
+                  apiKey={key}
+                  organization={organization}
+                  enabled={canReplace}
+                  creating={creating}
+                  onReplace={onReplace}
+                />
                 <RevokeButton apiKey={key} onRevoked={onRevoked} />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function ReplacementButton({
+  apiKey,
+  organization,
+  enabled,
+  creating,
+  onReplace,
+}: {
+  apiKey: ApiKey
+  organization: Me['organization']
+  enabled: boolean
+  creating: boolean
+  onReplace: (key: ApiKey) => void
+}) {
+  const { t } = useI18n()
+  const hintId = useId()
+  const knownScope = scopeOf(apiKey)
+  const organizationId = apiKey.metadata?.organizationId
+  const sameOrganization =
+    organizationId === organization.id ||
+    (typeof organizationId !== 'string' && organization.personal)
+  const hint = !knownScope
+    ? 'This key’s scope is unavailable. Revoke it and create a new key.'
+    : !sameOrganization
+      ? 'Switch to this key’s organization to create a replacement.'
+      : creating
+        ? 'Wait until key creation finishes before creating a replacement.'
+        : !enabled
+          ? 'Save your new key before creating another replacement.'
+          : null
+
+  return (
+    <div className="api-key-replacement">
+      <button
+        type="button"
+        className="button button-small"
+        disabled={hint !== null}
+        aria-label={t('Create a replacement for {0}', {
+          '0': apiKey.name || apiKey.start || t('Unnamed'),
+        })}
+        aria-describedby={hint ? hintId : undefined}
+        onClick={() => onReplace(apiKey)}
+      >
+        {t('Create replacement')}
+      </button>
+      {hint && (
+        <p id={hintId} className="hint">
+          {t(hint)}
+        </p>
+      )}
     </div>
   )
 }

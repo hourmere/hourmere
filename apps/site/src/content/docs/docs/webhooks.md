@@ -23,6 +23,11 @@ endpoint can receive events about the entire organization. A host can configure 
 personal organization's webhook. Current verified membership and role are checked again in
 the service; possession of another organization's endpoint ID grants no access.
 
+API keys need `read` or `full` scope to inspect webhook metadata and deliveries, and `full`
+to configure webhooks or rotate a signing secret. `bookings` cannot access these endpoints.
+Disallowed scopes get `403 insufficient_scope` in addition to the existing role checks;
+see [API key scopes](/docs/api-keys) for the generated operation table.
+
 Cookie-session writes require `X-Expected-Organization-Id` set to the organization where
 the action started, including personal organizations. List and delivery reads accept the
 same header optionally; omitting it preserves current-organization reads. A stale expected

@@ -1,5 +1,45 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  Scope: '权限范围',
+  'Bookings (read/write)': '预约读写',
+  'Read only': '只读',
+  'Bookings — recommended for AI agents': '预约读写（推荐用于 AI 智能体）',
+  'Read — analytics and reporting': '只读（用于分析和报表）',
+  'Full account access': '账户完整访问权限',
+  'Unknown scope': '权限范围未知',
+  'View event types, available times and bookings you can access. Create, reschedule or cancel bookings, and retry their conference or your calendar copy. Cannot change settings or read analytics, raw schedules or integration accounts.':
+    '查看你有权访问的活动类型、可预约时段和预约。创建、改期或取消预约，以及重试预约的会议或你自己的日历副本。无法修改设置，也无法读取统计、原始时间表或集成账户。',
+  'Read data you can access, including bookings and attendee details, schedules, analytics and integration metadata. Cannot create, change or cancel bookings, or change settings.':
+    '读取你有权访问的数据，包括预约和参会人详情、时间表、统计和集成元数据。无法创建、修改或取消预约，也无法修改设置。',
+  'Use all operations available to API keys with your permissions. This includes changing settings and cancelling bookings. Only choose this for a client you trust with full account access.':
+    '在你的权限内执行 API 密钥支持的所有操作，包括修改设置和取消预约。请仅为你信任、可以授予账户完整访问权限的客户端选择此范围。',
+  'Your agent can view event types, available times and bookings you can access, including attendee details and answers. It can create, reschedule or cancel bookings and retry their conference or your calendar copy. It cannot change settings or read analytics, raw schedules or integration accounts.':
+    '你的智能体可以查看你有权访问的活动类型、可预约时段和预约，包括参会人详情和回答。它可以创建、改期或取消预约，以及重试预约的会议或你自己的日历副本。它无法修改设置，也无法读取统计、原始时间表或集成账户。',
+  'Your agent can read data you can access, including bookings, attendee details, schedules and analytics through the API. MCP offers the permitted read tools. It cannot create, change or cancel bookings, or change settings.':
+    '你的智能体可以通过 API 读取你有权访问的数据，包括预约、参会人详情、时间表和统计。MCP 提供此范围允许的读取工具。它无法创建、修改或取消预约，也无法修改设置。',
+  'Your agent can use every MCP tool and all API operations available to API keys with your permissions, including changing settings and cancelling bookings. Browser-only actions, including managing API keys, still require you to sign in.':
+    '你的智能体可以在你的权限内使用所有 MCP 工具和 API 密钥支持的所有 API 操作，包括修改设置和取消预约。管理 API 密钥等仅限浏览器的操作仍需你登录后进行。',
+  'API keys let AI agents and scripts use Hourmere for you. Each key acts in one organization, limited by its scope and your permissions. Treat it like a password.':
+    'API 密钥让 AI 智能体和脚本代你使用 Hourmere。每个密钥作用于一个组织，受其权限范围和你的权限限制。请像保护密码一样妥善保管密钥。',
+  'Scope cannot be changed after creation. To change it, create a new key and revoke the old one.':
+    '密钥创建后无法修改权限范围。如需更改，请创建新密钥并撤销旧密钥。',
+  'Review the scope and expiration, create and test the new key, then revoke the old one.':
+    '请检查权限范围和到期时间，创建并测试新密钥，然后撤销旧密钥。',
+  'Create replacement': '创建替代密钥',
+  'Create a replacement for {0}': '为{0}创建替代密钥',
+  'Cancel replacement': '取消替换',
+  ' (replacement)': '（替换）',
+  'Replacement expires: {0}': '替代密钥到期时间：{0}',
+  'After testing the new key, revoke the old key “{0}” ({1}).':
+    '测试新密钥后，请撤销旧密钥“{0}”（{1}）。',
+  'Switch to this key’s organization to create a replacement.':
+    '请切换到此密钥的所属组织，再创建替代密钥。',
+  'Save your new key before creating another replacement.': '请先保存新密钥，再创建其他替代密钥。',
+  'Wait until key creation finishes before creating a replacement.':
+    '请等待密钥创建完成，再创建替代密钥。',
+  'This key’s scope is unavailable. Revoke it and create a new key.':
+    '无法确认此密钥的权限范围。请撤销此密钥并创建新密钥。',
+  'Scope: {scope}': '权限范围：{scope}',
   'This API key does not allow this operation.': '此 API 密钥不允许执行这项操作。',
   'API key scope cannot be changed; create a replacement key.':
     'API 密钥的权限范围无法修改；请创建新密钥来替换。',
