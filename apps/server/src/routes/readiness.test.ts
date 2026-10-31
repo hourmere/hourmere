@@ -173,13 +173,16 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
     await owned?.drop()
   })
 
-  function application(resolveCaller = createCallerResolver({ auth, db })) {
+  function application(
+    resolveCaller = createCallerResolver({ auth, db }),
+    routes = readinessRoutes,
+  ) {
     return createApp({
       publicUrl: origin,
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller,
-      routes: [readinessRoutes({ db })],
+      routes: [routes({ db })],
     })
   }
 
@@ -269,6 +272,52 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
     const owner = await session(other, team.id)
     expect((await get(`${teamPath(team.id)}?userId=${user.id}`, owner.cookie)).status).toBe(400)
   })
+
+  async function verifyMemberExpectedTarget(
+    routes: typeof readinessRoutes,
+    role: 'owner' | 'admin' | 'member',
+  ) {
+    const user = await createTestUser(db)
+    const current = await createTestTeam(db, [{ user, role }])
+    const expected = await createTestTeam(db, [{ user, role }])
+    const login = await session(user, current.id)
+    const target = application(createCallerResolver({ auth, db }), routes)
+    const headers = { 'X-Expected-Organization-Id': expected.id }
+    // Authority over the expected team must not reveal drift for a different target.
+    for (const teamId of [current.id, randomUUID()]) {
+      const response = await get(memberPath(teamId, [randomUUID()]), login.cookie, headers, target)
+      expect(response.status).toBe(403)
+      expect(await answer(response)).toEqual({ status: 403, body: denial })
+    }
+    const matching = await get(
+      memberPath(expected.id, [randomUUID()]),
+      login.cookie,
+      headers,
+      target,
+    )
+    expect(matching.status).toBe(409)
+    expect(await matching.json()).toMatchObject({ error: 'organization_context_changed' })
+  }
+
+  it.each(['owner', 'admin', 'member'] as const)(
+    'binds the %s member-read target before checking expected-team drift, including source copies',
+    async (role) => {
+      await verifyMemberExpectedTarget(readinessRoutes, role)
+      await verifyMemberExpectedTarget(readRouteCopy(), role)
+      await expect(
+        verifyMemberExpectedTarget(
+          readRouteCopy(undefined, undefined, [
+            `      options.memberReadScope === 'own_row' &&
+      expectedOrganizationId !== undefined &&
+      expectedOrganizationId.toLowerCase() !== c.req.param('teamId')?.toLowerCase()`,
+            '      false',
+          ]),
+          role,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError', actual: 409, expected: 403 })
+      await verifyMemberExpectedTarget(readRouteCopy(), role)
+    },
+  )
 
   it.each(['owner', 'admin'])('accepts a real current-team %s cookie', async (role) => {
     const user = await createTestUser(db)

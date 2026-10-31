@@ -278,9 +278,17 @@ export function teamManagementAccess(
   // Ordinary members can inspect a self target or a batch whose service always
   // restricts them to their own row. Consumers must still bind/recheck the team.
   const memberRead = createMiddleware<CallerEnv>(async (c, next) => {
+    const expectedOrganizationId = c.req.header(EXPECTED_ORGANIZATION_HEADER)
+    // Refuse a different explicit batch target before distinguishing context drift.
+    if (
+      options.memberReadScope === 'own_row' &&
+      expectedOrganizationId !== undefined &&
+      expectedOrganizationId.toLowerCase() !== c.req.param('teamId')?.toLowerCase()
+    )
+      throw denied()
     await expectedContext(
       c.var.principal,
-      c.req.header(EXPECTED_ORGANIZATION_HEADER),
+      expectedOrganizationId,
       options.memberReadScope === 'own_row' ||
         c.req.param('memberUserId')?.toLowerCase() === c.var.principal.user.id.toLowerCase(),
     )
