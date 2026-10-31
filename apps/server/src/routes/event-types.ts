@@ -348,6 +348,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, EVENT_TYPE_BODY_LIMIT),
         method: 'post',
         path: '/api/v1/event-types',
+        operationId: 'createEventType',
         summary: 'Create an event type',
         description:
           "Created in the organization the caller acts in and hosted by the caller: on the caller's personal page in a personal organization, on the team page in a team (owners and admins only).",
@@ -399,6 +400,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, EVENT_TYPE_BODY_LIMIT),
         method: 'patch',
         path: '/api/v1/event-types/{id}',
+        operationId: 'updateEventType',
         summary: 'Change an event type',
         request: {
           params: IdParams,
@@ -432,6 +434,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, 1024),
         method: 'post',
         path: '/api/v1/event-types/{id}/round-robin/activate',
+        operationId: 'activateRoundRobin',
         summary: 'Explicitly activate a team round-robin pool',
         description:
           'Validates the complete current verified host pool. Ordinary metadata saves and mode changes never activate it. Existing fairness sequence values are preserved.',
@@ -465,6 +468,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         ...route,
         method: 'delete',
         path: '/api/v1/event-types/{id}',
+        operationId: 'deleteEventType',
         summary: 'Delete an event type',
         description:
           'It disappears from the API and its slug becomes free; past bookings keep pointing at it.',

@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version } from './client.ts'
 
-const COMMANDS = {
+export const COMMANDS = {
   whoami: 'whoami',
   profile: 'get_profile',
   catalog: 'list_event_types',

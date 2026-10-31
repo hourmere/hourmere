@@ -321,6 +321,46 @@ checks advisory until reviewed baselines are committed.
   reformat code you are not changing.
 - **Tests** live next to the code as `*.test.ts`.
 
+### REST, MCP and CLI parity
+
+New capabilities must be available through REST, MCP and the CLI together, with the REST
+operation described in OpenAPI. The write-parity guard in
+[`scripts/interface-parity.test.ts`](scripts/interface-parity.test.ts) runs in the existing
+CI `check` job. It inventories every `POST`, `PUT`, `PATCH` and `DELETE` under `/api/v1`
+from the server's generated `openApiDocument`, the tools registered by `productTools` in
+`apps/server/src/server.ts`, and the actual `COMMANDS` table in `tools/cli/src/cli.ts`.
+Read operations are outside this guard's required coverage.
+
+When adding or changing a write operation:
+
+1. Give the REST route a stable, unique OpenAPI `operationId` and implement the corresponding MCP
+   tool and CLI command using the shared service behavior.
+2. Add an entry keyed by that exact `operationId` in
+   [`scripts/interface-parity.json`](scripts/interface-parity.json). Set `mcp` to the
+   registered tool name and `cli` to the command name, for example:
+
+   ```json
+   "createPublicBooking": { "mcp": "create_booking", "cli": "book" }
+   ```
+
+3. For an intentional interface restriction or an existing gap, use
+   `{ "exemption": "One-line concrete reason." }` instead. Explain the actual restriction
+   or missing capability for that operation; blanket exemptions are not accepted. Replace
+   an existing gap's exemption with a mapping when parity is implemented.
+4. Update or remove the entry when the operation or either interface name changes. Run
+   `npm run api:types` and commit the regenerated API types after route changes.
+5. Run the guard locally:
+
+   ```sh
+   npm test -- scripts/interface-parity.test.ts --maxWorkers=2 --no-fsModuleCache
+   ```
+
+The guard reports writes missing a mapping or exemption, nonexistent MCP tools or CLI
+commands, and entries for removed operations. Its negative tests inject an unmapped write
+and stale mappings to verify these failures. Keep those controls when changing the guard;
+do not resolve a failure by inventing an interface name or silently skipping an operation.
+List existing MCP/CLI gaps and their reasons in the pull request so later work can close them.
+
 ## Commits
 
 - Subject in the imperative mood, about 50 characters and at most 72, no trailing period:
