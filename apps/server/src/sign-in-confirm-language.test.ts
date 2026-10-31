@@ -178,13 +178,14 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
       if (!element?.events.click) throw new Error(`No click listener on ${id}`)
       element.events.click({ target: element, preventDefault() {} })
     },
-    key(id: string, key: string) {
+    key(id: string, key: string, shiftKey = false) {
       const element = elements.get(id)
       if (!element?.events.keydown) throw new Error(`No key listener on ${id}`)
       let prevented = false
       element.events.keydown({
         target: element,
         key,
+        shiftKey,
         preventDefault() {
           prevented = true
         },
@@ -329,6 +330,14 @@ describe('server-rendered sign-in confirmation languages', () => {
       expect(view.document.activeElement).toBe(trigger)
       expect(view.cookies).toEqual([])
       expect(view.stored).toEqual([])
+      view.key('language-trigger', 'ArrowDown')
+      expect(menu?.hidden).toBe(false)
+      expect(view.document.activeElement).toBe(current)
+      expect(view.key('language-menu', 'Home')).toBe(true)
+      expect(view.key('language-menu', 'Tab', true)).toBe(true)
+      expect(menu?.hidden).toBe(true)
+      expect(trigger?.attributes['aria-expanded']).toBe('false')
+      expect(view.document.activeElement).toBe(trigger)
       view.key('language-trigger', 'ArrowDown')
       expect(menu?.hidden).toBe(false)
       expect(view.document.activeElement).toBe(current)

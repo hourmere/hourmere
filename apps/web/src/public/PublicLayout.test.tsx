@@ -203,6 +203,20 @@ describe('compact public language menu', () => {
     },
   )
 
+  it('closes the menu when Shift+Tab leaves the first option for the trigger', async () => {
+    const user = userEvent.setup()
+    showPicker()
+    const trigger = screen.getByRole('button', { name: 'Language: English' })
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    await user.keyboard('{Home}')
+    expect(document.activeElement).toBe(screen.getAllByRole('menuitemradio')[0])
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it.each(['{ArrowDown}', '{ArrowUp}'])(
     'opens on the current language with %s and navigates all options with wrapping',
     async (key) => {

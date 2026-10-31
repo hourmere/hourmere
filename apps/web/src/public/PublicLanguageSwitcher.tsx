@@ -50,6 +50,12 @@ export function PublicLanguageSwitcher() {
       return
     }
     const index = items.current.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'Tab' && event.shiftKey && index === 0) {
+      // Shift+Tab from the first option returns to the trigger, which is still inside the picker.
+      event.preventDefault()
+      closeMenu()
+      return
+    }
     let next: number | undefined
     if (event.key === 'ArrowDown') next = (index + 1) % available.length
     if (event.key === 'ArrowUp') next = (index - 1 + available.length) % available.length
