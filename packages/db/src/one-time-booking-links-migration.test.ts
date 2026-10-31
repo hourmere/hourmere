@@ -11,7 +11,7 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0053_one_time_booking_links.sql'
-const predecessorMigration = '0050_booking_success_redirect.sql'
+const predecessorMigration = '0052_follow_up_host_note.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
 
 async function predecessorFiles(directory: string) {
@@ -67,6 +67,35 @@ async function seedPredecessor(directory: string) {
             'organizationId',k.metadata::jsonb->>'organizationId','retained','preserve')::text
         FROM (SELECT * FROM auth.apikey ORDER BY id LIMIT 1) k
         CROSS JOIN (VALUES ('read'),('bookings')) AS s(scope)`)
+    const notifications = {
+      reminders: [],
+      followUps: [
+        {
+          id: 'upgrade-after',
+          offsetMinutes: 60,
+          recipients: { invitee: true, guests: false, host: false },
+          hostNote: 'Thanks for meeting.\n资料已准备好，欢迎查阅。',
+        },
+      ],
+    }
+    await owned.pool.query(
+      `UPDATE event_types SET notifications=$1::jsonb WHERE id IN
+        (SELECT event_type_id FROM bookings WHERE status='confirmed' AND event_type_id IS NOT NULL
+          ORDER BY id LIMIT 1)`,
+      [JSON.stringify(notifications)],
+    )
+    const snapshots = await owned.pool.query(
+      `UPDATE bookings SET notification_snapshot=$1::jsonb
+        WHERE status='confirmed' AND event_type_id IN
+          (SELECT id FROM event_types WHERE notifications->'followUps'->0->>'id'='upgrade-after')`,
+      [JSON.stringify({ version: 1, executionMode: 'configurable', notifications })],
+    )
+    expect(snapshots.rowCount).toBeGreaterThan(0)
+    await owned.pool.query(`INSERT INTO booking_scheduled_messages
+      (organization_id,booking_id,kind,rule_id,anchor_start_at,anchor_end_at,due_at,expires_at,next_attempt_at,attempts)
+      SELECT organization_id,id,'follow_up','upgrade-after',start_at,end_at,
+        end_at+interval '1 hour',end_at+interval '25 hours',end_at+interval '1 hour',2
+      FROM bookings WHERE notification_snapshot->'notifications'->'followUps'->0->>'id'='upgrade-after'`)
     return owned
   } catch (error) {
     await owned?.drop()
@@ -362,7 +391,7 @@ const mutations: Record<string, (source: string) => string> = {
 }
 
 describe.skipIf(!serverUrl)('one-time booking links migration', () => {
-  it('preserves populated 0050 predecessor data, matches fresh schema and reruns without changes', async () => {
+  it('preserves populated 0052 predecessor data, matches fresh schema and reruns without changes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-one-time-upgrade-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -371,6 +400,7 @@ describe.skipIf(!serverUrl)('one-time booking links migration', () => {
       const before = await records(upgraded.pool)
       expect(before['public.bookings']?.length).toBeGreaterThan(0)
       expect(before['public.event_types']?.length).toBeGreaterThan(0)
+      expect(before['public.booking_scheduled_messages']?.length).toBeGreaterThan(0)
       const acknowledgements = (
         await upgraded.pool.query('SELECT * FROM schema_migrations ORDER BY name')
       ).rows

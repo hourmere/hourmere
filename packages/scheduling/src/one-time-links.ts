@@ -257,8 +257,7 @@ async function lockWriteOwner(db: Db, ctx: ServiceContext) {
     .selectFrom('auth.user')
     .select('emailVerified')
     .where('id', '=', ctx.principal.user.id)
-    .$if(personal !== undefined, (query) => query.forUpdate())
-    .$if(personal === undefined, (query) => query.forShare())
+    .forShare()
     .executeTakeFirst()
   if (!actor?.emailVerified) throw insufficientRole()
   const organization = await db

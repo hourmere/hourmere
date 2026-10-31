@@ -441,6 +441,43 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     ).rejects.toBeInstanceOf(TypeError)
   })
 
+  it('does not attach two links to one confirmed booking, keeping the unsuccessful link available', async () => {
+    const s = await setup()
+    const first = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+    const second = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+    const bookingId = await booking(s)
+    await claim(first.token, bookingId)
+    expect(await failure(() => claim(second.token, bookingId))).toMatchObject({
+      code: 'one_time_link_not_found',
+    })
+    expect((await resolve(second.token)).id).toBe(second.id)
+  })
+
+  it('uses the persisted personal owner marker instead of a caller-supplied space flag', async () => {
+    const s = await setup()
+    const intruder = await createTestUser(db)
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: s.organizationId,
+        userId: intruder.id,
+        role: 'admin',
+        createdAt: new Date(),
+      })
+      .execute()
+    const ctx = testContext(
+      db,
+      {
+        ...session(intruder.principal),
+        organization: { ...s.ctx.principal.organization, personal: false },
+      },
+      NOW,
+    )
+    expect(
+      await failure(() => Links.createOneTimeBookingLink(ctx, { eventTypeId: s.eventTypeId })),
+    ).toMatchObject({ code: 'insufficient_role' })
+  })
+
   it('restricts personal links to their owning user and current organization', async () => {
     const s = await setup()
     const other = await setup()
@@ -743,6 +780,98 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
         .execute(),
     ).toHaveLength(Links.ONE_TIME_BOOKING_LINK_LIMIT + 1)
   }, 20_000)
+
+  it('shares team capacity across creators and team event types', async () => {
+    const owner = await createTestUser(db)
+    const admin = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: admin, role: 'admin' },
+    ])
+    const eventTypeId = await fixtures.eventType(team.id, null)
+    const secondEventTypeId = await fixtures.eventType(team.id, null)
+    await sql`insert into one_time_booking_links (organization_id, event_type_id, creator_user_id, token_hash)
+      select ${team.id}::uuid, ${eventTypeId}::uuid, ${owner.id}::uuid,
+      encode(sha256(('synthetic-team-capacity-' || ${randomUUID()} || n::text)::bytea), 'hex')
+      from generate_series(1, ${Links.ONE_TIME_BOOKING_LINK_LIMIT}) n`.execute(db)
+    const ctx = testContext(db, session(team.as(admin)), NOW)
+    expect(
+      await failure(() => Links.createOneTimeBookingLink(ctx, { eventTypeId: secondEventTypeId })),
+    ).toMatchObject({ code: 'one_time_link_limit_reached' })
+    const retained = await db
+      .selectFrom('one_time_booking_links')
+      .select('id')
+      .where('organization_id', '=', team.id)
+      .executeTakeFirstOrThrow()
+    await Links.revokeOneTimeBookingLink(ctx, retained.id)
+    expect(
+      (await Links.createOneTimeBookingLink(ctx, { eventTypeId: secondEventTypeId })).creatorUserId,
+    ).toBe(admin.id)
+  })
+
+  async function writeAlongsidePublicOwnerLock(module: LinkModule) {
+    const s = await setup()
+    const hookHoldsOrganization = Promise.withResolvers<void>()
+    const readerHoldsOwner = Promise.withResolvers<void>()
+    const ctx = {
+      ...s.ctx,
+      authorizeOrganizationWrite: async (trx: Db) => {
+        await sql`set local lock_timeout = '1s'`.execute(trx)
+        // A browser organization-write hook already takes these locks in this order.
+        await trx
+          .selectFrom('auth.user')
+          .select('id')
+          .where('id', '=', s.user.id)
+          .forShare()
+          .executeTakeFirstOrThrow()
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', s.organizationId)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        hookHoldsOrganization.resolve()
+        // Resume the service only once another transaction holds the same user SHARE.
+        await readerHoldsOwner.promise
+      },
+    }
+    const writer = module
+      .createOneTimeBookingLink(ctx, { eventTypeId: s.eventTypeId })
+      .finally(() => {
+        // If setup fails, let the other transaction finish rather than leaving a waiter.
+        hookHoldsOrganization.resolve()
+        readerHoldsOwner.resolve()
+      })
+    const publicReader = (async () => {
+      await hookHoldsOrganization.promise
+      return db.transaction().execute(async (trx) => {
+        await sql`set local lock_timeout = '4s'`.execute(trx)
+        // Public booking takes owner SHARE before organization SHARE. The latter waits
+        // for the writer, while the writer must never upgrade the shared owner lock.
+        await trx
+          .selectFrom('auth.user')
+          .select('id')
+          .where('id', '=', s.user.id)
+          .forShare()
+          .executeTakeFirstOrThrow()
+        readerHoldsOwner.resolve()
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', s.organizationId)
+          .forShare()
+          .executeTakeFirstOrThrow()
+      })
+    })().finally(() => readerHoldsOwner.resolve())
+    const outcomes = await Promise.allSettled([writer, publicReader])
+    // Boolean assertions never include the newly generated capability in diagnostics.
+    expect(outcomes[0]?.status === 'fulfilled').toBe(true)
+    expect(outcomes[1]?.status === 'fulfilled').toBe(true)
+  }
+
+  it('finishes an organization-authorized write while a public booking holds the same owner SHARE lock', async () => {
+    await writeAlongsidePublicOwnerLock(Links)
+  })
 
   it('does not charge expired or used retained rows against available link capacity', async () => {
     const s = await setup()
@@ -1152,6 +1281,48 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
         })
         expect(link.prefill).toEqual({ name: 'Grace', email: 'grace@example.com' })
       },
+    )
+  })
+
+  it('detects removed single-line prefill validation with a real assertion failure', async () => {
+    await mutation(['cleanText(input.name, { max: 200 })', 'input.name'], async (module) => {
+      const s = await setup()
+      expect(
+        await failure(() =>
+          module.createOneTimeBookingLink(s.ctx, {
+            eventTypeId: s.eventTypeId,
+            prefill: { name: 'Grace\nHopper' },
+          }),
+        ),
+      ).toMatchObject({ code: 'invalid_one_time_link' })
+    })
+  })
+
+  it('detects removed prefill field whitelist with a real assertion failure', async () => {
+    await mutation(
+      [
+        "if (Object.keys(value).some((key) => key !== 'name' && key !== 'email')) throw invalid()",
+        '',
+      ],
+      async (module) => {
+        const s = await setup()
+        const prefill = { name: 'Grace', unexpected: 'unsupported' }
+        expect(
+          await failure(() =>
+            module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId, prefill }),
+          ),
+        ).toMatchObject({ code: 'invalid_one_time_link' })
+      },
+    )
+  })
+
+  it('detects an owner-lock upgrade deadlock with a real assertion failure', async () => {
+    await mutation(
+      [
+        ".where('id', '=', ctx.principal.user.id)\n    .forShare()",
+        ".where('id', '=', ctx.principal.user.id)\n    .forUpdate()",
+      ],
+      writeAlongsidePublicOwnerLock,
     )
   })
 })
