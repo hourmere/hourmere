@@ -192,10 +192,15 @@ calendar-list access.
   policy as settings (`hourmere.signup`, `hourmere.signup_allowed_domains`); other
   connections (migrations, psql) are not limited. The server reads the settings back at
   startup and refuses to start if they are missing (e.g. dropped by a connection pooler).
-- **Invitation authority is non-transitive.** Migration 0027 admits an invitation's exact
-  address only when its inviter has a currently allowed email domain or is the earliest
-  remaining auth user (creation time, then ID). Creating a team or accepting an invitation
-  grants no registration authority. Existing invitations follow the current policy.
+- **Invitation authority is non-transitive.** Migration 0046 replaces 0027's signup policy
+  without rewriting existing rows. An invitation admits its exact address only
+  when its inviter still belongs to the same team and qualifies through a currently allowed
+  email domain or earliest remaining auth user status (creation time, then ID). The application
+  checks membership before issuing sign-in mail or creating an account; the signup trigger locks
+  the invitation, inviter and inviter's membership rows `FOR SHARE` to serialize admission
+  with concurrent removal. A demoted inviter who remains a member retains eligibility.
+  Creating a team or accepting an invitation grants no registration authority. Existing
+  invitations follow the current policy.
 - **Every team retains an owner through membership management.** Departure, removal and
   demotion take the same organization row write lock before checking current owner role
   tokens and writing the membership. Native and REST management paths share this rule.
@@ -339,9 +344,11 @@ so the sender refuses it rather than falling back to a different administrator. 
 `auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
 Its current team membership also determines invitation validity independently of the
 generation's authorizing administrator. If the original inviter no longer belongs to the
-team, acceptance, resend and expired-row replacement refuse the invitation; queued/retrying
+team, signup loses its invitation exception, recipient invitation discovery omits the row,
+and acceptance, resend and expired-row replacement refuse the invitation; queued/retrying
 delivery becomes `skipped/invitation_ineligible`. Both claim and pre-SMTP checks enforce this.
-No invitation row rewrite or schema migration is needed. A current owner/admin can create
+No invitation lifecycle rewrite is needed. A new signup-policy migration also enforces
+current inviter membership when creating an account. A current owner/admin can create
 a fresh invitation in their own name, and cancellation remains allowed.
 Stop old web/all/worker processes before applying this migration and restart every role
 with the new code: old senders do not read the generation's authorizing administrator.

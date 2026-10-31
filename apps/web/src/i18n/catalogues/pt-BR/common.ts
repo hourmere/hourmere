@@ -1,6 +1,4 @@
 export const common = {
-  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
-    'Este convite não é mais válido porque a pessoa que o enviou não faz mais parte da equipe. Peça um novo convite à equipe.',
   'Your team context changed. Reload before making changes.':
     'O contexto da sua equipe mudou. Recarregue a página antes de fazer alterações.',
   '{count} min': '{count} min',

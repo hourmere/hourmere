@@ -216,6 +216,9 @@ administrator before using `closed`. `open` lets anyone who can reach the instan
 A pending, unexpired team invitation allows its exact email address in either restricted
 mode only if the inviter's current email domain is allowed or the inviter is the instance's
 first user (the earliest remaining auth user by creation time, with user id breaking ties).
+The original inviter must also still belong to the invitation's team; demotion while
+remaining a member preserves this eligibility. A void invitation grants no account or
+sign-in email to an otherwise ineligible address.
 Invitation-based registration is non-transitive: an invitee outside the allowed domains
 cannot admit another address by creating a team and inviting it. Team creation and invitation
 acceptance grant no registration authority. These rules apply to existing invitations too,
@@ -238,7 +241,8 @@ for your next sign-in. Invitation details remain restricted to the verified reci
 An existing member can open the team without accepting again.
 If the original inviter leaves or is removed from the team, their pending invitations are
 no longer valid. Ask a current team owner/admin for a new invitation; those old links cannot
-be accepted or resent. An inviter's demotion while remaining a member does not invalidate links.
+be accepted or resent, and recipient invitation discovery omits them. An inviter's demotion
+while remaining a member does not invalidate links.
 
 The signed-in header's space menu switches between **Personal** and your member organizations
 and shows your role in the current space. Switching asks before discarding unsaved changes

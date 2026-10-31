@@ -1203,6 +1203,8 @@ export const admin = {
     'Saved account — unavailable for a new selection',
   'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
+  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
+    'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
   'Accept invitation': 'Accept invitation',
   'Checking invitation…': 'Checking invitation…',
   'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':

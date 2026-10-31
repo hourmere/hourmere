@@ -1136,6 +1136,8 @@ export const admin = {
   'Saved account — unavailable for a new selection': '已保存的账号，目前无法重新选择',
   'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
     '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
+  'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.':
+    '此邀请已失效，因为发送邀请的人已不再是团队成员。请联系团队获取新邀请。',
   'Accept invitation': '接受邀请',
   'Checking invitation…': '正在检查邀请…',
   'This invitation is unavailable. Ask a team owner or admin to open Settings → Team members, check Pending invitations, and resend it. If it expired, select Expired and send a new invitation.':

@@ -17,6 +17,12 @@ sharing the organization lock with departure/removal. It either commits before d
 refuses without creating a member or rewriting the invitation. The recipient must ask the
 team for a new invitation. An inviter's role demotion alone does not invalidate it.
 
+Native `list-user-invitations` omits invitations whose original inviter no longer belongs
+to that team, for both HTTP and trusted `auth.api.listUserInvitations` calls. The stored
+invitation status is unchanged; retained rows keep the native response fields and recipient
+verification rules. A void invitation also grants no signup exception or sign-in email to
+an otherwise ineligible address.
+
 Rows with `invalidReason: "inviter_left"` show **No longer valid** and explain that a current
 owner/admin must cancel the old invitation and send a fresh invitation using the invite form.
 Resend and the expired-row replacement action are unavailable for these rows;

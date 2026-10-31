@@ -415,6 +415,12 @@ sharing the organization lock with departure/removal. It either commits before d
 refuses without creating a member or rewriting the invitation. The recipient must ask the
 team for a new invitation. An inviter's role demotion alone does not invalidate it.
 
+Native `list-user-invitations` omits invitations whose original inviter no longer belongs
+to that team, for both HTTP and trusted `auth.api.listUserInvitations` calls. The stored
+invitation status is unchanged; retained rows keep the native response fields and recipient
+verification rules. A void invitation also grants no signup exception or sign-in email to
+an otherwise ineligible address.
+
 Only a current verified team owner may assign the fixed `admin` or `member` role.
 Owner targets cannot be demoted, including by themselves; only their own safe departure
 is allowed. Admins cannot change roles, including their own. Assigning `owner` and custom roles is

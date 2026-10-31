@@ -532,11 +532,15 @@ describe('complete public documentation', () => {
       const acceptancePolicy = source.match(
         /The original inviter must remain[\s\S]*?invalidate it\./,
       )?.[0]
+      const recipientPolicy = source.match(
+        /Native `list-user-invitations` omits[\s\S]*?otherwise ineligible address\./,
+      )?.[0]
       const summaryPolicy = source.match(
         /Rows with `invalidReason:[\s\S]*?cancellation remains available\./,
       )?.[0]
       expect(resendPolicy).toBeDefined()
       expect(acceptancePolicy).toBeDefined()
+      expect(recipientPolicy).toBeDefined()
       expect(summaryPolicy).toBeDefined()
       const webhookRows = source.split('\n').filter((line) => line.startsWith('| Session webhook'))
       expect(webhookRows.length).toBeGreaterThan(0)
@@ -547,6 +551,8 @@ describe('complete public documentation', () => {
           resendPolicy,
           '',
           acceptancePolicy,
+          '',
+          recipientPolicy,
           '',
           summaryPolicy,
           '',

@@ -10,7 +10,8 @@ export interface SignupPolicy {
   /**
    * `open`: anyone. `first-user`: the first account, then only `allowedDomains`. `closed`:
    * only `allowedDomains`. A live team invitation also allows its exact address when its
-   * inviter has an allowed domain or is the earliest auth user (createdAt, then id).
+   * inviter is still a member of that team and either has an allowed domain or is the
+   * earliest auth user (createdAt, then id).
    */
   mode: SignupMode
   /** Lowercase email domains whose addresses may always sign up; exact match, no subdomains. */
@@ -42,6 +43,15 @@ export async function maySignUp(db: Db, policy: SignupPolicy, email: string): Pr
       eb.selectFrom('personal_organizations').select('organization_id'),
     )
     .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom('auth.member as inviterMembership')
+          .select('inviterMembership.id')
+          .whereRef('inviterMembership.organizationId', '=', 'auth.invitation.organizationId')
+          .whereRef('inviterMembership.userId', '=', 'auth.invitation.inviterId'),
+      ),
+    )
+    .where((eb) =>
       eb.or([
         sql<boolean>`lower(substring(inviter.email FROM '@([^@]*)$')) = ANY (${policy.allowedDomains}::text[])`,
         eb(
@@ -71,7 +81,7 @@ export async function hasAccount(db: Db, email: string): Promise<boolean> {
 
 /**
  * Connection settings that hand the policy to the database, which enforces it again in the
- * transaction that inserts the user (migrations 0006, 0012 and 0027). For Better Auth's pool.
+ * transaction that inserts the user (migrations 0006, 0012, 0027 and 0046). For Better Auth's pool.
  */
 export function signupConnectionOptions({ mode, allowedDomains }: SignupPolicy): string {
   // Also keeps anything but a plain domain out of the connection options.

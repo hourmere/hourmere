@@ -273,31 +273,28 @@ describe('accept invitation entry', () => {
     },
   )
 
-  it.each([
-    [
-      'en',
-      'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
-    ],
-    ['zh-CN', '此邀请已失效，因为发送邀请的人已不再是团队成员。请联系团队获取新邀请。'],
-    [
-      'de',
-      'Diese Einladung ist nicht mehr gültig, da die Person, die sie gesendet hat, nicht mehr zum Team gehört. Bitten Sie das Team um eine neue Einladung.',
-    ],
-    [
-      'fr',
-      'Cette invitation n’est plus valable, car la personne qui l’a envoyée ne fait plus partie de l’équipe. Demandez une nouvelle invitation à l’équipe.',
-    ],
-    [
-      'es',
-      'Esta invitación ya no es válida porque la persona que la envió ya no forma parte del equipo. Pide al equipo una nueva invitación.',
-    ],
-    [
-      'pt-BR',
-      'Este convite não é mais válido porque a pessoa que o enviou não faz mais parte da equipe. Peça um novo convite à equipe.',
-    ],
-  ] as const)(
-    'explains an inviter departure in the public %s locale',
-    async (language, guidance) => {
+  it.each(['de', 'fr', 'es', 'pt-BR'] as const)(
+    'keeps the complete join page in English for the public-only %s preference',
+    async (language) => {
+      chooseLanguage(language)
+      const { api } = server()
+      renderApp(path)
+      await screen.findByRole('heading', { name: 'Invitation to join Team Alpha' })
+      expect(screen.getByRole('heading', { name: 'Accept invitation' })).toBeDefined()
+      expect(screen.getByText(ME.user.email).closest('p')?.textContent).toContain('Signed in as')
+      expect(screen.getByRole('button', { name: 'Join team' })).toBeDefined()
+      expect(screen.getByRole('button', { name: 'Change account' })).toBeDefined()
+      const languagePicker = screen.getByLabelText<HTMLSelectElement>('Interface language')
+      expect(languagePicker.value).toBe('en')
+      expect([...languagePicker.options].map(({ value }) => value)).toEqual(['en', 'zh-CN'])
+      expect(localStorage.getItem('hourmere-language')).toBe(language)
+      expect(api.to(acceptRoute)).toHaveLength(0)
+    },
+  )
+
+  it.each(['en', 'zh-CN', 'de', 'fr', 'es', 'pt-BR'] as const)(
+    'explains an inviter departure in an admin language for the %s preference',
+    async (language) => {
       chooseLanguage(language)
       const { api } = server({
         [lookupRoute]: () =>
@@ -307,28 +304,33 @@ describe('accept invitation entry', () => {
           }),
       })
       renderApp(path)
-      expect((await screen.findByRole('alert')).textContent).toBe(guidance)
+      const chinese = language === 'zh-CN'
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        chinese
+          ? '此邀请已失效，因为发送邀请的人已不再是团队成员。请联系团队获取新邀请。'
+          : 'This invitation is no longer valid because the person who sent it has left the team. Ask the team for a new invitation.',
+      )
       expect(
-        screen.getByLabelText<HTMLSelectElement>(
-          language === 'zh-CN'
-            ? '界面语言'
-            : language === 'de'
-              ? 'Sprache der Benutzeroberfläche'
-              : language === 'fr'
-                ? 'Langue de l’interface'
-                : language === 'es'
-                  ? 'Idioma de la interfaz'
-                  : language === 'pt-BR'
-                    ? 'Idioma da interface'
-                    : 'Interface language',
-        ).value,
-      ).toBe(language)
+        screen.getByRole('heading', { name: chinese ? '接受邀请' : 'Accept invitation' }),
+      ).toBeDefined()
+      expect(
+        screen.getByRole('button', { name: chinese ? '检查邀请状态' : 'Check invitation status' }),
+      ).toBeDefined()
+      expect(
+        screen.getByRole('button', { name: chinese ? '切换账号' : 'Change account' }),
+      ).toBeDefined()
+      const languagePicker = screen.getByLabelText<HTMLSelectElement>(
+        chinese ? '界面语言' : 'Interface language',
+      )
+      expect(languagePicker.value).toBe(chinese ? 'zh-CN' : 'en')
+      expect([...languagePicker.options].map(({ value }) => value)).toEqual(['en', 'zh-CN'])
+      expect(localStorage.getItem('hourmere-language')).toBe(language)
       expect(api.to(acceptRoute)).toHaveLength(0)
       expect(api.to(switchRoute)).toHaveLength(0)
     },
   )
 
-  it('detects restricting the recipient route to admin locales in a production-source copy', () => {
+  it('detects exposing the recipient route to public locales in a production-source copy', () => {
     const source = readFileSync('apps/web/src/App.tsx', 'utf8')
     const routes = source.slice(
       source.indexOf('export const appRoutes'),
@@ -363,20 +365,13 @@ describe('accept invitation entry', () => {
     const assertion = (value: RouteObject[]) => {
       const match = matchRoutes(value, path)
       expect(match?.some(({ route }) => route.path === PATHS.join)).toBe(true)
-      expect(match?.some(({ route }) => route.handle?.surface === 'admin')).toBe(false)
+      expect(match?.some(({ route }) => route.handle?.surface === 'admin')).toBe(true)
     }
     assertion(copiedRoutes(routes))
-    const before = '<Route element={<SessionLayout />}>'
+    const before = `<Route element={<SessionLayout />} handle={{ surface: 'admin' }}>`
     expect(routes.split(before)).toHaveLength(2)
     expect(() =>
-      assertion(
-        copiedRoutes(
-          routes.replace(
-            before,
-            `<Route element={<SessionLayout />} handle={{ surface: 'admin' }}>`,
-          ),
-        ),
-      ),
+      assertion(copiedRoutes(routes.replace(before, '<Route element={<SessionLayout />}>'))),
     ).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
     assertion(copiedRoutes(routes))
   })

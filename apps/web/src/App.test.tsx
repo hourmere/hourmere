@@ -49,7 +49,7 @@ describe('route loading language', () => {
     },
   )
 
-  it('keeps the public language while the session-gated invitation route loads', () => {
+  it('keeps admin languages while the session-gated invitation route loads', () => {
     const recipientRoute = appRoutes.find(
       ({ element, children }) =>
         isValidElement(element) &&
@@ -57,7 +57,7 @@ describe('route loading language', () => {
         children?.some(({ path }) => path === '/app/join'),
     )
     expect(recipientRoute).toBeDefined()
-    expect(recipientRoute?.handle?.surface).not.toBe('admin')
+    expect(recipientRoute?.handle?.surface).toBe('admin')
     chooseLanguage('de')
     vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
     render(
@@ -65,10 +65,11 @@ describe('route loading language', () => {
         <App />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('status').textContent).toBe('Wird geladen…')
-    expect(screen.getByLabelText<HTMLSelectElement>('Sprache der Benutzeroberfläche').value).toBe(
-      'de',
-    )
+    expect(screen.getByRole('status').textContent).toBe('正在加载…')
+    expect(screen.getByLabelText<HTMLSelectElement>('界面语言').value).toBe('zh-CN')
+    expect(
+      [...screen.getByLabelText<HTMLSelectElement>('界面语言').options].map(({ value }) => value),
+    ).toEqual(['en', 'zh-CN'])
     expect(localStorage.getItem('hourmere-language')).toBe('de')
   })
 

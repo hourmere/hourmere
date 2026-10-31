@@ -167,7 +167,10 @@ applies. In either restricted mode, a pending, unexpired team invitation also pe
 exact email address to register only when the inviter's current email domain is in
 `SIGNUP_ALLOWED_DOMAINS` or the inviter is the first user: the earliest remaining auth user
 by creation time, with user id breaking ties. This check uses the current allowlist, including
-for existing invitations. An invitee outside those domains cannot admit another address by
+for existing invitations. The inviter must also still belong to that invitation's team;
+demotion while retaining membership does not remove signup eligibility. An invitation from
+someone who left or was removed grants no registration exception or sign-in email to an
+otherwise ineligible address. An invitee outside those domains cannot admit another address by
 creating a team and inviting it; neither team creation nor invitation acceptance delegates
 registration authority. With `closed` and no domains, only invitations from the first user
 admit new accounts, so an empty instance must first be bootstrapped in `first-user` mode or
