@@ -1554,7 +1554,7 @@ export interface paths {
          * Create or replace the caller's profile
          * @description The time zone and locale are stored normalized (europe/berlin → Europe/Berlin).
          */
-        put: operations["putProfile"];
+        put: operations["updateProfile"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2255,7 +2255,7 @@ export interface paths {
         };
         get?: never;
         /** Set the hours of one date */
-        put: operations["putScheduleOverride"];
+        put: operations["setScheduleOverride"];
         post?: never;
         /**
          * Remove the override of one date
@@ -6395,7 +6395,7 @@ export interface operations {
             };
         };
     };
-    putProfile: {
+    updateProfile: {
         parameters: {
             query?: never;
             header?: never;
@@ -6907,7 +6907,7 @@ export interface operations {
             };
         };
     };
-    putScheduleOverride: {
+    setScheduleOverride: {
         parameters: {
             query?: never;
             header?: never;

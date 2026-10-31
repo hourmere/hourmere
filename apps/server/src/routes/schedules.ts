@@ -348,7 +348,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, SCHEDULE_OVERRIDE_BODY_LIMIT),
         method: 'put',
         path: '/api/v1/schedules/{id}/overrides/{date}',
-        operationId: 'putScheduleOverride',
+        operationId: 'setScheduleOverride',
         summary: 'Set the hours of one date',
         request: {
           params: OverrideParams,

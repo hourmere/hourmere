@@ -1,121 +1,102 @@
 {
-  "activateRoundRobin": {
-    "exemption": "Gap: round-robin pool activation has no MCP tool or CLI command yet."
-  },
   "authorizeConferenceConnectionMeetings": {
-    "exemption": "Authorizing meeting permissions on an existing Zoom connection requires live browser consent."
+    "exemption": "browser-session-only",
+    "reason": "Authorizing meeting permissions on an existing Zoom connection requires live browser consent."
   },
   "authorizeGoogleCalendarConnection": {
-    "exemption": "Starting Google Calendar OAuth requires a live browser session and provider consent."
+    "exemption": "browser-session-only",
+    "reason": "Starting Google Calendar OAuth requires a live browser session and provider consent."
   },
   "authorizeMicrosoftCalendarConnection": {
-    "exemption": "Starting Microsoft Calendar OAuth requires a live browser session and provider consent."
+    "exemption": "browser-session-only",
+    "reason": "Starting Microsoft Calendar OAuth requires a live browser session and provider consent."
   },
   "authorizeZoomConnection": {
-    "exemption": "Starting Zoom identity OAuth requires a live browser session and provider consent."
+    "exemption": "browser-session-only",
+    "reason": "Starting Zoom identity OAuth requires a live browser session and provider consent."
   },
   "authorizeZoomMeetings": {
-    "exemption": "Starting Zoom meeting OAuth requires a live browser session and explicit provider consent."
+    "exemption": "browser-session-only",
+    "reason": "Starting Zoom meeting OAuth requires a live browser session and explicit provider consent."
   },
-  "cancelHostBooking": { "mcp": "cancel_booking", "cli": "cancel" },
-  "cancelManagedBooking": { "mcp": "cancel_booking", "cli": "cancel" },
+  "cancelHostBooking": {
+    "mcp": "cancel_booking",
+    "cli": "cancel"
+  },
+  "cancelManagedBooking": {
+    "mcp": "cancel_booking",
+    "cli": "cancel"
+  },
   "cancelTeamBooking": {
-    "exemption": "Team-wide owner/admin cancellation is browser-session-only; host cancellation does not grant this authority."
+    "exemption": "browser-session-only",
+    "reason": "Team-wide owner/admin cancellation is browser-session-only; host cancellation does not grant this authority."
   },
   "cancelTeamInvitation": {
-    "exemption": "Team invitation management requires a verified owner/admin browser session."
-  },
-  "configureCalendar": {
-    "exemption": "Gap: calendar conflict-selection writes have no MCP tool or CLI command yet."
-  },
-  "confirmDefaultSchedule": {
-    "exemption": "Gap: confirming starter working hours has no MCP tool or CLI command yet."
-  },
-  "createEventType": {
-    "exemption": "Gap: event-type creation has no MCP tool or CLI command yet."
+    "exemption": "browser-session-only",
+    "reason": "Team invitation management requires a verified owner/admin browser session."
   },
   "createMcpOAuthRequest": {
-    "exemption": "Creating an MCP OAuth consent request requires the user's browser session."
+    "exemption": "browser-session-only",
+    "reason": "Creating an MCP OAuth consent request requires the user's browser session."
   },
-  "createPublicBooking": { "mcp": "create_booking", "cli": "book" },
-  "createPublicTeamBooking": { "mcp": "create_booking", "cli": "book" },
-  "createSchedule": {
-    "exemption": "Gap: schedule creation has no MCP tool or CLI command yet."
+  "createPublicBooking": {
+    "mcp": "create_booking",
+    "cli": "book"
   },
-  "createWebhook": {
-    "exemption": "Gap: webhook creation and one-time signing-secret delivery have no MCP tool or CLI command yet."
-  },
-  "deleteEventType": {
-    "exemption": "Gap: event-type deletion has no MCP tool or CLI command yet."
-  },
-  "deleteSchedule": {
-    "exemption": "Gap: schedule deletion has no MCP tool or CLI command yet."
-  },
-  "deleteScheduleOverride": {
-    "exemption": "Gap: removing a date's schedule override has no MCP tool or CLI command yet."
-  },
-  "deleteWebhook": {
-    "exemption": "Gap: webhook deletion has no MCP tool or CLI command yet."
+  "createPublicTeamBooking": {
+    "mcp": "create_booking",
+    "cli": "book"
   },
   "disconnectCalendarConnection": {
-    "exemption": "Disconnecting calendar credentials requires a live browser session."
+    "exemption": "browser-session-only",
+    "reason": "Disconnecting calendar credentials requires a live browser session."
   },
   "disconnectConferenceConnection": {
-    "exemption": "Disconnecting Zoom credentials requires a live browser session."
+    "exemption": "browser-session-only",
+    "reason": "Disconnecting Zoom credentials requires a live browser session."
   },
   "leaveTeam": {
-    "exemption": "Leaving a team and resolving its scheduling dependencies requires a verified browser session."
-  },
-  "putProfile": {
-    "exemption": "Gap: profile creation and replacement have no MCP tool or CLI command yet."
-  },
-  "putScheduleOverride": {
-    "exemption": "Gap: setting a date's schedule override has no MCP tool or CLI command yet."
+    "exemption": "browser-session-only",
+    "reason": "Leaving a team and resolving its scheduling dependencies requires a verified browser session."
   },
   "reconnectConferenceConnection": {
-    "exemption": "Reconnecting a Zoom identity requires a live browser session and provider consent."
-  },
-  "refreshCalendarList": {
-    "exemption": "Gap: refreshing a connected account's calendar list has no MCP tool or CLI command yet."
+    "exemption": "browser-session-only",
+    "reason": "Reconnecting a Zoom identity requires a live browser session and provider consent."
   },
   "refreshConferenceConnection": {
-    "exemption": "Explicit Zoom credential rotation requires a live browser session."
+    "exemption": "browser-session-only",
+    "reason": "Explicit Zoom credential rotation requires a live browser session."
   },
   "removeTeamMember": {
-    "exemption": "Revoking team membership requires a verified owner/admin browser session and departure handling."
+    "exemption": "browser-session-only",
+    "reason": "Revoking team membership requires a verified owner/admin browser session and departure handling."
   },
-  "rescheduleHostBooking": { "mcp": "reschedule_booking", "cli": "reschedule" },
-  "rescheduleManagedBooking": { "mcp": "reschedule_booking", "cli": "reschedule" },
-  "retryBookingCalendarCopy": { "mcp": "retry_calendar_copy", "cli": "retry-calendar-copy" },
-  "retryBookingConference": { "mcp": "retry_conference", "cli": "retry-meeting" },
+  "rescheduleHostBooking": {
+    "mcp": "reschedule_booking",
+    "cli": "reschedule"
+  },
+  "rescheduleManagedBooking": {
+    "mcp": "reschedule_booking",
+    "cli": "reschedule"
+  },
+  "retryBookingCalendarCopy": {
+    "mcp": "retry_calendar_copy",
+    "cli": "retry-calendar-copy"
+  },
+  "retryBookingConference": {
+    "mcp": "retry_conference",
+    "cli": "retry-meeting"
+  },
   "revokeMcpOAuthConnection": {
-    "exemption": "Revoking an MCP OAuth consent grant requires the user's browser session."
-  },
-  "rotateWebhookSecret": {
-    "exemption": "Gap: webhook signing-secret rotation and one-time secret delivery have no MCP tool or CLI command yet."
+    "exemption": "browser-session-only",
+    "reason": "Revoking an MCP OAuth consent grant requires the user's browser session."
   },
   "selectMcpOAuthOrganization": {
-    "exemption": "Selecting an MCP OAuth grant's organization requires the user's browser consent flow."
-  },
-  "setCalendarDestination": {
-    "exemption": "Gap: choosing a calendar writeback destination has no MCP tool or CLI command yet."
+    "exemption": "browser-session-only",
+    "reason": "Selecting an MCP OAuth grant's organization requires the user's browser consent flow."
   },
   "submitMcpOAuthConsent": {
-    "exemption": "Approving or denying MCP OAuth access requires the user's browser consent flow."
-  },
-  "syncCalendar": {
-    "exemption": "Gap: requesting a calendar busy-time sync has no MCP tool or CLI command yet."
-  },
-  "updateDisplayName": {
-    "exemption": "Gap: account display-name updates have no MCP tool or CLI command yet."
-  },
-  "updateEventType": {
-    "exemption": "Gap: event-type updates have no MCP tool or CLI command yet."
-  },
-  "updateSchedule": {
-    "exemption": "Gap: schedule updates have no MCP tool or CLI command yet."
-  },
-  "updateWebhook": {
-    "exemption": "Gap: webhook subscription and pause updates have no MCP tool or CLI command yet."
+    "exemption": "browser-session-only",
+    "reason": "Approving or denying MCP OAuth access requires the user's browser consent flow."
   }
 }

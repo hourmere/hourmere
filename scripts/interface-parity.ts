@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createDb, createPool } from '@hourmere/db'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
 import { productTools } from '../apps/server/src/server.ts'
@@ -7,10 +8,38 @@ const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'del
 export type HttpMethod = (typeof METHODS)[number]
 const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 'delete'])
 
+const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'
+// Bootstrap only: the original 20 gaps, used before this guard first reaches main.
+// Once the file exists at the base commit, that committed list is the only baseline.
+const INITIAL_KNOWN_GAPS = [
+  'activateRoundRobin',
+  'configureCalendar',
+  'confirmDefaultSchedule',
+  'createEventType',
+  'createSchedule',
+  'createWebhook',
+  'deleteEventType',
+  'deleteSchedule',
+  'deleteScheduleOverride',
+  'deleteWebhook',
+  'refreshCalendarList',
+  'rotateWebhookSecret',
+  'setCalendarDestination',
+  'setScheduleOverride',
+  'syncCalendar',
+  'updateDisplayName',
+  'updateEventType',
+  'updateProfile',
+  'updateSchedule',
+  'updateWebhook',
+] as const
+
 export interface RestOperation {
   path: string
   method: HttpMethod
   operationId?: unknown
+  /** Effective OpenAPI security: an operation overrides the document's default. */
+  security?: unknown
 }
 
 export interface InterfaceInventory {
@@ -22,7 +51,7 @@ export interface InterfaceInventory {
 
 export type InterfaceParityMapping = Record<
   string,
-  { mcp: string; cli: string } | { exemption: string }
+  { mcp: string; cli: string } | { exemption: 'browser-session-only'; reason: string }
 >
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,6 +74,10 @@ export function restOperations(document: unknown): RestOperation[] {
         path,
         method,
         operationId: isRecord(operation) ? operation.operationId : undefined,
+        security:
+          isRecord(operation) && Object.hasOwn(operation, 'security')
+            ? operation.security
+            : document.security,
       })
     }
   }
@@ -71,11 +104,65 @@ function oneLineReason(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && !/[\r\n\u2028\u2029]/.test(value)
 }
 
+function browserSessionOnly(security: unknown): boolean {
+  if (!Array.isArray(security) || security.length !== 1) return false
+  const requirement: unknown = security[0]
+  return (
+    isRecord(requirement) &&
+    Object.keys(requirement).length === 1 &&
+    Object.hasOwn(requirement, 'session') &&
+    Array.isArray(requirement.session) &&
+    requirement.session.length === 0
+  )
+}
+
+function gitOutput(args: string[]): string {
+  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+}
+
+/** A verified base commit makes removed gaps impossible to reintroduce in later changes. */
+export function loadKnownGapBaseline(
+  base = process.env.HOURMERE_PARITY_BASE ?? 'origin/main',
+  git: (args: string[]) => string = gitOutput,
+): unknown {
+  let commit: string
+  try {
+    commit = git(['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`]).trim()
+  } catch {
+    throw new Error('Cannot resolve the interface-parity base commit; fetch its Git history.')
+  }
+  // A shallow or missing base must never silently reset the ratchet to its initial ceiling.
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) {
+    throw new Error('The interface-parity base must resolve to a full Git commit ID.')
+  }
+  const path = git(['ls-tree', '--name-only', commit, '--', KNOWN_GAPS_PATH]).trim()
+  if (path === '') return Object.fromEntries(INITIAL_KNOWN_GAPS.map((id) => [id, true]))
+  if (path !== KNOWN_GAPS_PATH) throw new Error('Unexpected interface-parity baseline path.')
+  return JSON.parse(git(['show', `${commit}:${KNOWN_GAPS_PATH}`])) as unknown
+}
+
+/** The committed known-gap list is a ratchet: additions must implement all interfaces. */
+export function knownGapRatchetErrors(knownGaps: unknown, baseline: unknown): string[] {
+  if (!isRecord(baseline)) return ['The committed interface-parity gap baseline must be an object.']
+  if (!isRecord(knownGaps)) return [] // The ordinary parity validation reports this shape error.
+  return Object.keys(knownGaps)
+    .filter((operationId) => !Object.hasOwn(baseline, operationId))
+    .map(
+      (operationId) =>
+        `${operationId}: new MCP/CLI gaps are forbidden; add the MCP tool and CLI command instead.`,
+    )
+    .sort()
+}
+
 /** Return all failures together, with operation names and routes for actionable CI output. */
-export function interfaceParityErrors(inventory: InterfaceInventory, mapping: unknown): string[] {
+export function interfaceParityErrors(
+  inventory: InterfaceInventory,
+  mapping: unknown,
+  knownGaps: unknown = {},
+): string[] {
   const errors: string[] = []
   const seen = new Map<string, string>()
-  const writes = new Map<string, string>()
+  const writes = new Map<string, { route: string; security: unknown }>()
   for (const operation of inventory.rest) {
     const route = `${operation.method.toUpperCase()} ${operation.path}`
     const write = WRITE_METHODS.has(operation.method)
@@ -88,16 +175,35 @@ export function interfaceParityErrors(inventory: InterfaceInventory, mapping: un
     if (prior)
       errors.push(`${operation.operationId}: duplicate operationId on ${prior} and ${route}.`)
     seen.set(operation.operationId, route)
-    if (write) writes.set(operation.operationId, route)
+    if (write) writes.set(operation.operationId, { route, security: operation.security })
   }
 
   if (!isRecord(mapping)) {
     errors.push('Interface parity mapping must be an object keyed by REST write operationId.')
     return errors
   }
-  for (const [operationId, route] of writes) {
-    if (!Object.hasOwn(mapping, operationId)) {
-      errors.push(`${operationId} (${route}): missing MCP/CLI mapping or reasoned exemption.`)
+  if (!isRecord(knownGaps)) {
+    errors.push('Known MCP/CLI gaps must be an object keyed by REST write operationId.')
+    return errors
+  }
+  for (const [operationId, { route }] of writes) {
+    if (!Object.hasOwn(mapping, operationId) && !Object.hasOwn(knownGaps, operationId)) {
+      errors.push(
+        `${operationId} (${route}): missing MCP/CLI mapping, verified browser-session-only exemption or frozen known gap.`,
+      )
+    }
+  }
+  for (const [operationId, reason] of Object.entries(knownGaps)) {
+    const operation = writes.get(operationId)
+    if (!operation) {
+      errors.push(`${operationId}: stale known gap; no REST write operation has this operationId.`)
+    } else if (Object.hasOwn(mapping, operationId) || browserSessionOnly(operation.security)) {
+      errors.push(
+        `${operationId}: stale known gap; remove it and keep the mapping or verified exemption.`,
+      )
+    }
+    if (!oneLineReason(reason)) {
+      errors.push(`${operationId}: known gap needs a nonempty, one-line reason.`)
     }
   }
   const tools = new Set(inventory.mcp)
@@ -107,13 +213,25 @@ export function interfaceParityErrors(inventory: InterfaceInventory, mapping: un
       errors.push(`${operationId}: stale ${kind}; no REST write operation has this operationId.`)
     }
     if (!isRecord(entry)) {
-      errors.push(`${operationId}: expected exactly {mcp, cli} or {exemption}.`)
+      errors.push(
+        `${operationId}: expected exactly {mcp, cli} or {exemption: "browser-session-only", reason}.`,
+      )
       continue
     }
     const keys = Object.keys(entry)
-    if (keys.length === 1 && Object.hasOwn(entry, 'exemption')) {
-      if (!oneLineReason(entry.exemption)) {
+    if (
+      keys.length === 2 &&
+      entry.exemption === 'browser-session-only' &&
+      Object.hasOwn(entry, 'reason')
+    ) {
+      if (!oneLineReason(entry.reason)) {
         errors.push(`${operationId}: exemption needs a nonempty, one-line reason.`)
+      }
+      const operation = writes.get(operationId)
+      if (operation && !browserSessionOnly(operation.security)) {
+        errors.push(
+          `${operationId}: browser-session-only exemption requires OpenAPI security exactly [{session: []}]; add the MCP tool and CLI command instead.`,
+        )
       }
       continue
     }
@@ -124,7 +242,9 @@ export function interfaceParityErrors(inventory: InterfaceInventory, mapping: un
       !identifier(entry.mcp) ||
       !identifier(entry.cli)
     ) {
-      errors.push(`${operationId}: expected exactly {mcp, cli} or {exemption}.`)
+      errors.push(
+        `${operationId}: expected exactly {mcp, cli} or {exemption: "browser-session-only", reason}.`,
+      )
       continue
     }
     if (!tools.has(entry.mcp)) {

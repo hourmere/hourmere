@@ -114,7 +114,7 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
       createRoute({
         method: 'put',
         path: '/api/v1/profile',
-        operationId: 'putProfile',
+        operationId: 'updateProfile',
         summary: "Create or replace the caller's profile",
         description:
           'The time zone and locale are stored normalized (europe/berlin → Europe/Berlin).',
