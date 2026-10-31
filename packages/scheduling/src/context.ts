@@ -44,6 +44,8 @@ export interface ServiceContext {
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
   db: Db
+  /** Internal waitlist attribution; transports do not expose enrollment yet. */
+  waitlistSecret?: string | undefined
   /** Maximum invitee moves across one booking chain; defaults to 5, and 0 disables them. */
   bookingMaxInviteeReschedules?: number | undefined
   /** Explicit instance capability; defaults off. */

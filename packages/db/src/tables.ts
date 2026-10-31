@@ -539,6 +539,7 @@ export interface EventTypes {
   slug: string;
   title: string;
   updated_at: Generated<Timestamp>;
+  waitlist_enabled: Generated<boolean>;
   zoom_connection_id: string | null;
 }
 
@@ -660,6 +661,131 @@ export interface SignInEmails {
   id: string;
 }
 
+export interface WaitlistCandidates {
+  accepted_at: Timestamp | null;
+  attempts: Generated<number>;
+  claim_token: string | null;
+  cohort_id: string;
+  created_at: Generated<Timestamp>;
+  due_at: Timestamp;
+  entry_id: string;
+  error_code: string | null;
+  event_type_id: string;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  last_job_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  slots: Json;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WaitlistCapabilities {
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  entry_id: string;
+  expires_at: Timestamp;
+  generation: Generated<number>;
+  id: Generated<string>;
+  purpose: string;
+  revoked_at: Timestamp | null;
+  token_hash: Buffer;
+}
+
+export interface WaitlistCohorts {
+  discovered_at: Generated<Timestamp>;
+  event_type_id: string;
+  id: Generated<string>;
+}
+
+export interface WaitlistEntries {
+  booking_id: string | null;
+  consent_version: string;
+  consented_at: Timestamp;
+  created_at: Generated<Timestamp>;
+  email: string | null;
+  event_type_id: string;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  locale: string | null;
+  name: string | null;
+  organization_id: string;
+  pending_expires_at: Timestamp;
+  recipient_hash: Buffer;
+  status: Generated<string>;
+  terminal_at: Timestamp | null;
+  terminal_reason: string | null;
+  time_zone: string | null;
+  verification_generation: Generated<number>;
+  verified_at: Timestamp | null;
+  window_end: Timestamp | null;
+  window_start: Timestamp | null;
+}
+
+export interface WaitlistKeyState {
+  secret_fingerprint: Buffer;
+  singleton: Generated<boolean>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WaitlistScanWork {
+  cursor_entry_id: string | null;
+  cursor_start_at: Timestamp | null;
+  dirty_generation: Generated<number>;
+  event_type_id: string;
+  last_scanned_at: Timestamp | null;
+  next_due_at: Generated<Timestamp>;
+  scanned_generation: Generated<number>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WaitlistSlots {
+  end_at: Timestamp;
+  event_type_id: string;
+  generation: Generated<number>;
+  is_open: boolean;
+  observed_at: Generated<Timestamp>;
+  start_at: Timestamp;
+}
+
+export interface WaitlistSlotTombstones {
+  consumed_at: Generated<Timestamp>;
+  end_at: Timestamp;
+  event_type_id: string;
+  outcome: Generated<string>;
+  purge_at: Timestamp;
+  recipient_hash: Buffer;
+  start_at: Timestamp;
+}
+
+export interface WaitlistVerificationOutbox {
+  accepted_at: Timestamp | null;
+  attempts: Generated<number>;
+  claim_token: string | null;
+  created_at: Generated<Timestamp>;
+  encrypted_payload: Buffer | null;
+  entry_id: string;
+  error_code: string | null;
+  expires_at: Timestamp;
+  generation: number;
+  id: Generated<string>;
+  last_job_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WaitlistVerificationRequests {
+  email_hash: Buffer;
+  event_type_id: string;
+  generation_id: string;
+  id: Generated<string>;
+  ip_hash: Buffer;
+  requested_at: Generated<Timestamp>;
+}
+
 export interface WebhookDeliveries {
   attempts: Generated<number>;
   booking_id: string;
@@ -737,6 +863,16 @@ export interface DB {
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
   sign_in_emails: SignInEmails;
+  waitlist_candidates: WaitlistCandidates;
+  waitlist_capabilities: WaitlistCapabilities;
+  waitlist_cohorts: WaitlistCohorts;
+  waitlist_entries: WaitlistEntries;
+  waitlist_key_state: WaitlistKeyState;
+  waitlist_scan_work: WaitlistScanWork;
+  waitlist_slot_tombstones: WaitlistSlotTombstones;
+  waitlist_slots: WaitlistSlots;
+  waitlist_verification_outbox: WaitlistVerificationOutbox;
+  waitlist_verification_requests: WaitlistVerificationRequests;
   webhook_deliveries: WebhookDeliveries;
   webhooks: Webhooks;
 }

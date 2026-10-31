@@ -38,6 +38,8 @@ import {
 import { type Responses, validateResponses } from './questions.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import { cleanText } from './text.ts'
+import { ensureWaitlistKey } from './waitlist.ts'
+import { attributeWaitlistBooking } from './waitlist-booking.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
 export type BookingSource = 'web' | 'embed' | 'api' | 'mcp'
@@ -839,6 +841,8 @@ export interface CreateBookingInput {
    * be random (e.g. a UUIDv4), never derived from the request.
    */
   idempotencyKey?: string | undefined
+  /** Optional internal attribution metadata; excluded from booking identity and privileges. */
+  waitlistToken?: string | undefined
 }
 
 /**
@@ -932,6 +936,11 @@ async function publicBooking(
 
   try {
     return await ctx.db.transaction().execute(async (trx) => {
+      // The accounting-key fence precedes ordinary booking locks, matching discovery
+      // and preventing a key rotation from forming a host/event/key lock cycle.
+      if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
+        await ensureWaitlistKey(trx, ctx.waitlistSecret, new Date(ctx.now().epochMilliseconds))
+      }
       await lockOrganization(trx, et.organizationId)
       await lockHosts(trx, et.hostUserIds)
       // A concurrent request with the same key may have committed while we waited.
@@ -1034,6 +1043,18 @@ async function publicBooking(
       })
       // In this transaction, and never on the replay paths: one set of emails per booking,
       // queued only if the booking commits.
+      if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
+        await attributeWaitlistBooking(trx, {
+          secret: ctx.waitlistSecret,
+          token: input.waitlistToken,
+          eventTypeId: current.id,
+          bookingId: id,
+          email: invitee.email,
+          start: input.start,
+          end,
+          now: ctx.now,
+        })
+      }
       await prepareBookingConference(ctx, trx, id)
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return { booking: await loadBooking(trx, id), manageToken, replayed: false }
