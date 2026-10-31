@@ -38,8 +38,12 @@ const custom: NotificationSettings = {
   ],
 }
 
-async function conferenceSourceCopy(replacement: readonly [string, string]) {
-  const url = new URL('../../calendars/src/conferences.ts', import.meta.url)
+async function sourceCopy<T>(
+  path: string,
+  exported: string,
+  replacement: readonly [string, string],
+) {
+  const url = new URL(path, import.meta.url)
   let source = readFileSync(url, 'utf8')
   expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
   source = stripTypeScriptTypes(source.replace(...replacement))
@@ -60,9 +64,15 @@ async function conferenceSourceCopy(replacement: readonly [string, string]) {
   }
   return new Function(
     ...Object.keys(dependencies),
-    `${source.replace(/\bexport /g, '')}; return writeBookingConference`,
-  )(...Object.values(dependencies)) as typeof writeBookingConference
+    `${source.replace(/\bexport /g, '')}; return ${exported}`,
+  )(...Object.values(dependencies)) as T
 }
+const conferenceSourceCopy = (replacement: readonly [string, string]) =>
+  sourceCopy<typeof writeBookingConference>(
+    '../../calendars/src/conferences.ts',
+    'writeBookingConference',
+    replacement,
+  )
 
 describe.skipIf(!serverUrl)('scheduled mail lifecycle and conference races', () => {
   let owned: TestDatabase
@@ -180,6 +190,60 @@ describe.skipIf(!serverUrl)('scheduled mail lifecycle and conference races', () 
       expect((await b.rows())[0]?.state).toBe('skipped')
     },
   )
+
+  async function verifyMeetingStartedBeforeSend(deliver = deliverScheduledBookingEmail) {
+    const b = await booked()
+    const row = (await b.rows())[0]
+    if (!row) throw new Error('Missing scheduled reminder')
+    now = Temporal.Instant.from(row.due_at.toISOString())
+    const holder = await owned.pool.connect()
+    await holder.query('SELECT pg_advisory_lock(1852798057,1835100524)')
+    const pending = deliver(deps(), row.id)
+    pending.catch(() => {})
+    try {
+      await waitForBudgetLock()
+      now = START
+    } finally {
+      await holder.query('SELECT pg_advisory_unlock(1852798057,1835100524)')
+      holder.release()
+    }
+    await pending
+    expect(sent).toHaveLength(0)
+    expect(
+      await db
+        .selectFrom('booking_notifications')
+        .selectAll()
+        .where('booking_id', '=', b.result.booking.id)
+        .execute(),
+    ).toHaveLength(0)
+    expect(
+      (await b.rows())[0],
+      'start-boundary skips retain the actual lifecycle reason',
+    ).toMatchObject({
+      state: 'skipped',
+      skip_reason: 'meeting_started',
+      attempts: 1,
+      claim_token: null,
+      lease_until: null,
+    })
+  }
+
+  it('records meeting_started when the reminder reaches start during a mail budget wait', async () => {
+    await verifyMeetingStartedBeforeSend()
+  })
+
+  it('kills a source-copy mutation that mislabels an overtaken reminder as booking_cancelled', async () => {
+    const deliver = await sourceCopy<typeof deliverScheduledBookingEmail>(
+      './scheduled.ts',
+      'deliverScheduledBookingEmail',
+      ['obsoleteReason(current, clock(deps))', "'booking_cancelled'"],
+    )
+    await expect(verifyMeetingStartedBeforeSend(deliver)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: expect.objectContaining({ skip_reason: 'booking_cancelled' }),
+      expected: expect.objectContaining({ skip_reason: 'meeting_started' }),
+    })
+  })
 
   it('cancels between recipients without holding a booking or message lock over SMTP', async () => {
     const b = await booked()

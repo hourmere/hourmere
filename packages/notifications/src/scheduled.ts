@@ -423,7 +423,14 @@ export async function deliverScheduledBookingEmail(
           sendSignal,
           undefined,
         )
-        if (result === 'overtaken') throw new ScheduledObsolete('booking_cancelled')
+        if (result === 'overtaken') {
+          const current = await currentRow(deps.db, messageId)
+          throw new ScheduledObsolete(
+            current
+              ? (obsoleteReason(current, clock(deps)) ?? 'booking_cancelled')
+              : 'booking_missing',
+          )
+        }
         if (result === 'sent') attempted++
       } catch (error) {
         if (!(error instanceof MailRejectedError) || !error.recipientOnly) throw error

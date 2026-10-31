@@ -8,11 +8,34 @@ It does not infer missing mail from absent receipts or reseed delivery accountin
 
 Receipt identity gains a message key. Historical keys remain empty; existing outcomes,
 suppression reasons, timestamps and manage-token hashes are preserved. The unique token
-index and deferred booking foreign key remain intact. Rebuilding the receipt primary key
-requires an exclusive table lock; allow a maintenance window proportional to retained
-receipt count and test its duration on a restored production-size backup. The automated
-predecessor fixture verifies preservation and reports its measured migration duration;
-its small synthetic dataset does not predict production lock time.
+index and deferred booking foreign key remain intact.
+
+Back up the database before starting, and run this upgrade during a quiet maintenance
+period with every old process stopped. The migration takes ACCESS EXCLUSIVE locks on
+`event_types`, `bookings` and `booking_notifications`, blocking reads and writes to each
+table once its lock is acquired. The runner applies the entire migration in one transaction,
+so these locks remain held until commit. Its work includes:
+
+- Full-table scans to validate the new CHECK constraints on all three tables, including
+  per-row JSON validation on `event_types`.
+- Building a unique btree index on `bookings(id, organization_id)` for the composite
+  scheduled-message foreign key. This index also adds ongoing storage and write overhead.
+- Rebuilding the `booking_notifications` primary-key btree with the new message key.
+- Taking SHARE ROW EXCLUSIVE locks on `bookings` and `auth.organization` while adding
+  the new, initially empty scheduled-message table's foreign keys.
+
+The constant-default columns do not rewrite historical rows, but validation still scans
+rows and the index builds process and sort their keys. Plan for work growing with booking,
+event-type and retained receipt counts, with additional sort and I/O cost for the indexes;
+the receipt index can dominate on large installations. Allow downtime for the entire
+migration and test its duration on a restored production-size backup before upgrading.
+The automated predecessor fixture verifies preservation and reports its measured migration
+duration; its small synthetic dataset does not predict production lock time.
+
+The SQL retains atomic validation and index creation. Adding CHECKs as NOT VALID and
+validating later within this same transaction, or creating the booking index after its
+table has already been altered, would still retain the earlier ACCESS EXCLUSIVE lock
+until commit. Reducing that downtime requires a separately designed, staged rollout.
 
 New configurable bookings store snapshots and bounded per-rule schedules transactionally.
 Schedules cascade with their booking/organization; the existing mail-budget ledger has

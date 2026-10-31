@@ -3,6 +3,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { type MailMessage, MailRejectedError } from '@hourmere/mail'
+import { getManagedBooking } from '@hourmere/scheduling'
 import {
   createNotificationSnapshot,
   type NotificationSettings,
@@ -96,8 +97,14 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     refuse = undefined
     await db.deleteFrom('notification_email_sends').execute()
   })
-  async function setup(settings = policy(), start = START, end = END, guests = false) {
-    const host = await f.host()
+  async function setup(
+    settings = policy(),
+    start = START,
+    end = END,
+    guests = false,
+    timeZone?: string,
+  ) {
+    const host = await f.host(timeZone === undefined ? {} : { timeZone })
     const eventTypeId = await f.eventType(host.organizationId, host.userId, {
       questions: [{ id: 'answer', label: 'Private answer' }],
     })
@@ -126,6 +133,12 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
           is_booker: false,
           time_zone: 'Europe/Berlin',
         })
+        .execute()
+    if (timeZone)
+      await db
+        .updateTable('booking_attendees')
+        .set({ time_zone: timeZone, locale: 'zh-CN' })
+        .where('booking_id', '=', bookingId)
         .execute()
     await db
       .transaction()
@@ -428,6 +441,47 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       'suppressed',
     )
   })
+  it('keeps an earlier sent receipt and its manage link when a later rule is suppressed', async () => {
+    const { bookingId } = await setup({
+      reminders: [
+        rule('a', 120, { host: false, invitee: true, guests: false }),
+        rule('b', 60, { host: false, invitee: true, guests: false }),
+      ],
+      followUps: [],
+    })
+    const [one, two] = firstTwo(await rows(bookingId))
+    const limits = { ...deps, mailMaxPerHour: 1 }
+    now = START.subtract({ minutes: 120 })
+    await deliverScheduledBookingEmail(limits, one.id)
+    expect(sent).toHaveLength(1)
+    const original = required((await receipts(bookingId))[0])
+    expect(original).toMatchObject({ message_key: 'a', outcome: 'sent' })
+    expect(original.manage_token_hash !== null).toBe(true)
+    const token = sent[0]?.text.match(/#token=([A-Za-z0-9_-]+)&action=reschedule/)?.[1]
+    expect(typeof token === 'string').toBe(true)
+    const context = { db, now: () => now }
+    expect((await getManagedBooking(context, token)).id).toBe(bookingId)
+
+    now = START.subtract({ minutes: 60 })
+    await db
+      .insertInto('notification_email_sends')
+      .values({ recipient_hash: null, sent_at: date(now.subtract({ minutes: 1 })) })
+      .execute()
+    await deliverScheduledBookingEmail(limits, two.id)
+    expect(sent).toHaveLength(1)
+    const saved = await receipts(bookingId)
+    expect(saved).toHaveLength(2)
+    expect(saved.find((r) => r.message_key === 'b')).toMatchObject({
+      outcome: 'suppressed',
+      suppression_reason: 'instance_hourly_limit',
+      manage_token_hash: null,
+    })
+    const earlier = required(saved.find((r) => r.message_key === 'a'))
+    expect(earlier.outcome).toBe('sent')
+    expect(earlier.manage_token_hash?.equals(original.manage_token_hash as Buffer)).toBe(true)
+    expect(JSON.stringify(earlier) === JSON.stringify(original)).toBe(true)
+    expect((await getManagedBooking(context, token)).id).toBe(bookingId)
+  })
   it('repairs lost jobs without resetting attempts and retires a crashed final claim', async () => {
     const { bookingId } = await setup()
     const m = required((await rows(bookingId))[0])
@@ -652,35 +706,112 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
         .executeTakeFirstOrThrow(),
     ).toMatchObject({ state: 'pending', attempts: 0, last_job_id: null })
   })
+  // Exact timeRules.vectors: pre- and post-meeting offsets cross each DST transition.
   it.each([
-    ['America/Los_Angeles', '2026-03-08T10:30:00Z'],
-    ['America/Los_Angeles', '2026-11-01T09:30:00Z'],
-    ['Europe/Berlin', '2026-03-29T01:30:00Z'],
-    ['Europe/Berlin', '2026-10-25T01:30:00Z'],
-  ])('uses elapsed minutes across both DST directions in %s at %s', async (zone, startText) => {
-    const start = Temporal.Instant.from(startText)
+    {
+      name: 'los-angeles-spring-reminder',
+      timeZone: 'America/Los_Angeles',
+      kind: 'reminder',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-03-08T16:00:00Z',
+      expectedDueUtc: '2026-03-07T16:00:00Z',
+    },
+    {
+      name: 'los-angeles-spring-follow-up',
+      timeZone: 'America/Los_Angeles',
+      kind: 'follow_up',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-03-07T17:30:00Z',
+      expectedDueUtc: '2026-03-08T17:30:00Z',
+    },
+    {
+      name: 'berlin-spring-reminder',
+      timeZone: 'Europe/Berlin',
+      kind: 'reminder',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-03-29T07:00:00Z',
+      expectedDueUtc: '2026-03-28T07:00:00Z',
+    },
+    {
+      name: 'berlin-spring-follow-up',
+      timeZone: 'Europe/Berlin',
+      kind: 'follow_up',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-03-28T08:30:00Z',
+      expectedDueUtc: '2026-03-29T08:30:00Z',
+    },
+    {
+      name: 'los-angeles-fall-reminder',
+      timeZone: 'America/Los_Angeles',
+      kind: 'reminder',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-11-01T17:00:00Z',
+      expectedDueUtc: '2026-10-31T17:00:00Z',
+    },
+    {
+      name: 'los-angeles-fall-follow-up',
+      timeZone: 'America/Los_Angeles',
+      kind: 'follow_up',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-10-31T16:30:00Z',
+      expectedDueUtc: '2026-11-01T16:30:00Z',
+    },
+    {
+      name: 'berlin-fall-reminder',
+      timeZone: 'Europe/Berlin',
+      kind: 'reminder',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-10-25T08:00:00Z',
+      expectedDueUtc: '2026-10-24T08:00:00Z',
+    },
+    {
+      name: 'berlin-fall-follow-up',
+      timeZone: 'Europe/Berlin',
+      kind: 'follow_up',
+      offsetMinutes: 1440,
+      anchorUtc: '2026-10-24T07:30:00Z',
+      expectedDueUtc: '2026-10-25T07:30:00Z',
+    },
+  ] as const)('uses the exact UTC send time for $name', async (vector) => {
+    const anchor = Temporal.Instant.from(vector.anchorUtc)
+    const start = vector.kind === 'reminder' ? anchor : anchor.subtract({ minutes: 30 })
+    const end = vector.kind === 'reminder' ? anchor.add({ minutes: 30 }) : anchor
+    const due = Temporal.Instant.from(vector.expectedDueUtc)
     now = start.subtract({ hours: 50 })
-    const { bookingId } = await setup(
-      { reminders: [rule('absolute-before', 1440)], followUps: [rule('absolute-after', 1440)] },
-      start,
-      start.add({ minutes: 30 }),
+    const recipients = { host: true, invitee: true, guests: false }
+    const settings: NotificationSettings = {
+      reminders:
+        vector.kind === 'reminder' ? [rule(vector.name, vector.offsetMinutes, recipients)] : [],
+      followUps:
+        vector.kind === 'follow_up' ? [rule(vector.name, vector.offsetMinutes, recipients)] : [],
+    }
+    const { bookingId } = await setup(settings, start, end, false, vector.timeZone)
+    const messages = await rows(bookingId)
+    expect(messages).toHaveLength(1)
+    const message = required(messages[0])
+    expect(message.kind).toBe(vector.kind)
+    expect(message.due_at.toISOString()).toBe(date(due).toISOString())
+    expect(message.anchor_start_at.toISOString()).toBe(date(start).toISOString())
+    expect(message.anchor_end_at.toISOString()).toBe(date(end).toISOString())
+    const job = required(
+      (
+        await fixture.pool.query<{ start_after: Date }>(
+          'SELECT start_after FROM pgboss.job WHERE id=$1',
+          [message.last_job_id],
+        )
+      ).rows[0],
     )
-    await db
-      .updateTable('booking_attendees')
-      .set({ time_zone: zone, locale: 'zh-CN' })
-      .where('booking_id', '=', bookingId)
-      .execute()
-    const [before, after] = firstTwo(await rows(bookingId))
-    expect(before.due_at.toISOString()).toBe(
-      new Date(start.epochMilliseconds - 86400000).toISOString(),
-    )
-    expect(after.due_at.toISOString()).toBe(
-      new Date(start.epochMilliseconds + 1800000 + 86400000).toISOString(),
-    )
-    expect(before.due_at.getTime()).toBe(start.epochMilliseconds - 1440 * 60000)
-    expect(after.due_at.getTime()).toBe(start.epochMilliseconds + 30 * 60000 + 1440 * 60000)
-    await run(before.id, Temporal.Instant.fromEpochMilliseconds(before.due_at.getTime()))
-    await run(after.id, Temporal.Instant.fromEpochMilliseconds(after.due_at.getTime()))
-    expect(sent.some((m) => m.subject.startsWith('会议时间已结束：'))).toBe(true)
+    expect(job.start_after.toISOString()).toBe(date(due).toISOString())
+    await run(message.id, due.subtract({ seconds: 1 }))
+    expect(sent).toEqual([])
+    const sentAt: string[] = []
+    during = async () => {
+      sentAt.push(now.toString())
+    }
+    await run(message.id, due)
+    expect(sentAt).toEqual([vector.expectedDueUtc, vector.expectedDueUtc])
+    expect((await rows(bookingId))[0]).toMatchObject({ state: 'completed', attempts: 1 })
+    if (vector.kind === 'follow_up')
+      expect(sent.some((m) => m.subject.startsWith('会议时间已结束：'))).toBe(true)
   })
 })
