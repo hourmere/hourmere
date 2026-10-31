@@ -35,6 +35,8 @@ function server(overrides: Routes = {}, item: EventType = eventType({ ownerUserI
   return fakeApi({
     ...signedInAs(team),
     ...profile(),
+    'GET /api/auth/organization/get-active-member': () =>
+      json(200, { organizationId: team.organization.id, userId: ME.user.id, role: 'admin' }),
     'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
     'GET /api/v1/event-types': () => json(200, { data: [item] }),
     'GET /api/v1/event-type-hosts': () =>

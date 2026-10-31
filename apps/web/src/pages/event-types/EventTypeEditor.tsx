@@ -32,6 +32,7 @@ import {
 } from '../../paths.ts'
 import { randomHex } from '../../random.ts'
 import { type Me, useMe, useSession } from '../../session.tsx'
+import { useTeamManagementAccess } from '../../team-management.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
@@ -52,6 +53,7 @@ import {
 } from './event-type-form.ts'
 import { HostAssignment } from './HostAssignment.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
+import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
 interface Loaded {
@@ -141,6 +143,10 @@ function EventTypeForm({
   const scheduleHint = t('The weekly hours times are offered in. {0}').split('{0}')
 
   const me = useMe()
+  const access = useTeamManagementAccess()
+  const canAssignHosts =
+    me.principal.kind !== 'session' || (access.status === 'ready' && access.role !== null)
+  const role = access.status === 'ready' ? (access.roles?.join(',') ?? null) : null
   // A form keeps the organization it started in; submitting never adopts another tab's
   // active organization. RequireSession remounts it after a confirmed context reload.
   const [expectedOrganizationId] = useState(me.organization.id)
@@ -156,6 +162,9 @@ function EventTypeForm({
       : { ...emptyDraft(), ...(!me.organization.personal && { hostUserIds: [me.user.id] }) },
   )
   const [draft, setDraft] = useState(baseline)
+  const ownSchedule =
+    me.organization.personal ||
+    (draft.hostUserIds.length === 1 && draft.hostUserIds[0] === me.user.id)
   // On a new event type the slug follows the title until it is edited by hand.
   const [slugTouched, setSlugTouched] = useState(eventType !== null)
   const [slugSuffix, setSlugSuffix] = useState<string | null>(null)
@@ -551,57 +560,65 @@ function EventTypeForm({
             </div>
           </section>
 
-          {!me.organization.personal && (
+          {!me.organization.personal && canAssignHosts && (
             <HostAssignment
+              organizationId={me.organization.id}
+              currentUserId={me.user.id}
+              role={role}
               draft={draft}
               error={errors.hosts}
               organizerError={errors.conferenceOrganizer}
               set={set}
             />
           )}
-
-          {!me.organization.personal && draft.schedulingType === 'round_robin' && (
-            <section className="panel" aria-labelledby="round-robin-heading">
-              <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
-              <p>
-                {t(
-                  saved?.roundRobinActive && saved.schedulingType === 'round_robin'
-                    ? 'Active'
-                    : 'Needs activation',
-                )}
-              </p>
-              <p>
-                {t(
-                  'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
-                )}
-              </p>
-              {saved?.schedulingType === 'round_robin' && !saved.roundRobinActive && (
-                <>
-                  <p>
-                    {t(
-                      'This uses each selected host’s current default availability. Activation is a separate action.',
-                    )}
-                  </p>
-                  <button
-                    type="button"
-                    disabled={dirty || saving}
-                    onClick={() => roundRobinAction('defaults')}
-                  >
-                    {t('Use hosts’ default availability')}
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={dirty || saving}
-                    onClick={() => roundRobinAction('activate')}
-                  >
-                    {t('Activate round robin')}
-                  </button>
-                  {dirty && <p>{t('Save your changes before using these actions.')}</p>}
-                </>
-              )}
-            </section>
+          {!me.organization.personal && !canAssignHosts && (
+            <ReadOnlyHosts draft={draft} me={me} role={role} onReload={confirmReload} />
           )}
+
+          {!me.organization.personal &&
+            canAssignHosts &&
+            draft.schedulingType === 'round_robin' && (
+              <section className="panel" aria-labelledby="round-robin-heading">
+                <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
+                <p>
+                  {t(
+                    saved?.roundRobinActive && saved.schedulingType === 'round_robin'
+                      ? 'Active'
+                      : 'Needs activation',
+                  )}
+                </p>
+                <p>
+                  {t(
+                    'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
+                  )}
+                </p>
+                {saved?.schedulingType === 'round_robin' && !saved.roundRobinActive && (
+                  <>
+                    <p>
+                      {t(
+                        'This uses each selected host’s current default availability. Activation is a separate action.',
+                      )}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={dirty || saving}
+                      onClick={() => roundRobinAction('defaults')}
+                    >
+                      {t('Use hosts’ default availability')}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={dirty || saving}
+                      onClick={() => roundRobinAction('activate')}
+                    >
+                      {t('Activate round robin')}
+                    </button>
+                    {dirty && <p>{t('Save your changes before using these actions.')}</p>}
+                  </>
+                )}
+              </section>
+            )}
 
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">{t('Location')}</h2>
@@ -676,6 +693,13 @@ function EventTypeForm({
                   {t(
                     'Each required host uses their current default schedule. Times are offered only when every host offers the same start and end.',
                   )}
+                </p>
+              ) : !ownSchedule ? (
+                <p>
+                  {t(
+                    'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
+                  )}{' '}
+                  <Link to={`${PATHS.settings}#team-members`}>{t('Review member setup')}</Link>
                 </p>
               ) : (
                 <Field

@@ -787,6 +787,12 @@ and titles without current event metadata remain unchanged. Public/manage respon
 
 ## Booking readiness reads
 
+`GET /api/v1/event-type-hosts` remains an owner/admin host-assignment directory for teams,
+containing only current members with verified email addresses. Each entry includes `id`
+(user ID), `memberId` (current team membership ID) and `name`. The membership ID can be
+used with the coarse member-readiness read below. Pending invitations are excluded;
+membership changes appear on the next directory load without rewriting saved hosts.
+
 `GET /api/v1/teams/{teamId}/member-readiness?memberIds=<comma-separated UUIDs>`
 returns coarse health checks for 1–100 displayed membership IDs in one request.
 Owners and admins receive only current members of that team; ordinary members receive

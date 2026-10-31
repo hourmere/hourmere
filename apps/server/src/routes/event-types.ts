@@ -310,7 +310,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
             description: 'A bounded member page',
             content: json(
               z.object({
-                data: z.array(z.object({ id: z.uuid(), name: z.string() })),
+                data: z.array(z.object({ id: z.uuid(), memberId: z.uuid(), name: z.string() })),
                 nextAfter: z.string().nullable(),
               }),
             ),

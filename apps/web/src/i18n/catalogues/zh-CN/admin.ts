@@ -1,5 +1,16 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'View hosted team events': '查看主持的团队活动',
+  'Showing team events with this member as a host or pool candidate.':
+    '当前显示该成员主持或参与候选池的团队活动。',
+  'Show all event types': '显示全部活动类型',
+  'This member does not host any team events.': '该成员未主持任何团队活动。',
+  'Only team owners and admins can change host assignments.':
+    '只有团队所有者和管理员可以修改主持人配置。',
+  'You are a selected host.': '您是已选主持人。',
+  'Review member setup': '查看成员设置',
+  'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
+    '请该成员检查个人工作时间和日历。只有成员本人可以修改其私人时间表。',
   'Member readiness': '成员就绪状态',
   'Default schedule set': '已设置默认时间表',
   'No default schedule': '未设置默认时间表',

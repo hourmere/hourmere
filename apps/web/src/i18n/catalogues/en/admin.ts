@@ -1,5 +1,16 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'View hosted team events': 'View hosted team events',
+  'Showing team events with this member as a host or pool candidate.':
+    'Showing team events with this member as a host or pool candidate.',
+  'Show all event types': 'Show all event types',
+  'This member does not host any team events.': 'This member does not host any team events.',
+  'Only team owners and admins can change host assignments.':
+    'Only team owners and admins can change host assignments.',
+  'You are a selected host.': 'You are a selected host.',
+  'Review member setup': 'Review member setup',
+  'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.':
+    'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
   'Member readiness': 'Member readiness',
   'Default schedule set': 'Default schedule set',
   'No default schedule': 'No default schedule',

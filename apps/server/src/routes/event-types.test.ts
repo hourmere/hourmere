@@ -127,8 +127,18 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     expect((await memberApi.get('/api/v1/event-type-hosts')).status).toBe(403)
     const first = await ownerApi.get('/api/v1/event-type-hosts?limit=1')
     expect(first.status).toBe(200)
-    const page = first.body as { data: { id: string; name: string }[]; nextAfter: string }
+    const page = first.body as {
+      data: { id: string; memberId: string; name: string }[]
+      nextAfter: string
+    }
     expect(page.data).toHaveLength(1)
+    const membership = await t.db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', page.data[0]?.id as string)
+      .executeTakeFirstOrThrow()
+    expect(page.data[0]?.memberId).toBe(membership.id)
     expect(JSON.stringify(first.body)).not.toContain('@')
     expect(
       (await ownerApi.get(`/api/v1/event-type-hosts?limit=1&after=${page.nextAfter}`)).status,

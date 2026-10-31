@@ -133,7 +133,7 @@ export function TeamMembers({
 
   return (
     <>
-      <section className="panel" aria-labelledby="team-members-heading">
+      <section id="team-members" className="panel" aria-labelledby="team-members-heading">
         <h2 id="team-members-heading">{t('Team members')}</h2>
         <p className="hint">{t('Pending invitations are not members or hosts.')}</p>
         <p className="hint">
@@ -255,6 +255,13 @@ export function TeamMembers({
                     own={member.userId === currentUserId}
                     canManage={canManage}
                   />
+                  {canManage && (
+                    <Link
+                      to={`${PATHS.eventTypes}?hostUserId=${encodeURIComponent(member.userId)}`}
+                    >
+                      {t('View hosted team events')}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
