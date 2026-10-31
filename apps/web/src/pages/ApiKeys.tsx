@@ -81,16 +81,16 @@ interface Replacement {
   expiresIn: string
 }
 
-/** Match the original lifetime, even if the source key has already expired. */
+/**
+ * Use the longest offered lifetime that does not exceed the original, even if the source key
+ * has already expired. Lifetimes shorter than every option fall back to the shortest one.
+ */
 function replacementExpiry(apiKey: ApiKey) {
   if (apiKey.expiresAt === null) return ''
   const lifetime = (Date.parse(apiKey.expiresAt) - Date.parse(apiKey.createdAt)) / 1000
   const finiteOptions = EXPIRY_OPTIONS.slice(1)
-  return finiteOptions.reduce((closest, option) =>
-    Math.abs(Number(option.value) - lifetime) < Math.abs(Number(closest.value) - lifetime)
-      ? option
-      : closest,
-  ).value
+  const fitting = finiteOptions.filter((option) => Number(option.value) <= lifetime)
+  return (fitting.at(-1) ?? EXPIRY_OPTIONS[1]).value
 }
 
 function clipKeyName(name: string, limit: number) {

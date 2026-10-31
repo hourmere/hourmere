@@ -422,12 +422,13 @@ describe('the API keys page', () => {
     { lifetimeDays: 365, chosenDays: 365, label: 'In 1 year' },
     { lifetimeDays: 45, chosenDays: 30, label: 'In 30 days' },
     { lifetimeDays: 60, chosenDays: 30, label: 'In 30 days' },
-    { lifetimeDays: 75, chosenDays: 90, label: 'In 90 days' },
+    { lifetimeDays: 75, chosenDays: 30, label: 'In 30 days' },
+    { lifetimeDays: 7, chosenDays: 30, label: 'In 30 days' },
     { lifetimeDays: 227.5, chosenDays: 90, label: 'In 90 days' },
-    { lifetimeDays: 300, chosenDays: 365, label: 'In 1 year' },
+    { lifetimeDays: 300, chosenDays: 90, label: 'In 90 days' },
     { lifetimeDays: null, chosenDays: null, label: 'Never' },
   ])(
-    'prefills the closest expiry to the original $lifetimeDays-day lifetime',
+    'prefills the longest expiry not exceeding the original $lifetimeDays-day lifetime',
     async ({ lifetimeDays, chosenDays, label }) => {
       const user = userEvent.setup()
       const createdAt = '2025-01-01T09:00:00.000Z'
