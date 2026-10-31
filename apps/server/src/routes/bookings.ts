@@ -308,6 +308,7 @@ export function bookingRoutes({
       createRoute({
         method: 'post',
         path: '/api/v1/bookings/{id}/conference/retry',
+        operationId: 'retryBookingConference',
         security: authenticated,
         middleware: caller,
         tags: ['Bookings'],
@@ -350,6 +351,7 @@ export function bookingRoutes({
       createRoute({
         method: 'post',
         path: '/api/v1/bookings/{id}/calendar-copy/retry',
+        operationId: 'retryBookingCalendarCopy',
         security: authenticated,
         middleware: caller,
         tags: ['Bookings'],
@@ -452,6 +454,7 @@ export function bookingRoutes({
       createRoute({
         method: 'post',
         path: '/api/v1/bookings/manage/cancel',
+        operationId: 'cancelManagedBooking',
         summary: 'Cancel with the manage token',
         middleware: manageLimit,
         request: {
@@ -483,6 +486,7 @@ export function bookingRoutes({
       createRoute({
         method: 'post',
         path: '/api/v1/bookings/manage/reschedule',
+        operationId: 'rescheduleManagedBooking',
         summary: 'Reschedule with the manage token',
         description:
           'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).',
@@ -558,6 +562,7 @@ export function bookingRoutes({
       createRoute({
         method: 'post',
         path: '/api/v1/bookings/{id}/reschedule',
+        operationId: 'rescheduleHostBooking',
         summary: 'Reschedule a booking the caller hosts',
         description:
           'Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.',
@@ -652,6 +657,7 @@ export function bookingRoutes({
       createRoute({
         method: 'post',
         path: '/api/v1/bookings/{id}/cancel',
+        operationId: 'cancelHostBooking',
         summary: 'Cancel a booking the caller hosts',
         security: authenticated,
         middleware: caller,

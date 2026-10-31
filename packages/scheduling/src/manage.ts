@@ -1,7 +1,13 @@
 // Booking details for invitee links and reschedule slots shared by invitees and hosts.
 // Invitee reads go through getManagedBooking, while host slots use getHostBooking so the
 // same availability rules retain each caller's authorization boundary.
-import { checkSlotRange, hasBookablePart, intersectSlots, type SlotView } from './availability.ts'
+import {
+  checkSlotRange,
+  hasBookablePart,
+  intersectSlots,
+  type SlotView,
+  selectDurationMinutes,
+} from './availability.ts'
 import {
   assertInviteeRescheduleAllowed,
   type Booking,
@@ -64,28 +70,40 @@ export async function getManagedBookingDetails(
 export async function listManagedSlots(
   ctx: PublicContext,
   token: string | undefined,
-  { start, end }: { start: Temporal.Instant; end: Temporal.Instant },
+  {
+    start,
+    end,
+    durationMinutes,
+  }: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
 ): Promise<SlotView[]> {
   checkSlotRange(start, end)
   const booking = await getManagedBooking(ctx, token)
-  return listBookingSlots(ctx, booking, { start, end }, true)
+  return listBookingSlots(ctx, booking, { start, end, durationMinutes }, true)
 }
 
 /** The same reschedule slots, scoped to a booking the caller hosts in their organization. */
 export async function listHostBookingSlots(
   ctx: ServiceContext,
   id: string,
-  { start, end }: { start: Temporal.Instant; end: Temporal.Instant },
+  {
+    start,
+    end,
+    durationMinutes,
+  }: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
 ): Promise<SlotView[]> {
   checkSlotRange(start, end)
   const booking = await getHostBooking(ctx, id)
-  return listBookingSlots(ctx, booking, { start, end })
+  return listBookingSlots(ctx, booking, { start, end, durationMinutes })
 }
 
 async function listBookingSlots(
   ctx: PublicContext,
   booking: Booking,
-  { start, end }: { start: Temporal.Instant; end: Temporal.Instant },
+  {
+    start,
+    end,
+    durationMinutes,
+  }: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
   asInvitee = false,
 ): Promise<SlotView[]> {
   const now = ctx.now()
@@ -104,6 +122,7 @@ async function listBookingSlots(
           .select([
             'id',
             'duration_minutes',
+            'allowed_durations_minutes',
             'slot_step_minutes',
             'minimum_notice_minutes',
             'booking_window_days',
@@ -130,10 +149,22 @@ async function listBookingSlots(
     snapshot.organization_id,
     snapshot.required_host_user_ids,
   )
+  const selectedDuration =
+    durationMinutes === undefined
+      ? Temporal.Instant.from(booking.end)
+          .since(Temporal.Instant.from(booking.start))
+          .total('minutes')
+      : selectDurationMinutes(
+          {
+            durationMinutes: eventType.duration_minutes,
+            allowedDurationsMinutes: eventType.allowed_durations_minutes,
+          },
+          durationMinutes,
+        )
   const rules = {
     minimumNoticeMinutes: eventType.minimum_notice_minutes,
     bookingWindowDays: eventType.booking_window_days,
-    slotStepMinutes: eventType.slot_step_minutes ?? eventType.duration_minutes,
+    slotStepMinutes: eventType.slot_step_minutes ?? selectedDuration,
   }
   if (!hasBookablePart(rules, start, end, now, hostIds.length)) return []
 
@@ -146,5 +177,6 @@ async function listBookingSlots(
     now,
     booking.id,
     snapshot.hosts_use_default_schedule,
+    durationMinutes,
   )
 }

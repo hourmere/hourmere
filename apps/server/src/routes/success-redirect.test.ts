@@ -11,7 +11,7 @@ import {
   updateEventType,
 } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, testContext, weekdays } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
 import { openApiDocument } from '../openapi-document.ts'
 import { productRoutes } from '../server.ts'
@@ -40,6 +40,7 @@ describe.skipIf(!serverUrl)('booking continuation HTTP contract', () => {
   afterAll(async () => {
     await owned?.drop()
   })
+  afterEach(() => vi.restoreAllMocks())
 
   async function setup(
     teamPage = false,
@@ -170,6 +171,7 @@ describe.skipIf(!serverUrl)('booking continuation HTTP contract', () => {
   })
 
   it('passes the production instance hostname and explicit IP exception to public booking validation', async () => {
+    vi.spyOn(Temporal.Now, 'instant').mockImplementation(now)
     for (const [url, publicUrl, allowIpHosts] of [
       ['https://127.0.0.1/thanks', 'https://127.0.0.1', false],
       ['https://192.0.2.1/thanks', 'https://hourmere.example.test', true],

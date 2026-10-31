@@ -293,78 +293,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Reconcile my pinned ordinary calendar copy */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Durable copy reconciliation requested */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description The id is not a UUID (`invalid_request`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_copy_not_retryable or organization_context_changed */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["retryBookingCalendarCopy"];
         delete?: never;
         options?: never;
         head?: never;
@@ -381,89 +310,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Cancel a booking the caller hosts */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["CancelBooking"];
-                };
-            };
-            responses: {
-                /** @description The cancelled booking */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Booking"];
-                    };
-                };
-                /** @description Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or the browser organization context changed (`organization_context_changed`) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["cancelHostBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -483,78 +330,7 @@ export interface paths {
          * Retry safe conference reconciliation for an assigned host
          * @description A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Durable reconciliation requested */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description The id is not a UUID (`invalid_request`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such booking or conference */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_not_retryable or organization_context_changed */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["retryBookingConference"];
         delete?: never;
         options?: never;
         head?: never;
@@ -574,89 +350,7 @@ export interface paths {
          * Reschedule a booking the caller hosts
          * @description Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["Reschedule"];
-                };
-            };
-            responses: {
-                /** @description The successor booking, with manageToken null */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["BookingWithToken"];
-                    };
-                };
-                /** @description Invalid request (`invalid_request`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or the browser organization context changed (`organization_context_changed`) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["rescheduleHostBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -823,69 +517,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Cancel with the manage token */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
-                    "x-manage-token"?: string;
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["CancelBooking"];
-                };
-            };
-            responses: {
-                /** @description The cancelled booking */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Booking"];
-                    };
-                };
-                /** @description Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Missing or unknown manage token (`booking_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["cancelManagedBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -905,69 +537,7 @@ export interface paths {
          * Reschedule with the manage token
          * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
-                    "x-manage-token"?: string;
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["Reschedule"];
-                };
-            };
-            responses: {
-                /** @description The new booking */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["BookingWithToken"];
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Missing or unknown manage token (`booking_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["rescheduleManagedBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1133,71 +703,7 @@ export interface paths {
          * Disconnect a calendar account and delete its local credentials and calendars
          * @description Requires a browser session. Cancels outstanding connection attempts. Does not revoke the provider-wide grant, which may also be used by other connections; access can be removed in the Google or Microsoft account settings.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Connection and local calendar data deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or a cross-origin write */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["disconnectCalendarConnection"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1216,84 +722,7 @@ export interface paths {
          * Refresh the connected account’s calendar list
          * @description Requires ownership of the connection. Refreshes an expired access token internally when necessary without granting new access or exposing credentials. Does not fetch events or busy intervals.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description The calendar list was refreshed */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["refreshCalendarList"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1313,81 +742,7 @@ export interface paths {
          * Start a separate Google Calendar connection
          * @description Requires a browser session and same-origin request. Follow authorizationUrl; the attempt expires after ten minutes and can only finish in this session. Default access=list requests identity and calendar-list access. access=sync additionally requests event read access and event writes on owned calendars; reconnect existing accounts to upgrade.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        access?: "list" | "sync";
-                    };
-                };
-            };
-            responses: {
-                /** @description The fixed Google authorization endpoint with state and PKCE */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            authorizationUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or a cross-origin write */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description google_calendar_disabled */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["authorizeGoogleCalendarConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1407,78 +762,7 @@ export interface paths {
          * Start a separate Microsoft Calendar connection
          * @description Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars. This connection does not synchronize busy times or write events.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description The fixed Microsoft authorization endpoint with session-bound state and PKCE */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            authorizationUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or a cross-origin write */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description microsoft_calendar_disabled */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["authorizeMicrosoftCalendarConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1497,76 +781,7 @@ export interface paths {
          * Choose the owned Google calendar for new booking events
          * @description Sessions and API keys change only the caller’s own writeback destination.
          */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        calendarId: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default booking calendar saved */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_not_found or profile_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_not_writable */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        put: operations["setCalendarDestination"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1591,86 +806,7 @@ export interface paths {
          * Select a calendar for busy-time conflict checks
          * @description Sessions and API keys can select only the caller’s own calendars.
          */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        checkConflicts: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Selection saved; enabled calendars synchronize in the background */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description google_calendar_permissions_missing or calendar_events_unreadable */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        patch: operations["configureCalendar"];
         trace?: never;
     };
     "/api/v1/calendars/{id}/sync": {
@@ -1686,75 +822,7 @@ export interface paths {
          * Synchronize selected calendar busy intervals now
          * @description Sessions and API keys can synchronize only the caller’s own calendars.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Busy intervals synchronized */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description calendar_sync_disabled or google_calendar_provider_unavailable */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["syncCalendar"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1844,75 +912,7 @@ export interface paths {
          * Disconnect local Zoom access and invalidate pending attempts
          * @description Wipes local credentials and retains an owned tombstone. Does not revoke an app-wide provider grant. Remove the app separately in Zoom.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Local access disconnected */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_session_required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["disconnectConferenceConnection"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1931,89 +931,7 @@ export interface paths {
          * Explicitly authorize automatic single-host Zoom meetings
          * @description Session-only opt-in. Requests exact identity plus meeting create/read/update/delete scopes, bound to one short-lived PKCE attempt. Reconnecting does not silently change its stored mode.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Explicit meeting-permission OAuth attempt */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            authorizationUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_session_required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_disabled, zoom_meetings_disabled or zoom_connection_limit */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["authorizeConferenceConnectionMeetings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2033,89 +951,7 @@ export interface paths {
          * Reconnect the same Zoom identity with its saved permissions
          * @description Retains the stored identity or meeting authorization mode. A changed instance flag does not widen a saved identity grant.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Expected-identity OAuth attempt */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            authorizationUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_session_required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_disabled */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["reconnectConferenceConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2135,84 +971,7 @@ export interface paths {
          * Explicitly rotate Zoom credentials and refresh identity metadata
          * @description Old credentials are durably retired before the provider call. Unknown or failed rotation requires reconnection. Only identity metadata is fetched; each connection retains its explicitly authorized mode.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Credentials and identity metadata refreshed */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_session_required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure. Busy account operations add errorAlias=zoom_operation_busy alongside error=zoom_refresh_in_progress (deprecated but retained for all of /api/v1; removal or renaming requires a new API version); retry shortly. */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["refreshConferenceConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2232,78 +991,7 @@ export interface paths {
          * Begin an independent Zoom identity connection
          * @description Browser session and same-origin required. Requests only user:read:user with S256 PKCE, expires after ten minutes, and cannot sign in or create meetings.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Fixed official Zoom authorization URL */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            authorizationUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_session_required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_disabled or zoom_connection_limit */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["authorizeZoomConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2323,87 +1011,7 @@ export interface paths {
          * Explicitly authorize automatic single-host Zoom meetings
          * @description Session-only opt-in. Requests exact identity plus meeting create/read/update/delete scopes, bound to one short-lived PKCE attempt. Reconnecting does not silently change its stored mode.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Explicit meeting-permission OAuth attempt */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            authorizationUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description conference_session_required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_connection_not_found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description zoom_disabled, zoom_meetings_disabled or zoom_connection_limit */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["authorizeZoomMeetings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2548,78 +1156,7 @@ export interface paths {
          * Create an event type
          * @description Created in the organization the caller acts in and hosted by the caller: on the caller's personal page in a personal organization, on the team page in a team (owners and admins only).
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
-                    "x-expected-organization-id"?: string;
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["EventTypeInput"];
-                };
-            };
-            responses: {
-                /** @description The new event type */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["EventType"];
-                    };
-                };
-                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createEventType"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2689,160 +1226,11 @@ export interface paths {
          * Delete an event type
          * @description It disappears from the API and its slug becomes free; past bookings keep pointing at it.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description organization_context_changed: reload the page before trying this team write again */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["deleteEventType"];
         options?: never;
         head?: never;
         /** Change an event type */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["EventTypeUpdate"];
-                };
-            };
-            responses: {
-                /** @description The changed event type */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["EventType"];
-                    };
-                };
-                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        patch: operations["updateEventType"];
         trace?: never;
     };
     "/api/v1/event-types/{id}/round-robin/activate": {
@@ -2858,89 +1246,7 @@ export interface paths {
          * Explicitly activate a team round-robin pool
          * @description Validates the complete current verified host pool. Ordinary metadata saves and mode changes never activate it. Existing fairness sequence values are preserved.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
-                    "x-expected-organization-id"?: string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description The activated configuration */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["EventType"];
-                    };
-                };
-                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description organization_context_changed: reload the page before trying this team write again */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["activateRoundRobin"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3083,75 +1389,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description MCP connection result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            success: boolean;
-                        };
-                    };
-                };
-                /** @description invalid_oauth_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or oauth_organization_forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description oauth_request_expired */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["revokeMcpOAuthConnection"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3166,82 +1404,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        accept: boolean;
-                        /** Format: uuid */
-                        intentId: string;
-                        oauthQuery: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description MCP connection result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            redirectUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_oauth_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or oauth_organization_forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description oauth_request_expired */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["submitMcpOAuthConsent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3257,96 +1420,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        intentId?: string;
-                        oauthQuery: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description MCP connection result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            clientId: string;
-                            clientName: string;
-                            organizations: {
-                                /** Format: uuid */
-                                id: string;
-                                name: string;
-                                slug: string;
-                            }[];
-                            redirectUri: string;
-                            scopes: string[];
-                            selectedOrganization: {
-                                /** Format: uuid */
-                                id: string;
-                                name: string;
-                                slug: string;
-                            } | null;
-                        };
-                    };
-                };
-                /** @description invalid_oauth_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or oauth_organization_forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description oauth_request_expired */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createMcpOAuthRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3362,81 +1436,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        oauthQuery: string;
-                        /** Format: uuid */
-                        organizationId: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description MCP connection result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            redirectUrl: string;
-                        };
-                    };
-                };
-                /** @description invalid_oauth_request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description session_required or oauth_organization_forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description oauth_request_expired */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["selectMcpOAuthOrganization"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3556,84 +1556,7 @@ export interface paths {
          * Create or replace the caller's profile
          * @description The time zone and locale are stored normalized (europe/berlin → Europe/Berlin).
          */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ProfileInput"];
-                };
-            };
-            responses: {
-                /** @description The profile was replaced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Profile"];
-                    };
-                };
-                /** @description The profile was created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Profile"];
-                    };
-                };
-                /** @description invalid_request, invalid_handle, handle_reserved, invalid_time_zone or invalid_locale */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description handle_taken: another user has this handle */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        put: operations["updateProfile"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3658,84 +1581,7 @@ export interface paths {
          * Update the caller's account display name
          * @description Works before creating a booking-page profile and across acting organizations. Only changes the caller’s name. Requests are limited to 4096 bytes.
          */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["DisplayNameInput"];
-                };
-            };
-            responses: {
-                /** @description The canonical display name */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["DisplayName"];
-                    };
-                };
-                /** @description invalid_request or invalid_display_name */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description user_not_found: the caller was deleted concurrently */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Request body exceeds 4096 bytes */
-                413: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        patch: operations["updateDisplayName"];
         trace?: never;
     };
     "/api/v1/public/{handle}": {
@@ -3870,81 +1716,7 @@ export interface paths {
          * Book a slot
          * @description Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
-                    "idempotency-key"?: string;
-                };
-                path: {
-                    handle: string;
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateBooking"];
-                };
-            };
-            responses: {
-                /** @description A retry of an earlier request with the same Idempotency-Key */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PublicBookingResult"];
-                    };
-                };
-                /** @description Booked */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PublicBookingResult"];
-                    };
-                };
-                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such public event type (`event_type_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createPublicBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4101,82 +1873,7 @@ export interface paths {
          * Book a slot
          * @description Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
-                    "idempotency-key"?: string;
-                };
-                path: {
-                    /** @description Exact-case organization slug */
-                    handle: string;
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateBooking"];
-                };
-            };
-            responses: {
-                /** @description A retry of an earlier request with the same Idempotency-Key */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PublicBookingResult"];
-                    };
-                };
-                /** @description Booked */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PublicBookingResult"];
-                    };
-                };
-                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such public event type (`event_type_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createPublicTeamBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4395,66 +2092,7 @@ export interface paths {
         };
         put?: never;
         /** Create a schedule */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ScheduleInput"];
-                };
-            };
-            responses: {
-                /** @description The new schedule */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Schedule"];
-                    };
-                };
-                /** @description invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createSchedule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4524,154 +2162,11 @@ export interface paths {
          * Delete a schedule
          * @description Its overrides go with it; event types that used it fall back to the host's default schedule.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description schedule_not_found: no such schedule among the caller’s */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description schedule_is_default: the default schedule while the user has others */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["deleteSchedule"];
         options?: never;
         head?: never;
         /** Change a schedule */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ScheduleUpdate"];
-                };
-            };
-            responses: {
-                /** @description The changed schedule */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Schedule"];
-                    };
-                };
-                /** @description invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description schedule_not_found: no such schedule among the caller’s */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description schedule_is_default: isDefault false on the default schedule */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        patch: operations["updateSchedule"];
         trace?: never;
     };
     "/api/v1/schedules/{id}/overrides": {
@@ -4762,160 +2257,13 @@ export interface paths {
         };
         get?: never;
         /** Set the hours of one date */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description Local date in the schedule’s time zone */
-                    date: string;
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ScheduleOverrideInput"];
-                };
-            };
-            responses: {
-                /** @description The override was replaced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ScheduleOverride"];
-                    };
-                };
-                /** @description The override was created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ScheduleOverride"];
-                    };
-                };
-                /** @description invalid_request, invalid_date or invalid_intervals */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description schedule_not_found: no such schedule among the caller’s */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        put: operations["setScheduleOverride"];
         post?: never;
         /**
          * Remove the override of one date
          * @description The weekly hours apply to the date again.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description Local date in the schedule’s time zone */
-                    date: string;
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Removed */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description invalid_date */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description schedule_not_found: no such schedule among the caller’s; schedule_override_not_found: the date has no override */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["deleteScheduleOverride"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4934,90 +2282,7 @@ export interface paths {
          * Confirm starter working hours
          * @description After profile and display name setup, creates a default Mon–Fri 09:00–17:00 schedule in the stored profile time zone only when the caller has no schedules. An existing default is returned unchanged. Existing non-default schedules require an explicit default choice in Availability.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /**
-                         * @description Current account interface language for the new schedule name; defaults to English. Existing schedules are never renamed.
-                         * @enum {string}
-                         */
-                        language?: "en" | "zh-CN";
-                    };
-                };
-            };
-            responses: {
-                /** @description The existing default, unchanged */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Schedule"];
-                    };
-                };
-                /** @description The confirmed starter schedule */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Schedule"];
-                    };
-                };
-                /** @description invalid_request or invalid_time_zone */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description forbidden: a cookie-authenticated write from another origin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description setup_profile_required: profile or display name is missing; setup_default_schedule_required: existing schedules have no default */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["confirmDefaultSchedule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5121,80 +2386,7 @@ export interface paths {
          * Cancel a booking of the session's current team
          * @description Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    /** @description Required: the organization where this cancellation action started */
-                    "x-expected-organization-id": string;
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["CancelBooking"];
-                };
-            };
-            responses: {
-                /** @description The team booking was cancelled */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TeamBookingCancellation"];
-                    };
-                };
-                /** @description Invalid parameters (invalid_request or invalid_reason) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: requires a current team owner/admin and an accessible cancellable booking; forbidden: cookie writes require same-origin Origin or Referer */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description organization_context_changed: reload the page before trying this team write again; booking_already_cancelled: this team's booking is already cancelled */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["cancelTeamBooking"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5358,61 +2550,7 @@ export interface paths {
          * Cancel a pending team invitation
          * @description Verified current team owner/admin session and same-origin request only. Serializes with acceptance and resend. Cancels only a still-pending invitation, including an expired one or one whose inviter left; a joined member is never removed and an already accepted invitation remains accepted. Returns the actual lifecycle after locking. A mail submission already in flight may still complete; cancellation invalidates joining through the link. Repeating cancellation is safe. X-Expected-Organization-Id is required for a successful write. Omitting it returns 409 organization_context_changed for an authorized manager; unauthorized callers retain 403 team_management_access_denied.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "x-expected-organization-id": string;
-                };
-                path: {
-                    invitationId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Final invitation summary; accepted if joining won the race */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TeamInvitationSummary"];
-                    };
-                };
-                /** @description invalid_request: malformed request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description organization_context_changed: reload before trying again */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["cancelTeamInvitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5593,81 +2731,7 @@ export interface paths {
          * Revoke a team membership immediately
          * @description Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing context returns 409 organization_context_changed. A caller who still owns or administers the expected team receives the same 409 after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    /** @description Required: the organization where this removal action started */
-                    "x-expected-organization-id": string;
-                };
-                path: {
-                    memberUserId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        teamId: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Membership revoked and removal recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["MemberRemoval"];
-                    };
-                };
-                /** @description Invalid parameters (invalid_request) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization and an accessible allowed member target; forbidden: cookie writes require same-origin Origin or Referer */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description organization_context_changed: reload the page before trying this team write again; member_departure_owner_required: add another owner first */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"] & {
-                            handling?: {
-                                /** @enum {string} */
-                                nextStep?: "add_another_owner_first";
-                                /** @enum {string} */
-                                owner?: "another_owner_is_needed_before_you_can_leave";
-                            };
-                        };
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["removeTeamMember"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5771,78 +2835,7 @@ export interface paths {
          * Leave a team after resolving event types and unfinished bookings
          * @description Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied before credentials are resolved, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. A caller who still belongs to the expected team in any role receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Missing context retains the 409 reload response. Rechecks owner continuity and departure impact inside the locked membership transaction. A sole owner must arrange another owner before leaving. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    "X-Expected-Organization-Id"?: string;
-                };
-                path: {
-                    teamId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Membership revoked; personal organization active */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            organizationId: string;
-                        };
-                    };
-                };
-                /** @description Invalid parameters */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: requires a current team session without Authorization */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), or organization_context_changed: reload before retrying */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"] & {
-                            handling?: {
-                                /** @enum {string} */
-                                eventTypes?: "ask_admin_to_replace_or_remove_host";
-                                /** @enum {string} */
-                                futureBookings?: "coordinate_cancellation";
-                                /** @enum {string} */
-                                inProgressBookings?: "wait_until_end_or_coordinate_offline";
-                                /** @enum {string} */
-                                nextStep?: "add_another_owner_first";
-                                /** @enum {string} */
-                                owner?: "another_owner_is_needed_before_you_can_leave";
-                            };
-                            impact?: components["schemas"]["MemberDepartureImpact"];
-                        };
-                    };
-                };
-            };
-        };
+        post: operations["leaveTeam"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6332,6 +3325,8 @@ export interface components {
          */
         ErrorAlias: "zoom_operation_busy";
         EventType: {
+            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            allowedDurationsMinutes: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
             /** @description How many days ahead can be booked; null = no limit */
@@ -6347,7 +3342,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             description: string | null;
-            /** @description Length of a meeting */
+            /** @description Default length of a meeting */
             durationMinutes: number;
             hosts: {
                 /** Format: uuid */
@@ -6414,7 +3409,7 @@ export interface components {
             scheduleId: string | null;
             /** @enum {string} */
             schedulingType: "individual" | "round_robin" | "collective";
-            /** @description Distance between start times; null = the duration */
+            /** @description Distance between start times; null = the selected duration */
             slotStepMinutes: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -6429,6 +3424,8 @@ export interface components {
             zoomConnectionId?: string | null;
         };
         EventTypeInput: {
+            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            allowedDurationsMinutes?: number[];
             /**
              * @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved
              * @default false
@@ -6450,7 +3447,7 @@ export interface components {
                 userId: string;
             } | null;
             description?: string | null;
-            /** @description Length of a meeting */
+            /** @description Default length of a meeting */
             durationMinutes: number;
             hosts?: {
                 userId: string;
@@ -6518,7 +3515,7 @@ export interface components {
             scheduleId?: string | null;
             /** @enum {string} */
             schedulingType?: "individual" | "collective" | "round_robin";
-            /** @description Distance between start times; null = the duration */
+            /** @description Distance between start times; null = the selected duration */
             slotStepMinutes?: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -6534,6 +3531,8 @@ export interface components {
         };
         /** @description Omitted fields stay as they are; null clears a nullable field */
         EventTypeUpdate: {
+            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            allowedDurationsMinutes?: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests?: boolean;
             /** @description How many days ahead can be booked; null = no limit */
@@ -6546,7 +3545,7 @@ export interface components {
                 userId: string;
             } | null;
             description?: string | null;
-            /** @description Length of a meeting */
+            /** @description Default length of a meeting */
             durationMinutes?: number;
             hosts?: {
                 userId: string;
@@ -6602,7 +3601,7 @@ export interface components {
             scheduleId?: string | null;
             /** @enum {string} */
             schedulingType?: "individual" | "collective" | "round_robin";
-            /** @description Distance between start times; null = the duration */
+            /** @description Distance between start times; null = the selected duration */
             slotStepMinutes?: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -7389,6 +4388,3054 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    retryBookingCalendarCopy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Durable copy reconciliation requested */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_copy_not_retryable or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelHostBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelBooking"];
+            };
+        };
+        responses: {
+            /** @description The cancelled booking */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Booking"];
+                };
+            };
+            /** @description Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or the browser organization context changed (`organization_context_changed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    retryBookingConference: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Durable reconciliation requested */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking or conference */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_not_retryable or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rescheduleHostBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reschedule"];
+            };
+        };
+        responses: {
+            /** @description The successor booking, with manageToken null */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingWithToken"];
+                };
+            };
+            /** @description Invalid request (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or the browser organization context changed (`organization_context_changed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelManagedBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
+                "x-manage-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelBooking"];
+            };
+        };
+        responses: {
+            /** @description The cancelled booking */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Booking"];
+                };
+            };
+            /** @description Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or unknown manage token (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rescheduleManagedBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
+                "x-manage-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reschedule"];
+            };
+        };
+        responses: {
+            /** @description The new booking */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingWithToken"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or unknown manage token (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    disconnectCalendarConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection and local calendar data deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or a cross-origin write */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    refreshCalendarList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The calendar list was refreshed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    authorizeGoogleCalendarConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    access?: "list" | "sync";
+                };
+            };
+        };
+        responses: {
+            /** @description The fixed Google authorization endpoint with state and PKCE */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorizationUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or a cross-origin write */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description google_calendar_disabled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    authorizeMicrosoftCalendarConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The fixed Microsoft authorization endpoint with session-bound state and PKCE */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorizationUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or a cross-origin write */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description microsoft_calendar_disabled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setCalendarDestination: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    calendarId: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Default booking calendar saved */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_not_found or profile_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_not_writable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    configureCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    checkConflicts: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Selection saved; enabled calendars synchronize in the background */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description google_calendar_permissions_missing or calendar_events_unreadable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    syncCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Busy intervals synchronized */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_sync_disabled or google_calendar_provider_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    disconnectConferenceConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Local access disconnected */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_session_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    authorizeConferenceConnectionMeetings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Explicit meeting-permission OAuth attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorizationUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_session_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_disabled, zoom_meetings_disabled or zoom_connection_limit */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    reconnectConferenceConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Expected-identity OAuth attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorizationUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_session_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_disabled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    refreshConferenceConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Credentials and identity metadata refreshed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_session_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure. Busy account operations add errorAlias=zoom_operation_busy alongside error=zoom_refresh_in_progress (deprecated but retained for all of /api/v1; removal or renaming requires a new API version); retry shortly. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    authorizeZoomConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Fixed official Zoom authorization URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorizationUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_session_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_disabled or zoom_connection_limit */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    authorizeZoomMeetings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Explicit meeting-permission OAuth attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorizationUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description conference_session_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description zoom_disabled, zoom_meetings_disabled or zoom_connection_limit */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createEventType: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventTypeInput"];
+            };
+        };
+        responses: {
+            /** @description The new event type */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventType"];
+                };
+            };
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteEventType: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateEventType: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventTypeUpdate"];
+            };
+        };
+        responses: {
+            /** @description The changed event type */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventType"];
+                };
+            };
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    activateRoundRobin: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The activated configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventType"];
+                };
+            };
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeMcpOAuthConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MCP connection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description invalid_oauth_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or oauth_organization_forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description oauth_request_expired */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    submitMcpOAuthConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    accept: boolean;
+                    /** Format: uuid */
+                    intentId: string;
+                    oauthQuery: string;
+                };
+            };
+        };
+        responses: {
+            /** @description MCP connection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        redirectUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_oauth_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or oauth_organization_forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description oauth_request_expired */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createMcpOAuthRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    intentId?: string;
+                    oauthQuery: string;
+                };
+            };
+        };
+        responses: {
+            /** @description MCP connection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        clientId: string;
+                        clientName: string;
+                        organizations: {
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            slug: string;
+                        }[];
+                        redirectUri: string;
+                        scopes: string[];
+                        selectedOrganization: {
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            slug: string;
+                        } | null;
+                    };
+                };
+            };
+            /** @description invalid_oauth_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or oauth_organization_forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description oauth_request_expired */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    selectMcpOAuthOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    oauthQuery: string;
+                    /** Format: uuid */
+                    organizationId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description MCP connection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        redirectUrl: string;
+                    };
+                };
+            };
+            /** @description invalid_oauth_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or oauth_organization_forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description oauth_request_expired */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileInput"];
+            };
+        };
+        responses: {
+            /** @description The profile was replaced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            /** @description The profile was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            /** @description invalid_request, invalid_handle, handle_reserved, invalid_time_zone or invalid_locale */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description handle_taken: another user has this handle */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateDisplayName: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisplayNameInput"];
+            };
+        };
+        responses: {
+            /** @description The canonical display name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayName"];
+                };
+            };
+            /** @description invalid_request or invalid_display_name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description user_not_found: the caller was deleted concurrently */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 4096 bytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createPublicBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
+                "idempotency-key"?: string;
+            };
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBooking"];
+            };
+        };
+        responses: {
+            /** @description A retry of an earlier request with the same Idempotency-Key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBookingResult"];
+                };
+            };
+            /** @description Booked */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBookingResult"];
+                };
+            };
+            /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createPublicTeamBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
+                "idempotency-key"?: string;
+            };
+            path: {
+                /** @description Exact-case organization slug */
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBooking"];
+            };
+        };
+        responses: {
+            /** @description A retry of an earlier request with the same Idempotency-Key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBookingResult"];
+                };
+            };
+            /** @description Booked */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBookingResult"];
+                };
+            };
+            /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleInput"];
+            };
+        };
+        responses: {
+            /** @description The new schedule */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_is_default: the default schedule while the user has others */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description The changed schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_is_default: isDefault false on the default schedule */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setScheduleOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Local date in the schedule’s time zone */
+                date: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleOverrideInput"];
+            };
+        };
+        responses: {
+            /** @description The override was replaced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOverride"];
+                };
+            };
+            /** @description The override was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOverride"];
+                };
+            };
+            /** @description invalid_request, invalid_date or invalid_intervals */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteScheduleOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Local date in the schedule’s time zone */
+                date: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_date */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s; schedule_override_not_found: the date has no override */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    confirmDefaultSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Current account interface language for the new schedule name; defaults to English. Existing schedules are never renamed.
+                     * @enum {string}
+                     */
+                    language?: "en" | "zh-CN";
+                };
+            };
+        };
+        responses: {
+            /** @description The existing default, unchanged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description The confirmed starter schedule */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description invalid_request or invalid_time_zone */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description setup_profile_required: profile or display name is missing; setup_default_schedule_required: existing schedules have no default */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelTeamBooking: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required: the organization where this cancellation action started */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelBooking"];
+            };
+        };
+        responses: {
+            /** @description The team booking was cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamBookingCancellation"];
+                };
+            };
+            /** @description Invalid parameters (invalid_request or invalid_reason) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team owner/admin and an accessible cancellable booking; forbidden: cookie writes require same-origin Origin or Referer */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; booking_already_cancelled: this team's booking is already cancelled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelTeamInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                invitationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Final invitation summary; accepted if joining won the race */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamInvitationSummary"];
+                };
+            };
+            /** @description invalid_request: malformed request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload before trying again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeTeamMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required: the organization where this removal action started */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                memberUserId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    teamId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Membership revoked and removal recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberRemoval"];
+                };
+            };
+            /** @description Invalid parameters (invalid_request) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team owner/admin session without Authorization and an accessible allowed member target; forbidden: cookie writes require same-origin Origin or Referer */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; member_departure_owner_required: add another owner first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] & {
+                        handling?: {
+                            /** @enum {string} */
+                            nextStep?: "add_another_owner_first";
+                            /** @enum {string} */
+                            owner?: "another_owner_is_needed_before_you_can_leave";
+                        };
+                    };
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    leaveTeam: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Membership revoked; personal organization active */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        organizationId: string;
+                    };
+                };
+            };
+            /** @description Invalid parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team session without Authorization */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), or organization_context_changed: reload before retrying */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] & {
+                        handling?: {
+                            /** @enum {string} */
+                            eventTypes?: "ask_admin_to_replace_or_remove_host";
+                            /** @enum {string} */
+                            futureBookings?: "coordinate_cancellation";
+                            /** @enum {string} */
+                            inProgressBookings?: "wait_until_end_or_coordinate_offline";
+                            /** @enum {string} */
+                            nextStep?: "add_another_owner_first";
+                            /** @enum {string} */
+                            owner?: "another_owner_is_needed_before_you_can_leave";
+                        };
+                        impact?: components["schemas"]["MemberDepartureImpact"];
+                    };
+                };
+            };
+        };
+    };
     listWebhooks: {
         parameters: {
             query?: never;

@@ -233,6 +233,36 @@ calendar-list access.
 - **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
   objects shifted by the server's time zone.
 
+## Event duration contract
+
+`event_types.duration_minutes` remains the default (`durationMinutes` in service and
+REST configuration). `allowed_durations_minutes` / `allowedDurationsMinutes` is an ordered
+list of 1–12 distinct whole-minute lengths, each from 1 to 1440 inclusive, and must include
+the default. Migration 0047 backfills each existing event type to `[duration_minutes]`
+without changing existing configuration, bookings or timestamps. Legacy inserts that omit
+the list and duration-only edits of singleton types retain singleton behavior. Editing a
+multi-duration default requires it to remain in the list, or a replacement list in the
+same write. Metadata-only edits preserve the list.
+
+The availability and booking services accept optional `durationMinutes` as the selected
+length; omission uses the default for a new booking. This name is reserved for the later
+REST selection, MCP and CLI parameters too. Configuration REST fields are additive;
+public-page selection, editor controls and MCP/CLI selection parameters follow separately.
+
+Every candidate's end is its start plus the selected elapsed minutes. The same before/after
+buffers apply around that interval; minimum notice and the booking window constrain its
+start. An explicit slot step remains fixed; a null step uses the selected duration. Daily
+limits count bookings across all durations, without multiplying allowances per option.
+Collective scheduling requires every host to fit that same interval; round-robin scheduling
+chooses one eligible host whose availability fits it, using the existing assignment rules.
+
+A booking's `start_at` and `end_at` store its actual duration. Configuration edits never
+rewrite them. A reschedule with no selected length keeps the original elapsed duration,
+even if that option was removed; an explicit new length must belong to the current list.
+Existing request fingerprints and exact idempotent replays remain unchanged. An explicitly
+supplied selection participates in the fingerprint, so a changed selection cannot reuse
+the same key as the same request.
+
 ## JSON columns
 
 Validated by the application (zod), not by the database:

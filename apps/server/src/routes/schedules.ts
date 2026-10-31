@@ -162,6 +162,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
         method: 'post',
         path: '/api/v1/schedules/default',
+        operationId: 'confirmDefaultSchedule',
         summary: 'Confirm starter working hours',
         description:
           'After profile and display name setup, creates a default Mon–Fri 09:00–17:00 schedule in the stored profile time zone only when the caller has no schedules. An existing default is returned unchanged. Existing non-default schedules require an explicit default choice in Availability.',
@@ -218,6 +219,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
         method: 'post',
         path: '/api/v1/schedules',
+        operationId: 'createSchedule',
         summary: 'Create a schedule',
         request: { body: { content: json(ScheduleInput), required: true } },
         responses: {
@@ -260,6 +262,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
         method: 'patch',
         path: '/api/v1/schedules/{id}',
+        operationId: 'updateSchedule',
         summary: 'Change a schedule',
         request: { params: IdParams, body: { content: json(ScheduleUpdate), required: true } },
         responses: {
@@ -288,6 +291,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         ...route,
         method: 'delete',
         path: '/api/v1/schedules/{id}',
+        operationId: 'deleteSchedule',
         summary: 'Delete a schedule',
         description:
           "Its overrides go with it; event types that used it fall back to the host's default schedule.",
@@ -344,6 +348,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         middleware: callerWithBodyLimit(caller, SCHEDULE_OVERRIDE_BODY_LIMIT),
         method: 'put',
         path: '/api/v1/schedules/{id}/overrides/{date}',
+        operationId: 'setScheduleOverride',
         summary: 'Set the hours of one date',
         request: {
           params: OverrideParams,
@@ -376,6 +381,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         ...route,
         method: 'delete',
         path: '/api/v1/schedules/{id}/overrides/{date}',
+        operationId: 'deleteScheduleOverride',
         summary: 'Remove the override of one date',
         description: 'The weekly hours apply to the date again.',
         request: { params: OverrideParams },
