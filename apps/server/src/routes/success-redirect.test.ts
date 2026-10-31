@@ -5,6 +5,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   createEventType,
   createSchedule,
+  getEventType,
   putProfile,
   type SuccessRedirectInput,
   type SuccessRedirectPolicy,
@@ -16,6 +17,7 @@ import { createApp } from '../app.ts'
 import { openApiDocument } from '../openapi-document.ts'
 import { productRoutes } from '../server.ts'
 import { bookingRoutes } from './bookings.ts'
+import { eventTypeRoutes } from './event-types.ts'
 import { publicRoutes } from './public.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -198,6 +200,43 @@ describe.skipIf(!serverUrl)('booking continuation HTTP contract', () => {
       expect(response.status).toBe(201)
       expect(((await response.json()) as Reply).successRedirect?.url).toBe(url)
     }
+  })
+
+  it('keeps saved redirect configuration inside the service until configuration interfaces are introduced', async () => {
+    const s = await setup(false, {
+      url: 'https://host.example.test/thanks',
+      allowEmbedParent: true,
+    })
+    const app = createApp({
+      publicUrl: 'https://hourmere.example.test',
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: true, principal: s.ctx.principal, setCookie: [] }),
+      routes: [eventTypeRoutes({ db, now })],
+    })
+    const list = await app.request('/api/v1/event-types')
+    expect(list.status).toBe(200)
+    expect(((await list.json()) as { data: unknown[] }).data[0]).not.toHaveProperty(
+      'successRedirect',
+    )
+    const single = await app.request(`/api/v1/event-types/${s.event.id}`)
+    expect(single.status).toBe(200)
+    expect(await single.json()).not.toHaveProperty('successRedirect')
+    const patch = (body: unknown) =>
+      app.request(`/api/v1/event-types/${s.event.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    const changed = await patch({ title: 'Renamed' })
+    expect(changed.status).toBe(200)
+    expect(await changed.json()).not.toHaveProperty('successRedirect')
+    expect((await getEventType(s.ctx, s.event.id)).successRedirect).toEqual(s.event.successRedirect)
+    const forbiddenSetting = await patch({
+      successRedirect: { url: 'https://other.example.test/' },
+    })
+    expect(forbiddenSetting.status).toBe(400)
+    expect(await forbiddenSetting.json()).toMatchObject({ error: 'invalid_request' })
   })
 })
 
