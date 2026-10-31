@@ -13,6 +13,7 @@ const page = <M,>(load: () => Promise<M>, pick: (module: M) => ComponentType) =>
 export const SessionLayout = page(
   () => import('./session.tsx'),
   ({ SessionProvider }) =>
+    // biome-ignore lint/correctness/noComponentHookFactories: React.lazy caches the component identity returned by this module-level loader.
     function SessionLayout() {
       return (
         <SessionProvider>

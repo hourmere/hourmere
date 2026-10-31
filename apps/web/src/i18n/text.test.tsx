@@ -11,6 +11,17 @@ import { msg, registerCatalog } from './translate.ts'
 
 registerCatalog(admin)
 
+function Notice() {
+  const { t, text, uiText } = useI18n()
+  return (
+    <>
+      <LanguageSwitcher />
+      <h1 title={t('Edit “{0}”', { '0': 'Intro' })}>{text('Edit “{0}”', { '0': 'Intro' })}</h1>
+      <p role="status">{uiText(msg('Created “{0}”.', { '0': 'Intro' }))}</p>
+    </>
+  )
+}
+
 describe('Chinese quote typography', () => {
   it('wraps only double quote glyphs, preserving escaped text and Latin letters', () => {
     const content = '“Intro <img src=x>”与‘Working hours’'
@@ -52,16 +63,6 @@ describe('Chinese quote typography', () => {
   })
 
   it('rerenders translated visible text with quote spans while attributes stay strings', () => {
-    function Notice() {
-      const { t, text, uiText } = useI18n()
-      return (
-        <>
-          <LanguageSwitcher />
-          <h1 title={t('Edit “{0}”', { '0': 'Intro' })}>{text('Edit “{0}”', { '0': 'Intro' })}</h1>
-          <p role="status">{uiText(msg('Created “{0}”.', { '0': 'Intro' }))}</p>
-        </>
-      )
-    }
     render(<Notice />)
     const heading = screen.getByRole('heading')
     expect(heading.querySelector('span')).toBeNull()

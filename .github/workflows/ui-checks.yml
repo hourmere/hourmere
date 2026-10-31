@@ -39,7 +39,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,7 +53,7 @@ jobs:
         run: google-chrome --version
       - name: Run layout measurement
         env:
-          HOURMERE_UI_FAIL_ON_EXIT: '1'
+          HOURMERE_UI_FAIL_ON_EXIT: "1"
         run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/4
       - name: Summarize measurements
         if: always()
@@ -84,7 +84,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,7 +98,7 @@ jobs:
         run: google-chrome --version
       - name: Run a11y measurement
         env:
-          HOURMERE_UI_FAIL_ON_EXIT: '1'
+          HOURMERE_UI_FAIL_ON_EXIT: "1"
         run: node tools/e2e/run-audit.ts a11y
       - name: Summarize measurements
         if: always()
@@ -132,7 +132,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,7 +158,7 @@ jobs:
         run: npx playwright install-deps --dry-run webkit firefox || npx playwright install-deps webkit firefox
       - name: Run cross-engine measurement
         env:
-          HOURMERE_UI_BLOCKING: '1'
+          HOURMERE_UI_BLOCKING: "1"
         run: node tools/e2e/run-audit.ts cross-engine
       - name: Summarize measurements
         if: always()
@@ -210,7 +210,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -253,7 +253,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,7 +269,7 @@ jobs:
         run: npm run test:e2e:privacy
       - name: Generate masked Linux baselines
         env:
-          HOURMERE_UI_BLOCKING: '1'
+          HOURMERE_UI_BLOCKING: "1"
         run: node tools/e2e/run-audit.ts visual --update-snapshots
       - name: Summarize measurements
         if: always()

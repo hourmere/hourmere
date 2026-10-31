@@ -314,45 +314,45 @@ describe('the session gate', () => {
   })
 })
 
+const TEAM_ME = {
+  ...ME,
+  organization: { ...ME.organization, id: TEAM_ID, name: 'Acme', personal: false },
+}
+
+function Consumer({ dirty = false }: { dirty?: boolean }) {
+  const { state, reload, confirmReload, refresh, accept, signOut } = useSession()
+  useUnsavedChanges(dirty)
+  return (
+    <>
+      <output data-testid="session-context">
+        {state.status === 'signed-in' ? state.me.organization.id : state.status}
+      </output>
+      <button type="button" onClick={() => void refresh()}>
+        Refresh session
+      </button>
+      <button type="button" onClick={() => void refresh({ fresh: true })}>
+        Refresh fresh session
+      </button>
+      <button type="button" onClick={() => accept(TEAM_ME)}>
+        Accept confirmed team
+      </button>
+      <button type="button" onClick={() => accept(ME)}>
+        Accept original team
+      </button>
+      <button type="button" onClick={reload}>
+        Reload session
+      </button>
+      <button type="button" onClick={confirmReload}>
+        Confirm reload
+      </button>
+      <button type="button" onClick={() => void signOut().catch(() => {})}>
+        End session
+      </button>
+    </>
+  )
+}
+
 describe('fresh session reads and confirmed organization handoffs', () => {
-  const TEAM_ME = {
-    ...ME,
-    organization: { ...ME.organization, id: TEAM_ID, name: 'Acme', personal: false },
-  }
-
-  function Consumer({ dirty = false }: { dirty?: boolean }) {
-    const { state, reload, confirmReload, refresh, accept, signOut } = useSession()
-    useUnsavedChanges(dirty)
-    return (
-      <>
-        <output data-testid="session-context">
-          {state.status === 'signed-in' ? state.me.organization.id : state.status}
-        </output>
-        <button type="button" onClick={() => void refresh()}>
-          Refresh session
-        </button>
-        <button type="button" onClick={() => void refresh({ fresh: true })}>
-          Refresh fresh session
-        </button>
-        <button type="button" onClick={() => accept(TEAM_ME)}>
-          Accept confirmed team
-        </button>
-        <button type="button" onClick={() => accept(ME)}>
-          Accept original team
-        </button>
-        <button type="button" onClick={reload}>
-          Reload session
-        </button>
-        <button type="button" onClick={confirmReload}>
-          Confirm reload
-        </button>
-        <button type="button" onClick={() => void signOut().catch(() => {})}>
-          End session
-        </button>
-      </>
-    )
-  }
-
   async function open(dirty = false) {
     const view = render(
       <SessionProvider>
