@@ -310,7 +310,12 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
   it('requires a browser session and independently configured Microsoft credentials', async () => {
     const { sessionId: _, ...rest } = owner
     await expect(
-      beginMicrosoftConnection(deps, { ...rest, kind: 'api_key', apiKeyId: owner.sessionId }),
+      beginMicrosoftConnection(deps, {
+        ...rest,
+        kind: 'api_key',
+        apiKeyScope: 'full' as const,
+        apiKeyId: owner.sessionId,
+      }),
     ).rejects.toMatchObject({ code: 'session_required' })
     await expect(
       beginMicrosoftConnection({ db, google: deps.google }, owner),

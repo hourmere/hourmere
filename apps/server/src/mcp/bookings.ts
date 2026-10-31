@@ -236,6 +236,9 @@ export function bookingTools({
 
   const findAvailableSlots = defineTool({
     name: 'find_available_slots',
+    scopeModes: ['personal', 'team'],
+    scopeMode: (args) =>
+      typeof args === 'object' && args !== null && 'teamSlug' in args ? 'team' : 'personal',
     title: 'Find available slots',
     description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, duration, location kind, the questions its booking form asks, and the host's time zone when applicable; round-robin metadata omits it). Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
     input: FindSlotsInput,
@@ -297,6 +300,9 @@ export function bookingTools({
 
   const createBooking = defineTool({
     name: 'create_booking',
+    scopeModes: ['personal', 'team'],
+    scopeMode: (args) =>
+      typeof args === 'object' && args !== null && 'teamSlug' in args ? 'team' : 'personal',
     title: 'Create a booking',
     description:
       "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass an idempotencyKey so that a retry after a lost response cannot book twice.",
@@ -331,6 +337,9 @@ export function bookingTools({
 
   const rescheduleBooking = defineTool({
     name: 'reschedule_booking',
+    scopeModes: ['host', 'manageToken'],
+    scopeMode: (args) =>
+      typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Reschedule a booking',
     description:
       "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
@@ -363,6 +372,9 @@ export function bookingTools({
 
   const cancelBooking = defineTool({
     name: 'cancel_booking',
+    scopeModes: ['host', 'manageToken'],
+    scopeMode: (args) =>
+      typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Cancel a booking',
     description:
       "Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Returns the cancelled booking. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past (and booking_changed, try again, if with an email's token the meeting kept being rescheduled while the call waited).",

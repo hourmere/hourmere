@@ -579,6 +579,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
         principal: {
           ...f.ownerCtx.principal,
           kind: 'api_key',
+          apiKeyScope: 'full' as const,
           apiKeyId: randomUUID(),
         } as Principal,
       }),

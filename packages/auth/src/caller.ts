@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
+import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
 
@@ -31,7 +32,7 @@ export type Principal = {
   personalOrganizationId?: string | null
 } & (
   | { kind: 'session'; sessionId: string }
-  | { kind: 'api_key'; apiKeyId: string }
+  | { kind: 'api_key'; apiKeyId: string; apiKeyScope: ApiKeyScope }
   | { kind: 'oauth'; oauthConsentId: string; clientId: string; scopes: readonly string[] }
 )
 
@@ -55,8 +56,9 @@ const BEARER = /^Bearer[ \t]+(\S+)[ \t]*$/i
  * by it alone, so a bad key never falls back to a cookie the client happens to carry.
  */
 export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): CallerResolver {
-  type Membership = Omit<Principal, 'kind' | 'sessionId' | 'apiKeyId'> & {
+  type Membership = Pick<Principal, 'user' | 'organization' | 'personalOrganizationId'> & {
     emailVerified: boolean
+    apiKeyScope?: ApiKeyScope
   }
 
   /**
@@ -79,17 +81,15 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
       .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
       .leftJoin('personal_organizations as own', 'own.user_id', 'u.id')
+      .leftJoin('auth.apikey as k', (join) =>
+        join
+          .on('k.id', '=', apiKeyId ?? '00000000-0000-4000-8000-000000000000')
+          .on('k.referenceId', '=', userId),
+      )
       .$if(apiKeyId !== undefined, (qb) =>
-        qb.where((eb) =>
-          eb.exists(
-            eb
-              .selectFrom('auth.apikey as k')
-              .select('k.id')
-              .where('k.id', '=', apiKeyId as string)
-              .where('k.referenceId', '=', userId)
-              .where(sql<boolean>`k.enabled IS DISTINCT FROM false`),
-          ),
-        ),
+        qb
+          .where('k.id', '=', apiKeyId as string)
+          .where(sql<boolean>`k.enabled IS DISTINCT FROM false`),
       )
       .select([
         'u.id as userId',
@@ -101,12 +101,26 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
         'o.slug',
         'p.user_id as personalOwnerId',
         'own.organization_id as personalOrganizationId',
+        'k.metadata as apiKeyMetadata',
+        'k.expiresAt as apiKeyExpiresAt',
       ])
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
       .executeTakeFirst()
     if (!row) return undefined
+    const metadata =
+      apiKeyId === undefined ? null : parsePersistedApiKeyMetadata(row.apiKeyMetadata)
+    if (
+      apiKeyId !== undefined &&
+      (!metadata ||
+        (row.apiKeyExpiresAt !== null && row.apiKeyExpiresAt.getTime() <= Date.now()) ||
+        (metadata.organizationId ?? row.personalOrganizationId)?.toLowerCase() !==
+          organizationId.toLowerCase())
+    ) {
+      return undefined
+    }
     return {
+      ...(metadata ? { apiKeyScope: metadata.scope } : {}),
       emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
       personalOrganizationId: row.personalOrganizationId,
@@ -144,19 +158,29 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     // Keys act in the organization stored when they were created (see createAuth). A key
     // without one acts in the personal organization; a key whose organization the user has
     // left stops working rather than silently acting somewhere else.
-    const stored: unknown = result.key.metadata?.organizationId
-    const organizationId =
-      typeof stored === 'string' ? stored : await ensurePersonalOrganization(db, userId)
+    if (!isUuid(userId) || !isUuid(result.key.id)) {
+      return { ok: false, error: 'unauthorized', setCookie: [] }
+    }
+    const persisted = await db
+      .selectFrom('auth.apikey')
+      .select('metadata')
+      .where('id', '=', result.key.id)
+      .where('referenceId', '=', userId)
+      .executeTakeFirst()
+    const stored = persisted ? parsePersistedApiKeyMetadata(persisted.metadata) : null
+    if (!stored) return { ok: false, error: 'unauthorized', setCookie: [] }
+    const organizationId = stored.organizationId ?? (await ensurePersonalOrganization(db, userId))
     const membership = await inOrganization(userId, organizationId, result.key.id)
     // Keys belong to verified users only; one from before that rule (or planted in an
     // account whose real owner has not signed in yet) does not work. Read in the same
     // statement as the key's existence, so a key deleted when the email was proven cannot
     // slip through as belonging to a now-verified user.
-    if (!membership?.emailVerified) return { ok: false, error: 'unauthorized', setCookie: [] }
-    const { emailVerified: _, ...caller } = membership
+    if (!membership?.emailVerified || !membership.apiKeyScope)
+      return { ok: false, error: 'unauthorized', setCookie: [] }
+    const { emailVerified: _, apiKeyScope, ...caller } = membership
     return {
       ok: true,
-      principal: { ...caller, kind: 'api_key', apiKeyId: result.key.id },
+      principal: { ...caller, kind: 'api_key', apiKeyId: result.key.id, apiKeyScope },
       setCookie: [],
     }
   }
@@ -179,7 +203,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
       (active ? await inOrganization(userId, active) : undefined) ??
       (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))
     if (!membership) return { ok: false, error: 'unauthorized', setCookie }
-    const { emailVerified: _, ...caller } = membership
+    const { emailVerified: _, apiKeyScope: _scope, ...caller } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'session', sessionId: session.session.id },

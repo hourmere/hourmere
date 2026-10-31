@@ -36,6 +36,7 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
 
     const as = (userId: string, organizationId: string): Principal => ({
       kind: 'api_key',
+      apiKeyScope: 'full' as const,
       apiKeyId: crypto.randomUUID(),
       user: { id: userId, name: '', email: '' },
       organization: { id: organizationId, name: '', slug: '', personal: false },

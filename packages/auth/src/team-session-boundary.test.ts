@@ -6,7 +6,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { signJWT } from 'better-auth/plugins/jwt'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { apiKeyRules } from './api-keys.ts'
+import { apiKeyCredentialBoundary, apiKeyRules } from './api-keys.ts'
 import { displayNameRules } from './display-name.ts'
 import type { beforeHook } from './hooks.ts'
 import {
@@ -406,6 +406,7 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
       APIError,
       createAuthMiddleware,
       getSessionFromCtx,
+      apiKeyCredentialBoundary,
       apiKeyRules,
       displayNameRules,
       invitationRules,

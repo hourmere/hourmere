@@ -76,6 +76,7 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
         const principal = headers.has('authorization')
           ? {
               kind: 'api_key' as const,
+              apiKeyScope: 'full' as const,
               apiKeyId: keyOwner === ownerInTeam ? ownerInTeam.organization.id : keyOwner.sessionId,
               user: keyOwner.user,
               organization: keyOwner.organization,
