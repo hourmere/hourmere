@@ -6865,6 +6865,8 @@ export interface components {
             durationMinutes: number;
             handle: string;
             host: {
+                /** @description An existing first-party raster image path; external profile pictures are omitted */
+                image?: string;
                 name: string;
                 /** @description The host's IANA time zone; omitted for round-robin pools */
                 timeZone?: string;
@@ -6905,6 +6907,8 @@ export interface components {
             }[];
             handle: string;
             host: {
+                /** @description An existing first-party raster image path; external profile pictures are omitted */
+                image?: string;
                 name: string;
                 /** @description The host's IANA time zone */
                 timeZone: string;

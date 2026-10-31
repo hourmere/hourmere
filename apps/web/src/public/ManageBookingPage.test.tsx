@@ -108,6 +108,37 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it('keeps the reschedule label muted and separated from the title outside a host identity', async () => {
+    manageServer()
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    const summary = await screen.findByRole('complementary', { name: 'Current booking' })
+    const label = within(summary).getByText('Current booking')
+    const title = within(summary).getByRole('heading', { name: 'Intro call' })
+    expect(label.tagName).toBe('P')
+    expect(label.className).toBe('event-host')
+    expect(label.parentElement).toBe(summary)
+    expect(label.closest('.host-identity')).toBeNull()
+    expect(label.nextElementSibling).toBe(title)
+    expect(title.className).toBe('event-title')
+
+    const sheet = document.createElement('style')
+    // jsdom does not expand var() in shorthand margins; concrete spacing tokens let
+    // this assertion exercise the real selectors and cascade.
+    sheet.textContent = publicStyles
+      .replace(/^@import[^;]+;/m, '')
+      .replaceAll('var(--space-1)', '4px')
+      .replaceAll('var(--space-3)', '12px')
+    document.head.append(sheet)
+    try {
+      expect(getComputedStyle(label).color).toBe('var(--muted)')
+      expect(getComputedStyle(label).fontSize).not.toBe('var(--text-lg)')
+      expect(getComputedStyle(label).fontWeight).toBe('600')
+      expect(getComputedStyle(title).marginTop).toBe('4px')
+    } finally {
+      sheet.remove()
+    }
+  })
+
   it.each(['Pick another time', 'conflict'])(
     'restores the browsed month and day after returning through %s',
     async (back) => {
