@@ -686,18 +686,33 @@ describe('member health observations', () => {
   )
 
   it('ignores a superseded refresh response even within the same team', async () => {
-    const first = later()
+    const first = json(200, page())
+    const firstBody = Promise.withResolvers<string>()
+    const readFirst = vi.spyOn(first, 'text').mockReturnValue(firstBody.promise)
+    const refreshed = json(200, page())
+    const refreshedBody = Promise.withResolvers<string>()
+    const readRefreshed = vi.spyOn(refreshed, 'text').mockReturnValue(refreshedBody.promise)
     let requests = 0
     const api = server({
-      [READINESS_ROUTE]: () => (++requests === 1 ? first.response : json(200, page())),
+      [READINESS_ROUTE]: () => (++requests === 1 ? first : refreshed),
     })
     render(contents())
-    await screen.findByText(copy.en.loading)
+    // Loading renders before the readiness effect installs its focus listener. Wait
+    // for the first request to reach its body before asking that listener to refresh.
+    await waitFor(() => expect(readFirst).toHaveBeenCalledTimes(1))
     act(() => {
       window.dispatchEvent(new Event('focus'))
     })
+    await waitFor(() => expect(readRefreshed).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      refreshedBody.resolve(JSON.stringify(page()))
+    })
     await screen.findAllByText(copy.en.ready)
-    await first.answer(json(200, page([check(self, { defaultSchedule: 'configuration_blocker' })])))
+    await act(async () => {
+      firstBody.resolve(
+        JSON.stringify(page([check(self, { defaultSchedule: 'configuration_blocker' })])),
+      )
+    })
     expect(within(row(self.user.name)).getByText(copy.en.ready)).toBeDefined()
     expect(screen.queryByText(copy.en.missing)).toBeNull()
     expect(api.to(READINESS_ROUTE)).toHaveLength(2)

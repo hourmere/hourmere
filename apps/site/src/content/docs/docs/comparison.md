@@ -68,8 +68,20 @@ Hourmere documents [personal booking and availability](/docs/self-hosting),
 [opt-in inline and popup widgets](/docs/embedding), and
 [Google Calendar connections, busy-time synchronization and booking event writes](/docs/google-calendar).
 
+Hourmere also has configurable [email reminders and follow-ups](/docs/reminders-and-follow-ups)
+in the event-type editor, REST, MCP and CLI. The default is one 24-hour reminder to the
+invitee, saved guests and assigned hosts, with no follow-ups. Choose up to five reminders
+before the start and three follow-ups after the scheduled end, each from 5 minutes to 30
+elapsed days away. Each rule selects invitee, guests and/or hosts; follow-ups can include
+an optional plain-text host note when the operator permits it.
+
 Check the documented limits when evaluating it:
 
+- Reminders are skipped unless their send time is more than one hour after booking or
+  rescheduling. Settings changes affect new bookings; reschedules retain their original
+  settings and recalculate the times. Follow-ups use the scheduled end regardless of
+  attendance, and a calendar decline does not cancel them. Shared mail limits can prevent
+  delivery; see the [known limitations](/docs/reminders-and-follow-ups#known-limitations).
 - [Microsoft calendar connections](/docs/microsoft-calendar) list calendars and refresh
   credentials, but do not synchronize busy times or write booking events.
 - [Zoom account connections](/docs/zoom-connections) are separate from sign-in and calendar
