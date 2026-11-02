@@ -92,6 +92,7 @@ const restContract = {
     'POST /api/v1/event-types',
     'DELETE /api/v1/event-types/{id}',
     'PATCH /api/v1/event-types/{id}',
+    'PUT /api/v1/event-types/{id}/notifications',
     'POST /api/v1/event-types/{id}/round-robin/activate',
     'PUT /api/v1/profile',
     'PATCH /api/v1/profile/name',
@@ -204,6 +205,19 @@ function verifyMinimalBookingReads(allows: Allows) {
   }
 }
 
+function verifyNotificationWrites(allows: Allows) {
+  for (const id of [
+    'PUT /api/v1/event-types/{id}/notifications',
+    'mcp:set_event_type_notifications',
+    'cli:set-event-notifications',
+  ]) {
+    for (const apiKeyScope of ['full', 'read', 'bookings'] as const)
+      expect(allows({ kind: 'api_key', apiKeyScope }, id), `${apiKeyScope} ${id}`).toBe(
+        apiKeyScope === 'full',
+      )
+  }
+}
+
 describe('shared API-key scope policy', () => {
   for (const [operationClass, operations] of Object.entries(restContract)) {
     describe(operationClass, () => {
@@ -241,6 +255,7 @@ describe('shared API-key scope policy', () => {
         'get_profile',
         'list_event_types',
         'get_event_type',
+        'set_event_type_notifications',
         'list_schedules',
         'get_schedule',
         'list_calendar_connections',
@@ -293,6 +308,8 @@ describe('shared API-key scope policy', () => {
     verifyUnknownDenied(apiKeyAllows))
   it('excludes raw configuration and integration metadata from bookings', () =>
     verifyMinimalBookingReads(apiKeyAllows))
+  it('allows only full keys to configure notifications across REST, MCP and CLI', () =>
+    verifyNotificationWrites(apiKeyAllows))
 
   it('lets full and non-key principals retain their native authorization for unknown operations', () => {
     const principals: ApiKeyScopePrincipal[] = [
@@ -342,6 +359,7 @@ describe('scope policy source-copy mutation checks', () => {
     verifyMinimalBookingReads(sourceCopyPolicy(undefined, sourceCopyRegistry()))
     verifyRequiredScope(sourceCopyRequirement())
     verifyFrozenScopes(sourceCopyRegistry())
+    verifyNotificationWrites(sourceCopyPolicy(undefined, sourceCopyRegistry()))
   })
   it('kills removing the common throwing scope assertion', () => {
     const mutant = sourceCopyRequirement([
@@ -385,5 +403,25 @@ describe('scope policy source-copy mutation checks', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
     verifyMinimalBookingReads(sourceCopyPolicy(undefined, sourceCopyRegistry()))
+  })
+  it.each([
+    [
+      "rest('PUT', '/api/v1/event-types/{id}/notifications', 'other_write', 'key')",
+      "rest('PUT', '/api/v1/event-types/{id}/notifications', 'booking_write', 'key')",
+    ],
+    [
+      "mcp('set_event_type_notifications', 'other_write'",
+      "mcp('set_event_type_notifications', 'booking_write'",
+    ],
+    [
+      "cli('set-event-notifications', 'set_event_type_notifications')",
+      "cli('set-event-notifications', 'create_booking')",
+    ],
+  ] as const)('kills broadened notification writes: %s', (before, after) => {
+    const mutant = sourceCopyPolicy(undefined, sourceCopyRegistry([before, after]))
+    expect(() => verifyNotificationWrites(mutant)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyNotificationWrites(sourceCopyPolicy(undefined, sourceCopyRegistry()))
   })
 })

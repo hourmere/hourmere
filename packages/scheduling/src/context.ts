@@ -28,6 +28,8 @@ export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Insta
  */
 export interface ServiceContext {
   db: Db
+  /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
+  followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined

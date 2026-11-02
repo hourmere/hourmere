@@ -33,7 +33,11 @@ import {
   SQLSTATE,
   timestamp,
 } from './internal.ts'
-import { type NotificationSettings, validateNotifications } from './notification-settings.ts'
+import {
+  type NotificationSettings,
+  parseNotifications,
+  validateNotifications,
+} from './notification-settings.ts'
 import { parseQuestions, type Question, validateQuestions } from './questions.ts'
 import {
   type SuccessRedirect,
@@ -88,6 +92,7 @@ export interface EventType {
   location: EventTypeLocation | null
   successRedirect: SuccessRedirect | null
   questions: Question[]
+  notifications: NotificationSettings
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
   isHidden: boolean
@@ -120,6 +125,7 @@ export interface EventTypeInput {
   location?: EventTypeLocation | null | undefined
   successRedirect?: SuccessRedirectInput | null | undefined
   questions?: QuestionInput[] | undefined
+  notifications?: NotificationSettings | undefined
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
   allowGuests?: boolean | undefined
@@ -241,13 +247,13 @@ export async function getEventType(ctx: ServiceContext, id: string): Promise<Eve
   return toEventType(await loadEventType(ctx.db, row.id))
 }
 
-/** Internal configuration service; public transports deliberately remain unchanged. */
+/** The complete saved notification settings visible to the caller. */
 export async function getEventTypeNotifications(
   ctx: ServiceContext,
   id: string,
 ): Promise<NotificationSettings> {
   const row = await visibleRow(ctx.db, ctx, id)
-  return validateNotifications(row.notifications)
+  return parseNotifications(row.notifications)
 }
 
 /** Replace the whole policy under the same write lock used by event type updates. */
@@ -256,15 +262,13 @@ export async function setEventTypeNotifications(
   id: string,
   value: unknown,
 ): Promise<NotificationSettings> {
-  const notifications = validateNotifications(value)
+  const notifications = validateNotifications(value, ctx)
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await assertCanWrite(trx, ctx, row, true)
-    if (
-      JSON.stringify(validateNotifications(row.notifications)) !== JSON.stringify(notifications)
-    ) {
+    if (JSON.stringify(parseNotifications(row.notifications)) !== JSON.stringify(notifications)) {
       await trx
         .updateTable('event_types')
         .set({ notifications: jsonb(notifications) })
@@ -350,6 +354,8 @@ export async function createEventType(
   input: EventTypeInput,
 ): Promise<EventType> {
   const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
+  const notifications =
+    input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
@@ -386,6 +392,7 @@ export async function createEventType(
         .insertInto('event_types')
         .values({
           ...columns(fields),
+          ...(notifications === undefined ? {} : { notifications: jsonb(notifications) }),
           organization_id: ctx.principal.organization.id,
           owner_user_id: personalOwnerId,
           scheduling_type: schedulingType,
@@ -416,6 +423,8 @@ export async function updateEventType(
   input: EventTypeUpdate,
 ): Promise<EventType> {
   const changes = defined(input)
+  const notifications =
+    input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
@@ -423,6 +432,9 @@ export async function updateEventType(
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
       await assertCanWrite(trx, ctx, row, true)
+      const notificationsChanged =
+        notifications !== undefined &&
+        JSON.stringify(parseNotifications(row.notifications)) !== JSON.stringify(notifications)
       const changingHosts = input.hosts !== undefined || input.schedulingType !== undefined
       if (
         input.schedulingType !== undefined &&
@@ -453,6 +465,7 @@ export async function updateEventType(
         zoomConnection = validZoomConnection(input.zoomConnectionId)
       if (
         Object.keys(changes).length > 0 ||
+        notificationsChanged ||
         scheduleId !== undefined ||
         changingHosts ||
         organizer !== undefined ||
@@ -512,6 +525,7 @@ export async function updateEventType(
           .updateTable('event_types')
           .set({
             ...columns(fields),
+            ...(notifications === undefined ? {} : { notifications: jsonb(notifications) }),
             scheduling_type: schedulingType,
             ...(organizer !== undefined ? { conference_organizer_user_id: organizer } : {}),
             ...(zoomConnection !== undefined ? { zoom_connection_id: zoomConnection } : {}),
@@ -971,6 +985,7 @@ function toEventType(row: EventTypeRow): EventType {
     organizationId: row.organization_id,
     ownerUserId: row.owner_user_id,
     ...fieldsOf(row),
+    notifications: parseNotifications(row.notifications),
     schedulingType: row.scheduling_type as SchedulingType,
     roundRobinActive: row.scheduling_type === 'round_robin' && row.round_robin_active,
     hosts: row.hosts,

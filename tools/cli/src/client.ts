@@ -14,12 +14,14 @@ export class CliError extends Error {
   readonly code: string
   readonly status?: number
   readonly retryAfterSeconds?: number
+  readonly detail?: string
 
-  constructor(code: string, status?: number, retryAfterSeconds?: number) {
+  constructor(code: string, status?: number, retryAfterSeconds?: number, detail?: string) {
     super(code)
     this.code = code
     this.status = status
     this.retryAfterSeconds = retryAfterSeconds
+    this.detail = detail
   }
 }
 
@@ -47,6 +49,45 @@ export function endpoint(value: string | undefined): URL {
 
 function safeCode(value: unknown, fallback: string): string {
   return typeof value === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(value) ? value : fallback
+}
+
+// The CLI never prints arbitrary server text. Only these value-free notification
+// constraints are allowed through, matching the service contract and parity tests.
+function notificationDetail(code: string, value: unknown): string | undefined {
+  if (code !== 'invalid_notifications' || typeof value !== 'string') return undefined
+  if (
+    value === 'notifications.reminders: at most 5 messages are allowed' ||
+    value === 'notifications.followUps: at most 3 messages are allowed'
+  )
+    return value
+  const match =
+    /^notifications\.(reminders|followUps)\[([0-4])\]\.(id|offsetMinutes|recipients|hostNote): (.+)$/.exec(
+      value,
+    )
+  if (!match) return undefined
+  const [, category, index, field, constraint] = match
+  if (category === 'followUps' && Number(index) > 2) return undefined
+  const constraints: Record<string, readonly string[]> = {
+    id: [
+      'must be 1–64 letters, digits, "_" or "-"',
+      'must not be __proto__',
+      'must be unique across reminders and followUps',
+    ],
+    offsetMinutes: [
+      'must be an integer number of minutes',
+      'must be between 5 and 43200 minutes',
+      'must be unique within this message category',
+    ],
+    recipients: ['at least one recipient must be selected'],
+    hostNote: [
+      'must contain at most 2000 UTF-16 code units',
+      'must contain well-formed Unicode',
+      'must not contain control characters other than LF',
+      'host notes are disabled by the operator',
+    ],
+  }
+  if (field === 'hostNote' && category !== 'followUps') return undefined
+  return field && constraint && constraints[field]?.includes(constraint) ? value : undefined
 }
 
 function retrySeconds(value: unknown): number | undefined {
@@ -164,10 +205,12 @@ export async function callTool(options: {
       } catch {
         // Neither server errors nor SDK messages are safe to echo into a terminal.
       }
+      const code = safeCode(isObject(detail) ? detail.error : undefined, 'tool_error')
       throw new CliError(
-        safeCode(isObject(detail) ? detail.error : undefined, 'tool_error'),
+        code,
         undefined,
         retrySeconds(isObject(detail) ? detail.retryAfterSeconds : undefined),
+        notificationDetail(code, isObject(detail) ? detail.message : undefined),
       )
     }
     if (result.isError !== undefined && result.isError !== false)
