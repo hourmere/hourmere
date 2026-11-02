@@ -13,6 +13,7 @@ import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
 import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import * as formFunctions from './event-type-form.ts'
+import * as notificationFunctions from './notifications-form.ts'
 import type * as editorFunctions from './SuccessRedirectEditor.tsx'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
@@ -60,6 +61,7 @@ const buildForm = (source: string) =>
     source,
     '{draftFromEventType, toInput, toPatchInput, emptyDraft, serverErrors}',
     {
+      ...notificationFunctions,
       RequestError,
       parseWhole,
       wholeNumberProblem,

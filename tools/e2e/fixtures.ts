@@ -28,6 +28,7 @@ import {
   AUDIT_DESCRIPTION,
   AUDIT_EMAIL,
   AUDIT_GUEST_NAME,
+  AUDIT_HOST_NOTE,
   AUDIT_HOST_TIME_ZONE,
   AUDIT_NOW,
   AUDIT_OVERNIGHT_BOOKING_END,
@@ -96,6 +97,7 @@ export interface FixtureApp {
 }
 export interface FixtureOptions {
   uiAudit: boolean
+  notificationEditor: boolean
 }
 export const test = base.extend<{
   app: FixtureApp
@@ -103,10 +105,12 @@ export const test = base.extend<{
   automaticMeet: boolean
   multiHostMeet: boolean
   uiAudit: boolean
+  notificationEditor: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
   uiAudit: [false, { option: true }],
+  notificationEditor: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -121,7 +125,7 @@ export const test = base.extend<{
     },
     { auto: true },
   ],
-  app: async ({ context, automaticMeet, multiHostMeet, uiAudit }, use) => {
+  app: async ({ context, automaticMeet, multiHostMeet, uiAudit, notificationEditor }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error(
@@ -428,6 +432,7 @@ export const test = base.extend<{
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
         ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
+        ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
         ...(automaticMeet && {
           GOOGLE_MEET_ENABLED: 'true',
           GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
@@ -505,6 +510,32 @@ export const test = base.extend<{
             description: AUDIT_DESCRIPTION,
             minimumNoticeMinutes: 30,
           })
+          // Opt in only for editor measurements; other audit pages keep their
+          // existing notification data and operator settings.
+          if (notificationEditor)
+            await db
+              .updateTable('event_types')
+              .set({
+                notifications: JSON.stringify({
+                  reminders: [
+                    {
+                      id: 'audit-reminder',
+                      offsetMinutes: 1440,
+                      recipients: { invitee: true, guests: true, host: true },
+                    },
+                  ],
+                  followUps: [
+                    {
+                      id: 'audit-follow-up',
+                      offsetMinutes: 60,
+                      recipients: { invitee: true, guests: true, host: true },
+                      hostNote: AUDIT_HOST_NOTE,
+                    },
+                  ],
+                }),
+              })
+              .where('id', '=', eventTypeId)
+              .execute()
           await f.eventType(team, null, {
             slug: 'layout-audit',
             title: AUDIT_TITLE,

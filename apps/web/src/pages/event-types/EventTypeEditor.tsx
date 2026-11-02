@@ -54,6 +54,8 @@ import {
   validateDraft,
 } from './event-type-form.ts'
 import { HostAssignment } from './HostAssignment.tsx'
+import { NotificationsEditor } from './NotificationsEditor.tsx'
+import { pruneNotificationErrors } from './notifications-form.ts'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -66,6 +68,7 @@ interface Loaded {
   profile: Profile | null
   automaticGoogleMeet: boolean
   automaticZoom: boolean
+  followUpHostNotesEnabled: boolean
 }
 
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
@@ -100,6 +103,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
         profile,
         automaticGoogleMeet: instance.automaticGoogleMeet === true,
         automaticZoom: instance.automaticZoom === true,
+        followUpHostNotesEnabled: instance.followUpHostNotesEnabled === true,
       }
     },
     [id],
@@ -141,6 +145,7 @@ function EventTypeForm({
   profile,
   automaticGoogleMeet,
   automaticZoom,
+  followUpHostNotesEnabled,
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
   const noScheduleHint = t('You have no schedule yet, so no times are offered. {0}.').split('{0}')
@@ -215,7 +220,7 @@ function EventTypeForm({
     setAttempt((n) => n + 1)
     setFormError(null)
     setStatus('')
-    const problems = validateDraft(draft)
+    const problems = validateDraft(draft, baseline)
     // A dormant configuration can retain an invalid old pool during metadata-only saves.
     if (saved?.schedulingType === 'round_robin' && unchangedPool) delete problems.hosts
     if (
@@ -769,6 +774,16 @@ function EventTypeForm({
               </div>
             )}
           </section>
+
+          <NotificationsEditor
+            notifications={draft.notifications}
+            errors={errors}
+            hostNotesEnabled={followUpHostNotesEnabled}
+            onChange={(notifications) => {
+              set('notifications', notifications)
+              setErrors((current) => pruneNotificationErrors(current, notifications))
+            }}
+          />
 
           <section className="panel" aria-labelledby="questions-heading">
             <h2 id="questions-heading">{t('Booking form')}</h2>

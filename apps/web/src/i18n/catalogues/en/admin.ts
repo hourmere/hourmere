@@ -36,6 +36,71 @@ export const admin = {
     'Allow sharing invitee name and email before selecting those parameters.',
   'Choose whether embedded bookings may open the parent page.':
     'Choose whether embedded bookings may open the parent page.',
+  'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
+    'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.',
+  'Reminders and follow-ups': 'Reminders and follow-ups',
+  'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.':
+    'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.',
+  'Reminders are sent only if the send time is more than 1 hour after the booking or reschedule; otherwise they are skipped and not sent late.':
+    'Reminders are sent only if the send time is more than 1 hour after the booking or reschedule; otherwise they are skipped and not sent late.',
+  'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.':
+    'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.',
+  'Email limits or delivery problems can prevent a message from being sent.':
+    'Email limits or delivery problems can prevent a message from being sent.',
+  'Pre-meeting reminders': 'Pre-meeting reminders',
+  'Post-meeting follow-ups': 'Post-meeting follow-ups',
+  'Up to {count} messages. Choose at least one recipient for each message.':
+    'Up to {count} messages. Choose at least one recipient for each message.',
+  'No reminders.': 'No reminders.',
+  'No follow-ups.': 'No follow-ups.',
+  'Add reminder': 'Add reminder',
+  'Add follow-up': 'Add follow-up',
+  'Reminder {number}': 'Reminder {number}',
+  'Follow-up {number}': 'Follow-up {number}',
+  'Added reminder {number}.': 'Added reminder {number}.',
+  'Added follow-up {number}.': 'Added follow-up {number}.',
+  'Removed reminder {number}.': 'Removed reminder {number}.',
+  'Removed follow-up {number}.': 'Removed follow-up {number}.',
+  'Removed the saved host note from follow-up {number}.':
+    'Removed the saved host note from follow-up {number}.',
+  'Timing preset': 'Timing preset',
+  'Custom timing': 'Custom timing',
+  'Custom timing selected for reminder {number}. Enter minutes before the meeting in the next field.':
+    'Custom timing selected for reminder {number}. Enter minutes before the meeting in the next field.',
+  'Custom timing selected for follow-up {number}. Enter minutes after the meeting in the next field.':
+    'Custom timing selected for follow-up {number}. Enter minutes after the meeting in the next field.',
+  '24 hours before': '24 hours before',
+  '2 hours before': '2 hours before',
+  '30 minutes before': '30 minutes before',
+  '1 hour after': '1 hour after',
+  '1 day after': '1 day after',
+  'Minutes before the meeting': 'Minutes before the meeting',
+  'Minutes after the meeting': 'Minutes after the meeting',
+  'Use 5–43,200 whole minutes, up to 30 days.': 'Use 5–43,200 whole minutes, up to 30 days.',
+  Recipients: 'Recipients',
+  'Host note (optional)': 'Host note (optional)',
+  'Plain text only. Line breaks are allowed. Placeholders are sent as written.':
+    'Plain text only. Line breaks are allowed. Placeholders are sent as written.',
+  '{count} / {limit} characters': '{count} / {limit} characters',
+  'A saved host note is kept until you remove it. Notes will not be sent while this feature is disabled.':
+    'A saved host note is kept until you remove it. Notes will not be sent while this feature is disabled.',
+  'Host notes are unavailable because the instance operator has disabled them.':
+    'Host notes are unavailable because the instance operator has disabled them.',
+  'Remove saved host note': 'Remove saved host note',
+  'Remove reminder {number}': 'Remove reminder {number}',
+  'Remove follow-up {number}': 'Remove follow-up {number}',
+  'Remove reminder': 'Remove reminder',
+  'Remove follow-up': 'Remove follow-up',
+  'Choose at least one recipient.': 'Choose at least one recipient.',
+  'Use each reminder or follow-up time only once per list.':
+    'Use each reminder or follow-up time only once per list.',
+  'Add at most {count} messages to this list.': 'Add at most {count} messages to this list.',
+  'Use plain text with line breaks only; remove tabs and other control characters.':
+    'Use plain text with line breaks only; remove tabs and other control characters.',
+  'Use valid Unicode text.': 'Use valid Unicode text.',
+  'Host notes are disabled on this instance. Remove saved notes before changing reminders or follow-ups.':
+    'Host notes are disabled on this instance. Remove saved notes before changing reminders or follow-ups.',
+  'Reload the event type and try again.': 'Reload the event type and try again.',
   'Allowed durations': 'Allowed durations',
   'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
     'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.',

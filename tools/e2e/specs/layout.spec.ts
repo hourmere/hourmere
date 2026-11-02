@@ -1,5 +1,5 @@
 import { a11yFindings, scanA11y } from '../a11y.ts'
-import { AUDIT_GUEST_NAME, AUDIT_TEAM_NAME, AUDIT_TITLE } from '../audit-data.ts'
+import { AUDIT_GUEST_NAME, AUDIT_HOST_NOTE, AUDIT_TEAM_NAME, AUDIT_TITLE } from '../audit-data.ts'
 import { auditLocales, auditPages, openAuditPage, settleAuditLayout } from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 import { layoutViewports, measureKeyboard, measureLayout } from '../layout.ts'
@@ -128,6 +128,32 @@ for (const viewport of [
       })
   })
 }
+
+test.describe('notification editor at 320px', () => {
+  const viewport = { width: 320, height: 568 }
+  test.use({ viewport, isMobile: true, hasTouch: true, notificationEditor: true })
+  for (const locale of ['en-US', 'zh-CN'] as const)
+    test(`saved reminder, follow-up and host note fit ${locale}`, async ({ page, app }) => {
+      await openAuditPage(page, app, 'event-type-editor', { locale })
+      const editor = page.locator('.notifications-editor')
+      const reminders = editor.locator('fieldset[id="notifications.reminders"]')
+      const followUps = editor.locator('fieldset[id="notifications.followUps"]')
+      await expect(reminders.locator('.notification-card')).toHaveCount(1)
+      await expect(followUps.locator('.notification-card')).toHaveCount(1)
+      await expect(followUps.locator('.notification-card > legend')).toHaveText(
+        locale === 'zh-CN' ? '会后消息 1' : 'Follow-up 1',
+      )
+      const note = followUps.getByRole('textbox', {
+        name: locale === 'zh-CN' ? '主持人留言（可选）' : 'Host note (optional)',
+        exact: true,
+      })
+      await expect(note).toBeVisible()
+      await expect(note).toBeEditable()
+      await expect(note).toHaveValue(AUDIT_HOST_NOTE)
+      await page.evaluate(settleAuditLayout)
+      expect(await page.evaluate(measureLayout, viewport)).toEqual([])
+    })
+})
 
 test.describe('team administrator bookings at 320px', () => {
   const viewport = { width: 320, height: 568 }

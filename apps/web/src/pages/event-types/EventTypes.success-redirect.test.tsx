@@ -208,6 +208,20 @@ describe.each(['en', 'zh-CN'] as const)('after-booking editor in %s', (language)
 })
 
 describe('redirect draft and preview contracts', () => {
+  it('keeps notification and redirect changes independent of their editor session baselines', () => {
+    const baseline = draftFromEventType(eventType({ successRedirect: settings }))
+    const onlyRedirect = toPatchInput({ ...baseline, allowEmbedParent: true }, baseline)
+    expect(onlyRedirect).not.toHaveProperty('notifications')
+    expect(onlyRedirect.successRedirect?.allowEmbedParent).toBe(true)
+    const notifications = { reminders: [], followUps: [] }
+    const onlyNotifications = toPatchInput({ ...baseline, notifications }, baseline)
+    expect(onlyNotifications).not.toHaveProperty('successRedirect')
+    expect(onlyNotifications.notifications).toEqual(notifications)
+    const both = toPatchInput({ ...baseline, notifications, allowEmbedParent: true }, baseline)
+    expect(both.notifications).toEqual(notifications)
+    expect(both.successRedirect?.allowEmbedParent).toBe(true)
+  })
+
   it('sends all configuration on create and only changed configuration on PATCH', () => {
     expect(toInput(emptyDraft())).not.toHaveProperty('successRedirect')
     const original = draftFromEventType(eventType({ successRedirect: settings }))

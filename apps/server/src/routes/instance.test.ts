@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
@@ -9,7 +11,10 @@ const publicUrl = 'https://instance.example.com:8443'
 const appWith = (
   socialProviders: Parameters<typeof instanceRoutes>[0]['socialProviders'],
   hostedSignupUrl?: string,
-  policies: Pick<Parameters<typeof instanceRoutes>[0], 'privacyPolicyUrl' | 'termsUrl'> = {},
+  options: Pick<
+    Parameters<typeof instanceRoutes>[0],
+    'privacyPolicyUrl' | 'termsUrl' | 'followUpHostNotesEnabled'
+  > = {},
 ) =>
   createApp({
     checkDb: async () => {},
@@ -17,7 +22,7 @@ const appWith = (
     authHandler: async () => new Response(null, { status: 404 }),
     // Nobody is signed in: the route must not need anyone to be.
     resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
-    routes: [instanceRoutes({ publicUrl, socialProviders, hostedSignupUrl, ...policies })],
+    routes: [instanceRoutes({ publicUrl, socialProviders, hostedSignupUrl, ...options })],
   })
 
 const oauth = (name: string) => ({
@@ -34,6 +39,7 @@ describe('GET /api/v1/instance', () => {
       hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
+      followUpHostNotesEnabled: true,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -48,6 +54,7 @@ describe('GET /api/v1/instance', () => {
       hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
+      followUpHostNotesEnabled: true,
       signIn: { email: true, google: true, microsoft: true },
     })
     expect(text).not.toMatch(/client/i)
@@ -58,6 +65,7 @@ describe('GET /api/v1/instance', () => {
       hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
+      followUpHostNotesEnabled: true,
       signIn: { email: true, google: true, microsoft: false },
     })
   })
@@ -72,6 +80,7 @@ describe('GET /api/v1/instance', () => {
       hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
+      followUpHostNotesEnabled: true,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -139,6 +148,117 @@ describe('GET /api/v1/instance', () => {
     }
   })
 
+  async function verifyHostNoteCapability(factory: typeof productRoutes = productRoutes) {
+    // No database connection is opened; route composition still owns and closes its pool.
+    const databaseUrl = 'postgres://instance-test@127.0.0.1:9/instance-test'
+    const db = createDb(createPool(databaseUrl))
+    try {
+      for (const configured of [undefined, 'true', 'false']) {
+        const config = loadConfig({
+          DATABASE_URL: databaseUrl,
+          BETTER_AUTH_SECRET: 'instance-route-test-secret-at-least-32-characters',
+          PUBLIC_URL: publicUrl,
+          ...(configured && { FOLLOW_UP_HOST_NOTES_ENABLED: configured }),
+        })
+        const app = createApp({
+          checkDb: async () => {},
+          publicUrl,
+          authHandler: async () => new Response(null, { status: 404 }),
+          resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+          routes: factory({
+            db,
+            publicUrl,
+            socialProviders: {},
+            followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+            invitationMailLimits: { secret: 'instance-route-test-mail-secret' },
+          }),
+        })
+        for (const headers of [{}, { authorization: 'Bearer hm_unknown' }]) {
+          const response = await app.request('/api/v1/instance', { headers })
+          expect(response.status).toBe(200)
+          expect(await response.json()).toHaveProperty(
+            'followUpHostNotesEnabled',
+            configured !== 'false',
+          )
+        }
+      }
+    } finally {
+      await db.destroy()
+    }
+  }
+
+  async function verifyPublicHostNoteCapability(
+    enabled: boolean,
+    factory: typeof instanceRoutes = instanceRoutes,
+  ) {
+    const app = createApp({
+      checkDb: async () => {},
+      publicUrl,
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      routes: [factory({ publicUrl, socialProviders: {}, followUpHostNotesEnabled: enabled })],
+    })
+    const res = await app.request('/api/v1/instance')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toHaveProperty('followUpHostNotesEnabled', enabled)
+  }
+
+  it.each([true, false])('publishes the host-note capability when set to %s', async (enabled) => {
+    await verifyPublicHostNoteCapability(enabled)
+  })
+
+  it('publishes the host-note operator switch through server route composition', async () => {
+    await verifyHostNoteCapability()
+  })
+
+  async function sourceCopy<T>(file: string, replacement?: [string, string]): Promise<T> {
+    const location = new URL(file, import.meta.url)
+    let source = readFileSync(location, 'utf8')
+    if (replacement) {
+      expect(source.includes(replacement[0]), 'mutation matches the capability protection').toBe(
+        true,
+      )
+      source = source.replace(...replacement)
+    }
+    const javascript = stripTypeScriptTypes(source).replace(
+      /((?:from|import)\s*)'([^']+)'/g,
+      (_, prefix: string, specifier: string) => {
+        const resolved = specifier.startsWith('.')
+          ? new URL(specifier, location).href
+          : import.meta.resolve(specifier)
+        return `${prefix}'${resolved}'`
+      },
+    )
+    return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+  }
+
+  it('passes the public switch assertions with an unmodified isolated source copy', async () => {
+    const copy = await sourceCopy<typeof import('../server.ts')>('../server.ts')
+    await verifyHostNoteCapability(copy.productRoutes)
+    const publicCopy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts')
+    await verifyPublicHostNoteCapability(false, publicCopy.instanceRoutes)
+  })
+
+  it('detects removing host-note capability wiring from the product routes', async () => {
+    const copy = await sourceCopy<typeof import('../server.ts')>('../server.ts', [
+      '      automaticZoom,\n      followUpHostNotesEnabled,\n      hostedSignupUrl,',
+      '      automaticZoom,\n      hostedSignupUrl,',
+    ])
+    await expect(verifyHostNoteCapability(copy.productRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it('detects a public response that hides the disabled host-note switch', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      '    followUpHostNotesEnabled,\n    signIn:',
+      '    followUpHostNotesEnabled: true,\n    signIn:',
+    ])
+    await expect(verifyPublicHostNoteCapability(false, copy.instanceRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
   it('is documented as a public route', async () => {
     const res = await appWith({}).request('/api/v1/openapi.json')
     const doc = (await res.json()) as {
@@ -162,5 +282,10 @@ describe('GET /api/v1/instance', () => {
     expect(instance?.properties).toHaveProperty('termsUrl')
     expect(instance?.required).not.toContain('privacyPolicyUrl')
     expect(instance?.required).not.toContain('termsUrl')
+    expect(instance?.properties).toHaveProperty('followUpHostNotesEnabled', {
+      type: 'boolean',
+      description: 'Whether hosts may add plain-text notes to follow-up emails',
+    })
+    expect(instance?.required).not.toContain('followUpHostNotesEnabled')
   })
 })

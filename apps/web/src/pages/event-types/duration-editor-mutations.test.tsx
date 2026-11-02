@@ -15,6 +15,7 @@ import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import type { DurationsEditor } from './DurationsEditor.tsx'
 import * as formFunctions from './event-type-form.ts'
+import * as notificationFunctions from './notifications-form.ts'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
 const editor = readFileSync('apps/web/src/pages/event-types/DurationsEditor.tsx', 'utf8')
@@ -44,6 +45,7 @@ function mutate(source: string, before: string, after: string) {
 }
 
 const formDeps = {
+  ...notificationFunctions,
   RequestError,
   parseWhole,
   wholeNumberProblem,
