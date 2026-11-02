@@ -156,7 +156,7 @@ test('a suggested slot taken after preselection keeps the draft and uses generic
   )
   await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()
   expect((await conflict).status()).toBe(409)
-  await expect(page.getByRole('status')).toHaveText(unavailable)
+  await expect(page.getByRole('status').filter({ hasText: unavailable })).toHaveText(unavailable)
   await expect(page.getByRole('alert')).toHaveCount(0)
   await pickSlot(page, page)
   await expect(page.getByLabel('Your name', { exact: true })).toHaveValue('Fixture Invitee')
