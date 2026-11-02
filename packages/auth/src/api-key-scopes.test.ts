@@ -23,6 +23,8 @@ const restContract = {
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
     'GET /api/v1/event-type-hosts',
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links',
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
     'GET /api/v1/schedules/{id}/overrides',
@@ -48,6 +50,8 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/event-types/{eventTypeId}/one-time-links',
+    'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
@@ -219,6 +223,33 @@ function verifyOneTimeWrites(allows: Allows) {
   }
 }
 
+function verifyOneTimeManagementScopes(operation: typeof apiKeyOperation) {
+  for (const id of [
+    'POST /api/v1/event-types/{eventTypeId}/one-time-links',
+    'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
+    'mcp:create_one_time_link',
+    'mcp:revoke_one_time_link',
+    'cli:one-time-links create',
+    'cli:one-time-links revoke',
+  ]) {
+    expect(operation(id), id).toMatchObject({
+      operationClass: 'booking_write',
+      allowedScopes: ['full', 'bookings'],
+    })
+  }
+  for (const id of [
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links',
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
+    'mcp:list_one_time_links',
+    'cli:one-time-links list',
+  ]) {
+    expect(operation(id), id).toMatchObject({
+      operationClass: 'other_read',
+      allowedScopes: ['full', 'read'],
+    })
+  }
+}
+
 function verifyEventTypeConfigurationScopes(operation: typeof apiKeyOperation) {
   for (const tool of ['create_event_type', 'update_event_type']) {
     expect(operation(`mcp:${tool}`)).toMatchObject({
@@ -289,6 +320,9 @@ describe('shared API-key scope policy', () => {
         'get_schedule',
         'create_event_type',
         'update_event_type',
+        'create_one_time_link',
+        'list_one_time_links',
+        'revoke_one_time_link',
         'list_calendar_connections',
         'list_conference_connections',
       ],
@@ -301,10 +335,13 @@ describe('shared API-key scope policy', () => {
         'get_event_type',
         'list_schedules',
         'get_schedule',
+        'list_one_time_links',
         'list_calendar_connections',
         'list_conference_connections',
       ],
       bookings: [
+        'create_one_time_link',
+        'revoke_one_time_link',
         'whoami',
         'find_available_slots',
         'create_booking',
@@ -336,6 +373,9 @@ describe('shared API-key scope policy', () => {
   })
 
   it('allows one-time consumption only as a booking write', () => verifyOneTimeWrites(apiKeyAllows))
+
+  it('requires booking write access for one-time link writes and read for history', () =>
+    verifyOneTimeManagementScopes(apiKeyOperation))
 
   it('denies unknown operations and never matches actual paths or HTTP/MCP hints', () =>
     verifyUnknownDenied(apiKeyAllows))
@@ -390,6 +430,44 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_write'",
+      "rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_read'",
+    ],
+    [
+      "rest('DELETE', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'booking_write'",
+      "rest('DELETE', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'booking_read'",
+    ],
+    [
+      "rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links', 'other_read'",
+      "rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_read'",
+    ],
+    [
+      "rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'other_read'",
+      "rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'booking_read'",
+    ],
+    ["mcp('create_one_time_link', 'booking_write'", "mcp('create_one_time_link', 'booking_read'"],
+    ["mcp('revoke_one_time_link', 'booking_write'", "mcp('revoke_one_time_link', 'booking_read'"],
+    ["mcp('list_one_time_links', 'other_read'", "mcp('list_one_time_links', 'booking_read'"],
+    [
+      "cli('one-time-links create', 'create_one_time_link')",
+      "cli('one-time-links create', 'create_event_type')",
+    ],
+    [
+      "cli('one-time-links revoke', 'revoke_one_time_link')",
+      "cli('one-time-links revoke', 'update_event_type')",
+    ],
+    [
+      "cli('one-time-links list', 'list_one_time_links')",
+      "cli('one-time-links list', 'list_bookings')",
+    ],
+  ] as const)('kills broadened one-time management scopes: %s', (before, after) => {
+    verifyOneTimeManagementScopes(sourceCopyRegistry())
+    expect(() => verifyOneTimeManagementScopes(sourceCopyRegistry([before, after]))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
   it.each([
     [
       "rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key')",
