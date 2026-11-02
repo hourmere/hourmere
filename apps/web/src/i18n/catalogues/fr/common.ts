@@ -3,6 +3,10 @@ export const common = {
     'Ces suggestions ont expiré. Consultez les créneaux actuellement disponibles.',
   'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.':
     'Si vous êtes toujours sur la liste d’attente, vous pouvez y rester jusqu’à son échéance initiale. Aucun créneau n’est réservé.',
+  'This booking link is unavailable': 'Ce lien de réservation n’est pas disponible',
+  'Contact the host for a new booking link.': 'Demandez un nouveau lien de réservation à l’hôte.',
+  'These details were filled in for convenience. You can change them.':
+    'Ces informations ont été préremplies pour vous faciliter la tâche. Vous pouvez les modifier.',
   'Your team context changed. Reload before making changes.':
     'Le contexte de votre équipe a changé. Rechargez la page avant d’effectuer des modifications.',
   '{count} min': '{count} min',

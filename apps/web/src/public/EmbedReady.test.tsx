@@ -40,10 +40,29 @@ function expectReady(postMessage: ReturnType<typeof vi.fn>, allowEmbedParent: bo
 beforeEach(() => window.history.replaceState(null, '', '/'))
 
 describe('readiness for every embedded route outcome', () => {
-  it('enumerates both dedicated embed routes from the actual router', () => {
-    expect(
-      appRoutes.filter(({ path }) => path?.startsWith('/embed/')).map(({ path }) => path),
-    ).toEqual(['/embed/team/:teamSlug/:slug', '/embed/:handle/:slug'])
+  it('enumerates the two supported embed routes and the explicit one-time refusal', () => {
+    const embedRoutes = appRoutes
+      .filter(({ path }) => path?.startsWith('/embed/'))
+      .map(({ path }) => path)
+    expect(embedRoutes).toEqual([
+      '/embed/book/:token',
+      '/embed/team/:teamSlug/:slug',
+      '/embed/:handle/:slug',
+    ])
+    expect(embedRoutes.filter((path) => path !== '/embed/book/:token')).toEqual([
+      '/embed/team/:teamSlug/:slug',
+      '/embed/:handle/:slug',
+    ])
+  })
+
+  it('refuses one-time embeds without reading the capability or announcing readiness/completion', async () => {
+    const path = '/embed/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB'
+    const postMessage = parent(path)
+    const api = fakeApi({})
+    renderApp(`${path}${QUERY}`)
+    await screen.findByRole('heading', { name: 'This booking link is unavailable' })
+    expect(api.calls.every((call) => call.path === '/api/v1/instance')).toBe(true)
+    expect(postMessage).not.toHaveBeenCalled()
   })
 
   // The team route shares BookingPage for individual, collective and round-robin events.

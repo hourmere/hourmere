@@ -128,6 +128,194 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/book/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open a one-time booking link
+         * @description The capability is carried only in the URL path. Reads never consume it. Prefill is editable convenience, not proof of identity. All unavailable states have the same response. This page cannot be embedded.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Booking form and optional prefill */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OneTimeBookingPage"];
+                    };
+                };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This booking link is unavailable (`one_time_link_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests; see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/book/{token}/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book through a one-time link
+         * @description Claims the link atomically with the booking. An unavailable link receives the same neutral error for every state. Exact Idempotency-Key replay returns the original booking without claiming again. Cancellation or rescheduling never reactivates the link; use the returned manage link.
+         */
+        post: operations["createOneTimeBooking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/book/{token}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Available slots through a one-time link */
+        get: {
+            parameters: {
+                query: {
+                    durationMinutes?: number;
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    end: string;
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    start: string;
+                };
+                header?: never;
+                path: {
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Available slots */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Slot"][];
+                        };
+                    };
+                };
+                /** @description Invalid booking parameters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The supplied API key is invalid */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This booking link is unavailable (`one_time_link_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests; see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings": {
         parameters: {
             query?: never;
@@ -4333,6 +4521,45 @@ export interface components {
             /** Format: date-time */
             removedAt: string;
         };
+        OneTimeBookingPage: {
+            eventType: components["schemas"]["OneTimeEventType"];
+            prefill: {
+                email: string | null;
+                name: string | null;
+            };
+        };
+        OneTimeEventType: {
+            /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
+            allowedDurationsMinutes?: number[];
+            /** @description Whether invitees may add guest recipients */
+            allowGuests: boolean;
+            description: string | null;
+            durationMinutes: number;
+            host: {
+                /** @description An existing first-party raster image path; external profile pictures are omitted */
+                image?: string;
+                name: string;
+                /** @description The host's IANA time zone; omitted for round-robin pools */
+                timeZone?: string;
+            };
+            hosts?: {
+                name: string;
+                timeZone: string;
+            }[];
+            /** @description Only the kind; details such as a phone number come with the booking */
+            location: {
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            } | null;
+            /** @description Booking-form fields beyond name and email */
+            questions: components["schemas"]["Question"][];
+            /** @enum {string} */
+            schedulingType?: "round_robin";
+            team?: {
+                name: string;
+            };
+            title: string;
+        };
         Profile: {
             /** Format: date-time */
             createdAt: string;
@@ -4897,6 +5124,122 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    createOneTimeBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                "idempotency-key"?: string;
+            };
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+                    durationMinutes?: number;
+                    /** @description Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed */
+                    guests?: {
+                        /** Format: email */
+                        email: string;
+                        name: string;
+                    }[];
+                    invitee: {
+                        /** Format: email */
+                        email: string;
+                        /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+                        locale?: string;
+                        name: string;
+                        /** @description IANA time zone */
+                        timeZone: string;
+                    };
+                    responses?: components["schemas"]["Responses"];
+                    /**
+                     * Format: date-time
+                     * @description The start of an offered slot
+                     * @example 2026-11-02T09:00:00.000Z
+                     */
+                    start: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Exact idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBookingResult"];
+                };
+            };
+            /** @description Booked and link consumed */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBookingResult"];
+                };
+            };
+            /** @description Invalid booking parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This booking link is unavailable (`one_time_link_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Slot unavailable or idempotency key reused */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     retryBookingCalendarCopy: {
         parameters: {
             query?: never;

@@ -15,9 +15,13 @@ import {
   type CreateBooking,
   codeOf,
   createBooking,
+  createOneTimeLinkBooking,
   eventSlots,
   failureMessage,
   getEventType,
+  getOneTimeBookingPage,
+  type OneTimeBookingPage as OneTimeBookingPageData,
+  oneTimeLinkSlots,
   type PublicBookingResult,
   type PublicEventType,
   PublicRequestError,
@@ -70,6 +74,65 @@ import {
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
   return <BookingPage team />
+}
+
+/** One-time capabilities stay in the path and are never accepted from query parameters. */
+export function OneTimeBookingPage() {
+  const { token } = useParams()
+  const { pathname } = useLocation()
+  if (
+    !token ||
+    !/^[A-Za-z0-9_-]{43}$/.test(token) ||
+    pathname.startsWith('/embed/') ||
+    window.parent !== window
+  )
+    return <OneTimeLinkUnavailable />
+  return <OneTimeBookingPageContent key={token} token={token} />
+}
+
+function OneTimeLinkUnavailable() {
+  const { t } = useI18n()
+  usePageTitle('This booking link is unavailable')
+  return (
+    <PublicLayout>
+      <div className="card public-card">
+        <FocusHeading>{t('This booking link is unavailable')}</FocusHeading>
+        <p>{t('Contact the host for a new booking link.')}</p>
+      </div>
+    </PublicLayout>
+  )
+}
+
+function OneTimeBookingPageContent({ token }: { token: string }) {
+  const { t, ui } = useI18n()
+  const load = useCallback((signal: AbortSignal) => getOneTimeBookingPage(token, signal), [token])
+  const [state, reload] = useRequest(load)
+  usePageTitle(
+    state.status === 'ready'
+      ? literal(`${state.data.eventType.title} · ${state.data.eventType.host.name}`)
+      : 'Booking',
+  )
+  if (state.status === 'loading')
+    return (
+      <PublicLayout wide>
+        <PublicStatus>{t('Loading…')}</PublicStatus>
+      </PublicLayout>
+    )
+  if (state.status === 'error') {
+    if (codeOf(state.error) === 'one_time_link_not_found') return <OneTimeLinkUnavailable />
+    return (
+      <PublicLayout>
+        <div className="card public-card">
+          <p role="alert">{ui(failureMessage(state.error))}</p>
+          <button type="button" className="button" onClick={reload}>
+            {t('Try again')}
+          </button>
+        </div>
+      </PublicLayout>
+    )
+  }
+  const { eventType, prefill } = state.data
+  return <BookingFlow event={eventType} oneTimeToken={token} prefill={prefill} />
 }
 
 export function BookingPage({ team = false }: { team?: boolean } = {}) {
@@ -164,19 +227,24 @@ interface Confirmed extends PublicBookingResult {
   timeZone: string
 }
 
+type BookingEvent = PublicEventType | OneTimeBookingPageData['eventType']
+type BookingAddress =
+  | { oneTimeToken: string; handle?: never; slug?: never; team?: never }
+  | { oneTimeToken?: never; handle: string; slug: string; team: boolean }
+
 function BookingFlow({
   event: initialEvent,
-  handle,
-  slug,
-  team,
+  handle = '',
+  slug = '',
+  team = !!initialEvent.team,
+  oneTimeToken,
+  prefill,
   waitlist,
 }: {
-  event: PublicEventType
-  handle: string
-  slug: string
-  team: boolean
+  event: BookingEvent
+  prefill?: { name: string | null; email: string | null }
   waitlist?: WaitlistLink | undefined
-}) {
+} & BookingAddress) {
   const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
 
   const embedded = useEmbedded()
@@ -197,7 +265,11 @@ function BookingFlow({
   const [version, setVersion] = useState(0)
   const [notice, setNotice] = useState<UiText | null>(null)
   const [backToPicker, setBackToPicker] = useState(false)
-  const [values, setValues] = useState<BookingFormValues>(EMPTY_FORM)
+  const [values, setValues] = useState<BookingFormValues>(() => ({
+    ...EMPTY_FORM,
+    name: prefill?.name ?? '',
+    email: prefill?.email ?? '',
+  }))
   const [serverErrors, setServerErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<UiText | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -218,7 +290,9 @@ function BookingFlow({
     refreshController.current = controller
     setDurationRefresh({ status: 'loading' })
     try {
-      const updated = await getEventType(handle, slug, controller.signal, team)
+      const updated = oneTimeToken
+        ? (await getOneTimeBookingPage(oneTimeToken, controller.signal)).eventType
+        : await getEventType(handle, slug, controller.signal, team)
       if (controller.signal.aborted) return
       // Keep the invitee's draft in this flow while replacing stale choices and slots.
       setEvent(updated)
@@ -228,16 +302,24 @@ function BookingFlow({
       setDurationRefresh(null)
     } catch (err) {
       if (controller.signal.aborted) return
-      if (codeOf(err) === 'event_type_not_found') setGone(true)
+      if (codeOf(err) === 'event_type_not_found' || codeOf(err) === 'one_time_link_not_found')
+        setGone(true)
       else setDurationRefresh({ status: 'error', message: failureMessage(err) })
     }
-  }, [handle, slug, team])
+  }, [handle, slug, team, oneTimeToken])
   const loadSlots = useMemo<SlotLoader>(() => {
-    const load = eventSlots(handle, slug, team, hasDurationChoices ? durationMinutes : undefined)
+    const duration = hasDurationChoices ? durationMinutes : undefined
+    const load = oneTimeToken
+      ? oneTimeLinkSlots(oneTimeToken, duration)
+      : eventSlots(handle, slug, team, duration)
     return async (start, end, signal) => {
       try {
         return await load(start, end, signal)
       } catch (err) {
+        if (!signal.aborted && codeOf(err) === 'one_time_link_not_found') {
+          setGone(true)
+          return []
+        }
         if (
           signal.aborted ||
           !(err instanceof PublicRequestError) ||
@@ -249,7 +331,16 @@ function BookingFlow({
         return []
       }
     }
-  }, [handle, slug, team, durationMinutes, hasDurationChoices, event.questions, refreshDurations])
+  }, [
+    handle,
+    slug,
+    team,
+    oneTimeToken,
+    durationMinutes,
+    hasDurationChoices,
+    event.questions,
+    refreshDurations,
+  ])
 
   // A suggested time is a preview, never a hold. Read normal availability before
   // opening the ordinary form; the booking transaction checks it again on submit.
@@ -289,7 +380,7 @@ function BookingFlow({
     return () => controller.abort()
   }, [waitlist, handle, slug, team, initialEvent.durationMinutes])
 
-  if (gone) return <PublicNotFound what="event" />
+  if (gone) return oneTimeToken ? <OneTimeLinkUnavailable /> : <PublicNotFound what="event" />
   if (confirmed)
     return <Confirmation event={event} confirmed={confirmed} locale={locale} team={team} />
 
@@ -342,13 +433,9 @@ function BookingFlow({
     setFormError(null)
     setServerErrors({})
     try {
-      const { result, replayed } = await createBooking(
-        handle,
-        slug,
-        attempt.current.body,
-        attempt.current.key,
-        team,
-      )
+      const { result, replayed } = oneTimeToken
+        ? await createOneTimeLinkBooking(oneTimeToken, attempt.current.body, attempt.current.key)
+        : await createBooking(handle, slug, attempt.current.body, attempt.current.key, team)
       setConfirmed({ ...result, replayed, timeZone })
     } catch (err) {
       const code = codeOf(err)
@@ -373,7 +460,7 @@ function BookingFlow({
       } else if (code === 'invalid_duration') {
         setNotice(bookingErrors(err, event.questions, values.guests).form)
         await refreshDurations()
-      } else if (code === 'event_type_not_found') {
+      } else if (code === 'event_type_not_found' || code === 'one_time_link_not_found') {
         setGone(true)
       } else if (code === 'idempotency_key_reused') {
         attempt.current = null
@@ -516,6 +603,11 @@ function BookingFlow({
               <FocusHeading level={2} id="details-heading" className="step-title">
                 {t('Your details')}
               </FocusHeading>
+              {(prefill?.name || prefill?.email) && (
+                <p className="hint">
+                  {t('These details were filled in for convenience. You can change them.')}
+                </p>
+              )}
               <BookingForm
                 allowGuests={event.allowGuests}
                 questions={event.questions}
@@ -588,7 +680,7 @@ function Confirmation({
   locale,
   team,
 }: {
-  event: PublicEventType
+  event: BookingEvent
   confirmed: Confirmed
   locale: string
   team: boolean

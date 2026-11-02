@@ -32,6 +32,7 @@ import {
   HostPage,
   ManageBookingPage,
   McpAuthorizePage,
+  OneTimeBookingPage,
   RequireSession,
   ScheduleEditorPage,
   SessionLayout,
@@ -85,6 +86,8 @@ export const appRoutes = createRoutesFromElements(
       </Route>
     </Route>
     {/* Public pages, outside the session: they never ask who is signed in. */}
+    <Route path="/book/:token?" element={<OneTimeBookingPage />} />
+    <Route path="/embed/book/:token" element={<OneTimeBookingPage />} />
     <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
     <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
     <Route path="/booking" element={<ManageBookingPage />} />

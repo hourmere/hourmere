@@ -84,6 +84,7 @@ import { instanceRoutes } from './routes/instance.ts'
 import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
+import { oneTimeBookingRoutes } from './routes/one-time-bookings.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
@@ -188,6 +189,13 @@ export function productRoutes({
     publicRoutes({
       db,
       waitlistSecret,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
+    }),
+    oneTimeBookingRoutes({
+      db,
       notify,
       automaticMeet,
       automaticZoom,

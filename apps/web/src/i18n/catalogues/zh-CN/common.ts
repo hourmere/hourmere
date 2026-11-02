@@ -4,6 +4,10 @@ export const common = {
     '这些建议时段已过期，请查看当前可约时间。',
   'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.':
     '如果您仍在候补名单中，可以继续等待，直至原定截止时间。我们不会为您预留时段。',
+  'This booking link is unavailable': '此预约链接不可用',
+  'Contact the host for a new booking link.': '请联系主持人，获取新的预约链接。',
+  'These details were filled in for convenience. You can change them.':
+    '这些信息已预先填写，方便你预约。你可以自行修改。',
   'Your team context changed. Reload before making changes.':
     '你的团队上下文已改变。请重新加载后再进行修改。',
   '{count} min': '{count}分钟',

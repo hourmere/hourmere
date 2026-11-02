@@ -24,6 +24,7 @@ import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
+import { isOneTimeLinkPath, redactOneTimeLogDetails } from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
@@ -120,6 +121,7 @@ const httpErrorCodes: Record<number, string> = {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
+  if (isOneTimeLinkPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   const message = result.error.issues
     .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
     .join('; ')
@@ -264,8 +266,14 @@ const COLORS = /\u001b\[[0-9;]*m/g
  * Logs requests without query strings (sign-in links and OAuth callbacks carry secrets
  * there) and without colors.
  */
-const requestLogger = logger((line, ...rest) =>
+const ordinaryRequestLogger = logger((line, ...rest) =>
   console.log(escapeControlCharacters(redactLogDetails(line.replace(COLORS, ''))), ...rest),
+)
+
+// A one-time capability is carried by the path. Do not hand that request to a
+// URL logger, including malformed tokens and refused embed attempts.
+const requestLogger = createMiddleware((c, next) =>
+  isOneTimeLinkPath(c.req.path) ? next() : ordinaryRequestLogger(c, next),
 )
 
 export function createApp({
@@ -289,7 +297,11 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) =>
     (level === 'ERROR' ? console.error : console.warn)(
-      `${new Date().toISOString()} ${level} ${escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))}`,
+      `${new Date().toISOString()} ${level} ${
+        isOneTimeLinkPath(c.req.path)
+          ? redactOneTimeLogDetails(`${c.req.method} /book/[redacted]: ${text}`)
+          : escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))
+      }`,
     )
   const logError = (c: Context, label: string, detail: unknown) =>
     logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
@@ -312,7 +324,10 @@ export function createApp({
       // A prepared response (e.g. from middleware) is sent as is; otherwise use our shape.
       if (err.res) return err.getResponse()
       const error = httpErrorCodes[err.status] ?? 'invalid_request'
-      return c.json(err.message ? { error, message: err.message } : { error }, err.status)
+      return c.json(
+        err.message && !isOneTimeLinkPath(c.req.path) ? { error, message: err.message } : { error },
+        err.status,
+      )
     }
     if (err instanceof ApiKeyScopeError) {
       return c.json({ error: err.error, message: err.message }, 403)
@@ -330,7 +345,7 @@ export function createApp({
       const body = {
         error: err.code,
         ...(errorAlias !== undefined && { errorAlias }),
-        ...(err.detail && { message: err.detail }),
+        ...(err.detail && !isOneTimeLinkPath(c.req.path) && { message: err.detail }),
       }
       return c.json(body, domainStatus[err.kind])
     }

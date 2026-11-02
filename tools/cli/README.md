@@ -72,6 +72,13 @@ request file. Retain that exact input and key before booking:
 hourmere book --input booking-request.json --output booking-result.json
 ```
 
+For a one-time booking link, set `oneTimeToken` to the secret path segment from
+`/book/{token}` in the private booking input. Omit `handle`, `teamSlug` and `slug`.
+The link is consumed together with the booking; the same input and idempotency key replay
+the winning booking. Its prefilled invitee details are editable and do not prove identity.
+Use the returned `manageToken` for later moves or cancellation; neither reopens the link.
+The CLI accepts this capability only through JSON input and redacts it from output.
+
 For an event with several lengths, choose from `allowedDurationsMinutes` using JSON
 `durationMinutes` or `--duration-minutes 60` on `slots`, `book` and `reschedule`. Keep the
 same length when finding and booking a slot. The flag accepts 1–1440 whole minutes;
