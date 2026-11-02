@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LanguageSwitcher } from '../i18n/runtime.tsx'
 import { fakeApi, json } from '../test/fake-api.tsx'
 import { booking, TOKEN } from '../test/public-fixtures.ts'
@@ -25,6 +25,8 @@ const failed = () => ({
     errorCode: 'ambiguous_create',
   },
 })
+// Conference polling and retry actions run before the fixed booking starts.
+beforeEach(() => vi.useFakeTimers({ now: Date.parse('2030-11-01T00:00:00Z') }))
 afterEach(() => vi.useRealTimers())
 const advance = async (ms = 2500) => {
   await act(async () => {
@@ -34,7 +36,6 @@ const advance = async (ms = 2500) => {
 
 describe('protected meeting link status', () => {
   it('polls with the private capability in a header only, then stops when ready', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({ 'GET /api/v1/bookings/manage': () => json(200, ready()) }),
       changed = vi.fn()
     render(<ConferenceNotice booking={pending()} manageToken={TOKEN} onChange={changed} />)
@@ -49,7 +50,6 @@ describe('protected meeting link status', () => {
     expect(localStorage.getItem(TOKEN)).toBeNull()
   })
   it('never requests a session, account profile or write on a tokenless replay', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({})
     render(<ConferenceNotice booking={pending()} />)
     await advance(120_000)
@@ -59,7 +59,6 @@ describe('protected meeting link status', () => {
     ).toBeDefined()
   })
   it('a failed read pauses; a manual read rechecks without creating a meeting', async () => {
-    vi.useFakeTimers()
     let reject = true
     const api = fakeApi({
       'GET /api/v1/bookings/manage': () =>
@@ -77,7 +76,6 @@ describe('protected meeting link status', () => {
     expect(api.calls.every((c) => c.method === 'GET')).toBe(true)
   })
   it('unknown creation has only a safe host retry, with no force-create payload or automatic write', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({
       [`POST /api/v1/bookings/${pending().id}/conference/retry`]: () =>
         new Response(null, { status: 204 }),
@@ -94,7 +92,6 @@ describe('protected meeting link status', () => {
     expect(screen.getByText(/Your time is reserved. The Google Meet link/)).toBeDefined()
   })
   it('explains exhausted Google polling in both languages and only rechecks after a host action', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({
       [`POST /api/v1/bookings/${pending().id}/conference/retry`]: () =>
         new Response(null, { status: 204 }),
@@ -155,7 +152,6 @@ describe('protected meeting link status', () => {
     },
   )
   it('never retries a host write whose response is lost', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({
       [`POST /api/v1/bookings/${pending().id}/conference/retry`]: () => {
         throw new TypeError('lost')
@@ -169,7 +165,6 @@ describe('protected meeting link status', () => {
     expect(api.calls).toHaveLength(1)
   })
   it('retains capability, requests and form draft across language changes', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({ 'GET /api/v1/bookings/manage': () => json(200, pending()) })
     render(
       <>
@@ -194,7 +189,6 @@ describe('protected meeting link status', () => {
     expect(Object.values(localStorage)).not.toContain(JOIN)
   })
   it('aborts and ignores an old booking read after unmount', async () => {
-    vi.useFakeTimers()
     let finish!: (response: Response) => void, request: Request | undefined
     vi.stubGlobal(
       'fetch',
@@ -234,7 +228,6 @@ describe('protected meeting link status', () => {
     expect(screen.getByText(/cleanup needs the host/)).toBeDefined()
   })
   it('cancellation aborts a same-id pending read and discards its late confirmed-ready result', async () => {
-    vi.useFakeTimers()
     let finish!: (response: Response) => void, request: Request | undefined
     vi.stubGlobal(
       'fetch',
@@ -267,7 +260,6 @@ describe('protected meeting link status', () => {
     ).toBeDefined()
   })
   it('cancellation aborts an in-flight safe retry and discards its late completion', async () => {
-    vi.useFakeTimers()
     let finish!: (response: Response) => void, request: Request | undefined
     vi.stubGlobal(
       'fetch',
@@ -316,7 +308,6 @@ describe('Zoom meeting presentation', () => {
     expect(api.calls).toHaveLength(0)
   })
   it('unknown creation requires host account inspection; no forced create or pretend safe recheck write is offered', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({})
     render(<ConferenceNotice booking={value('failed', 'ambiguous_create')} host />)
     expect(screen.getByText(/host must inspect their Zoom account/)).toBeDefined()

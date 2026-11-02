@@ -14,6 +14,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { organizationContext } from '../../../packages/auth/src/organization-context.ts'
 import {
@@ -269,7 +270,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     const f = await fixture()
     await db
       .updateTable('auth.session')
-      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
       .where('id', '=', f.sessionId)
       .execute()
     for (const cookie of [undefined, f.cookie]) {
@@ -545,7 +546,10 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     const status = state === 'expired' ? 'pending' : state
     await db
       .updateTable('auth.invitation')
-      .set({ status, ...(state === 'expired' ? { expiresAt: new Date(Date.now() - 60_000) } : {}) })
+      .set({
+        status,
+        ...(state === 'expired' ? { expiresAt: sql`clock_timestamp() - interval '1 minute'` } : {}),
+      })
       .where('id', '=', f.invitation.id)
       .execute()
     const response = await request(

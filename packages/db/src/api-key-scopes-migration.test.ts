@@ -15,6 +15,8 @@ const migration = '0048_api_key_scopes.sql'
 const userId = '00000000-0000-4000-8000-000000000001'
 const teamId = 'abcdef01-0000-4000-8000-000000000002'
 const personalId = '00000000-0000-4000-8000-000000000003'
+// Reuse one Node-clock instant so source-copy databases have identical fixtures.
+const keyNow = Date.now()
 // Locked Better Auth's defaultKeyHasher is SHA-256 encoded as unpadded base64url.
 // These deterministic synthetic credentials are never included in assertion diagnostics.
 const predecessorKey = (index: number) => `hm_${String.fromCharCode(65 + index).repeat(64)}`
@@ -62,7 +64,8 @@ async function seed(pool: pg.Pool) {
         userId,
         createHash('sha256').update(predecessorKey(index)).digest('base64url'),
         index !== 3,
-        index === 4 ? '2020-01-01T00:00Z' : '2030-01-01T00:00Z',
+        // Better Auth verifies key expiry with its Node clock after migration.
+        new Date(keyNow + (index === 4 ? -86_400_000 : 86_400_000)),
         metadata[index] === null ? null : JSON.stringify(metadata[index]),
       ],
     )

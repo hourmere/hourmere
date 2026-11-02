@@ -12,6 +12,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -708,7 +709,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       if (change === 'expired session')
         await db
           .updateTable('auth.session')
-          .set({ expiresAt: new Date(Date.now() - 1_000) })
+          .set({ expiresAt: sql`clock_timestamp() - interval '1 second'` })
           .where('id', '=', a.sessionId)
           .execute()
       if (change === 'switched organization')
@@ -985,6 +986,12 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     expect(await snapshot()).toEqual(before)
   })
 
+  // Invitation generation expiry is written against PostgreSQL's clock.
+  async function databaseNow() {
+    return (await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow())
+      .now
+  }
+
   async function verifyResendProtocol(factory = createAuth) {
     const i = instance(factory)
     const a = await actor()
@@ -999,7 +1006,9 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     expect(first.status).toBe(200)
     invitation = (await first.json()) as Invitation
     expect(invitation.delivery).toMatchObject({ generation: 2, attempts: 0, state: 'queued' })
-    expect(Date.parse(invitation.expiresAt) - Date.now()).toBeGreaterThan(lifetime - 10_000)
+    expect(Date.parse(invitation.expiresAt) - (await databaseNow()).getTime()).toBeGreaterThan(
+      lifetime - 10_000,
+    )
     const after = await snapshot()
     const replay = await resend(i, a, invitation, { expectedGeneration: 1, requestId })
     expect(replay.status).toBe(200)
@@ -1023,7 +1032,9 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     const updated = (await second.json()) as Invitation
     expect(updated.id).toBe(invitation.id)
     expect(updated.delivery.generation).toBe(3)
-    expect(Date.parse(updated.expiresAt) - Date.now()).toBeGreaterThan(lifetime - 10_000)
+    expect(Date.parse(updated.expiresAt) - (await databaseNow()).getTime()).toBeGreaterThan(
+      lifetime - 10_000,
+    )
     const advanced = await snapshot()
     await error(
       await resend(i, a, updated, { expectedGeneration: 1, requestId }),
@@ -1045,8 +1056,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
         role: 'member',
         status: 'pending',
         // Native historical resends changed expiresAt while retaining the original createdAt.
-        createdAt: new Date(Date.now() - 10 * 86_400_000),
-        expiresAt: new Date(Date.now() + 3_600_000),
+        createdAt: sql`clock_timestamp() - interval '10 days'`,
+        expiresAt: sql`clock_timestamp() + interval '1 hour'`,
       })
       .returningAll()
       .executeTakeFirstOrThrow()
@@ -1057,8 +1068,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
           invitation_id: row.id,
           state: 'failed',
           last_error_code: 'legacy_delivery_unknown',
-          generation_started_at: new Date(Date.now() - 3_600_000),
-          updated_at: new Date(Date.now() - 3_600_000),
+          generation_started_at: sql`clock_timestamp() - interval '1 hour'`,
+          updated_at: sql`clock_timestamp() - interval '1 hour'`,
           expiry_duration_ms: lifetime,
         })
         .execute()
@@ -1074,7 +1085,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     const response = await resend(i, a, invitation)
     expect(response.status).toBe(200)
     const renewed = (await response.json()) as Invitation
-    const duration = Date.parse(renewed.expiresAt) - Date.now()
+    const duration = Date.parse(renewed.expiresAt) - (await databaseNow()).getTime()
     expect(duration).toBeGreaterThan(lifetime - 10_000)
     expect(duration).toBeLessThanOrEqual(lifetime + 1_000)
     expect(renewed).toMatchObject({
@@ -1110,7 +1121,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     const response = await resend(i, a, invitation)
     expect(response.status).toBe(200)
     const renewed = (await response.json()) as Invitation
-    const duration = Date.parse(renewed.expiresAt) - Date.now()
+    const duration = Date.parse(renewed.expiresAt) - (await databaseNow()).getTime()
     expect(duration).toBeGreaterThan(pinnedDuration - 10_000)
     expect(duration).toBeLessThanOrEqual(pinnedDuration + 1_000)
   }
@@ -1207,7 +1218,11 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       await ageGeneration(invitation)
       await db
         .updateTable('auth.invitation')
-        .set(state === 'expired' ? { expiresAt: new Date(Date.now() - 1_000) } : { status: state })
+        .set(
+          state === 'expired'
+            ? { expiresAt: sql`clock_timestamp() - interval '1 second'` }
+            : { status: state },
+        )
         .where('id', '=', invitation.id)
         .execute()
       const before = await snapshot()
@@ -1287,7 +1302,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       .execute()
     await db
       .updateTable('auth.invitation')
-      .set({ expiresAt: new Date(Date.now() + 1_500) })
+      .set({ expiresAt: sql`clock_timestamp() + interval '1500 milliseconds'` })
       .where('id', '=', invitation.id)
       .execute()
     const before = await snapshot()
@@ -1476,7 +1491,7 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
               rule === 'role'
                 ? { role: 'admin' }
                 : rule === 'expiry'
-                  ? { expiresAt: new Date(Date.now() - 1_000) }
+                  ? { expiresAt: sql`clock_timestamp() - interval '1 second'` }
                   : { status: 'canceled' },
             )
             .where('id', '=', invitation.id)

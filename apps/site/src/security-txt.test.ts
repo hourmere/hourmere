@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
@@ -23,7 +24,9 @@ describe('published security.txt', () => {
     expect(expiry).toHaveLength(1)
     const value = expiry[0]?.slice('Expires: '.length) ?? ''
     expect(value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
-    const now = new Date()
+    // This is an intentional publication-renewal alarm, including in clock-offset runs.
+    // Measure actual elapsed system time so a simulated future does not demand renewal today.
+    const now = new Date(performance.timeOrigin + performance.now())
     const nextYear = new Date(now)
     nextYear.setUTCFullYear(nextYear.getUTCFullYear() + 1)
     expect(

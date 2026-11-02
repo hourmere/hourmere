@@ -491,7 +491,7 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
         else if (change === 'expiry')
           await db
             .updateTable('auth.session')
-            .set({ expiresAt: new Date(Date.now() - 60_000) })
+            .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
             .where('id', '=', f.sessionId)
             .execute()
         else
@@ -541,10 +541,10 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
           f.sessionId,
         ])
       else if (change === 'expiry')
-        await holder.query('UPDATE auth.session SET "expiresAt"=$1 WHERE id=$2', [
-          new Date(Date.now() - 60_000),
-          f.sessionId,
-        ])
+        await holder.query(
+          `UPDATE auth.session SET "expiresAt"=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+          [f.sessionId],
+        )
       else if (change === 'logout')
         await holder.query('DELETE FROM auth.session WHERE id=$1', [f.sessionId])
       else

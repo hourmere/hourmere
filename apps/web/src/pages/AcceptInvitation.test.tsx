@@ -12,7 +12,7 @@ import {
   Route,
   type RouteObject,
 } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import type { Schemas } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
@@ -36,6 +36,9 @@ import {
 } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
+
+// Invitation validity is evaluated by the page against Date.now().
+beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-01T12:00:00Z')))
 
 const id = '00000000-0000-7000-8000-000000000010'
 const path = `/app/join?invitationId=${id}`

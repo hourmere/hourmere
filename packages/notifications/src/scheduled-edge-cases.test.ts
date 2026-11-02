@@ -10,9 +10,10 @@ import {
   type NotificationSettings,
 } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { bookingNotifier, type NotificationDeps } from './index.ts'
 import { deliverScheduledBookingEmail } from './scheduled.ts'
+import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
 const NOW = Temporal.Instant.from('2026-11-01T00:00:00Z')
 const START = Temporal.Instant.from('2026-11-04T09:00:00Z')
@@ -102,8 +103,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
       now = NOW
       sent = []
       vi.restoreAllMocks()
+      await alignSmtpDateNowWithDatabase(db)
       await db.deleteFrom('notification_email_sends').execute()
     })
+    afterEach(() => vi.restoreAllMocks())
     const queue = { enqueue: async () => randomUUID() }
     const deps = (): NotificationDeps => ({
       db,

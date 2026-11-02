@@ -374,7 +374,8 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         await inviteFromTeam(app, owner, 'db-guest@outside.example')
         await expect(
           authPool(policy).query(
-            `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', 'db-guest@outside.example', true)`,
+            `INSERT INTO auth."user" (name, email, "emailVerified", "createdAt") VALUES ('', 'db-guest@outside.example', true, $1)`,
+            [new Date()],
           ),
         ).resolves.toBeDefined()
         const guest = await signIn(app, 'guest@outside.example')

@@ -12,8 +12,10 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { deliverInvitationEmail } from '@hourmere/notifications'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { withDatabaseClock } from './database-clock-testing.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -83,7 +85,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
           email: recipient.email,
           role: 'member',
           status: 'pending',
-          createdAt: new Date(Date.now() - 120_000),
+          createdAt: sql`clock_timestamp() - interval '2 minutes'`,
           expiresAt: new Date(Date.now() + 3_600_000),
         })
         .returning('id')
@@ -95,8 +97,8 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
         invitation_id: invitationId,
         state: 'queued',
         authorized_by_user_id: owner.id,
-        generation_started_at: new Date(Date.now() - 120_000),
-        updated_at: new Date(Date.now() - 120_000),
+        generation_started_at: sql`clock_timestamp() - interval '2 minutes'`,
+        updated_at: sql`clock_timestamp() - interval '2 minutes'`,
       })
       .execute()
   })
@@ -272,7 +274,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
     ownerCookie = await session(current, teamId)
     await db
       .updateTable('auth.invitation')
-      .set({ expiresAt: new Date(Date.now() - 3_600_000) })
+      .set({ expiresAt: sql`clock_timestamp() - interval '1 hour'` })
       .where('id', '=', invitationId)
       .execute()
     const response = await resend()
@@ -292,9 +294,11 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
     })
     expect((await accept()).ok, 'the replaced invitation link cannot join').toBe(false)
     expect(await member()).toBeUndefined()
-    const joined = await post('/api/auth/organization/accept-invitation', recipientCookie, {
-      invitationId: fresh.id,
-    })
+    const joined = await withDatabaseClock(db, () =>
+      post('/api/auth/organization/accept-invitation', recipientCookie, {
+        invitationId: fresh.id,
+      }),
+    )
     expect(joined.status).toBe(200)
     expect(await member(), 'the new invitation link can join').toBeDefined()
   })
@@ -304,7 +308,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
       if (expired)
         await db
           .updateTable('auth.invitation')
-          .set({ expiresAt: new Date(Date.now() - 3_600_000) })
+          .set({ expiresAt: sql`clock_timestamp() - interval '1 hour'` })
           .where('id', '=', invitationId)
           .execute()
       failEnqueue = 'unavailable'
@@ -340,7 +344,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
       if (expired)
         await db
           .updateTable('auth.invitation')
-          .set({ expiresAt: new Date(Date.now() - 3_600_000) })
+          .set({ expiresAt: sql`clock_timestamp() - interval '1 hour'` })
           .where('id', '=', invitationId)
           .execute()
       failEnqueue = 'ineligible'

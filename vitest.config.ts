@@ -10,7 +10,7 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          setupFiles: ['scripts/test-database-setup.ts'],
+          setupFiles: ['scripts/test-clock-setup.ts', 'scripts/test-database-setup.ts'],
           include: [
             'apps/*/src/**/*.test.{ts,tsx}',
             'packages/*/src/**/*.test.ts',
@@ -32,7 +32,7 @@ export default defineConfig({
               /\/apps\/web\/src\/(styles|public\/public|pages\/team-bookings\/team-bookings)\.css\?raw$/,
             ],
           },
-          setupFiles: ['apps/web/src/test/setup.ts'],
+          setupFiles: ['scripts/test-clock-setup.ts', 'apps/web/src/test/setup.ts'],
         },
       },
     ],

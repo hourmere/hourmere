@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -173,7 +174,7 @@ describe.skipIf(!databaseUrl)('browser Zoom token lease fencing (real Postgres)'
       .values({
         user_id: owner.user.id,
         operation_id: operation,
-        expires_at: new Date(Date.now() + 60000),
+        expires_at: sql<Date>`clock_timestamp() + interval '1 minute'`,
       })
       .execute()
     const attempt = () =>

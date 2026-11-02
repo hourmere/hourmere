@@ -9,6 +9,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -211,7 +212,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         email,
         role,
         status: 'pending',
-        createdAt: new Date(Date.now() - 120_000),
+        createdAt: sql`clock_timestamp() - interval '2 minutes'`,
         expiresAt: new Date(Date.now() + 3_600_000),
       })
       .returning(['id', 'email'])
@@ -958,7 +959,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
           } else {
             await db
               .updateTable('auth.session')
-              .set({ expiresAt: new Date(Date.now() - 60_000) })
+              .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
               .where('id', '=', f.actor.sessionId)
               .execute()
           }

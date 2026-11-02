@@ -43,7 +43,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   let original: Awaited<ReturnType<typeof actor>>
   let replacement: Awaited<ReturnType<typeof actor>>
   const sent: MailMessage[] = []
-  const now = () => new Date()
+  const now = async () =>
+    (await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow()).now
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'invite_recovery' })
@@ -57,7 +58,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
     organizationId = (
       await db
         .insertInto('auth.organization')
-        .values({ name: 'Recovery team', slug: randomUUID(), createdAt: now() })
+        .values({ name: 'Recovery team', slug: randomUUID(), createdAt: await now() })
         .returning('id')
         .executeTakeFirstOrThrow()
     ).id
@@ -82,7 +83,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
     ).id
     await db
       .insertInto('auth.member')
-      .values({ userId, organizationId, role, createdAt: now() })
+      .values({ userId, organizationId, role, createdAt: await now() })
       .execute()
     const sessionId = (
       await db
@@ -90,8 +91,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         .values({
           userId,
           token: randomUUID(),
-          expiresAt: new Date(Date.now() + 3_600_000),
-          updatedAt: now(),
+          expiresAt: sql`clock_timestamp() + INTERVAL '1 hour'`,
+          updatedAt: await now(),
           activeOrganizationId: organizationId,
         })
         .returning('id')
@@ -173,7 +174,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       expect(sent).toHaveLength(0)
       return
     }
-    expect(invitationResendDenial(row, await delivery(row.id), now())).toBeNull()
+    expect(invitationResendDenial(row, await delivery(row.id), await now())).toBeNull()
     const renewed = await resend(row, manage)
     sent.length = 0
     await send(renewed, deliver)
@@ -400,10 +401,10 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       status: 'pending',
       delivery: { generation: 1, state: 'queued', attempts: 0 },
     })
-    expect(fresh.expiresAt.getTime()).toBeGreaterThan(Date.now() + 47 * 3_600_000)
+    expect(fresh.expiresAt.getTime()).toBeGreaterThan((await now()).getTime() + 47 * 3_600_000)
     const retired = await storedInvitation(row.id)
     expect(
-      invitationEligibilityDenial(retired, now()),
+      invitationEligibilityDenial(retired, await now()),
       'the old invitation link remains unusable after replacement',
     ).toBe('INVITATION_INELIGIBLE')
     expect(retired.status, 'the old invitation is canceled atomically').toBe('canceled')
@@ -755,7 +756,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         email: row.email,
         role: 'member',
         status: 'pending',
-        expiresAt: new Date(Date.now() - 1_000),
+        expiresAt: sql`clock_timestamp() - INTERVAL '1 second'`,
       })
       .returning('id')
       .executeTakeFirstOrThrow()
@@ -784,7 +785,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
           email: `${randomUUID()}@example.test`,
           role: 'member',
           status: 'pending',
-          expiresAt: new Date(Date.now() + 3_600_000),
+          expiresAt: sql`clock_timestamp() + INTERVAL '1 hour'`,
         })),
       )
       .execute()
@@ -819,11 +820,11 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       )
     await db
       .transaction()
-      .execute((trx) =>
+      .execute(async (trx) =>
         reserve(
           trx,
           { userId: replacement.userId, organizationId, email: `${randomUUID()}@example.test` },
-          now(),
+          await now(),
         ),
       )
     await expect(
@@ -910,7 +911,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         email: row.email,
         role: 'member',
         status: 'pending',
-        expiresAt: new Date(Date.now() + 3_600_000),
+        expiresAt: sql`clock_timestamp() + INTERVAL '1 hour'`,
       })
       .returning('id')
       .executeTakeFirstOrThrow()
@@ -924,7 +925,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         .selectFrom('auth.invitation')
         .select('id')
         .where('status', '=', 'pending')
-        .where('expiresAt', '>', now())
+        .where('expiresAt', '>', await now())
         .execute(),
     ).toEqual([{ id: active.id }])
   }
