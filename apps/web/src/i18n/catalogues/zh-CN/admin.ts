@@ -5,8 +5,8 @@ export const admin = {
   'Reminders and follow-ups': '提醒与会后消息',
   'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.':
     '更改仅适用于新预约。现有预约及其改期会保留原有设置。',
-  'A reminder is skipped if it would be sent within 1 hour after booking, including exactly 1 hour.':
-    '如果提醒的发送时间距离预约创建时间不超过 1 小时（含恰好 1 小时），系统会跳过该提醒。',
+  'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.':
+    '仅当提醒的发送时间距预约创建或改期时间超过 1 小时时才会发送；否则会跳过，不会补发。',
   'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.':
     '会后消息按预定的会议结束时间安排，无论对方是否参加。拒绝日历邀请不会取消这些消息。',
   'Email limits or delivery problems can prevent a message from being sent.':
@@ -29,6 +29,10 @@ export const admin = {
     '已移除会后消息{number}中保存的主持人留言。',
   'Timing preset': '预设时间',
   'Custom timing': '自定义时间',
+  'Custom timing selected for reminder {number}. Enter minutes before the meeting in the next field.':
+    '已为提醒{number}选择自定义时间。请在下一栏输入会议开始前的分钟数。',
+  'Custom timing selected for follow-up {number}. Enter minutes after the meeting in the next field.':
+    '已为会后消息{number}选择自定义时间。请在下一栏输入会议结束后的分钟数。',
   '24 hours before': '提前 24 小时',
   '2 hours before': '提前 2 小时',
   '30 minutes before': '提前 30 分钟',

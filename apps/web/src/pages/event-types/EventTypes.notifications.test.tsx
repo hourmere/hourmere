@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -389,6 +389,11 @@ describe('event type reminders and follow-ups editor', () => {
     expect(
       within(followUp).getByText(/Notes will not be sent while this feature is disabled/),
     ).toBeDefined()
+    expect(
+      screen.getByText(
+        'Host notes are disabled on this instance. Remove saved notes before changing reminders or follow-ups.',
+      ),
+    ).toBeDefined()
     await user.type(screen.getByLabelText('Title', { exact: true }), ' renamed')
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     await screen.findByText('Saved.')
@@ -397,10 +402,78 @@ describe('event type reminders and follow-ups editor', () => {
     )
     expect(api.saved().notifications).toEqual(custom)
     await user.click(screen.getByRole('button', { name: 'Remove saved host note' }))
+    expect(screen.queryByText(/Remove saved notes before changing/)).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     await screen.findByText('Saved.')
     expect(api.saved().notifications.followUps[0]).not.toHaveProperty('hostNote')
   })
+
+  it.each([false, true])(
+    'explains disabled notes without asking to remove absent notes (follow-up: %s)',
+    async (hasFollowUp) => {
+      const settings = hasFollowUp
+        ? {
+            ...custom,
+            followUps: [{ ...required(custom.followUps[0]), hostNote: undefined }],
+          }
+        : eventType().notifications
+      editorApi(eventType({ notifications: settings }), false)
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      await screen.findByRole('region', { name: 'Reminders and follow-ups' })
+      expect(
+        screen.getAllByText(
+          'Host notes are unavailable because the instance operator has disabled them.',
+        ),
+      ).toHaveLength(hasFollowUp ? 2 : 1)
+      expect(screen.queryByText(/Remove saved notes before changing/)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Remove saved host note' })).toBeNull()
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps keyboard focus on each custom timing select and announces the next field in %s',
+    async (language) => {
+      chooseLanguage(language)
+      render(
+        <Harness
+          initial={{
+            ...defaultNotificationsDraft(),
+            followUps: [
+              {
+                id: 'follow-up',
+                offsetMinutes: '60',
+                recipients: { invitee: true, guests: false, host: false },
+              },
+            ],
+          }}
+        />,
+      )
+      const user = userEvent.setup()
+      const status = screen.getByRole('status')
+      const selects = screen.getAllByRole<HTMLSelectElement>('combobox')
+      const fields = screen.getAllByRole<HTMLInputElement>('textbox')
+      const announcements =
+        language === 'en'
+          ? [
+              'Custom timing selected for reminder 1. Enter minutes before the meeting in the next field.',
+              'Custom timing selected for follow-up 1. Enter minutes after the meeting in the next field.',
+            ]
+          : [
+              '已为提醒 1 选择自定义时间。请在下一栏输入会议开始前的分钟数。',
+              '已为会后消息 1 选择自定义时间。请在下一栏输入会议结束后的分钟数。',
+            ]
+      for (const [index, select] of selects.entries()) {
+        // A closed select can emit change from arrow keys; no pointer activation is needed.
+        while (document.activeElement !== select) await user.tab()
+        fireEvent.change(select, { target: { value: '' } })
+        expect(document.activeElement).toBe(select)
+        await waitFor(() => expect(status.textContent).toBe(announcements[index]))
+        expect(document.activeElement).toBe(select)
+        await user.tab()
+        expect(document.activeElement).toBe(fields[index])
+      }
+    },
+  )
 
   it('announces keyboard additions and removals and respects per-category limits', async () => {
     render(<Harness />)
@@ -435,6 +508,34 @@ describe('event type reminders and follow-ups editor', () => {
     expect(within(followUp).getByText(/9\s*\/\s*2,?000/)).toBeDefined()
   })
 
+  it('retains an over-limit pasted host note, shows its real count and blocks saving until corrected', async () => {
+    const api = editorApi(eventType({ notifications: custom }))
+    const user = userEvent.setup()
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    const followUp = await screen.findByRole('group', { name: 'Follow-up 1' })
+    const note = within(followUp).getByLabelText<HTMLTextAreaElement>('Host note (optional)')
+    const pasted = '🙂'.repeat(1001)
+    await user.clear(note)
+    await user.paste(pasted)
+    expect(note.value).toBe(pasted)
+    expect(within(followUp).getByText(/2,?002\s*\/\s*2,?000 characters/)).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    const summary = await screen.findByRole('alert', { name: 'Please check the form' })
+    expect(document.activeElement).toBe(summary)
+    expect(note.getAttribute('aria-invalid')).toBe('true')
+    expect(note.getAttribute('aria-describedby')).toContain(`${note.id}-error`)
+    expect(document.getElementById(`${note.id}-error`)?.textContent).toContain(
+      'Use at most 2000 characters (now 2002).',
+    )
+    expect(note.value).toBe(pasted)
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(0)
+    await user.clear(note)
+    await user.paste('Thanks for your time again.')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.saved().notifications.followUps[0]?.hostNote).toBe('Thanks for your time again.')
+  })
+
   it.each(['en', 'zh-CN'] as const)(
     'explains booking snapshots, skipped reminders and scheduled-end follow-ups in %s',
     (language) => {
@@ -442,7 +543,11 @@ describe('event type reminders and follow-ups editor', () => {
       render(<Harness />)
       if (language === 'en') {
         expect(screen.getByText(/new bookings only/i)).toBeDefined()
-        expect(screen.getByText(/1 hour after booking/i)).toBeDefined()
+        expect(
+          screen.getByText(
+            'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.',
+          ),
+        ).toBeDefined()
         expect(screen.getByText(/regardless of attendance/i)).toBeDefined()
         expect(
           screen.getByText(
@@ -451,7 +556,11 @@ describe('event type reminders and follow-ups editor', () => {
         ).toBeDefined()
       } else {
         expect(screen.getByText(/仅.*新预约|只.*新预约/)).toBeDefined()
-        expect(screen.getByText(/预约创建时间.*1 小时/)).toBeDefined()
+        expect(
+          screen.getByText(
+            '仅当提醒的发送时间距预约创建或改期时间超过 1 小时时才会发送；否则会跳过，不会补发。',
+          ),
+        ).toBeDefined()
         expect(screen.getByText(/是否.*出席|是否.*参加/)).toBeDefined()
         expect(
           screen.getByText(

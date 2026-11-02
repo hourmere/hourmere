@@ -5,8 +5,8 @@ export const admin = {
   'Reminders and follow-ups': 'Reminders and follow-ups',
   'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.':
     'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.',
-  'A reminder is skipped if it would be sent within 1 hour after booking, including exactly 1 hour.':
-    'A reminder is skipped if it would be sent within 1 hour after booking, including exactly 1 hour.',
+  'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.':
+    'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.',
   'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.':
     'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.',
   'Email limits or delivery problems can prevent a message from being sent.':
@@ -29,6 +29,10 @@ export const admin = {
     'Removed the saved host note from follow-up {number}.',
   'Timing preset': 'Timing preset',
   'Custom timing': 'Custom timing',
+  'Custom timing selected for reminder {number}. Enter minutes before the meeting in the next field.':
+    'Custom timing selected for reminder {number}. Enter minutes before the meeting in the next field.',
+  'Custom timing selected for follow-up {number}. Enter minutes after the meeting in the next field.':
+    'Custom timing selected for follow-up {number}. Enter minutes after the meeting in the next field.',
   '24 hours before': '24 hours before',
   '2 hours before': '2 hours before',
   '30 minutes before': '30 minutes before',

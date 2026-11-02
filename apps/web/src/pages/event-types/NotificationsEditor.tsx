@@ -39,6 +39,7 @@ export function NotificationsEditor({
   const [focus, setFocus] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState<UiText>('')
   const announcementTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const hasSavedNotes = notifications.followUps.some((rule) => Boolean(rule.hostNote))
 
   useEffect(() => () => clearTimeout(announcementTimer.current), [])
   useEffect(() => {
@@ -120,7 +121,7 @@ export function NotificationsEditor({
         </p>
         <p>
           {t(
-            'A reminder is skipped if it would be sent within 1 hour after booking, including exactly 1 hour.',
+            'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.',
           )}
         </p>
         <p>
@@ -141,7 +142,9 @@ export function NotificationsEditor({
       {!hostNotesEnabled && (
         <p className="hint">
           {t(
-            'Host notes are disabled on this instance. Remove saved notes before changing reminders or follow-ups.',
+            hasSavedNotes
+              ? 'Host notes are disabled on this instance. Remove saved notes before changing reminders or follow-ups.'
+              : 'Host notes are unavailable because the instance operator has disabled them.',
           )}
         </p>
       )}
@@ -183,6 +186,16 @@ export function NotificationsEditor({
                       errors={errors}
                       hostNotesEnabled={hostNotesEnabled}
                       onUpdate={(change) => update(category, rule.id, change)}
+                      onCustomTiming={() =>
+                        announce(
+                          msg(
+                            category === 'reminders'
+                              ? 'Custom timing selected for reminder {number}. Enter minutes before the meeting in the next field.'
+                              : 'Custom timing selected for follow-up {number}. Enter minutes after the meeting in the next field.',
+                            { number: index + 1 },
+                          ),
+                        )
+                      }
                       onRemove={() => remove(category, index)}
                       onRemoveNote={() => {
                         update(category, rule.id, { hostNote: '' })
@@ -224,6 +237,7 @@ function NotificationRule({
   errors,
   hostNotesEnabled,
   onUpdate,
+  onCustomTiming,
   onRemove,
   onRemoveNote,
 }: {
@@ -233,6 +247,7 @@ function NotificationRule({
   errors: FieldErrors
   hostNotesEnabled: boolean
   onUpdate: (change: Partial<NotificationRuleDraft>) => void
+  onCustomTiming: () => void
   onRemove: () => void
   onRemoveNote: () => void
 }) {
@@ -267,7 +282,7 @@ function NotificationRule({
               onChange={(event) => {
                 setCustomTiming(event.target.value === '')
                 if (event.target.value) onUpdate({ offsetMinutes: event.target.value })
-                else document.getElementById(field('offsetMinutes'))?.focus()
+                else onCustomTiming()
               }}
             >
               <option value="">{t('Custom timing')}</option>
@@ -340,7 +355,6 @@ function NotificationRule({
                   {...props}
                   aria-describedby={describedBy(props['aria-describedby'], `${noteId}-count`)}
                   value={rule.hostNote ?? ''}
-                  maxLength={NOTIFICATION_LIMITS.hostNoteMaxLength}
                   onChange={(event) => onUpdate({ hostNote: event.target.value })}
                 />
                 <p id={`${noteId}-count`} className="hint notification-note-count">

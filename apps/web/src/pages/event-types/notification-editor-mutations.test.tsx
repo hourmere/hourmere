@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
 import { describe, expect, it } from 'vitest'
+import '../../i18n/admin.ts'
 import { RequestError } from '../../api/errors.ts'
 import {
   describedBy,
@@ -13,6 +14,7 @@ import {
   wholeNumberProblem,
 } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
+import { chooseLanguage } from '../../i18n/store.ts'
 import { literal, msg } from '../../i18n/translate.ts'
 import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
 import { randomHex } from '../../random.ts'
@@ -386,6 +388,169 @@ describe('notification editor production-source mutation controls', () => {
       assertEditor(mutate(editor, 'hostNotesEnabled ? (', 'true ? ('), check, false, initial),
     ).rejects.toMatchObject({ name: 'AssertionError' })
     await assertEditor(editor, check, false, initial)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'detects incomplete skip-rule guidance in %s',
+    async (language) => {
+      chooseLanguage(language)
+      const complete =
+        'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.'
+      const expected =
+        language === 'en'
+          ? complete
+          : '仅当提醒的发送时间距预约创建或改期时间超过 1 小时时才会发送；否则会跳过，不会补发。'
+      const check = async () => {
+        expect(screen.queryByText(expected)).not.toBeNull()
+      }
+      await assertEditor(editor, check)
+      await expect(
+        assertEditor(
+          mutate(
+            editor,
+            complete,
+            'A reminder is skipped if it would be sent within 1 hour after booking, including exactly 1 hour.',
+          ),
+          check,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await assertEditor(editor, check)
+    },
+  )
+
+  it.each([false, true])(
+    'detects misleading disabled-note instructions when saved notes exist: %s',
+    async (savedNote) => {
+      const initial = {
+        reminders: [],
+        followUps: [
+          {
+            ...notificationFunctions.newNotificationRule(60),
+            hostNote: savedNote ? 'Saved note' : '',
+          },
+        ],
+      }
+      const check = async () => {
+        expect(Boolean(screen.queryByText(/Remove saved notes before changing/))).toBe(savedNote)
+      }
+      await assertEditor(editor, check, false, initial)
+      await expect(
+        assertEditor(
+          mutate(
+            editor,
+            'notifications.followUps.some((rule) => Boolean(rule.hostNote))',
+            String(!savedNote),
+          ),
+          check,
+          false,
+          initial,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await assertEditor(editor, check, false, initial)
+    },
+  )
+
+  it('detects moving keyboard focus when Custom timing is selected', async () => {
+    const check = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.tab()
+      const select = screen.getByRole('combobox')
+      expect(document.activeElement).toBe(select)
+      fireEvent.change(select, { target: { value: '' } })
+      expect(document.activeElement).toBe(select)
+      await user.tab()
+      expect(document.activeElement).toBe(screen.getByLabelText('Minutes before the meeting'))
+    }
+    await assertEditor(editor, check)
+    await expect(
+      assertEditor(
+        mutate(
+          editor,
+          'else onCustomTiming()',
+          "else { document.getElementById(field('offsetMinutes'))?.focus(); onCustomTiming() }",
+        ),
+        check,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await assertEditor(editor, check)
+  })
+
+  it('detects silencing the custom timing announcement', async () => {
+    const check = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.selectOptions(screen.getByRole('combobox'), '')
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('region', { name: 'Reminders and follow-ups' })).getByRole(
+            'status',
+          ).textContent,
+        ).toBe(
+          'Custom timing selected for reminder 1. Enter minutes before the meeting in the next field.',
+        ),
+      )
+    }
+    await assertEditor(editor, check)
+    await expect(
+      assertEditor(mutate(editor, 'else onCustomTiming()', 'else void 0'), check),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await assertEditor(editor, check)
+  })
+
+  it('detects silently truncating a pasted host note at the length limit', async () => {
+    const check = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getByRole('button', { name: 'Add follow-up' }))
+      const note = screen.getByLabelText<HTMLTextAreaElement>('Host note (optional)')
+      const pasted = '🙂'.repeat(1001)
+      await user.click(note)
+      await user.paste(pasted)
+      expect(note.value).toBe(pasted)
+      const state = JSON.parse(
+        required(screen.getByTestId('notifications-value').textContent),
+      ) as notificationFunctions.NotificationsDraft
+      expect(notificationFunctions.validateNotificationsDraft(state)).toHaveProperty(
+        notificationFunctions.notificationField(
+          'followUps',
+          required(state.followUps[0]),
+          'hostNote',
+        ),
+      )
+    }
+    await assertEditor(editor, check)
+    await expect(
+      assertEditor(
+        mutate(
+          editor,
+          "value={rule.hostNote ?? ''}",
+          "value={rule.hostNote ?? ''} maxLength={NOTIFICATION_LIMITS.hostNoteMaxLength}",
+        ),
+        check,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await assertEditor(editor, check)
+  })
+
+  it('detects clamping the host-note counter at the limit', async () => {
+    const initial = {
+      reminders: [],
+      followUps: [
+        { ...notificationFunctions.newNotificationRule(60), hostNote: '🙂'.repeat(1001) },
+      ],
+    }
+    const check = async () => {
+      expect(screen.queryByText(/2,?002\s*\/\s*2,?000 characters/)).not.toBeNull()
+    }
+    await assertEditor(editor, check, true, initial)
+    await expect(
+      assertEditor(
+        mutate(
+          editor,
+          "(rule.hostNote ?? '').length",
+          "Math.min((rule.hostNote ?? '').length, NOTIFICATION_LIMITS.hostNoteMaxLength)",
+        ),
+        check,
+        true,
+        initial,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await assertEditor(editor, check, true, initial)
   })
 
   it('detects failing to delete a saved note through the explicit action', async () => {
