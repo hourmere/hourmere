@@ -244,10 +244,15 @@ the list and duration-only edits of singleton types retain singleton behavior. E
 multi-duration default requires it to remain in the list, or a replacement list in the
 same write. Metadata-only edits preserve the list.
 
-The availability and booking services accept optional `durationMinutes` as the selected
-length; omission uses the default for a new booking. This name is reserved for the later
-REST selection, MCP and CLI parameters too. Configuration REST fields are additive;
-public-page selection, editor controls and MCP/CLI selection parameters follow separately.
+The availability and booking services, public REST endpoints and MCP tools accept optional
+`durationMinutes` as the selected length; omission uses the default for new slots and
+bookings. The CLI exposes the same selection as `--duration-minutes`. Public personal,
+team and embedded booking pages offer a labelled duration choice when multiple lengths are
+available, with the default preselected. Changing the selection refreshes availability
+before the invitee chooses a time. Single-duration pages retain their existing flow.
+If the host changes the available lengths while the page is open, an `invalid_duration`
+booking or slots response refreshes the choices and availability in place, asks the invitee
+to choose again, and preserves their entered details, guests and answers.
 
 Every candidate's end is its start plus the selected elapsed minutes. The same before/after
 buffers apply around that interval; minimum notice and the booking window constrain its
@@ -259,6 +264,10 @@ chooses one eligible host whose availability fits it, using the existing assignm
 A booking's `start_at` and `end_at` store its actual duration. Configuration edits never
 rewrite them. A reschedule with no selected length keeps the original elapsed duration,
 even if that option was removed; an explicit new length must belong to the current list.
+Managed and host reschedule slot queries follow the same rule. The management page uses
+the booking's original elapsed duration for both slot fetching and time-zone day boundaries.
+Confirmation details, management details, email times and calendar invitations use the
+stored interval rather than the event type's current default.
 Existing request fingerprints and exact idempotent replays remain unchanged. An explicitly
 supplied selection participates in the fingerprint, so a changed selection cannot reuse
 the same key as the same request.
