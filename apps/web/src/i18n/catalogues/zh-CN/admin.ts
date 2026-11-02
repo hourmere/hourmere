@@ -1,5 +1,66 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
+    '请在会议开始前于 Hourmere 中取消预约。会议开始后，受邀人无法停止会后消息。',
+  'Reminders and follow-ups': '提醒与会后消息',
+  'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.':
+    '更改仅适用于新预约。现有预约及其改期会保留原有设置。',
+  'A reminder is skipped if it would be sent within 1 hour after booking, including exactly 1 hour.':
+    '如果提醒的发送时间距离预约创建时间不超过 1 小时（含恰好 1 小时），系统会跳过该提醒。',
+  'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.':
+    '会后消息按预定的会议结束时间安排，无论对方是否参加。拒绝日历邀请不会取消这些消息。',
+  'Email limits or delivery problems can prevent a message from being sent.':
+    '邮件发送限额或投递问题可能导致消息无法发送。',
+  'Pre-meeting reminders': '会前提醒',
+  'Post-meeting follow-ups': '会后消息',
+  'Up to {count} messages. Choose at least one recipient for each message.':
+    '最多可添加{count}条消息。请为每条消息选择至少一类收件人。',
+  'No reminders.': '尚无提醒。',
+  'No follow-ups.': '尚无会后消息。',
+  'Add reminder': '添加提醒',
+  'Add follow-up': '添加会后消息',
+  'Reminder {number}': '提醒{number}',
+  'Follow-up {number}': '会后消息{number}',
+  'Added reminder {number}.': '已添加提醒{number}。',
+  'Added follow-up {number}.': '已添加会后消息{number}。',
+  'Removed reminder {number}.': '已移除提醒{number}。',
+  'Removed follow-up {number}.': '已移除会后消息{number}。',
+  'Removed the saved host note from follow-up {number}.':
+    '已移除会后消息{number}中保存的主持人留言。',
+  'Timing preset': '预设时间',
+  'Custom timing': '自定义时间',
+  '24 hours before': '提前 24 小时',
+  '2 hours before': '提前 2 小时',
+  '30 minutes before': '提前 30 分钟',
+  '1 hour after': '结束 1 小时后',
+  '1 day after': '结束 1 天后',
+  'Minutes before the meeting': '会议开始前的分钟数',
+  'Minutes after the meeting': '会议结束后的分钟数',
+  'Use 5–43,200 whole minutes, up to 30 days.': '请输入 5 至 43200 之间的整分钟数，最长为 30 天。',
+  Recipients: '收件人',
+  'Host note (optional)': '主持人留言（可选）',
+  'Plain text only. Line breaks are allowed. Placeholders are sent as written.':
+    '仅支持纯文本，可以换行。占位符会原样发送。',
+  '{count} / {limit} characters': '{count}／{limit}个字符',
+  'A saved host note is kept until you remove it. Notes will not be sent while this feature is disabled.':
+    '已保存的主持人留言会保留，直到你将其移除。此功能停用期间不会发送留言。',
+  'Host notes are unavailable because the instance operator has disabled them.':
+    '实例运营者已停用主持人留言，此功能暂不可用。',
+  'Remove saved host note': '移除已保存的主持人留言',
+  'Remove reminder {number}': '移除提醒{number}',
+  'Remove follow-up {number}': '移除会后消息{number}',
+  'Remove reminder': '移除提醒',
+  'Remove follow-up': '移除会后消息',
+  'Choose at least one recipient.': '请选择至少一类收件人。',
+  'Use each reminder or follow-up time only once per list.':
+    '每个列表中的提醒或会后消息时间不可重复。',
+  'Add at most {count} messages to this list.': '此列表最多可添加{count}条消息。',
+  'Use plain text with line breaks only; remove tabs and other control characters.':
+    '请使用纯文本，仅允许换行。请移除制表符及其他控制字符。',
+  'Use valid Unicode text.': '请使用有效的 Unicode 文本。',
+  'Host notes are disabled on this instance. Remove saved notes before changing reminders or follow-ups.':
+    '此实例已停用主持人留言。更改提醒或会后消息前，请先移除已保存的留言。',
+  'Reload the event type and try again.': '请重新加载活动类型后再试。',
   'Allowed durations': '可选时长',
   'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
     '提供 1–12 种不同时长，每种为 1–1440 分钟。受邀人先选择时长，再选择时间。',

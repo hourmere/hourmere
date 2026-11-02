@@ -8,6 +8,16 @@ import { type FieldErrors, parseWhole, wholeNumberProblem } from '../../componen
 import { literal, msg, type UiText } from '../../i18n/translate.ts'
 import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
+import {
+  comparableNotifications,
+  defaultNotificationsDraft,
+  type NotificationsDraft,
+  notificationField,
+  notificationServerErrors,
+  notificationsFromSettings,
+  notificationsInput,
+  validateNotificationsDraft,
+} from './notifications-form.ts'
 
 export type QuestionType = Schemas['Question']['type']
 export type LocationKind = NonNullable<EventType['location']>['kind']
@@ -79,6 +89,7 @@ export interface EventTypeDraft {
   isActive: boolean
   isHidden: boolean
   allowGuests: boolean
+  notifications: NotificationsDraft
 }
 
 let nextKey = 0
@@ -125,6 +136,7 @@ export function emptyDraft(): EventTypeDraft {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    notifications: defaultNotificationsDraft(),
   }
 }
 
@@ -167,6 +179,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     isActive: e.isActive,
     isHidden: e.isHidden,
     allowGuests: e.allowGuests,
+    notifications: notificationsFromSettings(e.notifications),
   }
 }
 
@@ -174,6 +187,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
 export function comparable(draft: EventTypeDraft): string {
   return JSON.stringify({
     ...draft,
+    notifications: comparableNotifications(draft.notifications),
     questions: draft.questions.map(({ key: _key, options, ...q }) => ({
       ...q,
       options: isChoice(q.type) ? options.map((o) => o.text) : [],
@@ -248,8 +262,14 @@ const NUMBER_FIELDS = [
 ] as const satisfies readonly (readonly [keyof typeof RULES, boolean])[]
 
 /** The problems with a draft, by field id; empty when it can be sent. */
-export function validateDraft(draft: EventTypeDraft): FieldErrors {
+export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  // Untouched stored notes may predate tighter write rules; omission preserves them.
+  if (
+    comparableNotifications(draft.notifications) !==
+    comparableNotifications(baseline?.notifications ?? defaultNotificationsDraft())
+  )
+    Object.assign(errors, validateNotificationsDraft(draft.notifications))
   if (draft.locationKind === 'zoom' && draft.autoCreateZoom) {
     if (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
       errors['location-kind'] = msg(
@@ -447,12 +467,22 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     isActive: draft.isActive,
     isHidden: draft.isHidden,
     allowGuests: draft.allowGuests,
+    ...(comparableNotifications(draft.notifications) !==
+      comparableNotifications(defaultNotificationsDraft()) && {
+      notifications: notificationsInput(draft.notifications),
+    }),
   }
 }
 
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // Only this session's changes replace the complete notification policy.
+  if (
+    comparableNotifications(draft.notifications) === comparableNotifications(baseline.notifications)
+  )
+    delete body.notifications
+  else body.notifications = notificationsInput(draft.notifications)
   // Preserve a concurrent API edit when this session did not change the offered lengths.
   if (draft.allowedDurationsMinutes.join() === baseline.allowedDurationsMinutes.join())
     delete body.allowedDurationsMinutes
@@ -508,6 +538,18 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     maxBookingsPerDay: 'Daily limit',
     bookingWindowDays: 'Booking window',
     position: 'Position',
+    notifications: 'Reminders and follow-ups',
+    'notifications.reminders': 'Pre-meeting reminders',
+    'notifications.followUps': 'Post-meeting follow-ups',
+  }
+  for (const category of ['reminders', 'followUps'] as const) {
+    draft.notifications[category].forEach((rule, index) => {
+      const name = msg(category === 'reminders' ? 'Reminder {number}' : 'Follow-up {number}', {
+        number: index + 1,
+      })
+      for (const part of ['id', 'offsetMinutes', 'recipients', 'hostNote'] as const)
+        labels[notificationField(category, rule, part)] = name
+    })
   }
   draft.questions.forEach((q, i) => {
     const name = msg('Question {0}', { '0': i + 1 })
@@ -540,6 +582,8 @@ export function serverErrors(
   draft: EventTypeDraft,
 ): { fields: FieldErrors; message: UiText | null } {
   if (!(err instanceof RequestError)) return { fields: {}, message: null }
+  const notificationErrors = notificationServerErrors(err, draft.notifications)
+  if (notificationErrors) return { fields: notificationErrors, message: null }
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {

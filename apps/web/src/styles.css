@@ -2494,3 +2494,91 @@ h3:lang(zh) {
 .durations-editor > button {
   justify-self: start;
 }
+
+/* Notification rules stack at narrow widths and retain full labels when text wraps. */
+.notifications-editor,
+.notification-category,
+.notification-list,
+.notification-card,
+.notification-timing,
+.notification-note-disabled {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.notification-category,
+.notification-recipients,
+.notification-note-disabled {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.notification-category > legend,
+.notification-recipients > legend,
+.notification-note-disabled > legend {
+  margin-bottom: var(--space-2);
+}
+
+.notification-category h3,
+.notification-guidance p {
+  margin: 0;
+}
+
+.notification-guidance p + p {
+  margin-top: var(--space-2);
+}
+
+.notification-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification-list > li {
+  min-width: 0;
+}
+
+.notification-card {
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--bg);
+}
+
+.notification-card > legend {
+  padding-inline: var(--space-1);
+  font-weight: 700;
+}
+
+.notification-category > .button,
+.notification-card > .button,
+.notification-note-disabled > .button {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.notification-recipients > div {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+}
+
+.notification-note-count {
+  margin: 0;
+}
+
+@media (min-width: 640px) {
+  .notification-card {
+    padding: var(--space-4);
+  }
+
+  .notification-timing {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

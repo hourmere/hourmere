@@ -4114,6 +4114,8 @@ export interface components {
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
+            /** @description Whether hosts may add plain-text notes to follow-up emails */
+            followUpHostNotesEnabled?: boolean;
             /**
              * Format: uri
              * @description Hosted service destination for public attribution and sign-up links

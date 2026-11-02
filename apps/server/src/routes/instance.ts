@@ -17,6 +17,9 @@ const Instance = z
     }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
+    followUpHostNotesEnabled: z.boolean().optional().openapi({
+      description: 'Whether hosts may add plain-text notes to follow-up emails',
+    }),
     signIn: z
       .object({
         email: z.boolean().openapi({ description: 'Sign-in links sent by email' }),
@@ -37,6 +40,7 @@ export function instanceRoutes({
   socialProviders,
   automaticMeet = false,
   automaticZoom = false,
+  followUpHostNotesEnabled = true,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -47,6 +51,7 @@ export function instanceRoutes({
   socialProviders: { google?: unknown; microsoft?: unknown }
   automaticMeet?: boolean
   automaticZoom?: boolean
+  followUpHostNotesEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -58,6 +63,7 @@ export function instanceRoutes({
     ...(termsUrl && { termsUrl }),
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
+    followUpHostNotesEnabled,
     signIn: {
       email: true,
       google: socialProviders.google !== undefined,
