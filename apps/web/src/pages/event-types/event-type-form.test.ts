@@ -113,13 +113,39 @@ describe('question identity', () => {
 })
 
 describe('validateDraft', () => {
-  it('keeps an invitee-phone compatibility read from becoming an undefined host number', () => {
+  it('round-trips invitee-phone compatibility without requiring a host number on metadata saves', () => {
     const draft = draftFromEventType(eventType({ location: { kind: 'phone', askInvitee: true } }))
     expect(draft.locationKind).toBe('phone')
     expect(draft.phone).toBe('')
+    expect(draft.phoneAskInvitee).toBe(true)
+    expect(toInput(draft).location).toEqual({ kind: 'phone', askInvitee: true })
+    const renamed = { ...draft, title: 'Renamed' }
+    expect(renderedDraftErrors(renamed, draft)).toEqual({})
+    expect(toPatchInput(renamed, draft)).not.toHaveProperty('location')
     expect(
       draftFromEventType(eventType({ location: { kind: 'phone', number: '+14155550123' } })).phone,
     ).toBe('+14155550123')
+  })
+
+  it('validates a deliberate switch from invitee phone to a host number', () => {
+    const draft = draftFromEventType(eventType({ location: { kind: 'phone', askInvitee: true } }))
+    expect(renderedDraftErrors({ ...draft, phone: '0301234567' }, draft)).toHaveProperty(
+      'location-phone',
+    )
+    const hostPhone = { ...draft, phone: ' +14155550123 ' }
+    expect(renderedDraftErrors(hostPhone, draft)).toEqual({})
+    expect(toPatchInput(hostPhone, draft).location).toEqual({
+      kind: 'phone',
+      number: '+14155550123',
+    })
+    expect(
+      renderedDraftErrors({
+        ...emptyDraft(),
+        title: 'Intro',
+        slug: 'intro',
+        locationKind: 'phone',
+      }),
+    ).toHaveProperty('location-phone')
   })
 
   it('keeps provider labels inert until explicit automatic opt-in, and preserves that opt-in through a round trip', () => {
@@ -208,6 +234,49 @@ describe('validateDraft', () => {
         [questionField(q, 'options')]: 'Offer at most 50 options.',
       },
     )
+  })
+})
+
+describe('location compatibility metadata saves', () => {
+  it.each([
+    null,
+    { kind: 'phone', number: '+14155550123' },
+    { kind: 'in_person', address: 'HQ' },
+    { kind: 'link', url: 'https://example.com/room' },
+    { kind: 'google_meet' },
+    { kind: 'zoom' },
+  ] as const)(
+    'omits unchanged compat value %j so the saved option list is preserved',
+    (location) => {
+      const baseline = draftFromEventType(eventType({ location }))
+      const draft = { ...baseline, title: 'Renamed' }
+      expect(renderedDraftErrors(draft, baseline)).toEqual({})
+      expect(toPatchInput(draft, baseline)).not.toHaveProperty('location')
+    },
+  )
+
+  it('preserves a future location kind on metadata saves without sending an incomplete value', () => {
+    const baseline = draftFromEventType(
+      eventType({ location: { kind: 'future_location', setting: 'opaque' } as never }),
+    )
+    const draft = { ...baseline, title: 'Renamed' }
+    expect(renderedDraftErrors(draft, baseline)).toEqual({})
+    expect(toPatchInput(draft, baseline)).not.toHaveProperty('location')
+  })
+
+  it('sends explicit location edits, clearing, and changes after a metadata save', () => {
+    const baseline = draftFromEventType(
+      eventType({ location: { kind: 'phone', number: '+14155550123' } }),
+    )
+    expect(toPatchInput({ ...baseline, phone: '+442071838750' }, baseline).location).toEqual({
+      kind: 'phone',
+      number: '+442071838750',
+    })
+    expect(
+      toPatchInput({ ...baseline, locationKind: 'in_person', address: 'HQ' }, baseline).location,
+    ).toEqual({ kind: 'in_person', address: 'HQ' })
+    expect(toPatchInput({ ...baseline, locationKind: '' }, baseline).location).toBeNull()
+    expect(toPatchInput({ ...baseline, title: 'Renamed' }, baseline)).not.toHaveProperty('location')
   })
 })
 

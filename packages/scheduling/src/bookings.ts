@@ -660,6 +660,17 @@ async function loadBooking(db: Db, id: string): Promise<Booking> {
 
 // --- Writing bookings -------------------------------------------------------------------
 
+/** The existing booking form cannot collect an invitee's phone number yet. */
+function requireCollectedPhone(location: Location | null): void {
+  if (location?.kind === 'phone' && location.askInvitee === true) {
+    throw new DomainError(
+      'invalid',
+      'invalid_invitee_phone',
+      'Provide a phone number in E.164 format.',
+    )
+  }
+}
+
 /**
  * Serializes booking writes per host for the rest of the transaction. The exclusion
  * constraint alone stops overlapping meetings, but not two concurrent bookings that only
@@ -1108,6 +1119,7 @@ async function publicBooking(
           throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
         throw unavailable()
       }
+      requireCollectedPhone(current.location)
       if (guests.length > 0 && !current.allowGuests) {
         throw new DomainError(
           'invalid',

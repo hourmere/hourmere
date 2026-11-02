@@ -86,6 +86,11 @@ describe('location option source-copy mutation controls', () => {
       },
     },
     {
+      name: 'reserved option id',
+      mutate: (source: string) => source.replace("if (id === '__proto__')", 'if (false)'),
+      verify: (module: typeof Options) => reject(module, [{ ...one, id: '__proto__' }]),
+    },
+    {
       name: 'distinct ids',
       mutate: (source: string) => source.replace('ids.has(id)', 'false'),
       verify: (module: typeof Options) => reject(module, [one, { id: 'one', kind: 'google_meet' }]),
@@ -290,6 +295,144 @@ describe('location option source-copy mutation controls', () => {
         reject(module, [
           { id: 'link', kind: 'link', url: `https://example.com/${'東'.repeat(300)}` },
         ]),
+    },
+    {
+      name: 'legacy echo preserves rich options',
+      mutate: (source: string) =>
+        source.replace('return locations\n', 'return locationOptionsFromLegacy(location)\n'),
+      verify: (module: typeof Options) => {
+        const options: Options.LocationOption[] = [
+          { id: 'office', kind: 'in_person', address: 'Office', label: 'Headquarters' },
+          { id: 'call', kind: 'phone', askInvitee: true, isDefault: true },
+        ]
+        expect(module.applyLegacyLocation(options, { askInvitee: true, kind: 'phone' })).toEqual(
+          options,
+        )
+      },
+    },
+    {
+      name: 'legacy equality includes optional settings',
+      mutate: (source: string) =>
+        source.replace(
+          'isDeepStrictEqual(current, location)',
+          'current !== null && record(location) && Object.entries(current).every(([key, value]) => Reflect.get(location, key) === value)',
+        ),
+      verify: (module: typeof Options) =>
+        expect(
+          module.applyLegacyLocation([{ id: 'video', kind: 'zoom' }], {
+            kind: 'zoom',
+            autoCreate: true,
+          }),
+        ).toEqual([{ id: 'video', kind: 'zoom', autoCreate: true }]),
+    },
+    {
+      name: 'legacy singleton settings update',
+      mutate: (source: string) =>
+        source.replace(
+          'isDeepStrictEqual(current, location)',
+          'current !== null && record(location) && Object.keys(current).length === Object.keys(location).length',
+        ),
+      verify: (module: typeof Options) =>
+        expect(
+          module.applyLegacyLocation([{ id: 'room', kind: 'in_person', address: 'Before' }], {
+            kind: 'in_person',
+            address: 'After',
+          }),
+        ).toEqual([{ id: 'room', kind: 'in_person', address: 'After' }]),
+    },
+    {
+      name: 'deep historical legacy equality',
+      mutate: (source: string) =>
+        source.replace(
+          'isDeepStrictEqual(current, location)',
+          'current !== null && record(location) && Object.keys(current).length === Object.keys(location).length && Object.entries(current).every(([key, value]) => Reflect.get(location, key) === value)',
+        ),
+      verify: (module: typeof Options) => {
+        const location = {
+          kind: 'link' as const,
+          url: 'https://example.com/room',
+          historical: { rooms: [{ name: 'Main', floor: 2 }] },
+        }
+        const options = [{ ...location, id: 'room' }]
+        expect(module.isLegacyLocationEcho(options, structuredClone(location))).toBe(true)
+      },
+    },
+    {
+      name: 'legacy singleton stable id',
+      mutate: (source: string) =>
+        source.replace(
+          'previous?.kind === location.kind ? previous.id : crypto.randomUUID()',
+          'crypto.randomUUID()',
+        ),
+      verify: (module: typeof Options) =>
+        expect(
+          module.applyLegacyLocation([{ id: 'room', kind: 'in_person', address: 'Before' }], {
+            kind: 'in_person',
+            address: 'After',
+          })?.[0]?.id,
+        ).toBe('room'),
+    },
+    {
+      name: 'legacy singleton default marker',
+      mutate: (source: string) => source.replace('previous?.isDefault === true', 'false'),
+      verify: (module: typeof Options) =>
+        expect(
+          module.applyLegacyLocation(
+            [{ id: 'room', kind: 'in_person', address: 'Before', isDefault: true }],
+            { kind: 'in_person', address: 'After' },
+          )?.[0]?.isDefault,
+        ).toBe(true),
+    },
+    {
+      name: 'legacy kind change rotates identity',
+      mutate: (source: string) =>
+        source.replace(
+          'previous?.kind === location.kind ? previous.id : crypto.randomUUID()',
+          'previous?.id ?? crypto.randomUUID()',
+        ),
+      verify: (module: typeof Options) =>
+        expect(
+          module.applyLegacyLocation([{ id: 'room', kind: 'in_person', address: 'Office' }], {
+            kind: 'zoom',
+          })?.[0]?.id,
+        ).not.toBe('room'),
+    },
+    {
+      name: 'legacy recreation allocates identity',
+      mutate: (source: string) =>
+        source.replace(
+          'previous?.kind === location.kind ? previous.id : crypto.randomUUID()',
+          "previous?.kind === location.kind ? previous.id : previous ? crypto.randomUUID() : 'legacy'",
+        ),
+      verify: (module: typeof Options) =>
+        expect(module.applyLegacyLocation(null, { kind: 'zoom' })?.[0]?.id).toMatch(
+          /^[0-9a-f-]{36}$/,
+        ),
+    },
+    {
+      name: 'legacy multi-option conflict',
+      mutate: (source: string) => source.replace('locations.length > 1 ||', 'false ||'),
+      verify: (module: typeof Options) =>
+        expect(() =>
+          module.applyLegacyLocation(
+            [
+              { id: 'room', kind: 'in_person', address: 'Office' },
+              { id: 'video', kind: 'zoom' },
+            ],
+            null,
+          ),
+        ).toThrowError(),
+    },
+    {
+      name: 'legacy labelled-option conflict',
+      mutate: (source: string) => source.replace('locations[0]?.label !== undefined', 'false'),
+      verify: (module: typeof Options) =>
+        expect(() =>
+          module.applyLegacyLocation(
+            [{ id: 'room', kind: 'in_person', address: 'Office', label: 'Headquarters' }],
+            null,
+          ),
+        ).toThrowError(),
     },
     {
       name: 'compat default preference',

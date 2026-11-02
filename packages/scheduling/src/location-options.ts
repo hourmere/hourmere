@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { DomainError } from './errors.ts'
 import { cleanText } from './text.ts'
 
@@ -53,6 +54,7 @@ export function validateLocationOptions(value: unknown): LocationOption[] | null
       return invalid(
         'A location option id must contain 1–64 letters, digits, underscores or hyphens',
       )
+    if (id === '__proto__') return invalid('A location option id must not be __proto__')
     if (ids.has(id)) return invalid('Location option ids must be distinct')
     ids.add(id)
     if (!kinds.includes(kind as (typeof kinds)[number]))
@@ -131,9 +133,9 @@ export function validateLocationOptions(value: unknown): LocationOption[] | null
   })
 }
 
-/** Backfilled and legacy-written single locations retain their original settings. */
+/** Initial legacy configuration and historical backfills retain their original settings. */
 export function locationOptionsFromLegacy(
-  location: EventTypeLocation | null,
+  location: LocationSettings | null,
 ): LocationOption[] | null {
   return location === null ? null : [{ ...location, id: 'legacy' }]
 }
@@ -149,6 +151,38 @@ export function compatLocation(
 ): LocationSettings | null {
   const option = locations?.find((item) => item.isDefault === true) ?? locations?.[0]
   return option ? settingsOf(option) : null
+}
+
+/** Exact echoes may include untouched historical settings that current writes would normalize. */
+export function isLegacyLocationEcho(
+  locations: LocationOption[] | null,
+  location: unknown,
+): boolean {
+  const current = compatLocation(locations)
+  return isDeepStrictEqual(current, location)
+}
+
+/** Preserve option identity when an older client echoes or edits the compatibility field. */
+export function applyLegacyLocation(
+  locations: LocationOption[] | null,
+  location: LocationSettings | null,
+): LocationOption[] | null {
+  if (isLegacyLocationEcho(locations, location)) return locations
+  if (locations && (locations.length > 1 || locations[0]?.label !== undefined))
+    throw new DomainError(
+      'conflict',
+      'location_options_conflict',
+      'Use locations to change or clear multiple or labelled location options.',
+    )
+  if (location === null) return null
+  const previous = locations?.[0]
+  return [
+    {
+      ...location,
+      id: previous?.kind === location.kind ? previous.id : crypto.randomUUID(),
+      ...(previous?.isDefault === true ? { isDefault: true as const } : {}),
+    },
+  ]
 }
 
 export type PublicLocationOption = Pick<LocationOption, 'id' | 'kind' | 'label' | 'isDefault'> & {

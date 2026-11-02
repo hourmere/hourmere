@@ -739,7 +739,6 @@ describe('editing an event type', () => {
         minimumNoticeMinutes: 1440,
         maxBookingsPerDay: 3,
         bookingWindowDays: null,
-        location: { kind: 'in_person', address: 'Unter den Linden 1' },
         // Saved questions keep their ids, so earlier answers stay attached.
         questions: [
           { id: 'company', label: 'Company', type: 'short_text', required: true },
@@ -759,6 +758,103 @@ describe('editing an event type', () => {
       },
     ])
   })
+
+  it('saves metadata for an invitee-phone default without supplying a host number', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([eventType({ location: { kind: 'phone', askInvitee: true } })])
+    await openExisting()
+    expect(field('Your phone number').value).toBe('')
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Renamed')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const patch = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+    expect(patch).toHaveProperty('title', 'Renamed')
+    expect(patch).not.toHaveProperty('location')
+    expect(field('Your phone number').value).toBe('')
+  })
+
+  it('validates and saves an intentional host-number replacement for an invitee-phone default', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([eventType({ location: { kind: 'phone', askInvitee: true } })])
+    await openExisting()
+    await user.type(field('Your phone number'), '0301234567')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Enter the number in international format',
+    )
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(0)
+    await user.clear(field('Your phone number'))
+    await user.type(field('Your phone number'), '+14155550123')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).toHaveProperty(
+      'location',
+      {
+        kind: 'phone',
+        number: '+14155550123',
+      },
+    )
+  })
+
+  it('saves an intentional location kind change and reloads its returned compatibility value', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([
+      eventType({ location: { kind: 'phone', number: '+14155550123' } }),
+    ])
+    await openExisting()
+    await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'in_person')
+    await user.type(field('Address'), 'New office')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).toHaveProperty(
+      'location',
+      { kind: 'in_person', address: 'New office' },
+    )
+    expect(screen.getByLabelText<HTMLSelectElement>('Where the meeting happens').value).toBe(
+      'in_person',
+    )
+    expect(field('Address').value).toBe('New office')
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
+    expect(screen.queryByLabelText('Your phone number')).toBeNull()
+  })
+
+  it.each([
+    ['multiple options', { kind: 'phone', number: '+14155550123' }],
+    ['a labelled option', { kind: 'in_person', address: 'HQ' }],
+  ] as const)(
+    'retains the draft and displays a conflict when a legacy edit cannot represent %s',
+    async (_, compatLocation) => {
+      const user = userEvent.setup()
+      const message = 'Use locations to change or clear multiple or labelled location options.'
+      const api = eventTypeServer([eventType({ location: compatLocation })], {
+        [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: () =>
+          json(409, { error: 'location_options_conflict', message }),
+      })
+      await openExisting()
+      await user.clear(field('Title'))
+      await user.type(field('Title'), 'Unsaved rename')
+      await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'link')
+      await user.type(field('Meeting link'), 'https://example.com/new-room')
+      await user.click(screen.getByRole('button', { name: 'Save changes' }))
+      const error = await screen.findByRole('alert')
+      expect(within(error).getByRole('heading').textContent).toBe('Could not save')
+      expect(error.textContent).toContain(message)
+      expect(field('Title').value).toBe('Unsaved rename')
+      expect(field('Meeting link').value).toBe('https://example.com/new-room')
+      expect(screen.getByText('Unsaved changes')).toBeDefined()
+      expect(screen.queryByText('Saved.')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Save changes' })).toHaveProperty('disabled', false)
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`).map((call) => call.body)).toEqual(
+        [
+          expect.objectContaining({
+            title: 'Unsaved rename',
+            location: { kind: 'link', url: 'https://example.com/new-room' },
+          }),
+        ],
+      )
+    },
+  )
 
   it('loads guest opt-in, preserves unsaved opt-out across failure, and saves a retry', async () => {
     const user = userEvent.setup()

@@ -35,8 +35,10 @@ import {
   timestamp,
 } from './internal.ts'
 import {
+  applyLegacyLocation,
   compatLocation,
   type EventTypeLocation,
+  isLegacyLocationEcho,
   type LocationOption,
   type LocationSettings,
   locationOptionsFromLegacy,
@@ -126,7 +128,7 @@ export interface EventTypeInput {
   minimumNoticeMinutes?: number | undefined
   bookingWindowDays?: number | null | undefined
   maxBookingsPerDay?: number | null | undefined
-  location?: EventTypeLocation | null | undefined
+  location?: LocationSettings | null | undefined
   /** Replaces the ordered list. Cannot be combined with a legacy location write. */
   locations?: LocationOption[] | null | undefined
   successRedirect?: SuccessRedirectInput | null | undefined
@@ -531,7 +533,6 @@ export async function updateEventType(
   id: string,
   input: EventTypeUpdate,
 ): Promise<EventType> {
-  const changes = defined(input)
   const notifications =
     input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
   return withWriteErrors(() =>
@@ -541,6 +542,7 @@ export async function updateEventType(
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
       await assertCanWrite(trx, ctx, row, true)
+      const changes = defined(input, fieldsOf(row).locations)
       const notificationsChanged =
         notifications !== undefined &&
         JSON.stringify(parseNotifications(row.notifications)) !== JSON.stringify(notifications)
@@ -593,6 +595,7 @@ export async function updateEventType(
           },
           ctx.successRedirectPolicy,
           input.successRedirect !== undefined,
+          changes.locations !== undefined,
         )
         if (
           zoomConnection &&
@@ -601,8 +604,7 @@ export async function updateEventType(
         )
           throw new DomainError('invalid', 'invalid_zoom_connection')
         if (
-          input.location !== undefined ||
-          input.locations !== undefined ||
+          changes.locations !== undefined ||
           changingHosts ||
           scheduleId !== undefined ||
           organizer !== undefined ||
@@ -836,15 +838,25 @@ async function withWriteErrors<T>(write: () => Promise<T>): Promise<T> {
 }
 
 /** The fields of `input` that are set, so they can be laid over defaults or current values. */
-function defined(input: EventTypeUpdate): Partial<Record<keyof Fields, unknown>> {
+function defined(
+  input: EventTypeUpdate,
+  currentLocations?: LocationOption[] | null,
+): Partial<Record<keyof Fields, unknown>> {
   if (input.location !== undefined && input.locations !== undefined) {
     throw new DomainError('invalid', 'invalid_locations', 'Specify location or locations, not both')
   }
   const result: Partial<Record<keyof Fields, unknown>> = {}
-  for (const name of FIELD_NAMES) if (input[name] !== undefined) result[name] = input[name]
-  // A legacy write replaces the complete list, including clearing it with null.
+  for (const name of FIELD_NAMES)
+    if (name !== 'location' && input[name] !== undefined) result[name] = input[name]
   if (input.location !== undefined) {
-    result.locations = locationOptionsFromLegacy(validLocation(input.location))
+    if (currentLocations !== undefined && isLegacyLocationEcho(currentLocations, input.location))
+      return result
+    const location = validLocation(input.location)
+    result.locations =
+      currentLocations === undefined
+        ? locationOptionsFromLegacy(location)
+        : applyLegacyLocation(currentLocations, location)
+    if (result.locations === currentLocations) delete result.locations
   }
   return result
 }
@@ -855,9 +867,12 @@ function validFields(
   candidate: Partial<Record<keyof Fields, unknown>>,
   policy?: SuccessRedirectPolicy,
   validateRedirect = true,
+  validateLocations = true,
 ): Fields {
   const c = candidate
-  const locations = validateLocationOptions(c.locations)
+  const locations = validateLocations
+    ? validateLocationOptions(c.locations)
+    : (c.locations as LocationOption[] | null)
   const allowedDurationsMinutes =
     c.allowedDurationsMinutes === undefined ? [c.durationMinutes] : c.allowedDurationsMinutes
   // The engine's own check, so a stored event type can never make availability fail.
@@ -974,7 +989,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).every((key) => keys.includes(key))
 
-function validLocation(value: unknown): EventTypeLocation | null {
+function validLocation(value: unknown): LocationSettings | null {
   if (value === null) return null
   const fail = (message: string): never => {
     throw new DomainError('invalid', 'invalid_location', message)
@@ -996,7 +1011,12 @@ function validLocation(value: unknown): EventTypeLocation | null {
         return fail('autoCreate must be true when specified')
       return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
     case 'phone': {
-      expect(['number'])
+      expect(['number', 'askInvitee'])
+      if (value.askInvitee !== undefined) {
+        if (value.askInvitee !== true || value.number !== undefined)
+          return fail('A phone location requires either a host number or askInvitee: true')
+        return { kind, askInvitee: true }
+      }
       const { number } = value
       if (typeof number !== 'string' || !PHONE_NUMBER_PATTERN.test(number)) {
         return fail('location.number must be a phone number in E.164 format, e.g. +14155550123')

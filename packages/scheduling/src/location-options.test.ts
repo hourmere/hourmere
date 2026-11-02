@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyLegacyLocation,
   compatLocation,
   type EventTypeLocation,
   type LocationChoiceContext,
@@ -83,6 +84,7 @@ describe('location options validation', () => {
     ['empty id', [{ id: '', kind: 'zoom' }]],
     ['long id', [{ id: 'x'.repeat(65), kind: 'zoom' }]],
     ['invalid id', [{ id: 'a b', kind: 'zoom' }]],
+    ['reserved id', [{ id: '__proto__', kind: 'zoom' }]],
     [
       'duplicate ids',
       [
@@ -157,6 +159,11 @@ describe('location options validation', () => {
 })
 
 describe('legacy compatibility and public projection', () => {
+  it('matches the question and reminder id reservation without rejecting other object member names', () => {
+    for (const id of ['constructor', 'prototype', 'toString', 'hasOwnProperty', 'valueOf'])
+      expect(validateLocationOptions([{ id, kind: 'zoom' }])).toEqual([{ id, kind: 'zoom' }])
+  })
+
   it.each(allKinds)('round trips the original $kind settings through one option', (option) => {
     const { id: _id, ...settings } = option
     expect(compatLocation(locationOptionsFromLegacy(settings as EventTypeLocation))).toEqual(
@@ -185,6 +192,84 @@ describe('legacy compatibility and public projection', () => {
     if (compat?.kind === 'in_person') compat.address = 'Other'
     expect(options?.[0]).toEqual({ kind: 'in_person', address: 'Before', id: 'legacy' })
   })
+
+  it('keeps every option, label, default and order when legacy settings are echoed', () => {
+    const options: LocationOption[] = [
+      { id: 'office', kind: 'in_person', address: 'Office', label: 'Headquarters' },
+      { id: 'call', kind: 'phone', askInvitee: true, isDefault: true },
+    ]
+    expect(applyLegacyLocation(options, { askInvitee: true, kind: 'phone' })).toBe(options)
+    expect(
+      applyLegacyLocation([options[0] as LocationOption], { kind: 'in_person', address: 'Office' }),
+    ).toEqual([options[0]])
+    expect(applyLegacyLocation(null, null)).toBeNull()
+  })
+
+  it('recognizes exact echoes of nested historical JSON independently of object identity', () => {
+    const location = {
+      kind: 'link' as const,
+      url: 'https://example.com/room',
+      historical: { rooms: [{ name: 'Main room', floor: 2 }], flags: [true, null] },
+    }
+    const options = [{ ...location, id: 'room', label: 'Room' }]
+    expect(applyLegacyLocation(options, structuredClone(location))).toBe(options)
+  })
+
+  it('updates singleton settings in place and preserves the default marker', () => {
+    const options: LocationOption[] = [
+      { id: 'office', kind: 'in_person', address: 'Before', isDefault: true },
+    ]
+    expect(applyLegacyLocation(options, { kind: 'in_person', address: 'After' })).toEqual([
+      { id: 'office', kind: 'in_person', address: 'After', isDefault: true },
+    ])
+    expect(options[0]).toEqual({
+      id: 'office',
+      kind: 'in_person',
+      address: 'Before',
+      isDefault: true,
+    })
+    expect(applyLegacyLocation(options, null)).toBeNull()
+  })
+
+  it('allocates a new identity for a changed kind or re-created option', () => {
+    const changed = applyLegacyLocation(
+      [{ id: 'office', kind: 'in_person', address: 'Office', isDefault: true }],
+      { kind: 'phone', number: '+14155550123' },
+    )
+    expect(changed?.[0]).toMatchObject({
+      kind: 'phone',
+      number: '+14155550123',
+      isDefault: true,
+    })
+    expect(changed?.[0]?.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(changed?.[0]?.id).not.toBe('office')
+    const first = applyLegacyLocation(null, { kind: 'zoom' })
+    const recreated = applyLegacyLocation(null, { kind: 'zoom' })
+    expect(first?.[0]?.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(recreated?.[0]?.id).not.toBe(first?.[0]?.id)
+  })
+
+  it.each([
+    {
+      options: [
+        { id: 'office', kind: 'in_person', address: 'Office' },
+        { id: 'video', kind: 'zoom' },
+      ],
+    },
+    { options: [{ id: 'office', kind: 'in_person', address: 'Office', label: 'HQ' }] },
+  ] satisfies { options: LocationOption[] }[])(
+    'rejects changed or cleared legacy settings for rich options %j',
+    ({ options }) => {
+      for (const location of [null, { kind: 'zoom' as const }])
+        expect(() => applyLegacyLocation(options, location)).toThrow(
+          expect.objectContaining({
+            kind: 'conflict',
+            code: 'location_options_conflict',
+            message: expect.stringContaining('locations'),
+          }),
+        )
+    },
+  )
 
   it('exposes only safe metadata and invitee collection requirements', () => {
     expect(publicLocationOptions(allKinds)).toEqual(allKinds.map(({ id, kind }) => ({ id, kind })))

@@ -399,7 +399,8 @@ for host steps, invitee selection and the shared-rule limitations.
 
 `event_types.locations` / internal service `locations` is an ordered list of 1–5
 location options, or SQL/service null for no location. An empty list is invalid.
-Each option has a stable `id` (1–64 ASCII letters, digits, `_` or `-`), a `kind`,
+Each option has a stable `id` (1–64 ASCII letters, digits, `_` or `-`, excluding
+`__proto__`, as for question and reminder rule IDs), a `kind`,
 optional public single-line `label` (1–100 characters), optional `isDefault: true`,
 and the settings below. IDs and kinds must each be distinct within a list: this
 version offers at most one option of each kind, rather than several addresses or
@@ -418,18 +419,32 @@ Unknown keys, false default/opt-in flags, malformed Unicode and control characte
 in text are rejected. Labels and addresses are trimmed; link URLs are normalized
 using the URL parser. Validation belongs to the shared scheduling service; database
 constraints also enforce the list envelope, identities, kinds and default count.
-Option IDs survive edits and reordering. Removing and recreating an option should
-allocate a new ID so a stale page cannot accidentally select a different option.
+Option IDs survive settings edits within the same kind and reordering. A kind change
+replaces the option identity. Removing and recreating an option must allocate a new ID
+so a stale page cannot accidentally select a different option under the old ID.
+Internal complete-list writers are responsible for these identity rules.
 
 `event_types.location` and service `location` remain compatibility fields derived
 from the explicit default, or first/only option, with `id`, `label` and `isDefault`
-removed. Legacy writes supplying `location` replace the list with a singleton whose
-ID is `legacy`; null clears it. Internal writes supply `locations` as a complete
-replacement; specifying both fields in one service write is invalid. Unrelated
-edits preserve the list and its order. Migration 0056 wraps every existing non-null
+removed. Legacy updates supplying a value exactly equal to this compatibility projection
+(object key order does not matter) are a no-op for the complete list, preserving IDs,
+labels, the default marker, settings and order without normalization. A different legacy
+value may edit a single unlabelled option: settings change in place and retain its ID
+and default marker; a kind change allocates a new ID. Null clears a single unlabelled
+option; a later recreation gets a new ID. Creating an event through the legacy field
+initially uses `legacy`, as does historical backfill.
+A different value, including null, for several options or an option with a label returns
+conflict `location_options_conflict` (REST 409; MCP tool error), instructing the client to
+use `locations`. Rejecting the ambiguous edit avoids guessing a target or dropping data.
+Internal writes supply `locations` as a complete replacement; specifying both fields in
+one service write is invalid. Unrelated edits preserve the list and its order. Migration 0056 wraps every existing non-null
 event location in `{ id: "legacy", ...location }` without normalizing its settings
 or changing timestamps; existing nulls stay null. A compatibility trigger also
-supports old direct inserts and location-only updates.
+supports old direct inserts and location-only updates with the same identity and conflict
+rules (SQLSTATE `P0001`, message prefixed `location_options_conflict`). Explicit changed
+lists take precedence in SQL. Later data migrations that echo `location` are harmless;
+ones that intentionally change a multi-option or labelled configuration must update
+`locations` explicitly instead.
 
 The additive transport contract for later work is `locations` beside the existing
 `location`; configuration REST, MCP and CLI must introduce writes together. Future
@@ -442,7 +457,16 @@ slice does not expose `locations` through REST/OpenAPI, MCP or CLI, add booking
 request fields, or enable public choice or per-choice conference creation.
 The existing protected event-type response's `location` schema additionally accepts
 `{ kind: "phone", askInvitee: true }` so reads of internal configuration remain
-well-typed; legacy REST/MCP/CLI location writes still require a host number.
+well-typed. Legacy REST/MCP writes accept this same phone configuration so clients can
+read and write it back; a host number and `askInvitee` together remain invalid. The
+published `EventType.location` retains its discriminated `oneOf` shape, with optional
+`number`/`askInvitee` fields on its single phone branch. The current editor preserves this
+configuration and omits an unchanged location when saving unrelated settings.
+Until the booking follow-up adds phone collection, existing personal, team and one-time
+booking paths reject an effective default `askInvitee` location with
+`invalid_invitee_phone` before persistence, rechecking under the booking locks. They
+cannot create a phone booking without a number from this configuration; exact replays
+of existing bookings retain their previous result.
 
 A new booking will store its chosen configuration snapshot in
 `bookings.location_option`, including its ID, kind, label/default marker and settings.

@@ -21,6 +21,7 @@ BEGIN
   RETURN jsonb_typeof(option) = 'object'
     AND jsonb_typeof(option->'id') = 'string'
     AND length(option->>'id') > 0
+    AND option->>'id' <> '__proto__'
     AND jsonb_typeof(option->'kind') = 'string'
     AND (NOT known_kind OR option->>'kind' IN ('google_meet', 'zoom', 'phone', 'in_person', 'link'))
     AND (NOT option ? 'isDefault' OR option->'isDefault' = 'true'::jsonb);
@@ -52,6 +53,9 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_location_option_valid
 
 CREATE FUNCTION event_type_location_defaults() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+DECLARE
+  previous jsonb;
+  option_id text;
 BEGIN
   IF TG_OP = 'INSERT' AND NEW.locations IS NULL THEN
     IF NEW.location IS NOT NULL THEN
@@ -60,9 +64,23 @@ BEGIN
   ELSIF TG_OP = 'UPDATE'
     AND NEW.location IS DISTINCT FROM OLD.location
     AND NEW.locations IS NOT DISTINCT FROM OLD.locations THEN
-    -- Old callers replace the singleton through their existing location field.
-    NEW.locations := CASE WHEN NEW.location IS NULL THEN NULL
-      ELSE jsonb_build_array(jsonb_build_object('id', 'legacy') || NEW.location) END;
+    -- Echoes never enter this branch. Ambiguous legacy edits must be explicit
+    -- list replacements; guessing would silently discard host configuration.
+    IF OLD.locations IS NOT NULL AND (jsonb_array_length(OLD.locations) > 1
+      OR (OLD.locations->0) ? 'label') THEN
+      RAISE EXCEPTION 'location_options_conflict: Use locations to change multiple or labelled location options'
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF NEW.location IS NULL THEN
+      NEW.locations := NULL;
+    ELSE
+      previous := OLD.locations->0;
+      option_id := CASE WHEN previous->>'kind' = NEW.location->>'kind'
+        THEN previous->>'id' ELSE uuidv7()::text END;
+      NEW.locations := jsonb_build_array(NEW.location || jsonb_build_object('id', option_id)
+        || CASE WHEN previous->'isDefault' = 'true'::jsonb
+          THEN '{"isDefault":true}'::jsonb ELSE '{}'::jsonb END);
+    END IF;
   END IF;
   -- Explicit lists take precedence. The first option is the implicit default.
   IF NEW.locations IS NULL THEN

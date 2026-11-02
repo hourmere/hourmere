@@ -7,6 +7,7 @@ import {
   deleteEventType,
   EVENT_TYPE_LIMITS,
   getEventType,
+  type LocationSettings,
   listEventTypeHosts,
   listEventTypes,
   MAX_OPTION_LENGTH,
@@ -79,18 +80,19 @@ const locationKinds = {
 }
 const locationDoc = {
   description:
-    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set.',
+    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. Phone uses a host number or askInvitee: true. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
 }
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
 const Location = z
-  .union([
+  .discriminatedUnion('kind', [
     z.object(locationKinds.googleMeet),
     z.object(locationKinds.zoom),
-    z.object(locationKinds.phone),
-    // Read compatibility for internally configured invitee-phone options. Legacy
-    // location writes remain host-number-only until all write surfaces ship.
-    z.object({ kind: z.literal('phone'), askInvitee: z.literal(true) }),
+    z.object({
+      ...locationKinds.phone,
+      number: locationKinds.phone.number.optional(),
+      askInvitee: z.literal(true).optional(),
+    }),
     z.object(locationKinds.inPerson),
     z.object(locationKinds.link),
   ])
@@ -100,7 +102,17 @@ const LocationInput = z
   .discriminatedUnion('kind', [
     z.strictObject(locationKinds.googleMeet),
     z.strictObject(locationKinds.zoom),
-    z.strictObject(locationKinds.phone),
+    z
+      .strictObject({
+        ...locationKinds.phone,
+        number: locationKinds.phone.number.optional(),
+        askInvitee: z.literal(true).optional(),
+      })
+      .refine(
+        (phone): phone is Extract<LocationSettings, { kind: 'phone' }> =>
+          (phone.number !== undefined) !== (phone.askInvitee === true),
+        { message: 'Phone requires exactly one of number or askInvitee: true' },
+      ),
     z.strictObject(locationKinds.inPerson),
     z.strictObject(locationKinds.link),
   ])
@@ -357,6 +369,8 @@ const invalid =
   'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
+const locationOptionsConflict =
+  'location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
@@ -527,6 +541,8 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/event-types/{id}',
         operationId: 'updateEventType',
         summary: 'Change an event type',
+        description:
+          'An unchanged legacy location preserves the complete option list. A changed legacy location edits a single unlabelled option in place; changing its kind allocates a new option id. Multiple or labelled options require an option-aware locations write and return location_options_conflict.',
         request: {
           params: IdParams,
           headers: ExpectedOrganizationHeaders,
@@ -538,7 +554,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
             400: invalid,
             403: forbidden,
             404: notFound,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${locationOptionsConflict}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),

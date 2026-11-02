@@ -137,6 +137,7 @@ const invalidLists: [string, unknown][] = [
   ['id string', [{ id: 1, kind: 'phone' }]],
   ['id present', [{ kind: 'phone' }]],
   ['id nonempty', [{ id: '', kind: 'phone' }]],
+  ['reserved id', [{ id: '__proto__', kind: 'phone' }]],
   ['kind string', [{ id: 'phone', kind: 1 }]],
   ['kind present', [{ id: 'phone' }]],
   ['kind known', [{ id: 'other', kind: 'other' }]],
@@ -181,7 +182,135 @@ function insertCustomBooking(pool: pg.Pool | pg.PoolClient, organization: string
 
 const customLocation = { kind: 'custom', text: 'private-only-conference-link' }
 
+// These assertions also run on copied migration SQL, so each compatibility rule
+// has a negative control without ever changing the checked-in migration.
+async function verifyLegacyWrites(pool: pg.Pool | pg.PoolClient, event: string, only?: string) {
+  const set = (locations: unknown) =>
+    pool.query('UPDATE event_types SET locations=$2::jsonb WHERE id=$1', [
+      event,
+      locations === null ? null : JSON.stringify(locations),
+    ])
+  const write = (location: unknown) =>
+    pool.query(
+      'UPDATE event_types SET location=$2::jsonb WHERE id=$1 RETURNING location,locations',
+      [event, location === null ? null : JSON.stringify(location)],
+    )
+  const phone = { kind: 'phone', number: '+14155550123' }
+  const changedPhone = { kind: 'phone', number: '+14155550124' }
+  const link = { kind: 'link', url: 'https://example.test/new' }
+  for (const [name, list] of [
+    ['legacy conflict for multiple options', options.map(({ label: _label, ...option }) => option)],
+    ['legacy conflict for labelled option', [options[0]]],
+  ] as const) {
+    if (only && only !== name) continue
+    await set(list)
+    // Reordered JSON keys still echo exactly in PostgreSQL's jsonb equality.
+    const compat = name.endsWith('multiple options')
+      ? { address: 'Example Street', kind: 'in_person' }
+      : phone
+    await expect(write(compat)).resolves.toMatchObject({ rows: [{ locations: list }] })
+    for (const replacement of [link, null]) {
+      if (only) await pool.query('SAVEPOINT legacy_conflict')
+      try {
+        await expect(write(replacement)).rejects.toMatchObject({
+          code: 'P0001',
+          message: expect.stringContaining('location_options_conflict: Use locations'),
+        })
+      } finally {
+        if (only) await pool.query('ROLLBACK TO SAVEPOINT legacy_conflict')
+      }
+    }
+  }
+  for (const name of [
+    'legacy singleton identity',
+    'legacy changed-kind identity',
+    'legacy recreated identity',
+    'legacy default marker',
+  ]) {
+    if (only && only !== name) continue
+    const original = { id: 'kept', ...phone, isDefault: true }
+    await set([original])
+    await expect(write(changedPhone)).resolves.toMatchObject({
+      rows: [{ locations: [{ ...original, ...changedPhone }] }],
+    })
+    const changed = (await write(link)).rows[0].locations[0]
+    expect(changed).toEqual({ id: expect.any(String), ...link, isDefault: true })
+    expect(changed.id).not.toBe(original.id)
+    await expect(write(null)).resolves.toMatchObject({
+      rows: [{ location: null, locations: null }],
+    })
+    const recreated = (await write(link)).rows[0].locations[0]
+    expect(recreated.id).not.toBe('legacy')
+    expect(recreated.id).not.toBe(changed.id)
+  }
+  if (!only) {
+    const askInvitee = [{ id: 'invitee', kind: 'phone', askInvitee: true, isDefault: true }]
+    await set(askInvitee)
+    await expect(write({ askInvitee: true, kind: 'phone' })).resolves.toMatchObject({
+      rows: [{ locations: askInvitee }],
+    })
+    // A later migration may normalize the legacy column or explicitly replace a list.
+    await expect(
+      pool.query('UPDATE event_types SET location=location WHERE id=$1 RETURNING locations', [
+        event,
+      ]),
+    ).resolves.toMatchObject({ rows: [{ locations: askInvitee }] })
+    await set(null)
+  }
+}
+
 describe.skipIf(!serverUrl)('event type location migration', () => {
+  it('tolerates migration gaps and later legacy-column normalization', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-location-gaps-'))
+    let owned: TestDatabase | undefined
+    let fresh: TestDatabase | undefined
+    try {
+      await copyPredecessor(directory)
+      await copyFile(join(migrationsDir, migration), join(directory, migration))
+      owned = await createTestDatabase(serverUrl as string, directory, { tag: 'location_gaps' })
+      const { events } = await seedLocations(owned.pool)
+      await owned.pool.query('UPDATE event_types SET locations=$2::jsonb WHERE id=$1', [
+        events[0],
+        JSON.stringify(options),
+      ])
+      await writeFile(
+        join(directory, '0054_location_echo.sql'),
+        'UPDATE event_types SET location=location;',
+      )
+      await writeFile(
+        join(directory, '0055_location_normalization.sql'),
+        `UPDATE event_types SET location=jsonb_set(location,'{number}','"+14155550124"')
+          WHERE slug='historical-location-2';`,
+      )
+      expect(await runMigrations(owned.pool, directory)).toEqual([
+        '0054_location_echo.sql',
+        '0055_location_normalization.sql',
+      ])
+      expect(
+        (await owned.pool.query('SELECT locations FROM event_types WHERE id=$1', [events[0]])).rows,
+      ).toEqual([{ locations: options }])
+      expect(
+        (await owned.pool.query('SELECT locations FROM event_types WHERE id=$1', [events[2]])).rows,
+      ).toEqual([{ locations: [{ id: 'legacy', kind: 'phone', number: '+14155550124' }] }])
+      await writeFile(
+        join(directory, '0059_later_location_echo.sql'),
+        'UPDATE event_types SET location=location;',
+      )
+      expect(await runMigrations(owned.pool, directory)).toEqual(['0059_later_location_echo.sql'])
+      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'location_gap_new' })
+      expect(await snapshotSchema(owned.pool)).toEqual(await snapshotSchema(fresh.pool))
+      const before = await records(owned.pool, await inventory(owned.pool), true)
+      expect(await runMigrations(owned.pool, directory)).toEqual([])
+      expect(await records(owned.pool, await inventory(owned.pool), true)).toEqual(before)
+    } finally {
+      try {
+        await Promise.all([owned?.drop(), fresh?.drop()])
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
+    }
+  }, 30_000)
+
   it('upgrades populated 0053 data, preserving historical fields and matching a fresh install and no-op rerun', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-locations-upgrade-'))
     let upgraded: TestDatabase | undefined
@@ -324,19 +453,7 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
           [event],
         ),
       ).resolves.toMatchObject({ rows: [{ locations: options }] })
-      await expect(
-        owned.pool.query(
-          `UPDATE event_types SET location='{"kind":"link","url":"https://example.test/new"}' WHERE id=$1 RETURNING locations`,
-          [event],
-        ),
-      ).resolves.toMatchObject({
-        rows: [{ locations: [{ id: 'legacy', kind: 'link', url: 'https://example.test/new' }] }],
-      })
-      await expect(
-        owned.pool.query('UPDATE event_types SET location=NULL WHERE id=$1 RETURNING locations', [
-          event,
-        ]),
-      ).resolves.toMatchObject({ rows: [{ locations: null }] })
+      await verifyLegacyWrites(owned.pool, event as string)
       await expect(
         owned.pool.query(
           `UPDATE event_types SET location='{"kind":"phone"}',locations=$2::jsonb WHERE id=$1 RETURNING location`,
@@ -424,8 +541,10 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
         'id present': [
           [idType, ''],
           [idLength, ''],
+          ["    AND option->>'id' <> '__proto__'\n", ''],
         ],
         'id nonempty': [[idLength, "    AND length(option->>'id') >= 0\n"]],
+        'reserved id': [["    AND option->>'id' <> '__proto__'\n", '']],
         'kind string': [
           [kindType, ''],
           [kindKnown, ''],
@@ -486,6 +605,26 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
         ],
         'explicit event update': [['AND NEW.locations IS NOT DISTINCT FROM OLD.locations', '']],
         'multi list preservation': [['AND NEW.location IS DISTINCT FROM OLD.location', '']],
+        'legacy conflict for multiple options': [
+          ['jsonb_array_length(OLD.locations) > 1', 'false'],
+        ],
+        'legacy conflict for labelled option': [["OR (OLD.locations->0) ? 'label'", 'OR false']],
+        'legacy singleton identity': [
+          [
+            "THEN previous->>'id' ELSE uuidv7()::text END",
+            'THEN uuidv7()::text ELSE uuidv7()::text END',
+          ],
+        ],
+        'legacy changed-kind identity': [
+          ['ELSE uuidv7()::text END', "ELSE coalesce(previous->>'id', uuidv7()::text) END"],
+        ],
+        'legacy recreated identity': [['ELSE uuidv7()::text END', "ELSE 'legacy' END"]],
+        'legacy default marker': [
+          [
+            "THEN '{\"isDefault\":true}'::jsonb ELSE '{}'::jsonb END",
+            "THEN '{}'::jsonb ELSE '{}'::jsonb END",
+          ],
+        ],
         'default projection': [
           [
             "ORDER BY (value->'isDefault' = 'true'::jsonb) DESC NULLS LAST, ordinality",
@@ -548,6 +687,7 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
             'id string',
             'id present',
             'id nonempty',
+            'reserved id',
             'kind string',
             'kind present',
             'kind known',
@@ -619,7 +759,7 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
                 [event],
               )
             ).rows,
-          ).toEqual([{ locations: [{ id: 'legacy', kind: 'phone' }] }])
+          ).toEqual([{ locations: [{ id: expect.any(String), kind: 'phone' }] }])
         } else if (name === 'explicit event insert') {
           expect(
             (
@@ -643,14 +783,21 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
             event,
             JSON.stringify(options),
           ])
-          expect(
-            (
-              await query(
-                'UPDATE event_types SET location=location WHERE id=$1 RETURNING locations',
-                [event],
-              )
-            ).rows,
-          ).toEqual([{ locations: options }])
+          await expect(
+            query('UPDATE event_types SET location=location WHERE id=$1 RETURNING locations', [
+              event,
+            ]),
+          ).resolves.toMatchObject({ rows: [{ locations: options }] })
+        } else if (
+          name.startsWith('legacy conflict') ||
+          [
+            'legacy singleton identity',
+            'legacy changed-kind identity',
+            'legacy recreated identity',
+            'legacy default marker',
+          ].includes(name)
+        ) {
+          await verifyLegacyWrites(client as pg.PoolClient, event as string, name)
         } else if (name === 'default projection' || name === 'metadata projection') {
           expect(
             (await insert(client as pg.PoolClient, fixture.organization, options)).rows,
@@ -742,10 +889,15 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
           mutant = mutant.replace(before, after)
         }
         await check(source, name)
-        await expect(check(mutant, name), name).rejects.toMatchObject({ name: 'AssertionError' })
+        try {
+          await expect(check(mutant, name), name).rejects.toMatchObject({ name: 'AssertionError' })
+        } catch (error) {
+          if (error instanceof Error) error.message = `${name}: ${error.message}`
+          throw error
+        }
         await check(source, name)
       }
-      expect(Object.keys(replacements)).toHaveLength(36)
+      expect(Object.keys(replacements)).toHaveLength(43)
       expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
     } finally {
       client?.release()

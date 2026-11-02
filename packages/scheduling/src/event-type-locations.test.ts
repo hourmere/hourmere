@@ -130,9 +130,7 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
     const saved = await api.createEventType(ctx, { ...base, location })
     expect(saved.location).toEqual(location)
     expect(saved.locations).toEqual([{ id: 'legacy', ...location }])
-    const multi = await api.updateEventType(ctx, saved.id, { locations: options })
-    expect(multi.locations).toEqual(options)
-    const changed = { kind: 'in_person' as const, address: '10 Side Street' }
+    const changed = { kind: 'link' as const, url: 'https://example.com/changed' }
     expect(await api.updateEventType(ctx, saved.id, { location: changed })).toMatchObject({
       location: changed,
       locations: [{ id: 'legacy', ...changed }],
@@ -142,8 +140,168 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       location: null,
     })
   }
-  it('keeps single-location clients compatible and makes a legacy edit replace the complete list', () =>
-    verifyLegacy())
+  it('keeps legacy singleton identity when settings change or clear', () => verifyLegacy())
+
+  async function verifyLegacyEcho(api: Services = events) {
+    const ctx = await context()
+    for (const locations of [options, [options[0] as LocationOption], null]) {
+      const saved = await api.createEventType(ctx, {
+        ...base,
+        slug: randomUUID(),
+        locations,
+      })
+      const before = await owned.pool.query(
+        'SELECT xmin::text, ctid::text FROM event_types WHERE id = $1',
+        [saved.id],
+      )
+      const echo = await api.updateEventType(ctx, saved.id, { location: saved.location })
+      expect(echo.locations).toEqual(locations)
+      expect(
+        await owned.pool.query('SELECT xmin::text, ctid::text FROM event_types WHERE id = $1', [
+          saved.id,
+        ]),
+      ).toMatchObject({ rows: before.rows })
+      const renamed = await api.updateEventType(ctx, saved.id, {
+        title: 'Saved by an old client',
+        location: saved.location,
+      })
+      expect(renamed.locations).toEqual(locations)
+      expect(await stored(saved.id)).toEqual({ locations, location: saved.location })
+    }
+  }
+  it('preserves rich option lists on exact legacy echoes including unrelated saves', () =>
+    verifyLegacyEcho())
+
+  async function verifyHistoricalEcho(api: Services = events) {
+    const ctx = await context()
+    const historical = [
+      [
+        { id: 'office', kind: 'in_person', address: ' Office ', label: 'Headquarters' },
+        { id: 'room', kind: 'link', url: 'https://EXAMPLE.COM:443/room', isDefault: true },
+      ],
+      [{ id: 'office', kind: 'in_person', address: ' Office ', label: 'Headquarters' }],
+      [{ id: 'call', kind: 'phone' }],
+      [
+        {
+          id: 'room',
+          kind: 'link',
+          url: 'https://example.com/room',
+          label: 'Room',
+          historical: { rooms: [{ name: 'Main', floor: 2 }], flags: [true, null] },
+        },
+      ],
+    ]
+    for (const locations of historical) {
+      const created = await api.createEventType(ctx, { ...base, slug: randomUUID() })
+      await db
+        .updateTable('event_types')
+        .set({ locations: jsonb(locations) })
+        .where('id', '=', created.id)
+        .execute()
+      const saved = await api.getEventType(ctx, created.id)
+      await expect(
+        api.updateEventType(ctx, saved.id, { location: saved.location }),
+      ).resolves.toMatchObject({ locations })
+      await expect(
+        api.updateEventType(ctx, saved.id, { title: 'Legacy echo save', location: saved.location }),
+      ).resolves.toMatchObject({ locations })
+      await expect(
+        api.updateEventType(ctx, saved.id, { title: 'Editor omitted location' }),
+      ).resolves.toMatchObject({ locations })
+      expect(await stored(saved.id)).toEqual({ locations, location: saved.location })
+    }
+  }
+  it('preserves historical settings before validating or normalizing exact echoes and unrelated saves', () =>
+    verifyHistoricalEcho())
+
+  async function verifyLegacySettings(api: Services = events) {
+    const ctx = await context()
+    const saved = await api.createEventType(ctx, {
+      ...base,
+      locations: [{ id: 'office', kind: 'in_person', address: 'Before', isDefault: true }],
+    })
+    expect(
+      await api.updateEventType(ctx, saved.id, {
+        location: { kind: 'in_person', address: 'After' },
+      }),
+    ).toMatchObject({
+      location: { kind: 'in_person', address: 'After' },
+      locations: [{ id: 'office', kind: 'in_person', address: 'After', isDefault: true }],
+    })
+  }
+  it('keeps a singleton option id and default when its settings change', () =>
+    verifyLegacySettings())
+
+  async function verifyLegacyIdentity(api: Services = events) {
+    const ctx = await context()
+    const location = { kind: 'link' as const, url: 'https://example.com/legacy' }
+    const saved = await api.createEventType(ctx, { ...base, location })
+    const changed = await api.updateEventType(ctx, saved.id, {
+      location: { kind: 'in_person', address: 'Office' },
+    })
+    expect(changed.locations?.[0]?.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(changed.locations?.[0]?.id).not.toBe(saved.locations?.[0]?.id)
+    await api.updateEventType(ctx, saved.id, { location: null })
+    const recreated = await api.updateEventType(ctx, saved.id, { location })
+    expect(recreated.locations?.[0]?.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(recreated.locations?.[0]?.id).not.toBe(saved.locations?.[0]?.id)
+    expect(recreated.locations?.[0]?.id).not.toBe(changed.locations?.[0]?.id)
+  }
+  it('rotates singleton identity after changing kind or clearing and re-creating it', () =>
+    verifyLegacyIdentity())
+
+  async function verifyLegacyConflict(api: Services = events) {
+    const ctx = await context()
+    for (const locations of [options, [options[0] as LocationOption]]) {
+      const saved = await api.createEventType(ctx, { ...base, slug: randomUUID(), locations })
+      for (const location of [null, { kind: 'zoom' as const }])
+        await expect(
+          api.updateEventType(ctx, saved.id, { title: 'Must not commit', location }),
+        ).rejects.toMatchObject({
+          kind: 'conflict',
+          code: 'location_options_conflict',
+          message: expect.stringContaining('locations'),
+        })
+      expect(await api.getEventType(ctx, saved.id)).toMatchObject({ title: base.title, locations })
+      expect(await stored(saved.id)).toEqual({ locations, location: saved.location })
+    }
+  }
+  it('rejects changed and cleared legacy writes for multiple or labelled options atomically', () =>
+    verifyLegacyConflict())
+
+  async function verifyLegacyPhone(api: Services = events) {
+    const ctx = await context()
+    const locations: LocationOption[] = [
+      { id: 'office', kind: 'in_person', address: 'Office', label: 'Headquarters' },
+      { id: 'call', kind: 'phone', askInvitee: true, isDefault: true },
+    ]
+    const saved = await api.createEventType(ctx, { ...base, locations })
+    await expect(
+      api.createEventType(ctx, {
+        ...base,
+        slug: 'legacy-phone',
+        location: { kind: 'phone', askInvitee: true },
+      }),
+    ).resolves.toMatchObject({ location: { kind: 'phone', askInvitee: true } })
+    await expect(
+      api.updateEventType(ctx, saved.id, { title: 'Phone save', location: saved.location }),
+    ).resolves.toMatchObject({
+      title: 'Phone save',
+      locations,
+      location: { kind: 'phone', askInvitee: true },
+    })
+    for (const location of [
+      { kind: 'phone', askInvitee: true, number: '+14155550123' },
+      { kind: 'phone', askInvitee: false },
+      { kind: 'phone', askInvitee: 'true' },
+      { kind: 'phone' },
+    ])
+      await expect(
+        api.updateEventType(ctx, saved.id, { location } as events.EventTypeUpdate),
+      ).rejects.toMatchObject({ code: 'invalid_location' })
+  }
+  it('round-trips an invitee-phone compat value while rejecting invalid and mixed phone settings', () =>
+    verifyLegacyPhone())
 
   async function verifyConflict(api: Services = events) {
     const ctx = await context()
@@ -279,6 +437,40 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
   it('checks non-default Meet organizer and readiness rules for individual, collective and round-robin hosts', () =>
     verifyMeet())
 
+  async function verifyConferenceEcho(api: Services = events) {
+    const { owner, ctx } = await teamContext()
+    const saved = await api.createEventType(ctx, { ...base, locations: [link] })
+    const choices = [link, meet]
+    // A saved non-default automatic option can lose readiness independently of metadata edits.
+    await db
+      .updateTable('event_types')
+      .set({ locations: jsonb(choices) })
+      .where('id', '=', saved.id)
+      .execute()
+    await expect(
+      api.updateEventType(ctx, saved.id, { title: 'Legacy echo save', location: saved.location }),
+    ).resolves.toMatchObject({ locations: choices })
+    await expect(
+      api.updateEventType(ctx, saved.id, { title: 'Editor save' }),
+    ).resolves.toMatchObject({ locations: choices })
+    for (const patch of [
+      { locations: choices },
+      { hosts: [{ userId: owner.id }] },
+      { scheduleId: null },
+      { conferenceOrganizer: null },
+      { zoomConnectionId: null },
+    ])
+      await expect(api.updateEventType(ctx, saved.id, patch)).rejects.toMatchObject({
+        code: 'automatic_meet_unavailable',
+      })
+    await api.updateEventType(ctx, saved.id, { isActive: false })
+    await expect(api.updateEventType(ctx, saved.id, { isActive: true })).rejects.toMatchObject({
+      code: 'automatic_meet_unavailable',
+    })
+  }
+  it('preserves unready automatic options on legacy echo saves while explicit readiness changes are checked', () =>
+    verifyConferenceEcho())
+
   async function verifyZoom(api: Services = events) {
     const { owner, host, ctx } = await teamContext()
     const hosts = [{ userId: owner.id }, { userId: host.id }]
@@ -373,10 +565,17 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
     const api = await sourceCopy()
     await verifyRoundTrip(api)
     await verifyLegacy(api)
+    await verifyLegacyEcho(api)
+    await verifyHistoricalEcho(api)
+    await verifyLegacySettings(api)
+    await verifyLegacyIdentity(api)
+    await verifyLegacyConflict(api)
+    await verifyLegacyPhone(api)
     await verifyConflict(api)
     await verifyValidation(api)
     await verifyProjection(api)
     await verifyMeet(api)
+    await verifyConferenceEcho(api)
     await verifyZoom(api)
     await verifyBothConferences(api)
   })
@@ -387,18 +586,67 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       ['input.location !== undefined && input.locations !== undefined', 'false'],
       verifyConflict,
     ],
+    ['legacy conversion', ['locationOptionsFromLegacy(location)', 'null'], verifyLegacy],
     [
-      'legacy conversion',
+      'legacy update preservation',
       [
-        'result.locations = locationOptionsFromLegacy(validLocation(input.location))',
-        'result.locations = null',
+        'return result\n    const location',
+        'return { ...result, locations: locationOptionsFromLegacy(validLocation(input.location)) }\n    const location',
       ],
-      verifyLegacy,
+      verifyLegacyEcho,
+    ],
+    [
+      'exact historical echo before legacy validation',
+      ['isLegacyLocationEcho(currentLocations, input.location)', 'false'],
+      verifyHistoricalEcho,
+    ],
+    [
+      'trusted stored options on unrelated writes',
+      ['changes.locations !== undefined,', 'true,'],
+      verifyHistoricalEcho,
+    ],
+    [
+      'legacy echo avoids row rewrites',
+      ["name !== 'location' && input[name] !== undefined", 'input[name] !== undefined'],
+      verifyLegacyEcho,
+    ],
+    [
+      'singleton legacy settings identity',
+      ['applyLegacyLocation(currentLocations, location)', 'locationOptionsFromLegacy(location)'],
+      verifyLegacySettings,
+    ],
+    [
+      'kind change and recreation identity',
+      ['applyLegacyLocation(currentLocations, location)', 'locationOptionsFromLegacy(location)'],
+      verifyLegacyIdentity,
+    ],
+    [
+      'rich option legacy conflict',
+      ['applyLegacyLocation(currentLocations, location)', 'locationOptionsFromLegacy(location)'],
+      verifyLegacyConflict,
+    ],
+    [
+      'invitee-phone compatibility',
+      ['return { kind, askInvitee: true }', "return fail('Invitee phone unsupported')"],
+      verifyLegacyPhone,
+    ],
+    [
+      'exclusive legacy phone modes',
+      ['value.askInvitee !== true || value.number !== undefined', 'value.askInvitee !== true'],
+      verifyLegacyPhone,
+    ],
+    [
+      'legacy invitee phone opt-in type',
+      [
+        'value.askInvitee !== true || value.number !== undefined',
+        'false || value.number !== undefined',
+      ],
+      verifyLegacyPhone,
     ],
     [
       'write validation',
       [
-        'const locations = validateLocationOptions(c.locations)',
+        'const locations = validateLocations\n    ? validateLocationOptions(c.locations)\n    : (c.locations as LocationOption[] | null)',
         'const locations = c.locations as LocationOption[] | null',
       ],
       verifyValidation,
@@ -430,6 +678,14 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       verifyProjection,
     ],
     [
+      'legacy echoes avoid conference revalidation',
+      [
+        'changes.locations !== undefined ||',
+        'input.location !== undefined || changes.locations !== undefined ||',
+      ],
+      verifyConferenceEcho,
+    ],
+    [
       'all-option Meet rules',
       [
         'if (!locations?.some(automaticMeet)) return',
@@ -455,7 +711,7 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
     ],
     [
       'location replacement readiness',
-      ['input.locations !== undefined ||', 'false ||'],
+      ['changes.locations !== undefined ||', 'false ||'],
       verifyMeet,
     ],
     [
