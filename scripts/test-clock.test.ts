@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { offsetTestClock } from './test-clock.ts'
 
 describe('optional wall-clock offset', () => {
-  it.each([7, 30, 90, 400])('moves Date and every Temporal.Now read by %i days', (days) => {
+  it.each([7, 30, 90, 400, 1600])('moves Date and every Temporal.Now read by %i days', (days) => {
     const OriginalDate = Date
     const existing = new OriginalDate(0)
     const originalNow = Temporal.Now

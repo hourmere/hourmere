@@ -19,6 +19,7 @@ import {
 import { createNotificationSnapshot } from '@hourmere/scheduling/notification-settings'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fakeSmtpServer } from '../../../packages/mail/src/smtp-testing.ts'
 import { type RunningServer, startServer } from './server.ts'
@@ -729,7 +730,14 @@ describe.skipIf(!serverUrl)('startServer', () => {
     const db = createDb(testDb.pool)
     const f = createFixtures(db)
     const host = await f.host()
-    const now = Temporal.Now.instant().round({ smallestUnit: 'second', roundingMode: 'floor' })
+    // pg-boss and scheduled-message eligibility use PostgreSQL's unshifted clock.
+    const { now: databaseNow } = await db
+      .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
+      .executeTakeFirstOrThrow()
+    const now = Temporal.Instant.from(databaseNow.toISOString()).round({
+      smallestUnit: 'second',
+      roundingMode: 'floor',
+    })
     const end = now.subtract({ minutes: 10 })
     const hostNote = 'StoredHostNoteFromBeforeOperatorSwitch'
     const bookingId = await f.booking(
@@ -765,6 +773,14 @@ describe.skipIf(!serverUrl)('startServer', () => {
     const smtp = fakeSmtpServer()
     let worker: RunningServer | undefined
     await new Promise<void>((resolve) => smtp.server.listen(0, '127.0.0.1', resolve))
+    // This real worker also checks message expiry in Temporal and SMTP lease
+    // budgets in Date.now. Let both tick from the same database clock.
+    const started = performance.now()
+    const wallNow = () => databaseNow.getTime() + Math.trunc(performance.now() - started)
+    const messageClock = vi
+      .spyOn(Temporal.Now, 'instant')
+      .mockImplementation(() => Temporal.Instant.fromEpochMilliseconds(wallNow()))
+    const smtpClock = vi.spyOn(Date, 'now').mockImplementation(wallNow)
     try {
       await producer.start()
       await db.transaction().execute((trx) =>
@@ -812,11 +828,16 @@ describe.skipIf(!serverUrl)('startServer', () => {
         ).notification_snapshot,
       ).toEqual(snapshot)
     } finally {
-      await worker?.close()
-      await producer.stop()
-      for (const socket of smtp.sockets) socket.destroy()
-      await new Promise<void>((resolve) => smtp.server.close(() => resolve()))
-      await db.deleteFrom('auth.user').where('id', '=', host.userId).execute()
+      try {
+        await worker?.close()
+        await producer.stop()
+        for (const socket of smtp.sockets) socket.destroy()
+        await new Promise<void>((resolve) => smtp.server.close(() => resolve()))
+        await db.deleteFrom('auth.user').where('id', '=', host.userId).execute()
+      } finally {
+        messageClock.mockRestore()
+        smtpClock.mockRestore()
+      }
     }
   }
 

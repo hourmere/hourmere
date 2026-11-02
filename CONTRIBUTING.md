@@ -47,7 +47,7 @@ npm test            # Vitest; database tests are skipped unless DATABASE_URL is 
 npm run build
 ```
 
-An optional clock diagnostic runs the same suite at +7, +30, +90 and +400 days:
+An optional clock diagnostic runs the same suite at +7, +30, +90, +400 and +1600 days:
 
 ```sh
 DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run test:clock
