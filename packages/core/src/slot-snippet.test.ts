@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { JSDOM } from 'jsdom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { interfaceLanguage } from './language.ts'
 import { type InterfaceLanguage, localeRegistry } from './locales.ts'
 import { isPublicTeamSlug, isReservedName } from './reserved.ts'
@@ -14,6 +14,7 @@ import {
   resolveSnippetTimeZone,
   type SlotSnippet,
   type SlotSnippetInput,
+  snippetTimeZone,
 } from './slot-snippet.ts'
 
 const BASE: SlotSnippetInput = {
@@ -91,6 +92,48 @@ function verifyHrefEscaping(format: Renderer) {
   expect(format(BASE).html).toContain('&amp;durationMinutes=30')
 }
 
+function verifyLabelEscaping(format: Renderer) {
+  const markup = `<img src=x onerror=alert(1)> & "quoted" 'label'`
+  // Feed markup through the real label formatter, without widening the public renderer input.
+  const formatter = vi
+    .spyOn(Intl.DateTimeFormat.prototype, 'format', 'get')
+    .mockImplementation(() => () => markup)
+  try {
+    const result = format(BASE)
+    const document = new JSDOM(result.html).window.document
+    const link = document.querySelector('a')
+    expect(result.slots[0]?.label).toContain(markup)
+    expect(link?.textContent).toBe(result.slots[0]?.label)
+    expect(link?.children).toHaveLength(0)
+    expect(document.querySelectorAll('img,[onerror]')).toHaveLength(0)
+    expect(result.html).toContain('&lt;img src=x onerror=alert(1)&gt; &amp;')
+    expect(result.html).toContain('&quot;quoted&quot; &#39;label&#39;')
+    expect(result.text).toContain(result.slots[0]?.label)
+  } finally {
+    formatter.mockRestore()
+  }
+}
+
+const proofreadNotices = {
+  en: 'These times are not reserved and may no longer be available. Each link opens the booking page with that time selected. Confirm your booking there if the time is still available.',
+  'zh-CN':
+    '这些时间不会被预留，打开链接时可能已不可约。每个链接都会打开预约页面，并预选对应的时间。若该时间仍可约，请在页面上确认预约。',
+  de: 'Diese Termine sind nicht reserviert und möglicherweise nicht mehr verfügbar. Jeder Link führt zur Buchungsseite, auf der der entsprechende Termin vorausgewählt ist. Bestätigen Sie Ihre Buchung dort, wenn der Termin noch verfügbar ist.',
+  fr: 'Ces créneaux ne sont pas réservés et peuvent ne plus être disponibles. Chaque lien ouvre la page de réservation avec le créneau correspondant présélectionné. Confirmez votre réservation sur cette page si le créneau est toujours disponible.',
+  es: 'Estos horarios no están reservados y es posible que ya no estén disponibles. Cada enlace abre la página de reservas con el horario correspondiente preseleccionado. Confirme su reserva en esa página si el horario sigue disponible.',
+  'pt-BR':
+    'Estes horários não estão reservados e podem não estar mais disponíveis. Cada link abre a página de agendamento com o horário correspondente já selecionado. Confirme seu agendamento nessa página se o horário ainda estiver disponível.',
+} satisfies Record<InterfaceLanguage, string>
+
+function verifyProofreadNotices(format: Renderer) {
+  for (const [locale, notice] of Object.entries(proofreadNotices)) {
+    const result = format({ ...BASE, locale: locale as InterfaceLanguage })
+    const document = new JSDOM(result.html).window.document
+    expect(result.text.endsWith(`\n\n${notice}`)).toBe(true)
+    expect(document.querySelector('div')?.lastElementChild?.textContent).toBe(notice)
+  }
+}
+
 function verifyTitleNormalization(format: Renderer) {
   const result = format({ ...BASE, title: 'A\r\nB\tC\u0085D\u2028E\u2029F\u202eG\u2066H\u0000I' })
   expect(result.text.split('\n')[0]).toBe('Available times for A B C D E FGHI (30 minutes)')
@@ -124,7 +167,7 @@ function verifyLocaleZone(format: Renderer) {
   for (const locale of ['en-US', 'zh', 'unknown', '__proto__']) {
     expect(() => format({ ...BASE, locale: locale as InterfaceLanguage })).toThrow('invalid_locale')
   }
-  for (const displayTimeZone of ['-05:00', '+01', 'EST', 'CST', 'GMT', 'invalid/zone']) {
+  for (const displayTimeZone of ['-05:00', '+01', 'EST', 'EST5EDT', 'CST', 'GMT', 'invalid/zone']) {
     expect(() => format({ ...BASE, displayTimeZone })).toThrow('invalid_time_zone')
   }
 }
@@ -166,6 +209,41 @@ function verifyMidnight(format: Renderer) {
   expect(result.slots[0]?.label).toBe(
     'Tue, June 15, 2027, 11:30 PM – Wed, June 16, 2027, 12:30 AM [Asia/Tokyo, UTC+09:00]',
   )
+}
+
+function verifyChineseLabels(format: Renderer) {
+  for (const [start, durationMinutes, displayTimeZone, expected] of [
+    ['2027-06-15T14:30:00Z', 60, 'UTC', '2027年6月15日周二，14:30至15:30［UTC，UTC+00:00］'],
+    [
+      '2027-06-15T14:30:00Z',
+      60,
+      'Asia/Tokyo',
+      '2027年6月15日周二，23:30至2027年6月16日周三，0:30［Asia/Tokyo，UTC+09:00］',
+    ],
+    [
+      '2027-03-14T06:30:00Z',
+      60,
+      'America/New_York',
+      '2027年3月14日周日，1:30（UTC-05:00）至3:30（UTC-04:00）［America/New_York］',
+    ],
+    [
+      '2027-03-14T04:30:00Z',
+      180,
+      'America/New_York',
+      '2027年3月13日周六，23:30（UTC-05:00）至2027年3月14日周日，3:30（UTC-04:00）［America/New_York］',
+    ],
+  ] as const) {
+    const result = format({
+      ...BASE,
+      starts: [start],
+      locale: 'zh-CN',
+      durationMinutes,
+      displayTimeZone,
+    })
+    expect(result.slots[0]?.label).toBe(expected)
+    expect(result.text).toContain(expected)
+    expect(new JSDOM(result.html).window.document.querySelector('a')?.textContent).toBe(expected)
+  }
 }
 
 function verifyUrlLimit(format: Renderer) {
@@ -216,6 +294,9 @@ describe('portable slot snippet renderer', () => {
     expect(resolveSnippetTimeZone(undefined)).toBe('UTC')
     expect(resolveSnippetTimeZone('EST')).toBe('UTC')
     expect(resolveSnippetTimeZone('america/new_york')).toBe('America/New_York')
+    expect(snippetTimeZone('america/new_york')).toBe('America/New_York')
+    expect(() => snippetTimeZone('EST5EDT')).toThrow('invalid_time_zone')
+    expect(() => snippetTimeZone('invalid/zone')).toThrow('invalid_time_zone')
     verifyLocaleZone(formatSlotSnippet)
   })
 
@@ -273,6 +354,18 @@ describe('portable slot snippet renderer', () => {
     expect(buildSlotSnippetLink(BASE.publicUrl, BASE.address, BASE.starts[0] ?? '', 30)).toBe(
       'https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=30',
     )
+  })
+
+  it('escapes markup produced by time label formatting without changing visible or plain text', () => {
+    verifyLabelEscaping(formatSlotSnippet)
+  })
+
+  it('uses the proofread availability and booking-page notice in every email language', () => {
+    verifyProofreadNotices(formatSlotSnippet)
+  })
+
+  it('uses Chinese interval punctuation while preserving dates, named zones and endpoint offsets', () => {
+    verifyChineseLabels(formatSlotSnippet)
   })
 
   it('uses each endpoint offset and shows both full dates across midnight', () => {
@@ -382,6 +475,21 @@ describe('slot snippet source-copy mutations', () => {
       replacement: ['escapeHtml(slot.url)', 'slot.url'],
       verify: verifyHrefEscaping,
     },
+    {
+      name: 'time label escaping',
+      replacement: ['escapeHtml(slot.label)', 'slot.label'],
+      verify: verifyLabelEscaping,
+    },
+    {
+      name: 'Chinese interval punctuation',
+      replacement: ["if (language === 'zh-CN') {", 'if (false) {'],
+      verify: verifyChineseLabels,
+    },
+    ...Object.entries(proofreadNotices).map(([locale, notice]) => ({
+      name: `proofread ${locale} notice`,
+      replacement: [notice, 'Times are reserved.'] as Replacement,
+      verify: verifyProofreadNotices,
+    })),
     {
       name: 'title controls and bidi removal',
       replacement: [".replace(FORBIDDEN_CONTROLS, '')", ''],

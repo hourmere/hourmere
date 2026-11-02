@@ -20,7 +20,13 @@ export default defineConfig<FixtureOptions>({
     navigationTimeout: 15_000,
   },
   testIgnore: [],
-  testMatch: `**/${suite}.spec.ts`,
+  // The host-copy regression checks paste from the system clipboard across engines.
+  // Serialize this lane so another browser cannot replace its clipboard mid-assertion.
+  workers: suite === 'cross-engine' ? 1 : functional.workers,
+  testMatch:
+    suite === 'cross-engine'
+      ? ['**/cross-engine.spec.ts', '**/host-slot-picker.spec.ts']
+      : `**/${suite}.spec.ts`,
   timeout: ['layout', 'a11y'].includes(suite) ? 240_000 : 120_000,
   // Preserve only masked visual comparisons, never traces, video or failure DOM.
   preserveOutput: suite === 'visual' ? 'failures-only' : 'never',

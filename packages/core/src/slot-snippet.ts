@@ -59,29 +59,33 @@ export class SlotSnippetError extends Error {
 export const slotSnippetTemplates = {
   en: {
     heading: 'Available times for {title} ({duration})',
-    notice: 'These times are not reserved. Choose a time and confirm your booking.',
+    notice:
+      'These times are not reserved and may no longer be available. Each link opens the booking page with that time selected. Confirm your booking there if the time is still available.',
   },
   'zh-CN': {
     heading: '「{title}」的可预约时间（{duration}）',
-    notice: '这些时间尚未预留。请选择一个时间，并确认预约。',
+    notice:
+      '这些时间不会被预留，打开链接时可能已不可约。每个链接都会打开预约页面，并预选对应的时间。若该时间仍可约，请在页面上确认预约。',
   },
   de: {
     heading: 'Verfügbare Termine für {title} ({duration})',
     notice:
-      'Diese Termine sind nicht reserviert. Wählen Sie einen Termin und bestätigen Sie Ihre Buchung.',
+      'Diese Termine sind nicht reserviert und möglicherweise nicht mehr verfügbar. Jeder Link führt zur Buchungsseite, auf der der entsprechende Termin vorausgewählt ist. Bestätigen Sie Ihre Buchung dort, wenn der Termin noch verfügbar ist.',
   },
   fr: {
     heading: 'Créneaux disponibles pour {title} ({duration})',
     notice:
-      'Ces créneaux ne sont pas réservés. Choisissez un créneau et confirmez votre réservation.',
+      'Ces créneaux ne sont pas réservés et peuvent ne plus être disponibles. Chaque lien ouvre la page de réservation avec le créneau correspondant présélectionné. Confirmez votre réservation sur cette page si le créneau est toujours disponible.',
   },
   es: {
     heading: 'Horarios disponibles para {title} ({duration})',
-    notice: 'Estos horarios no están reservados. Elija uno y confirme su reserva.',
+    notice:
+      'Estos horarios no están reservados y es posible que ya no estén disponibles. Cada enlace abre la página de reservas con el horario correspondiente preseleccionado. Confirme su reserva en esa página si el horario sigue disponible.',
   },
   'pt-BR': {
     heading: 'Horários disponíveis para {title} ({duration})',
-    notice: 'Estes horários não estão reservados. Escolha um horário e confirme sua reserva.',
+    notice:
+      'Estes horários não estão reservados e podem não estar mais disponíveis. Cada link abre a página de agendamento com o horário correspondente já selecionado. Confirme seu agendamento nessa página se o horário ainda estiver disponível.',
   },
 } as const satisfies Record<InterfaceLanguage, { heading: string; notice: string }>
 
@@ -96,7 +100,7 @@ function snippetLocale(value: unknown): InterfaceLanguage {
   return value as InterfaceLanguage
 }
 
-function snippetTimeZone(value: unknown): string {
+export function snippetTimeZone(value: unknown): string {
   // Abbreviations and numeric offsets are ambiguous; accept a named identifier or UTC.
   if (
     typeof value !== 'string' ||
@@ -305,6 +309,12 @@ export function formatSlotLabel(
   const endOffset = offset(last)
   const datesDiffer = startDate !== endDate
   const offsetsDiffer = startOffset !== endOffset
+  if (language === 'zh-CN') {
+    if (offsetsDiffer) {
+      return `${startDate}，${startTime}（${startOffset}）至${datesDiffer ? `${endDate}，` : ''}${endTime}（${endOffset}）［${zone}］`
+    }
+    return `${startDate}，${startTime}至${datesDiffer ? `${endDate}，` : ''}${endTime}［${zone}，${startOffset}］`
+  }
   if (offsetsDiffer) {
     return `${startDate}, ${startTime} (${startOffset}) – ${datesDiffer ? `${endDate}, ` : ''}${endTime} (${endOffset}) [${zone}]`
   }

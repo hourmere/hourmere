@@ -156,7 +156,7 @@ jobs:
         run: npx playwright install webkit firefox
       - name: Install only missing browser system dependencies
         run: npx playwright install-deps --dry-run webkit firefox || npx playwright install-deps webkit firefox
-      - name: Run cross-engine measurement
+      - name: Run cross-engine booking and host slot-copy tests
         env:
           HOURMERE_UI_BLOCKING: "1"
         run: node tools/e2e/run-audit.ts cross-engine

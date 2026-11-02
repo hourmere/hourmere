@@ -7,6 +7,8 @@ import * as react from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { codeOf, eventSlots, getEventType } from '../../public/api.ts'
+import { addDays, parseDateKey } from '../../public/calendar.ts'
+import { dateKeyIn, instantOf } from '../../public/time.ts'
 import { fakeApi, json, later, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import type { HostSlotPicker, HostSlotPickerProps } from './HostSlotPicker.tsx'
@@ -19,7 +21,7 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'clipboard')
 })
 
-const DAY = new Date().toISOString().slice(0, 10)
+const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
 const START = `${DAY}T09:00:00.000Z`
 const END = `${DAY}T09:30:00.000Z`
 const META = 'GET /api/v1/public/ada/intro-call'
@@ -39,7 +41,7 @@ const props = (overrides: Partial<HostSlotPickerProps> = {}): HostSlotPickerProp
   verifyAccess: vi.fn(async () => {}),
   ...overrides,
 })
-function component(code: string): typeof HostSlotPicker {
+function component(code: string, overrides: Record<string, unknown> = {}): typeof HostSlotPicker {
   const compiled = execFileSync(
     process.execPath,
     [
@@ -57,11 +59,16 @@ function component(code: string): typeof HostSlotPicker {
     useState: react.useState,
     ...snippet,
     registeredLocales,
-    timeZoneNames: () => ['UTC', 'Europe/Berlin'],
+    timeZoneNames: () => ['UTC', 'Europe/Berlin', 'EST5EDT'],
     useI18n,
     eventSlots,
     getEventType,
     codeOf,
+    dateKeyIn,
+    instantOf,
+    addDays,
+    parseDateKey,
+    ...overrides,
   }
   return new Function('reactRuntime', ...Object.keys(deps), `${compiled}; return HostSlotPicker`)(
     react,
@@ -77,7 +84,7 @@ async function detects(before: string, after: string, assertion: (code: string) 
   await expect(assertion(mutate(before, after))).rejects.toMatchObject({ name: 'AssertionError' })
   await assertion(production)
 }
-const available = () => within(screen.getByRole('group', { name: 'Available alternatives' }))
+const available = () => within(screen.getByRole('group', { name: 'Available times' }))
 async function choose(indices = [0]) {
   await waitFor(() => expect(available().queryAllByRole('checkbox').length).toBeGreaterThan(0))
   for (const index of indices)
@@ -92,6 +99,27 @@ function clipboard() {
   const write = vi.fn(async (_items: unknown[]) => {})
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText, write } })
   return { writeText, write }
+}
+class PromiseItem {
+  readonly data: Record<string, Blob | Promise<Blob>>
+  constructor(data: Record<string, Blob | Promise<Blob>>) {
+    this.data = data
+  }
+  get types() {
+    return Object.keys(this.data)
+  }
+  async getType(type: string) {
+    return await this.data[type]
+  }
+}
+function promiseClipboard() {
+  const clip = clipboard()
+  vi.stubGlobal('ClipboardItem', PromiseItem)
+  clip.write.mockImplementation(async (items) => {
+    for (const item of items as PromiseItem[])
+      await Promise.all(item.types.map((type) => item.getType(type)))
+  })
+  return clip
 }
 function server() {
   return fakeApi({
@@ -168,9 +196,9 @@ describe('host picker production-source protections', () => {
           recheck = true
           fireEvent.click(screen.getByRole('button', { name: 'Copy plain text' }))
           await screen.findByText(
-            'Some selected times are no longer offered. Nothing was copied. Remove those times explicitly before trying again.',
+            'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.',
           )
-          expect(screen.queryByText('1 of 10 alternatives selected')).not.toBeNull()
+          expect(screen.queryByText('Selected times: 1 (maximum 10)')).not.toBeNull()
           expect(screen.queryByRole('button', { name: /^Remove / })).not.toBeNull()
         } finally {
           view.unmount()
@@ -190,7 +218,7 @@ describe('host picker production-source protections', () => {
         fireEvent.change(screen.getByRole('combobox', { name: 'Meeting length' }), {
           target: { value: '60' },
         })
-        expect(screen.queryByText('0 of 10 alternatives selected')).not.toBeNull()
+        expect(screen.queryByText('Selected times: 0 (maximum 10)')).not.toBeNull()
       } finally {
         view.unmount()
       }
@@ -277,7 +305,7 @@ describe('host picker production-source protections', () => {
 
   it('detects removing the second current-role check', async () => {
     const before =
-      '      await verifyAccess()\n      if (!current()) return\n      const canonicalAddress'
+      "      await verifyAccess()\n      if (!current()) throw new Error('copy_cancelled')\n      const canonicalAddress"
     await detects(before, before.replace('      await verifyAccess()\n', ''), async (code) => {
       server()
       const clip = clipboard()
@@ -340,7 +368,7 @@ describe('host picker production-source protections', () => {
       try {
         expect(
           screen.queryByText(
-            'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.',
+            'This event type is unlisted. Anyone with these links can open the booking page and book an available time.',
           ),
         ).not.toBeNull()
       } finally {
@@ -351,15 +379,18 @@ describe('host picker production-source protections', () => {
 
   it('detects a rich clipboard missing its complete plain-text alternative', async () => {
     await detects(
-      "              'text/plain': new Blob([snippet.text], { type: 'text/plain' }),\n",
-      '',
+      "kind === 'rich' ? { 'text/plain': plain, 'text/html': html } : { 'text/plain': plain }",
+      "kind === 'rich' ? { 'text/html': html } : { 'text/plain': plain }",
       async (code) => {
         server()
         const clip = clipboard()
         class Item {
-          data: Record<string, Blob>
-          constructor(data: Record<string, Blob>) {
+          data: Record<string, Blob | Promise<Blob>>
+          constructor(data: Record<string, Blob | Promise<Blob>>) {
             this.data = data
+          }
+          getType(type: string) {
+            return Promise.resolve(this.data[type] as Blob | Promise<Blob>)
           }
         }
         vi.stubGlobal('ClipboardItem', Item)
@@ -416,7 +447,7 @@ describe('host picker production-source protections', () => {
       const view = render(<Picker {...props()} />)
       try {
         await choose([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        expect(screen.queryByText('10 of 10 alternatives selected')).not.toBeNull()
+        expect(screen.queryByText('Selected times: 10 (maximum 10)')).not.toBeNull()
         expect(available().getAllByRole<HTMLInputElement>('checkbox')[10]?.checked).toBe(false)
       } finally {
         view.unmount()
@@ -447,7 +478,7 @@ describe('host picker production-source protections', () => {
         try {
           await choose([1, 0])
           const selected = within(
-            screen.getByRole('group', { name: 'Selected alternatives' }),
+            screen.getByRole('group', { name: 'Selected times' }),
           ).getAllByRole('listitem')
           expect(selected[0]?.textContent).toContain(
             snippet.formatSlotLabel(START, END, 'en', PROFILE.timeZone),
@@ -473,7 +504,7 @@ describe('host picker production-source protections', () => {
           fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
             target: { value: 'fr' },
           })
-          expect(screen.queryByText('1 of 10 alternatives selected')).not.toBeNull()
+          expect(screen.queryByText('Selected times: 1 (maximum 10)')).not.toBeNull()
           expect(client.to(ROUTE)).toHaveLength(1)
         } finally {
           view.unmount()
@@ -512,14 +543,17 @@ describe('host picker production-source protections', () => {
       const next = { start: `${tomorrow}T10:00:00.000Z`, end: `${tomorrow}T10:30:00.000Z` }
       fakeApi({
         [ROUTE]: ({ path }) =>
-          new URL(path, location.origin).searchParams.get('start')?.startsWith(DAY)
+          dateKeyIn(
+            Date.parse(new URL(path, location.origin).searchParams.get('start') ?? ''),
+            PROFILE.timeZone,
+          ) === DAY
             ? pending.response
             : json(200, { data: [next] }),
       })
       const Picker = component(code)
       const view = render(<Picker {...props()} />)
       try {
-        fireEvent.change(screen.getByLabelText('Availability date (UTC)'), {
+        fireEvent.change(screen.getByLabelText(`Availability date (${PROFILE.timeZone})`), {
           target: { value: tomorrow },
         })
         await choose()
@@ -548,7 +582,7 @@ describe('host picker production-source protections', () => {
           await choose()
           await preview()
           view.rerender(<Picker {...value} event={eventType({ id: 'different-event' })} />)
-          expect(screen.queryByText('0 of 10 alternatives selected')).not.toBeNull()
+          expect(screen.queryByText('Selected times: 0 (maximum 10)')).not.toBeNull()
           expect(
             screen.queryByRole('textbox', { name: 'Complete plain-text email preview' }),
           ).toBeNull()
@@ -591,7 +625,9 @@ describe('host picker production-source protections', () => {
       try {
         await choose()
         fireEvent.click(screen.getByRole('button', { name: 'Preview email' }))
-        await waitFor(() => expect(screen.queryByText('Checking preview access…')).toBeNull())
+        await waitFor(() =>
+          expect(screen.queryByText('Checking that you can preview these times…')).toBeNull(),
+        )
         expect(
           screen.queryByRole('textbox', { name: 'Complete plain-text email preview' }),
         ).toBeNull()
@@ -624,7 +660,7 @@ describe('host picker production-source protections', () => {
         try {
           await choose()
           fireEvent.click(screen.getByRole('button', { name: 'Preview email' }))
-          await screen.findByText('Checking preview access…')
+          await screen.findByText('Checking that you can preview these times…')
           view.rerender(<Picker {...value} disabled={true} />)
           await react.act(async () => {
             answer()
@@ -638,5 +674,403 @@ describe('host picker production-source protections', () => {
         }
       },
     )
+  })
+
+  it.each(['plain', 'rich'] as const)(
+    'detects deferring the %s clipboard call beyond the click activation',
+    async (kind) => {
+      await detects(
+        'writing = navigator.clipboard.write([item])',
+        'writing = Promise.resolve().then(() => navigator.clipboard.write([item]))',
+        async (code) => {
+          server()
+          const clip = promiseClipboard()
+          let release = () => {}
+          const pending = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          const verifyAccess = vi.fn(async () => {})
+          const Picker = component(code)
+          const view = render(<Picker {...props({ verifyAccess })} />)
+          try {
+            await choose()
+            await preview()
+            verifyAccess.mockImplementationOnce(() => pending)
+            fireEvent.click(
+              screen.getByRole('button', {
+                name: kind === 'plain' ? 'Copy plain text' : 'Copy rich text',
+              }),
+            )
+            expect(clip.write).toHaveBeenCalledOnce()
+          } finally {
+            await react.act(async () => {
+              release()
+              await pending
+            })
+            view.unmount()
+          }
+        },
+      )
+    },
+  )
+
+  it('detects resolving the clipboard data after a recheck failure', async () => {
+    await detects(
+      'rejectSnippet(error)',
+      "resolveSnippet({ text: 'unchecked', html: '<p>unchecked</p>' })",
+      async (code) => {
+        let recheck = false
+        fakeApi({
+          [META]: () => json(200, publicEvent),
+          [ROUTE]: () => json(200, { data: recheck ? [] : [{ start: START, end: END }] }),
+        })
+        const clip = promiseClipboard()
+        const Picker = component(code)
+        const view = render(<Picker {...props()} />)
+        try {
+          await choose()
+          await preview()
+          recheck = true
+          fireEvent.click(screen.getByRole('button', { name: 'Copy rich text' }))
+          await waitFor(() => expect(screen.queryByText('Checking selected times…')).toBeNull())
+          const item = clip.write.mock.calls[0]?.[0]?.[0] as PromiseItem
+          const result = await Promise.allSettled(item.types.map((type) => item.getType(type)))
+          expect(result.map(({ status }) => status)).toEqual(['rejected', 'rejected'])
+        } finally {
+          view.unmount()
+        }
+      },
+    )
+  })
+
+  it('detects accepting a legacy constructor that stringifies promise data', async () => {
+    await detects(
+      'value.size === probe.size && value.type === probe.type',
+      'true',
+      async (code) => {
+        server()
+        const clip = clipboard()
+        class LegacyItem {
+          value: Blob
+          constructor(data: Record<string, unknown>) {
+            this.value = new Blob([String(data['text/plain'])], { type: 'text/plain' })
+          }
+          async getType() {
+            return this.value
+          }
+        }
+        vi.stubGlobal('ClipboardItem', LegacyItem)
+        const Picker = component(code)
+        const view = render(<Picker {...props()} />)
+        try {
+          await choose()
+          await preview()
+          fireEvent.click(screen.getByRole('button', { name: 'Copy rich text' }))
+          await waitFor(() => expect(screen.queryByText('Checking selected times…')).toBeNull())
+          expect(clip.write).not.toHaveBeenCalled()
+          expect(
+            screen.queryByText(
+              'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.',
+            ),
+          ).not.toBeNull()
+        } finally {
+          view.unmount()
+        }
+      },
+    )
+  })
+
+  it('detects disabling the focused copy button while checking', async () => {
+    const before =
+      "disabled={disabled}\n              aria-disabled={busy}\n              onClick={(click) => {\n                click.currentTarget.focus()\n                void copy('plain')\n              }}"
+    await detects(
+      before,
+      before.replace('disabled={disabled}', 'disabled={disabled || busy}'),
+      async (code) => {
+        server()
+        clipboard()
+        let release = () => {}
+        const pending = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        const verifyAccess = vi.fn(async () => {})
+        const Picker = component(code)
+        const view = render(<Picker {...props({ verifyAccess })} />)
+        try {
+          await choose()
+          await preview()
+          verifyAccess.mockImplementationOnce(() => pending)
+          const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Copy plain text' })
+          react.act(() => button.focus())
+          fireEvent.click(button)
+          expect(button.disabled).toBe(false)
+          expect(document.activeElement).toBe(button)
+        } finally {
+          await react.act(async () => {
+            release()
+            await pending
+          })
+          view.unmount()
+        }
+      },
+    )
+  })
+
+  it('detects losing focus when the stale preview controls are removed', async () => {
+    await detects('retry.current?.focus()', '', async (code) => {
+      let recheck = false
+      fakeApi({
+        [META]: () => json(200, publicEvent),
+        [ROUTE]: () => json(200, { data: recheck ? [] : [{ start: START, end: END }] }),
+      })
+      clipboard()
+      const Picker = component(code)
+      const view = render(<Picker {...props()} />)
+      try {
+        await choose()
+        await preview()
+        recheck = true
+        const button = screen.getByRole('button', { name: 'Copy plain text' })
+        react.act(() => button.focus())
+        fireEvent.click(button)
+        await waitFor(() => expect(screen.queryByText('Checking selected times…')).toBeNull())
+        expect(document.activeElement).toBe(
+          screen.getByRole('button', { name: 'Check availability again' }),
+        )
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it.each(['plain', 'rich'] as const)(
+    'detects omitting focus on the %s copy click',
+    async (kind) => {
+      const before = `click.currentTarget.focus()\n                void copy('${kind}')`
+      await detects(before, `void copy('${kind}')`, async (code) => {
+        server()
+        clipboard()
+        const Picker = component(code)
+        const view = render(<Picker {...props()} />)
+        try {
+          await choose()
+          await preview()
+          const button = screen.getByRole('button', {
+            name: kind === 'plain' ? 'Copy plain text' : 'Copy rich text',
+          })
+          expect(document.activeElement).not.toBe(button)
+          fireEvent.click(button)
+          expect(document.activeElement).toBe(button)
+        } finally {
+          view.unmount()
+        }
+      })
+    },
+  )
+
+  it('detects hiding the focus recovery button while the new display day loads', async () => {
+    const start = production.lastIndexOf('<button', production.indexOf('ref={retry}'))
+    const end = production.indexOf('</button>', start) + '</button>'.length
+    const before = production.slice(start, end)
+    await detects(before, `{!loading && (${before})}`, async (code) => {
+      let loadingDay = false
+      const pending = later()
+      fakeApi({
+        [META]: () => json(200, publicEvent),
+        [ROUTE]: ({ path }) => {
+          const query = new URL(path, location.origin).searchParams
+          const exact =
+            Date.parse(query.get('end') ?? '') - Date.parse(query.get('start') ?? '') ===
+            30 * 60_000
+          return loadingDay
+            ? exact
+              ? json(200, { data: [] })
+              : pending.response
+            : json(200, { data: [{ start: START, end: END }] })
+        },
+      })
+      clipboard()
+      const Picker = component(code)
+      const view = render(<Picker {...props()} />)
+      try {
+        await choose()
+        await preview()
+        loadingDay = true
+        fireEvent.change(screen.getByLabelText(`Availability date (${PROFILE.timeZone})`), {
+          target: { value: addDays(DAY, 1) },
+        })
+        const button = screen.getByRole('button', { name: 'Copy plain text' })
+        react.act(() => button.focus())
+        fireEvent.click(button)
+        await waitFor(() => expect(screen.queryByText('Checking selected times…')).toBeNull())
+        expect(screen.queryByRole('button', { name: 'Check availability again' })).not.toBeNull()
+        expect(document.activeElement).not.toBe(document.body)
+      } finally {
+        await pending.answer(json(200, { data: [] }))
+        view.unmount()
+      }
+    })
+  })
+
+  it('detects removing the availability-failure live region', async () => {
+    const before =
+      '<p role="alert">{t(\'We could not load available times. Please try again.\')}</p>'
+    await detects(before, before.replace(' role="alert"', ''), async (code) => {
+      fakeApi({ [ROUTE]: () => json(403, { error: 'forbidden' }) })
+      const Picker = component(code)
+      const view = render(<Picker {...props()} />)
+      try {
+        await screen.findByText('We could not load available times. Please try again.')
+        expect(screen.queryByRole('alert')).not.toBeNull()
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it('detects omitting the ready-preview announcement', async () => {
+    await detects("setStatus('Email preview ready.')", 'setStatus(null)', async (code) => {
+      server()
+      const Picker = component(code)
+      const view = render(<Picker {...props()} />)
+      try {
+        await choose()
+        await preview()
+        expect(screen.queryByText('Email preview ready.')?.closest('[role="status"]')).toBeTruthy()
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it('detects offering browser zones rejected by the formatter', async () => {
+    await detects('snippetTimeZone(zone)', 'void zone', async (code) => {
+      server()
+      const Picker = component(code)
+      const view = render(<Picker {...props()} />)
+      try {
+        const select = screen.getByRole<HTMLSelectElement>('combobox', {
+          name: 'Display time zone',
+        })
+        expect([...select.options].map(({ value }) => value)).not.toContain('EST5EDT')
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it('detects replacing a label-format failure with an empty label', async () => {
+    await detects(
+      "return t('This time could not be displayed. Please try another display time zone.')",
+      "return ''",
+      async (code) => {
+        server()
+        const Picker = component(code, {
+          formatSlotLabel: () => {
+            throw new RangeError('Intl failure')
+          },
+        })
+        const view = render(<Picker {...props()} />)
+        try {
+          await choose()
+          expect(
+            available().queryByRole('checkbox', {
+              name: 'This time could not be displayed. Please try another display time zone.',
+            }),
+          ).not.toBeNull()
+        } finally {
+          view.unmount()
+        }
+      },
+    )
+  })
+
+  it.each([
+    [
+      'dateKeyIn(Date.now(), displayTimeZone)',
+      'new Date(Date.now()).toISOString().slice(0, 10)',
+      'Pacific/Kiritimati',
+      '2026-03-07T12:30:00Z',
+      '2026-03-08',
+    ],
+    [
+      'instantOf(parseDateKey(date), 0, 0, displayTimeZone)',
+      "Date.parse(date + 'T00:00:00Z')",
+      'Pacific/Kiritimati',
+      '2026-03-07T12:30:00Z',
+      '2026-03-08',
+    ],
+    [
+      'instantOf(parseDateKey(addDays(date, 1)), 0, 0, displayTimeZone)',
+      'start + 86_400_000',
+      'America/Los_Angeles',
+      '2026-03-09T01:00:00Z',
+      '2026-03-08',
+    ],
+  ] as const)('detects UTC date arithmetic replacing %s', async (before, after, zone, now, day) => {
+    await detects(before, after, async (code) => {
+      vi.spyOn(Date, 'now').mockReturnValue(Date.parse(now))
+      const client = fakeApi({ [ROUTE]: () => json(200, { data: [] }) })
+      const Picker = component(code)
+      const view = render(<Picker {...props({ profile: { ...PROFILE, timeZone: zone } })} />)
+      try {
+        await waitFor(() => expect(screen.queryByText('Loading available times…')).toBeNull())
+        expect(screen.getByLabelText<HTMLInputElement>(`Availability date (${zone})`).value).toBe(
+          day,
+        )
+        const query = new URL(client.to(ROUTE)[0]?.path ?? '', location.origin).searchParams
+        expect(Date.parse(query.get('start') ?? '')).toBe(instantOf(parseDateKey(day), 0, 0, zone))
+        expect(Date.parse(query.get('end') ?? '')).toBe(
+          instantOf(parseDateKey(addDays(day, 1)), 0, 0, zone) + 30 * 60_000,
+        )
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it.each([
+    [
+      'invalid_title',
+      'The saved event title is invalid. Reload the saved event type and try again.',
+    ],
+    [
+      'invalid_address',
+      'The saved booking address is invalid. Reload the saved event type and try again.',
+    ],
+    [
+      'snippet_too_large',
+      'The email preview could not be created. Please choose fewer times and try again.',
+    ],
+    [
+      'invalid_slots',
+      'The email preview could not be created. Reload the saved event type and try again.',
+    ],
+  ] as const)('detects losing the accurate %s formatting message', async (cause, message) => {
+    const before =
+      cause === 'invalid_slots' ? `return '${message}'` : `if (error.code === '${cause}')`
+    const after =
+      cause === 'invalid_slots'
+        ? "return 'The email preview could not be created. Please choose fewer times and try again.'"
+        : 'if (false)'
+    await detects(before, after, async (code) => {
+      server()
+      const Picker = component(code, {
+        formatSlotSnippet: () => {
+          throw new snippet.SlotSnippetError(cause)
+        },
+      })
+      const view = render(<Picker {...props()} />)
+      try {
+        await choose()
+        fireEvent.click(screen.getByRole('button', { name: 'Preview email' }))
+        await waitFor(() =>
+          expect(screen.queryByText('Checking that you can preview these times…')).toBeNull(),
+        )
+        expect(screen.queryByRole('alert')?.textContent).toBe(message)
+      } finally {
+        view.unmount()
+      }
+    })
   })
 })

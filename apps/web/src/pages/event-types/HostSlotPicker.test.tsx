@@ -1,11 +1,15 @@
 import '../../i18n/admin.ts'
+import * as snippet from '@hourmere/core/slot-snippet'
 import { formatSlotLabel } from '@hourmere/core/slot-snippet'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as zonePicker from '../../components/TimeZonePicker.tsx'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
 import type { Slot } from '../../public/api.ts'
+import { addDays, parseDateKey } from '../../public/calendar.ts'
+import { dateKeyIn, instantOf } from '../../public/time.ts'
 import { fakeApi, json, later, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { HostSlotPicker, type HostSlotPickerProps } from './HostSlotPicker.tsx'
@@ -16,7 +20,7 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'clipboard')
 })
 
-const DAY = new Date().toISOString().slice(0, 10)
+const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
 const slots = (count = 2, minutes = 30): Slot[] =>
   Array.from({ length: count }, (_, index) => {
     const start = Date.parse(`${DAY}T09:00:00.000Z`) + index * 30 * 60_000
@@ -57,7 +61,7 @@ function renderPicker(value = props()) {
   return render(element(value))
 }
 function available() {
-  return within(screen.getByRole('group', { name: 'Available alternatives' }))
+  return within(screen.getByRole('group', { name: 'Available times' }))
 }
 async function choose(indices = [0]) {
   await waitFor(() => expect(available().getAllByRole('checkbox').length).toBeGreaterThan(0))
@@ -75,6 +79,31 @@ function clipboard() {
   const write = vi.fn(async (_items: unknown[]) => {})
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText, write } })
   return { writeText, write }
+}
+class PromiseItem {
+  readonly data: Record<string, Blob | Promise<Blob>>
+  constructor(data: Record<string, Blob | Promise<Blob>>) {
+    this.data = data
+  }
+  get types() {
+    return Object.keys(this.data)
+  }
+  async getType(type: string) {
+    const blob = await this.data[type]
+    if (!blob) throw new Error('missing_type')
+    return blob
+  }
+}
+function promiseClipboard() {
+  const clip = clipboard()
+  const committed = vi.fn()
+  clip.write.mockImplementation(async (items) => {
+    for (const item of items as PromiseItem[])
+      await Promise.all(item.types.map((type) => item.getType(type)))
+    committed()
+  })
+  vi.stubGlobal('ClipboardItem', PromiseItem)
+  return { ...clip, committed }
 }
 function server(offered = slots()) {
   return fakeApi({
@@ -103,7 +132,7 @@ describe('host open-time picker', () => {
     )
     await choose([9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
     expect(available().getAllByRole<HTMLInputElement>('checkbox')[10]?.disabled).toBe(true)
-    expect(screen.getByText('10 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 10 (maximum 10)')).toBeDefined()
     await preview()
     const text = textPreview().value
     expect(text.indexOf(encodeURIComponent(slots(11)[0]?.start ?? ''))).toBeLessThan(
@@ -138,7 +167,7 @@ describe('host open-time picker', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Meeting length' }), {
       target: { value: '60' },
     })
-    expect(screen.getByText('0 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 0 (maximum 10)')).toBeDefined()
     expect(screen.queryByRole('textbox', { name: 'Complete plain-text email preview' })).toBeNull()
     await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
     expect(
@@ -146,7 +175,7 @@ describe('host open-time picker', () => {
     ).toBe('60')
   })
 
-  it('keeps selected instants and requests unchanged when display language or named zone changes', async () => {
+  it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
     const client = server()
     renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
@@ -163,8 +192,8 @@ describe('host open-time picker', () => {
     })
     expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
     expect(textPreview().value).toContain('America/New_York')
-    expect(screen.getByText('2 of 10 alternatives selected')).toBeDefined()
-    expect(client.to(ROUTE)).toHaveLength(1)
+    expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
+    await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
     expect(
       screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
     ).toHaveLength(6)
@@ -186,7 +215,7 @@ describe('host open-time picker', () => {
     ).toBe('UTC')
     expect(
       screen.getByText(
-        'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.',
+        'This event type is unlisted. Anyone with these links can open the booking page and book an available time.',
       ),
     ).toBeDefined()
     await choose()
@@ -214,17 +243,17 @@ describe('host open-time picker', () => {
     checks = true
     fireEvent.click(screen.getByRole('button', { name: 'Copy plain text' }))
     await screen.findByText(
-      'Some selected times are no longer offered. Nothing was copied. Remove those times explicitly before trying again.',
+      'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.',
     )
     expect(clip.writeText).not.toHaveBeenCalled()
-    expect(screen.getByText('2 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
     expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(2)
     expect(screen.getByText('No longer offered')).toBeDefined()
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Preview email' }).disabled).toBe(
       true,
     )
     fireEvent.click(screen.getAllByRole('button', { name: /^Remove / })[0] as HTMLButtonElement)
-    expect(screen.getByText('1 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
     await preview()
     fireEvent.click(screen.getByRole('button', { name: 'Copy plain text' }))
     await screen.findByText('Plain text copied.')
@@ -253,7 +282,7 @@ describe('host open-time picker', () => {
       )
       expect(screen.queryByText('No longer offered')).toBeNull()
       expect(screen.queryByText('No times are offered on this date.')).toBeNull()
-      expect(screen.getByText('1 of 10 alternatives selected')).toBeDefined()
+      expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
       expect(clip.writeText).not.toHaveBeenCalled()
       expect(screen.queryByRole('button', { name: 'Copy plain text' })).toBeNull()
       checks = false
@@ -270,11 +299,14 @@ describe('host open-time picker', () => {
     })
     renderPicker()
     await screen.findByText('We could not load available times. Please try again.')
+    expect(screen.getByRole('alert').textContent).toBe(
+      'We could not load available times. Please try again.',
+    )
     expect(screen.queryByText('No times are offered on this date.')).toBeNull()
     failure = false
-    fireEvent.click(screen.getByRole('button', { name: 'Retry availability' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check availability again' }))
     await choose()
-    expect(screen.getByText('1 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
   })
 
   it('refuses a duration removed from current public metadata', async () => {
@@ -288,20 +320,23 @@ describe('host open-time picker', () => {
     await preview()
     fireEvent.click(screen.getByRole('button', { name: 'Copy plain text' }))
     await screen.findByText(
-      'This meeting length is no longer offered. Reload the saved event before trying again.',
+      'This meeting length is no longer offered. Reload the saved event type before trying again.',
     )
     expect(clip.writeText).not.toHaveBeenCalled()
     expect(client.to(ROUTE)).toHaveLength(1)
-    expect(screen.getByText('1 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
   })
 
   it('writes both rich MIME types in one action with complete plain text', async () => {
     server()
     const clip = clipboard()
     class Item {
-      readonly data: Record<string, Blob>
-      constructor(data: Record<string, Blob>) {
+      readonly data: Record<string, Blob | Promise<Blob>>
+      constructor(data: Record<string, Blob | Promise<Blob>>) {
         this.data = data
+      }
+      getType(type: string) {
+        return Promise.resolve(this.data[type] as Blob | Promise<Blob>)
       }
     }
     vi.stubGlobal('ClipboardItem', Item)
@@ -314,7 +349,7 @@ describe('host open-time picker', () => {
     expect(clip.write).toHaveBeenCalledOnce()
     const item = clip.write.mock.calls[0]?.[0]?.[0] as Item
     expect(Object.keys(item.data).sort()).toEqual(['text/html', 'text/plain'])
-    expect(item.data['text/plain']?.size).toBe(new TextEncoder().encode(text).byteLength)
+    expect((await item.getType('text/plain')).size).toBe(new TextEncoder().encode(text).byteLength)
     expect(clip.writeText).not.toHaveBeenCalled()
   })
 
@@ -379,7 +414,7 @@ describe('host open-time picker', () => {
     view.rerender(element({ ...value, event: eventType({ id: 'new-event' }) }))
     await pending.answer(json(200, publicEvent()))
     expect(clip.writeText).not.toHaveBeenCalled()
-    expect(screen.getByText('0 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 0 (maximum 10)')).toBeDefined()
   })
 
   it('ignores late copy checks after disabled context or unmount', async () => {
@@ -405,12 +440,15 @@ describe('host open-time picker', () => {
     const next = { start: `${tomorrow}T14:00:00.000Z`, end: `${tomorrow}T14:30:00.000Z` }
     fakeApi({
       [ROUTE]: ({ path }) =>
-        new URL(path, location.origin).searchParams.get('start')?.startsWith(DAY)
+        dateKeyIn(
+          Date.parse(new URL(path, location.origin).searchParams.get('start') ?? ''),
+          PROFILE.timeZone,
+        ) === DAY
           ? pending.response
           : json(200, { data: [next] }),
     })
     renderPicker()
-    fireEvent.change(screen.getByLabelText('Availability date (UTC)'), {
+    fireEvent.change(screen.getByLabelText(`Availability date (${PROFILE.timeZone})`), {
       target: { value: tomorrow },
     })
     await choose()
@@ -446,7 +484,7 @@ describe('host open-time picker', () => {
     )
     expect(
       screen
-        .getByText('1 of 10 alternatives selected')
+        .getByText('Selected times: 1 (maximum 10)')
         .closest('[role="status"]')
         ?.getAttribute('aria-live'),
     ).toBe('polite')
@@ -458,7 +496,7 @@ describe('host open-time picker', () => {
     renderPicker()
     expect(screen.getByRole('heading', { name: '将可约时间复制到邮件' })).toBeDefined()
     expect(screen.getByLabelText<HTMLSelectElement>('邮件语言').value).toBe('en')
-    await waitFor(() => expect(screen.queryByText('正在加载可约时间…')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('正在加载可约时间……')).toBeNull())
   })
 
   it('checks fresh authorization before preview and allows a neutral retry after denial', async () => {
@@ -472,7 +510,7 @@ describe('host open-time picker', () => {
     )
     expect(screen.queryByRole('textbox', { name: 'Complete plain-text email preview' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Copy plain text' })).toBeNull()
-    expect(screen.getByText('1 of 10 alternatives selected')).toBeDefined()
+    expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
     expect(client.to(META)).toHaveLength(0)
     await preview()
     expect(verifyAccess).toHaveBeenCalledTimes(2)
@@ -491,7 +529,7 @@ describe('host open-time picker', () => {
       const view = renderPicker(value)
       await choose()
       fireEvent.click(screen.getByRole('button', { name: 'Preview email' }))
-      await screen.findByText('Checking preview access…')
+      await screen.findByText('Checking that you can preview these times…')
       if (change === 'unmount') view.unmount()
       else if (change === 'disabled') view.rerender(element({ ...value, disabled: true }))
       else view.rerender(element({ ...value, event: eventType({ id: 'changed-event' }) }))
@@ -578,5 +616,201 @@ describe('host open-time picker', () => {
         (call) => call.method === 'GET' && call.path.startsWith('/api/v1/public/teams/'),
       ),
     ).toBe(true)
+  })
+
+  it.each(['plain', 'rich'] as const)(
+    'starts %s clipboard writing inside the click, then resolves checked blobs and retains focus',
+    async (kind) => {
+      server()
+      const clip = promiseClipboard()
+      let release = () => {}
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const verifyAccess = vi.fn(async () => {}).mockImplementationOnce(async () => {})
+      renderPicker(props({ verifyAccess }))
+      await choose()
+      await preview()
+      expect(screen.getByText('Email preview ready.').closest('[role="status"]')).not.toBeNull()
+      verifyAccess.mockImplementationOnce(() => pending)
+      const button = screen.getByRole<HTMLButtonElement>('button', {
+        name: kind === 'plain' ? 'Copy plain text' : 'Copy rich text',
+      })
+      fireEvent.click(button)
+      expect(clip.write).toHaveBeenCalledOnce()
+      expect(clip.committed).not.toHaveBeenCalled()
+      expect(verifyAccess).toHaveBeenCalledTimes(2)
+      expect(button.disabled).toBe(false)
+      expect(button.getAttribute('aria-disabled')).toBe('true')
+      expect(document.activeElement).toBe(button)
+      const item = clip.write.mock.calls[0]?.[0]?.[0] as PromiseItem
+      expect(item.types.sort()).toEqual(
+        kind === 'plain' ? ['text/plain'] : ['text/html', 'text/plain'],
+      )
+      for (const value of Object.values(item.data)) expect(value).toBeInstanceOf(Promise)
+      await act(async () => release())
+      await screen.findByText(
+        kind === 'plain' ? 'Plain text copied.' : 'Rich text copied with a plain-text fallback.',
+      )
+      const blob = await item.getType('text/plain')
+      expect(blob.type).toBe('text/plain')
+      expect(blob.size).toBe(new TextEncoder().encode(textPreview().value).byteLength)
+      if (kind === 'rich') expect((await item.getType('text/html')).type).toBe('text/html')
+      expect(clip.committed).toHaveBeenCalledOnce()
+      expect(clip.writeText).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(button)
+    },
+  )
+
+  it.each([
+    'initial access',
+    'final access',
+    'metadata',
+    'unavailable interval',
+    'unknown interval',
+  ])('rejects every promised rich representation after a failed %s recheck', async (failure) => {
+    let recheck = false
+    fakeApi({
+      [META]: () =>
+        failure === 'metadata' ? json(403, { error: 'forbidden' }) : json(200, publicEvent()),
+      [ROUTE]: () =>
+        recheck && failure === 'unknown interval'
+          ? json(403, { error: 'forbidden' })
+          : json(200, { data: recheck && failure === 'unavailable interval' ? [] : slots() }),
+    })
+    const clip = promiseClipboard()
+    const verifyAccess = vi.fn(async () => {})
+    renderPicker(props({ verifyAccess }))
+    await choose()
+    await preview()
+    if (failure === 'initial access') verifyAccess.mockRejectedValueOnce(new Error('forbidden'))
+    if (failure === 'final access')
+      verifyAccess.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('forbidden'))
+    recheck = true
+    const button = screen.getByRole('button', { name: 'Copy rich text' })
+    act(() => button.focus())
+    fireEvent.click(button)
+    expect(clip.write).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByText('Checking selected times…')).toBeNull())
+    const item = clip.write.mock.calls[0]?.[0]?.[0] as PromiseItem
+    await expect(item.getType('text/plain')).rejects.toBeInstanceOf(Error)
+    await expect(item.getType('text/html')).rejects.toBeInstanceOf(Error)
+    expect(clip.committed).not.toHaveBeenCalled()
+    expect(clip.writeText).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Check availability again' }),
+    )
+    expect(screen.queryByText('Rich text copied with a plain-text fallback.')).toBeNull()
+  })
+
+  it.each(['throws', 'stringifies'] as const)(
+    'feature-detects a legacy ClipboardItem that %s promise data and offers complete manual rich copy',
+    async (support) => {
+      server()
+      const clip = clipboard()
+      class LegacyItem {
+        readonly value: Blob
+        constructor(data: Record<string, Blob | Promise<Blob>>) {
+          if (support === 'throws') throw new TypeError('Blob required')
+          this.value = new Blob([String(data['text/plain'])], { type: 'text/plain' })
+        }
+        async getType() {
+          return this.value
+        }
+      }
+      vi.stubGlobal('ClipboardItem', LegacyItem)
+      renderPicker()
+      await choose()
+      await preview()
+      fireEvent.click(screen.getByRole('button', { name: 'Copy rich text' }))
+      await screen.findByText(
+        'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.',
+      )
+      expect(clip.write).not.toHaveBeenCalled()
+      await waitFor(() => expect(document.activeElement).toBe(textPreview()))
+      expect(textPreview().selectionEnd - textPreview().selectionStart).toBe(
+        textPreview().value.length,
+      )
+    },
+  )
+
+  it('filters browser zone names the snippet formatter rejects and catches label errors neutrally', async () => {
+    vi.spyOn(zonePicker, 'timeZoneNames').mockReturnValue(['UTC', 'Europe/Berlin', 'EST5EDT'])
+    vi.spyOn(snippet, 'formatSlotLabel').mockImplementation(() => {
+      throw new RangeError('Intl failure')
+    })
+    server()
+    renderPicker()
+    const options = [
+      ...screen.getByRole<HTMLSelectElement>('combobox', { name: 'Display time zone' }).options,
+    ]
+    expect(options.map(({ value }) => value)).toEqual(['Europe/Berlin', 'UTC'])
+    await choose()
+    expect(
+      available().getAllByRole('checkbox', {
+        name: 'This time could not be displayed. Please try another display time zone.',
+      }),
+    ).toHaveLength(2)
+    expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
+  })
+
+  it.each([
+    ['Pacific/Kiritimati', '2026-03-07T12:30:00Z', '2026-03-08', 24],
+    ['America/Los_Angeles', '2026-03-09T01:00:00Z', '2026-03-08', 23],
+    ['America/Los_Angeles', '2026-11-02T01:00:00Z', '2026-11-01', 25],
+  ] as const)(
+    'loads the local calendar day and DST boundary in %s at %s',
+    async (zone, now, day, hours) => {
+      vi.spyOn(Date, 'now').mockReturnValue(Date.parse(now))
+      const start = instantOf(parseDateKey(day), 0, 0, zone)
+      const boundary = instantOf(parseDateKey(addDays(day, 1)), 0, 0, zone)
+      const onDay = {
+        start: new Date(start).toISOString(),
+        end: new Date(start + 30 * 60_000).toISOString(),
+      }
+      const outside = {
+        start: new Date(boundary).toISOString(),
+        end: new Date(boundary + 30 * 60_000).toISOString(),
+      }
+      const client = fakeApi({ [ROUTE]: () => json(200, { data: [onDay, outside] }) })
+      renderPicker(props({ profile: { ...PROFILE, timeZone: zone } }))
+      expect(screen.getByLabelText<HTMLInputElement>(`Availability date (${zone})`).value).toBe(day)
+      await choose()
+      expect(available().getAllByRole('checkbox')).toHaveLength(1)
+      const query = new URL(client.to(ROUTE)[0]?.path ?? '', location.origin).searchParams
+      expect(query.get('start')).toBe(onDay.start)
+      expect(Date.parse(query.get('end') ?? '')).toBe(boundary + 30 * 60_000)
+      expect(boundary - start).toBe(hours * 60 * 60_000)
+      expect(dateKeyIn(Date.parse(onDay.start), zone)).toBe(day)
+    },
+  )
+
+  it.each([
+    [
+      'invalid_title',
+      'The saved event title is invalid. Reload the saved event type and try again.',
+    ],
+    [
+      'invalid_address',
+      'The saved booking address is invalid. Reload the saved event type and try again.',
+    ],
+    [
+      'snippet_too_large',
+      'The email preview could not be created. Please choose fewer times and try again.',
+    ],
+    [
+      'invalid_slots',
+      'The email preview could not be created. Reload the saved event type and try again.',
+    ],
+  ] as const)('explains the formatter cause %s accurately', async (code, message) => {
+    server()
+    vi.spyOn(snippet, 'formatSlotSnippet').mockImplementation(() => {
+      throw new snippet.SlotSnippetError(code)
+    })
+    renderPicker()
+    await choose()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview email' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(message)
+    expect(screen.queryByText('Email preview ready.')).toBeNull()
   })
 })

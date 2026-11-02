@@ -98,7 +98,7 @@ describe('saved event picker entry', () => {
     expect(api.calls.some((call) => call.path.includes('unsaved-address'))).toBe(false)
     expect(
       screen.getByText(
-        'Choose 1–10 alternatives from the saved event type. Unsaved changes are not included.',
+        'Choose 1–10 available times for the saved event type. Unsaved changes are not included.',
       ),
     ).toBeDefined()
   })
@@ -109,7 +109,7 @@ describe('saved event picker entry', () => {
     await open()
     await user.click(await screen.findByRole('button', { name: 'Pick open times' }))
     await screen.findByText(
-      'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.',
+      'This event type is unlisted. Anyone with these links can open the booking page and book an available time.',
     )
   })
 

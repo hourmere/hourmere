@@ -4,6 +4,9 @@ import {
   formatSlotSnippet,
   resolveSnippetLocale,
   resolveSnippetTimeZone,
+  type SlotSnippet,
+  SlotSnippetError,
+  snippetTimeZone,
 } from '@hourmere/core/slot-snippet'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { EventType, Profile } from '../../api/resources.ts'
@@ -11,6 +14,8 @@ import { timeZoneNames } from '../../components/TimeZonePicker.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { codeOf, eventSlots, getEventType, type Slot } from '../../public/api.ts'
+import { addDays, parseDateKey } from '../../public/calendar.ts'
+import { dateKeyIn, instantOf } from '../../public/time.ts'
 
 export interface HostSlotPickerProps {
   event: EventType
@@ -42,6 +47,18 @@ const sorted = (slots: Slot[]) => [...slots].sort((a, b) => a.start.localeCompar
 const exact = (a: Slot, b: Slot) =>
   Date.parse(a.start) === Date.parse(b.start) && Date.parse(a.end) === Date.parse(b.end)
 
+function formattingMessage(error: unknown): MessageKey {
+  if (error instanceof SlotSnippetError) {
+    if (error.code === 'invalid_title')
+      return 'The saved event title is invalid. Reload the saved event type and try again.'
+    if (error.code === 'invalid_address')
+      return 'The saved booking address is invalid. Reload the saved event type and try again.'
+    if (error.code === 'snippet_too_large')
+      return 'The email preview could not be created. Please choose fewer times and try again.'
+  }
+  return 'The email preview could not be created. Reload the saved event type and try again.'
+}
+
 function Picker({
   event,
   profile,
@@ -55,7 +72,7 @@ function Picker({
   const [durationMinutes, setDuration] = useState(event.durationMinutes)
   const [locale, setLocale] = useState(() => resolveSnippetLocale(profile?.locale))
   const [displayTimeZone, setZone] = useState(() => resolveSnippetTimeZone(profile?.timeZone))
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => dateKeyIn(Date.now(), displayTimeZone))
   const [reload, setReload] = useState(0)
   const [offered, setOffered] = useState<Slot[]>([])
   const [selected, setSelected] = useState<Slot[]>([])
@@ -72,28 +89,49 @@ function Picker({
   const blocked = useRef(disabled)
   blocked.current = disabled
   const preview = useRef<HTMLTextAreaElement>(null)
+  const retry = useRef<HTMLButtonElement>(null)
+  const promiseClipboard = useRef(false)
   const handle = address.kind === 'team' ? address.teamSlug : address.handle
   const team = address.kind === 'team'
   const slug = address.slug
   const zones = useMemo(
-    () => [...new Set(['UTC', displayTimeZone, ...timeZoneNames()])].sort(),
+    () =>
+      [...new Set(['UTC', displayTimeZone, ...timeZoneNames()])]
+        .filter((zone) => {
+          try {
+            snippetTimeZone(zone)
+            return true
+          } catch {
+            return false
+          }
+        })
+        .sort(),
     [displayTimeZone],
   )
-  const label = (slot: Slot) => formatSlotLabel(slot.start, slot.end, locale, displayTimeZone)
-  const formatted = useMemo(() => {
-    if (!previewVisible || !selected.length || stale.length) return null
+  const label = (slot: Slot) => {
     try {
-      return formatSlotSnippet({
-        publicUrl,
-        address: previewSource.address,
-        title: previewSource.title,
-        durationMinutes,
-        starts: selected.map((slot) => slot.start),
-        locale,
-        displayTimeZone,
-      })
+      return formatSlotLabel(slot.start, slot.end, locale, displayTimeZone)
     } catch {
-      return null
+      return t('This time could not be displayed. Please try another display time zone.')
+    }
+  }
+  const formatResult = useMemo(() => {
+    if (!previewVisible || !selected.length || stale.length) return { snippet: null, error: null }
+    try {
+      return {
+        snippet: formatSlotSnippet({
+          publicUrl,
+          address: previewSource.address,
+          title: previewSource.title,
+          durationMinutes,
+          starts: selected.map((slot) => slot.start),
+          locale,
+          displayTimeZone,
+        }),
+        error: null,
+      }
+    } catch (error) {
+      return { snippet: null, error: formattingMessage(error) }
     }
   }, [
     previewVisible,
@@ -105,6 +143,32 @@ function Picker({
     locale,
     displayTimeZone,
   ])
+
+  const formatted = formatResult.snippet
+
+  // Probe promise data without touching the system clipboard. Older implementations
+  // may accept the constructor but stringify promises instead of awaiting them.
+  useEffect(() => {
+    let active = true
+    promiseClipboard.current = false
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return
+      const probe = new Blob(['promise support'], { type: 'text/plain' })
+      const item = new ClipboardItem({ 'text/plain': Promise.resolve(probe) })
+      void item
+        .getType('text/plain')
+        .then((value) => {
+          if (active)
+            promiseClipboard.current = value.size === probe.size && value.type === probe.type
+        })
+        .catch(() => {})
+    } catch {
+      // A plain-text/manual fallback remains available after the same rechecks.
+    }
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(
     () => () => {
@@ -132,9 +196,9 @@ function Picker({
     setOffered([])
     async function load() {
       try {
-        const start = Date.parse(`${date}T00:00:00.000Z`)
-        const boundary = start + 24 * 60 * 60_000
-        // Include cross-midnight meetings while keeping work bounded to a single start day.
+        const start = instantOf(parseDateKey(date), 0, 0, displayTimeZone)
+        const boundary = instantOf(parseDateKey(addDays(date, 1)), 0, 0, displayTimeZone)
+        // Include cross-midnight meetings within one display-zone calendar day (23–25 hours at DST).
         const load = eventSlots(handle, slug, team, durationMinutes)
         const end = boundary + durationMinutes * 60_000
         let slots: Slot[]
@@ -148,7 +212,7 @@ function Picker({
           if (codeOf(error) !== 'range_too_long' || controller.signal.aborted) throw error
           // Two bounded start windows also fit the candidate budget for eight hosts,
           // a one-minute step and a 24-hour meeting. Never scan a larger horizon.
-          const middle = start + 12 * 60 * 60_000
+          const middle = start + (boundary - start) / 2
           const halves = await Promise.all([
             load(
               new Date(start).toISOString(),
@@ -181,7 +245,7 @@ function Picker({
     }
     void load()
     return () => controller.abort()
-  }, [date, durationMinutes, reload, handle, slug, team, disabled])
+  }, [date, durationMinutes, reload, handle, slug, team, disabled, displayTimeZone])
 
   function invalidate() {
     version.current += 1
@@ -216,13 +280,26 @@ function Picker({
     setBusy(true)
     setPreviewVisible(false)
     setManual(false)
-    setStatus('Checking preview access…')
+    setStatus('Checking that you can preview these times…')
     try {
       await verifyAccess()
       if (!current()) return
       setPreviewSource({ title: event.title, address })
       setPreviewVisible(true)
-      setStatus(null)
+      try {
+        formatSlotSnippet({
+          publicUrl,
+          address,
+          title: event.title,
+          durationMinutes,
+          starts: selected.map((slot) => slot.start),
+          locale,
+          displayTimeZone,
+        })
+        setStatus('Email preview ready.')
+      } catch {
+        setStatus(null)
+      }
     } catch {
       if (current())
         setStatus('We could not prepare the preview. Nothing was copied. Please try again.')
@@ -242,18 +319,23 @@ function Picker({
     setBusy(true)
     setManual(false)
     setStatus('Checking selected times…')
-    try {
+    const stop = () => {
+      // Move focus before removing the preview and its copy controls.
+      retry.current?.focus()
+      setPreviewVisible(false)
+    }
+    async function prepare(): Promise<SlotSnippet> {
       await verifyAccess()
-      if (!current()) return
+      if (!current()) throw new Error('copy_cancelled')
       const metadata = await getEventType(handle, slug, controller.signal, team)
-      if (!current()) return
+      if (!current()) throw new Error('copy_cancelled')
       const allowed = metadata.allowedDurationsMinutes ?? [metadata.durationMinutes]
       if (!allowed.includes(durationMinutes)) {
-        setPreviewVisible(false)
+        stop()
         setStatus(
-          'This meeting length is no longer offered. Reload the saved event before trying again.',
+          'This meeting length is no longer offered. Reload the saved event type before trying again.',
         )
-        return
+        throw new Error('copy_recheck_failed')
       }
       // A maximum of ten short requests, never the hull between distant alternatives.
       const results = await Promise.allSettled(
@@ -268,11 +350,11 @@ function Picker({
           return slots.some((item) => exact(item, slot))
         }),
       )
-      if (!current()) return
+      if (!current()) throw new Error('copy_cancelled')
       if (results.some((result) => result.status === 'rejected')) {
-        setPreviewVisible(false)
+        stop()
         setStatus('We could not check the selected times. Nothing was copied. Please try again.')
-        return
+        throw new Error('copy_recheck_failed')
       }
       const unavailable = selected.filter((_, index) => {
         const result = results[index]
@@ -280,14 +362,14 @@ function Picker({
       })
       if (unavailable.length) {
         setStale(unavailable.map((slot) => slot.start))
-        setPreviewVisible(false)
+        stop()
         setStatus(
-          'Some selected times are no longer offered. Nothing was copied. Remove those times explicitly before trying again.',
+          'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.',
         )
-        return
+        throw new Error('copy_recheck_failed')
       }
       await verifyAccess()
-      if (!current()) return
+      if (!current()) throw new Error('copy_cancelled')
       const canonicalAddress = team
         ? { kind: 'team' as const, teamSlug: metadata.team?.slug ?? handle, slug: metadata.slug }
         : { kind: 'personal' as const, handle: metadata.handle, slug: metadata.slug }
@@ -302,20 +384,59 @@ function Picker({
       })
       setPreviewSource({ title: metadata.title, address: canonicalAddress })
       setPreviewVisible(true)
+      return snippet
+    }
+    // Register the write in the click's activation window, before starting any I/O.
+    // Both representations share one recheck promise: a failure rejects the entire item.
+    let resolveSnippet!: (snippet: SlotSnippet) => void
+    let rejectSnippet!: (error: unknown) => void
+    const checked = new Promise<SlotSnippet>((resolve, reject) => {
+      resolveSnippet = resolve
+      rejectSnippet = reject
+    })
+    void checked.catch(() => {})
+    let writing: Promise<void> | null = null
+    if (promiseClipboard.current) {
+      const plain = checked.then((snippet) => new Blob([snippet.text], { type: 'text/plain' }))
+      const html = checked.then((snippet) => new Blob([snippet.html], { type: 'text/html' }))
+      // A browser may reject write before consuming the data promises.
+      void plain.catch(() => {})
+      void html.catch(() => {})
       try {
-        if (kind === 'plain') {
-          if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable')
-          await navigator.clipboard.writeText(snippet.text)
-        } else {
-          if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined')
-            throw new Error('clipboard_unavailable')
-          await navigator.clipboard.write([
-            new ClipboardItem({
-              'text/plain': new Blob([snippet.text], { type: 'text/plain' }),
-              'text/html': new Blob([snippet.html], { type: 'text/html' }),
-            }),
-          ])
+        const item = new ClipboardItem(
+          kind === 'rich' ? { 'text/plain': plain, 'text/html': html } : { 'text/plain': plain },
+        )
+        writing = navigator.clipboard.write([item])
+        void writing.catch(() => {})
+      } catch {
+        writing = Promise.reject(new Error('clipboard_unavailable'))
+        void writing.catch(() => {})
+      }
+    }
+    try {
+      let snippet: SlotSnippet
+      try {
+        snippet = await prepare()
+        resolveSnippet(snippet)
+      } catch (error) {
+        rejectSnippet(error)
+        if (current()) {
+          stop()
+          if (error instanceof SlotSnippetError) setStatus(formattingMessage(error))
+          else
+            setStatus((previous) =>
+              previous === 'Checking selected times…'
+                ? 'We could not check the selected times. Nothing was copied. Please try again.'
+                : previous,
+            )
         }
+        return
+      }
+      try {
+        if (writing) await writing
+        else if (kind === 'plain' && navigator.clipboard?.writeText)
+          await navigator.clipboard.writeText(snippet.text)
+        else throw new Error('clipboard_unavailable')
         if (current())
           setStatus(
             kind === 'plain'
@@ -335,11 +456,6 @@ function Picker({
           }
         }, 0)
       }
-    } catch {
-      if (current()) {
-        setPreviewVisible(false)
-        setStatus('We could not check the selected times. Nothing was copied. Please try again.')
-      }
     } finally {
       if (current()) setBusy(false)
     }
@@ -349,17 +465,19 @@ function Picker({
     <section className="panel" aria-labelledby={`${id}-heading`}>
       <h3 id={`${id}-heading`}>{t('Copy open times into an email')}</h3>
       <p>
-        {t('Choose 1–10 alternatives from the saved event type. Unsaved changes are not included.')}
+        {t(
+          'Choose 1–10 available times for the saved event type. Unsaved changes are not included.',
+        )}
       </p>
       <p>
         {t(
-          'Availability is checked again when you copy. Times are not reserved, and each booking requires confirmation.',
+          'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.',
         )}
       </p>
       {event.isHidden && (
         <p className="notice">
           {t(
-            'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.',
+            'This event type is unlisted. Anyone with these links can open the booking page and book an available time.',
           )}
         </p>
       )}
@@ -378,7 +496,7 @@ function Picker({
         >
           {event.allowedDurationsMinutes.map((duration) => (
             <option key={duration} value={duration}>
-              {t('{0} minutes', { '0': duration })}
+              {t('{0} min', { '0': duration })}
             </option>
           ))}
         </select>
@@ -418,10 +536,12 @@ function Picker({
         </select>
         <p className="hint">
           {t(
-            'Language and display time zone change labels only. Booking pages use each invitee’s preferences.',
+            'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.',
           )}
         </p>
-        <label htmlFor={`${id}-date`}>{t('Availability date (UTC)')}</label>
+        <label htmlFor={`${id}-date`}>
+          {t('Availability date ({zone})', { zone: displayTimeZone })}
+        </label>
         <input
           id={`${id}-date`}
           type="date"
@@ -432,11 +552,11 @@ function Picker({
         />
       </fieldset>
       <fieldset disabled={disabled || busy || loading} aria-busy={loading}>
-        <legend>{t('Available alternatives')}</legend>
+        <legend>{t('Available times')}</legend>
         {loading ? (
           <p role="status">{t('Loading available times…')}</p>
         ) : loadError ? (
-          <p>{t('We could not load available times. Please try again.')}</p>
+          <p role="alert">{t('We could not load available times. Please try again.')}</p>
         ) : offered.length === 0 ? (
           <p>{t('No times are offered on this date.')}</p>
         ) : (
@@ -456,22 +576,24 @@ function Picker({
           })
         )}
       </fieldset>
-      {!loading && (
-        <button
-          type="button"
-          className="button button-small"
-          disabled={disabled || busy}
-          onClick={() => setReload((value) => value + 1)}
-        >
-          {t('Retry availability')}
-        </button>
-      )}
+      <button
+        type="button"
+        className="button button-small"
+        ref={retry}
+        disabled={disabled}
+        aria-disabled={busy || loading}
+        onClick={() => {
+          if (!busy && !loading) setReload((value) => value + 1)
+        }}
+      >
+        {t('Check availability again')}
+      </button>
       <div aria-live="polite" role="status">
-        <p>{t('{0} of 10 alternatives selected', { '0': selected.length })}</p>
+        <p>{t('Selected times: {0} (maximum 10)', { '0': selected.length })}</p>
       </div>
       {selected.length > 0 && (
         <fieldset disabled={disabled || busy}>
-          <legend>{t('Selected alternatives')}</legend>
+          <legend>{t('Selected times')}</legend>
           <ul>
             {selected.map((slot) => (
               <li key={slot.start}>
@@ -499,9 +621,7 @@ function Picker({
         {t('Preview email')}
       </button>
       {previewVisible && !formatted && (
-        <p role="alert">
-          {t('The email preview could not be created. Please choose fewer times and try again.')}
-        </p>
+        <p role="alert">{formatResult.error && t(formatResult.error)}</p>
       )}
       {formatted && (
         <>
@@ -517,16 +637,24 @@ function Picker({
             <button
               type="button"
               className="button"
-              disabled={disabled || busy}
-              onClick={() => void copy('plain')}
+              disabled={disabled}
+              aria-disabled={busy}
+              onClick={(click) => {
+                click.currentTarget.focus()
+                void copy('plain')
+              }}
             >
               {t('Copy plain text')}
             </button>
             <button
               type="button"
               className="button button-primary"
-              disabled={disabled || busy}
-              onClick={() => void copy('rich')}
+              disabled={disabled}
+              aria-disabled={busy}
+              onClick={(click) => {
+                click.currentTarget.focus()
+                void copy('rich')
+              }}
             >
               {t('Copy rich text')}
             </button>
