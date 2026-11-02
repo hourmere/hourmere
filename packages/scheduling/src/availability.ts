@@ -989,6 +989,21 @@ export async function buildAvailabilityInput(
       sql`${instant} + interval '999 microseconds'`,
     ])
 
+  const hostBookings = db
+    .selectFrom('booking_hosts as bh')
+    .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
+    .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
+    .select((eb) => [
+      floorMs(eb, eb.ref('b.start_at')).as('start_at'),
+      ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
+      'b.event_type_id',
+      'bet.buffer_before_minutes',
+      'bet.buffer_after_minutes',
+    ])
+    .where('bh.user_id', '=', hostUserId)
+    .where('bh.active', '=', true)
+    .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
+
   const [overrides, busy, bookings] = await Promise.all([
     db
       .selectFrom('schedule_overrides')
@@ -1064,30 +1079,20 @@ export async function buildAvailabilityInput(
         ),
       )
       .execute(),
-    db
-      .selectFrom('booking_hosts as bh')
-      .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
-      .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
-      .select((eb) => [
-        floorMs(eb, eb.ref('b.start_at')).as('start_at'),
-        ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
-        'b.event_type_id',
-        'bet.buffer_before_minutes',
-        'bet.buffer_after_minutes',
-      ])
-      .where('bh.user_id', '=', hostUserId)
-      .where('bh.active', '=', true)
-      .where((eb) =>
-        eb.or([
-          eb('bh.period', '&&', windowRange(eb)),
-          eb.and([
-            eb('b.event_type_id', '=', eventTypeId),
-            eb('b.start_at', '>=', new Date(bookingWindow.start.epochMilliseconds)),
-            eb('b.start_at', '<', new Date(bookingWindow.end.epochMilliseconds)),
-          ]),
-        ]),
+    hostBookings
+      .where((eb) => eb('bh.period', '&&', windowRange(eb)))
+      // Keep the overlap GiST and event-type/start indexes usable in separate branches.
+      // Unlimited types need only the short window. Exclude its rows from the complete
+      // period branch so UNION ALL cannot count a booking twice.
+      .$if(periodWindows.length > 0, (q) =>
+        q.unionAll(
+          hostBookings
+            .where('b.event_type_id', '=', eventTypeId)
+            .where('b.start_at', '>=', new Date(bookingWindow.start.epochMilliseconds))
+            .where('b.start_at', '<', new Date(bookingWindow.end.epochMilliseconds))
+            .where((eb) => eb.not(eb('bh.period', '&&', windowRange(eb)))),
+        ),
       )
-      .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
       .execute(),
   ])
 

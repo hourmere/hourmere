@@ -327,6 +327,23 @@ describe.skipIf(!serverUrl)('weekly and monthly booking limits', () => {
     },
   )
 
+  it('reschedules Monday to Saturday within its full week while excluding itself', async () => {
+    const s = await setup({ maxBookingsPerWeek: 1 })
+    const monday = instant('2026-11-02T12:00Z')
+    const saturday = instant('2026-11-07T12:00Z')
+    // The predecessor is outside the target's short busy-time window, so only the
+    // complete-week query can see it and must apply reschedule self-exclusion.
+    expect(
+      Temporal.Instant.compare(monday.add({ minutes: 30 }), saturday.subtract({ hours: 72 })),
+    ).toBeLessThan(0)
+    const booked = await s.book(monday)
+    await expect(
+      rescheduleManagedBooking(ctx, required(booked.manageToken), { start: saturday }),
+    ).resolves.toMatchObject({
+      booking: { status: 'confirmed', rescheduledFromId: booked.booking.id },
+    })
+  })
+
   it.each([
     ['weekly', { maxBookingsPerWeek: 1 }],
     ['monthly', { maxBookingsPerMonth: 1 }],
