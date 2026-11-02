@@ -5,7 +5,7 @@ export const admin = {
   'Reminders and follow-ups': '提醒与会后消息',
   'Changes apply to new bookings only. Existing bookings and their reschedules keep their saved settings.':
     '更改仅适用于新预约。现有预约及其改期会保留原有设置。',
-  'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.':
+  'Reminders are sent only if the send time is more than 1 hour after the booking or reschedule; otherwise they are skipped and not sent late.':
     '仅当提醒的发送时间在预约创建或改期之后，且间隔超过 1 小时时才会发送；否则会跳过，不会补发。',
   'Follow-ups use the scheduled meeting end, regardless of attendance. Declining a calendar invitation does not cancel them.':
     '会后消息按预定的会议结束时间安排，无论对方是否参加。拒绝日历邀请不会取消这些消息。',

@@ -545,7 +545,7 @@ describe('event type reminders and follow-ups editor', () => {
         expect(screen.getByText(/new bookings only/i)).toBeDefined()
         expect(
           screen.getByText(
-            'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.',
+            'Reminders are sent only if the send time is more than 1 hour after the booking or reschedule; otherwise they are skipped and not sent late.',
           ),
         ).toBeDefined()
         expect(screen.getByText(/regardless of attendance/i)).toBeDefined()

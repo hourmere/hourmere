@@ -121,7 +121,7 @@ export function NotificationsEditor({
         </p>
         <p>
           {t(
-            'Sent only if the send time is more than 1 hour after the booking or reschedule; otherwise skipped and not sent late.',
+            'Reminders are sent only if the send time is more than 1 hour after the booking or reschedule; otherwise they are skipped and not sent late.',
           )}
         </p>
         <p>
