@@ -35,7 +35,11 @@ import {
   notificationRecipientHash,
   type SuppressionReason,
 } from './mail-limits.ts'
-import { enqueueScheduledBookingEmails, type ScheduledEmailQueue } from './scheduled.ts'
+import {
+  enqueueScheduledBookingEmails,
+  REMINDER_MIN_GAP,
+  type ScheduledEmailQueue,
+} from './scheduled.ts'
 
 export {
   createInvitationEmailDispatcher,
@@ -74,8 +78,7 @@ export const BOOKING_NOTIFICATION_JOB = 'booking-notification'
  */
 export const REMINDER_LEAD = { hours: 24 } as const
 
-/** No reminder when it would go out sooner than this after the booking (made just over a day ahead). */
-export const REMINDER_MIN_GAP = { hours: 1 } as const
+export { REMINDER_MIN_GAP }
 
 /** Fixed, so changing PUBLIC_URL does not orphan calendar entries made before. */
 export const CALENDAR_UID_DOMAIN = 'hourmere'
