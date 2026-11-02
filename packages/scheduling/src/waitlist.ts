@@ -991,11 +991,19 @@ export async function cleanupWaitlist(ctx: WaitlistContext, options: { limit?: n
           candidates.map((row) => row.id),
         )
         .execute()
+    // Keep one minimal accepted receipt so managers retain lastNotifiedAt for this entry.
+    // Existing entry cleanup still cascades it at terminal + seven elapsed days.
+    const keepNewestReceipt = sql<boolean>`accepted_at IS NULL OR id <> (
+      SELECT receipt.id FROM waitlist_candidates receipt
+      WHERE receipt.entry_id = waitlist_candidates.entry_id AND receipt.accepted_at IS NOT NULL
+      ORDER BY receipt.accepted_at DESC, receipt.id DESC LIMIT 1
+    )`
     const oldCandidates = await db
       .selectFrom('waitlist_candidates')
       .select('id')
       .where('state', 'not in', ['pending', 'processing'])
       .where('expires_at', '<=', new Date(now.getTime() - 7 * DAY))
+      .where(keepNewestReceipt)
       .limit(limit)
       .execute()
     if (oldCandidates.length)

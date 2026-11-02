@@ -17,6 +17,7 @@ import {
 } from './calendar.ts'
 import { MonthCalendar } from './MonthCalendar.tsx'
 import { dateKeyIn, formatDateKey, formatTime } from './time.ts'
+import { type WaitlistWindow, waitlistWindow } from './waitlist-window.ts'
 
 /** How far ahead people may page (the API has no notion of "the last month with slots"). */
 const MONTHS_AHEAD = 24
@@ -83,6 +84,8 @@ interface SlotPickerProps {
   focusTitle?: boolean
   /** A message about the last attempt, shown above the calendar (e.g. the time was taken). */
   notice?: UiText | null | undefined
+  /** Only supplied for an enabled, supported event. Errors never offer enrollment. */
+  renderWaitlist?: ((window: WaitlistWindow) => ReactNode) | undefined
 }
 
 const monthKey = ({ year, month }: YearMonth) => `${year}-${month}`
@@ -144,6 +147,7 @@ export function SlotPicker({
   afterTitle,
   focusTitle = false,
   notice,
+  renderWaitlist,
 }: SlotPickerProps) {
   const { t, uiText } = useI18n()
 
@@ -240,21 +244,25 @@ export function SlotPicker({
   // The first month shown may have nothing left (late in the month, or a booking window that
   // opens later): move on by itself, a couple of times at most.
   useEffect(() => {
-    if (!ready || available.size || autoAdvanced.current >= AUTO_ADVANCE) return
+    if (renderWaitlist || !ready || available.size || autoAdvanced.current >= AUTO_ADVANCE) return
     if (compareMonths(month, lastMonth) >= 0) return
     autoAdvanced.current += 1
     setMonth(addMonths(month, 1))
-  }, [ready, available, month, lastMonth])
+  }, [ready, available, month, lastMonth, renderWaitlist])
 
   // The chosen day must be in the month shown and still have times (another zone can move a
   // day's times to the day before or after); keyboard focus stays in the month shown.
   useEffect(() => {
     if (day === null) return
-    if (day < today || compareMonths(monthOf(day), month) !== 0 || (ready && !available.has(day))) {
+    if (
+      day < today ||
+      compareMonths(monthOf(day), month) !== 0 ||
+      (ready && !available.has(day) && !renderWaitlist)
+    ) {
       setDay(null)
       setPositionUnavailable(true)
     }
-  }, [day, month, available, ready, today])
+  }, [day, month, available, ready, today, renderWaitlist])
   useEffect(() => {
     if (compareMonths(monthOf(focusDay), month) !== 0) {
       setFocusDay(toDateKey({ ...month, day: 1 }))
@@ -312,6 +320,10 @@ export function SlotPicker({
   const labels = daySlots.map((s) => formatTime(Date.parse(s.start), timeZone, locale))
   // Where clocks go back, one wall time happens twice: add the zone's abbreviation then.
   const repeated = new Set(labels.filter((l, i) => labels.indexOf(l) !== i))
+  const emptyWindow =
+    ready && (day ? !daySlots.length : !available.size)
+      ? waitlistWindow(month, day, timeZone, now)
+      : null
 
   let status = ''
   if (state.status === 'loading') status = t('Loading available times…')
@@ -356,6 +368,7 @@ export function SlotPicker({
             lastMonth={lastMonth}
             onMonthChange={changeMonth}
             available={available}
+            allowEmptyDays={Boolean(renderWaitlist)}
             selected={day}
             onSelect={(next) => {
               setDaySelection((attempt) => attempt + 1)
@@ -406,7 +419,9 @@ export function SlotPicker({
           />
         </div>
         <div className="picker-slots">
-          {day ? (
+          {renderWaitlist && emptyWindow ? (
+            renderWaitlist(emptyWindow)
+          ) : day ? (
             <>
               <h3 className="slots-day" ref={slotsHeading}>
                 {formatDateKey(day, locale)}

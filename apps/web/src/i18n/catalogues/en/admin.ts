@@ -1,5 +1,39 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Booking waitlist': 'Booking waitlist',
+  'Only team owners and admins can manage the waitlist.':
+    'Only team owners and admins can manage the waitlist.',
+  'Waitlist management is unavailable for this account.':
+    'Waitlist management is unavailable for this account.',
+  'Let invitees join a waitlist when no times are available':
+    'Let invitees join a waitlist when no times are available',
+  'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
+    'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.',
+  'Waitlists support individual event types with one host.':
+    'Waitlists support individual event types with one host.',
+  'View waitlist entries': 'View waitlist entries',
+  'Pending verification': 'Pending verification',
+  'Waiting for a time': 'Waiting for a time',
+  Notified: 'Notified',
+  Removed: 'Removed',
+  'Waitlist entries': 'Waitlist entries',
+  'Loading waitlist entries…': 'Loading waitlist entries…',
+  'Could not load waitlist entries.': 'Could not load waitlist entries.',
+  'Last notified shows the latest retained mail-server acceptance, not inbox delivery. Older notification records may have been cleared.':
+    'Last notified shows the latest retained mail-server acceptance, not inbox delivery. Older notification records may have been cleared.',
+  'No waitlist entries.': 'No waitlist entries.',
+  'Contact details cleared': 'Contact details cleared',
+  'Requested period': 'Requested period',
+  'Last notified': 'Last notified',
+  'Notification time unavailable': 'Notification time unavailable',
+  'Remove entry': 'Remove entry',
+  'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.':
+    'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.',
+  'Could not remove the waitlist entry.': 'Could not remove the waitlist entry.',
+  'Back to first page': 'Back to first page',
+  'Next page': 'Next page',
+  Refresh: 'Refresh',
+
   'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
     'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.',
   'Reminders and follow-ups': 'Reminders and follow-ups',

@@ -7,8 +7,10 @@ import {
   deleteEventType,
   EVENT_TYPE_LIMITS,
   getEventType,
+  getEventTypeWaitlist,
   listEventTypeHosts,
   listEventTypes,
+  listEventTypeWaitlistEntries,
   MAX_OPTION_LENGTH,
   MAX_OPTIONS,
   MAX_QUESTION_LABEL,
@@ -16,8 +18,10 @@ import {
   NotificationSettingsSchema,
   PHONE_NUMBER_PATTERN,
   QuestionSchema,
+  removeEventTypeWaitlistEntry,
   type EventType as ServiceEventType,
   SLUG_PATTERN,
+  setEventTypeWaitlist,
   updateEventType,
 } from '@hourmere/scheduling'
 import {
@@ -180,6 +184,42 @@ const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
 const minMax = ({ min, max }: { min: number; max: number }) => ({ minimum: min, maximum: max })
 
+export const WaitlistSettings = z.object({ enabled: z.boolean() }).openapi('WaitlistSettings')
+const WaitlistSettingsInput = z
+  .strictObject({ enabled: z.boolean() })
+  .openapi('WaitlistSettingsInput', {
+    description:
+      'Off by default. Supported only for personal and team individual events with one current verified host. Disabling removes waiting entries; enabling again never restores them.',
+  })
+export const WaitlistEntryPage = z
+  .object({
+    data: z.array(
+      z.object({
+        id: z.uuid(),
+        state: z.enum([
+          'pending_verification',
+          'active',
+          'notified',
+          'booked',
+          'removed',
+          'expired',
+        ]),
+        email: z.string().nullable(),
+        name: z.string().nullable(),
+        preferredWindow: z
+          .object({ start: z.iso.datetime(), end: z.iso.datetime(), timeZone: z.string() })
+          .nullable(),
+        createdAt: z.iso.datetime(),
+        lastNotifiedAt: z.iso.datetime().nullable(),
+      }),
+    ),
+    nextAfter: z.string().nullable(),
+  })
+  .openapi('WaitlistEntryPage', {
+    description:
+      'Manager-only page. Erased contact fields stay null; no verification or management capabilities are returned.',
+  })
+
 const fields = {
   slug: z.string().openapi({
     description:
@@ -250,6 +290,7 @@ export const EventType = z
     zoomConnectionId: z.uuid().nullable().optional(),
     questions: z.array(Question),
     notifications: NotificationSettings,
+    waitlist: WaitlistSettings,
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -277,6 +318,7 @@ export const EventTypeInput = z
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
+    waitlist: WaitlistSettingsInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
     allowGuests: fields.allowGuests.optional().openapi({ default: false }),
@@ -308,6 +350,7 @@ export const EventTypeUpdate = z
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
+    waitlist: WaitlistSettingsInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
     allowGuests: fields.allowGuests.optional(),
@@ -359,6 +402,132 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   })
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/event-types/{id}/waitlist',
+        operationId: 'getEventTypeWaitlist',
+        summary: 'Read waitlist settings as an event manager',
+        request: { params: IdParams },
+        responses: {
+          200: { description: 'Current settings', content: json(WaitlistSettings) },
+          ...errorResponses({ 403: forbidden, 404: notFound }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getEventTypeWaitlist(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').id,
+          ),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, 1024),
+        method: 'put',
+        path: '/api/v1/event-types/{id}/waitlist',
+        operationId: 'setEventTypeWaitlist',
+        summary: 'Enable or disable an event waitlist',
+        request: {
+          params: IdParams,
+          headers: ExpectedOrganizationHeaders,
+          body: { content: json(WaitlistSettingsInput), required: true },
+        },
+        responses: {
+          200: { description: 'Saved settings', content: json(WaitlistSettings) },
+          ...errorResponses({
+            400: 'invalid_request, waitlist_unsupported',
+            403: forbidden,
+            404: notFound,
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await setEventTypeWaitlist(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/event-types/{id}/waitlist/entries',
+        operationId: 'listWaitlistEntries',
+        summary: 'List waitlist entries as an event manager',
+        description:
+          'Personal owners and team owners/admins only. Ordinary team members cannot read contacts or entry preferences. Read API-key scope is required.',
+        request: {
+          params: IdParams,
+          query: z.object({
+            after: z.uuid().optional(),
+            limit: z.coerce.number().int().min(1).max(100).optional(),
+          }),
+        },
+        responses: {
+          200: { description: 'Bounded entry page', content: json(WaitlistEntryPage) },
+          ...errorResponses({
+            400: 'invalid_limit, invalid_cursor',
+            403: forbidden,
+            404: notFound,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await listEventTypeWaitlistEntries(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').id,
+            c.req.valid('query'),
+          ),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'delete',
+        path: '/api/v1/event-types/{id}/waitlist/entries/{entryId}',
+        operationId: 'removeWaitlistEntry',
+        summary: 'Remove an entry as an event manager',
+        description:
+          'Idempotent while the entry is retained. Immediately erases contact data and cancels pending mail. Sends no removal email and never changes a terminal entry back to waiting.',
+        request: {
+          params: IdParams.extend({ entryId: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+        },
+        responses: {
+          200: {
+            description: 'Removed or already terminal',
+            content: json(z.object({ removed: z.literal(true) })),
+          },
+          ...errorResponses({
+            403: forbidden,
+            404: 'event_type_not_found, waitlist_entry_not_found',
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await removeEventTypeWaitlistEntry(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('param').entryId,
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({

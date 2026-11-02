@@ -33,7 +33,9 @@ import * as picker from './SlotPicker.tsx'
 import * as time from './time.ts'
 import * as validation from './validation.ts'
 import * as visitorZone from './visitor-time-zone.ts'
+import * as waitlistJoin from './WaitlistJoin.tsx'
 import * as waitlistLink from './waitlist-link.ts'
+import * as waitlistWindow from './waitlist-window.ts'
 
 const TOKEN = 'pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB'
 const BASE = `/api/v1/book/${TOKEN}`
@@ -100,6 +102,8 @@ function pageCopy(text = source): typeof OneTimeBookingPage {
     './validation.ts': validation,
     './visitor-time-zone.ts': visitorZone,
     './waitlist-link.ts': waitlistLink,
+    './waitlist-window.ts': waitlistWindow,
+    './WaitlistJoin.tsx': waitlistJoin,
   }).OneTimeBookingPage
 }
 

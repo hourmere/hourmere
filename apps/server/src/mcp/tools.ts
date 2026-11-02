@@ -10,7 +10,7 @@ import {
   type Principal,
   requireApiKeyOperation,
 } from '@hourmere/auth'
-import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
+import { DomainError, type DomainErrorKind, WaitlistRateLimitError } from '@hourmere/scheduling'
 import {
   type CallToolResult,
   type McpServer,
@@ -31,6 +31,8 @@ export type McpCaller = Extract<Principal, { kind: 'api_key' | 'oauth' }>
 /** What a tool's handler gets besides its arguments. */
 export interface ToolCall {
   caller: McpCaller
+  /** Trusted socket/proxy address resolved by the HTTP transport, never tool input. */
+  trustedIp?: string | undefined
   /**
    * Counts this call against `limiter` for the caller's user, all of their API keys together
    * (one person cannot multiply a limit by creating keys). Over the limit, the call stops
@@ -75,6 +77,8 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   scopeMode?(args: unknown): string
   /** Capability-bearing requests must not repeat validation input or unsanitized errors. */
   privateInput?(args: unknown): boolean
+  /** Omit arbitrary exception details for requests containing private contact information. */
+  privateDiagnostics?: boolean
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
 }
@@ -155,9 +159,11 @@ export async function runTool(
 ): Promise<CallToolResult> {
   const privateInput = tool.privateInput?.(args) === true
   const diagnostic = (detail: unknown) =>
-    privateInput
-      ? redactOneTimeLogDetails(inspect(detail, { breakLength: Number.POSITIVE_INFINITY }))
-      : detail
+    tool.privateDiagnostics
+      ? '[private request diagnostic omitted]'
+      : privateInput
+        ? redactOneTimeLogDetails(inspect(detail, { breakLength: Number.POSITIVE_INFINITY }))
+        : detail
   try {
     requireApiKeyOperation(call.caller, `mcp:${tool.name}`)
     if (tool.scopeMode)
@@ -194,6 +200,8 @@ export async function runTool(
         retryAfterSeconds: err.retryAfterSeconds,
       })
     }
+    if (err instanceof WaitlistRateLimitError)
+      return errorResult({ error: 'rate_limited', retryAfterSeconds: err.retryAfterSeconds })
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
@@ -294,9 +302,11 @@ export function registerTools(
   tools: readonly PreparedTool[],
   caller: McpCaller,
   logError: ToolErrorLog,
+  trustedIp?: string | undefined,
 ): void {
   const call: ToolCall = {
     caller,
+    trustedIp,
     rateLimit(limiter) {
       const retryAfter = limiter.hit(`user:${caller.user.id}`)
       if (retryAfter !== undefined) throw new RateLimited(retryAfter)

@@ -194,6 +194,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         successRedirect: null,
         questions: [],
         notifications: DEFAULT_NOTIFICATIONS,
+        waitlist: { enabled: false },
         isActive: true,
         isHidden: false,
         allowGuests: false,

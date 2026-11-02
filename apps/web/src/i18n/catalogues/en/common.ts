@@ -1,5 +1,30 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'To join the waitlist, choose the default meeting length ({duration}).',
+  'Join the waitlist': 'Join the waitlist',
+  'No available times in this period.': 'No available times in this period.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.',
+  'From {start} to {end} ({timeZone})': 'From {start} to {end} ({timeZone})',
+  'Wait until {date}. Unconfirmed requests expire after 24 hours.':
+    'Wait until {date}. Unconfirmed requests expire after 24 hours.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.',
+  'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.':
+    'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.',
+  'Check your email to confirm': 'Check your email to confirm',
+  'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.':
+    'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.',
+  'Resend confirmation email': 'Resend confirmation email',
+  'Confirmation requested. Check your email; delivery is subject to limits.':
+    'Confirmation requested. Check your email; delivery is subject to limits.',
+  'Agree to receive waitlist emails before joining.':
+    'Agree to receive waitlist emails before joining.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'The waitlist is unavailable for this period. Check available times and try again.',
+  'Joining…': 'Joining…',
+  'Sending…': 'Sending…',
   'These suggestions have expired. Check the currently available times.':
     'These suggestions have expired. Check the currently available times.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

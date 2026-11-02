@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createSatteriMarkdownProcessor } from '@astrojs/markdown-satteri'
 import { describe, expect, it } from 'vitest'
+import { API_KEY_MCP_OPERATIONS } from '../packages/auth/src/api-key-operations.ts'
 import {
   renderScopeTables,
   replaceScopeTables,
@@ -81,7 +82,7 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
   const rows = [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
     .map(([, row]) => [...(row ?? '').matchAll(/<td>([\s\S]*?)<\/td>/g)].map(([, cell]) => cell))
     .filter((cells) => cells.length > 0)
-  expect(rows).toHaveLength(27)
+  expect(rows).toHaveLength(API_KEY_MCP_OPERATIONS.length)
   for (const cells of rows) {
     expect(cells).toHaveLength(4)
     expect(cells[0]).toMatch(/^<code>\w+<\/code>$/)

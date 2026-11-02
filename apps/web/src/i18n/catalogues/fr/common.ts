@@ -1,4 +1,29 @@
 export const common = {
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'Pour rejoindre la liste d’attente, choisissez la durée par défaut ({duration}).',
+  'Join the waitlist': 'Rejoindre la liste d’attente',
+  'No available times in this period.': 'Aucun créneau n’est disponible sur cette période.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'Si un créneau se libère, toutes les personnes concernées peuvent être prévenues. Rien n’est réservé ; la première réservation réussie obtient le créneau.',
+  'From {start} to {end} ({timeZone})': 'Du {start} au {end} ({timeZone})',
+  'Wait until {date}. Unconfirmed requests expire after 24 hours.':
+    'L’attente prend fin le {date}. Les demandes non confirmées expirent après 24 heures.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'J’accepte de recevoir des e-mails pour cette période d’attente. Je peux quitter la liste grâce au lien présent dans chaque e-mail.',
+  'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.':
+    'Quitter la liste efface vos coordonnées. Des enregistrements codés sont conservés 2 jours pour prévenir les abus et jusqu’à 64 jours pour éviter les notifications répétées.',
+  'Check your email to confirm': 'Consultez vos e-mails pour confirmer',
+  'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.':
+    'Si votre demande peut être acceptée, nous enverrons un lien de confirmation. Les limites d’envoi peuvent empêcher sa livraison. Répéter l’inscription ne renvoie pas d’e-mail.',
+  'Resend confirmation email': 'Renvoyer l’e-mail de confirmation',
+  'Confirmation requested. Check your email; delivery is subject to limits.':
+    'E-mail de confirmation demandé. Consultez votre messagerie ; l’envoi est soumis à des limites.',
+  'Agree to receive waitlist emails before joining.':
+    'Acceptez de recevoir les e-mails de la liste d’attente avant de vous inscrire.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'La liste d’attente n’est pas disponible pour cette période. Consultez les créneaux disponibles et réessayez.',
+  'Joining…': 'Inscription en cours…',
+  'Sending…': 'Envoi en cours…',
   'These suggestions have expired. Check the currently available times.':
     'Ces suggestions ont expiré. Consultez les créneaux actuellement disponibles.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

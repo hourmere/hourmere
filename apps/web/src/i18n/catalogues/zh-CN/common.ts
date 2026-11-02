@@ -1,5 +1,29 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    '若要加入候补名单，请选择默认时长（{duration}）。',
+  'Join the waitlist': '加入候补名单',
+  'No available times in this period.': '这段时间内没有可约时段。',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    '有空位时，所有符合条件的人都可能收到通知。我们不会预留时段，先成功预约者获得该时段。',
+  'From {start} to {end} ({timeZone})': '从{start}至{end}（{timeZone}）',
+  'Wait until {date}. Unconfirmed requests expire after 24 hours.':
+    '候补截止时间为{date}。未确认的申请会在 24 小时后失效。',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    '我同意接收这段时间的候补邮件，并可通过任一候补邮件中的链接退出。',
+  'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.':
+    '退出后会清除你的联系信息。使用编码代替邮箱的记录会保留 2 天以防滥用，通知去重记录最多保留 64 天。',
+  'Check your email to confirm': '请查收邮件并确认',
+  'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.':
+    '如果申请可受理，我们会发送确认链接。发送限制可能导致邮件无法送达。重复加入不会重发邮件。',
+  'Resend confirmation email': '重发确认邮件',
+  'Confirmation requested. Check your email; delivery is subject to limits.':
+    '已请求发送确认邮件。请查收邮箱，邮件发送受额度限制。',
+  'Agree to receive waitlist emails before joining.': '请先同意接收候补邮件，再加入名单。',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    '这段时间暂时无法加入候补名单。请查看可约时段后重试。',
+  'Joining…': '正在加入…',
+  'Sending…': '正在发送…',
   'These suggestions have expired. Check the currently available times.':
     '这些建议时段已过期，请查看当前可约时间。',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

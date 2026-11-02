@@ -1,4 +1,29 @@
 export const common = {
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'Wählen Sie die Standarddauer ({duration}), um sich auf die Warteliste setzen zu lassen.',
+  'Join the waitlist': 'Auf die Warteliste setzen',
+  'No available times in this period.': 'In diesem Zeitraum sind keine Termine verfügbar.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'Wenn ein Termin frei wird, können alle passenden Interessierten benachrichtigt werden. Es wird nichts reserviert; wer zuerst erfolgreich bucht, erhält den Termin.',
+  'From {start} to {end} ({timeZone})': 'Von {start} bis {end} ({timeZone})',
+  'Wait until {date}. Unconfirmed requests expire after 24 hours.':
+    'Die Warteliste gilt bis {date}. Unbestätigte Anfragen verfallen nach 24 Stunden.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'Ich möchte für diesen Zeitraum Wartelisten-E-Mails erhalten. Über den Link in jeder Wartelisten-E-Mail kann ich mich abmelden.',
+  'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.':
+    'Beim Abmelden werden Ihre Kontaktdaten gelöscht. Codierte Datensätze bleiben zur Missbrauchsvermeidung 2 Tage und zur Vermeidung wiederholter Benachrichtigungen bis zu 64 Tage erhalten.',
+  'Check your email to confirm': 'Prüfen Sie Ihr Postfach zur Bestätigung',
+  'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.':
+    'Wenn Ihre Anfrage angenommen werden kann, senden wir einen Bestätigungslink. Versandlimits können die Zustellung verhindern. Erneutes Anmelden löst keinen weiteren Versand aus.',
+  'Resend confirmation email': 'Bestätigungs-E-Mail erneut anfordern',
+  'Confirmation requested. Check your email; delivery is subject to limits.':
+    'Bestätigungs-E-Mail angefordert. Prüfen Sie Ihr Postfach; der Versand unterliegt Limits.',
+  'Agree to receive waitlist emails before joining.':
+    'Stimmen Sie vor der Anmeldung dem Empfang von Wartelisten-E-Mails zu.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'Für diesen Zeitraum ist die Warteliste nicht verfügbar. Prüfen Sie die freien Termine und versuchen Sie es erneut.',
+  'Joining…': 'Anmeldung läuft…',
+  'Sending…': 'Wird gesendet…',
   'These suggestions have expired. Check the currently available times.':
     'Diese Terminvorschläge sind abgelaufen. Prüfen Sie die aktuell verfügbaren Zeiten.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

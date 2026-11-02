@@ -81,6 +81,16 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `update_event_type` | — | `update-event` | `full` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
+| `get_event_type_waitlist` | — | `event-waitlist` | `full, read` |
+| `set_event_type_waitlist` | — | `set-event-waitlist` | `full` |
+| `list_waitlist_entries` | — | `waitlist-entries` | `full, read` |
+| `remove_waitlist_entry` | — | `remove-waitlist-entry` | `full` |
+| `join_waitlist` | — | `join-waitlist` | `full, bookings` |
+| `join_waitlist` | `personal` | `join-waitlist` | `full, bookings` |
+| `join_waitlist` | `team` | `join-waitlist` | `full, bookings` |
+| `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
+| `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
+| `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 
 <!-- api-key-scope-table:end -->
 

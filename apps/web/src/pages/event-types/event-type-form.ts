@@ -89,6 +89,7 @@ export interface EventTypeDraft {
   isActive: boolean
   isHidden: boolean
   allowGuests: boolean
+  waitlistEnabled: boolean
   notifications: NotificationsDraft
 }
 
@@ -136,6 +137,7 @@ export function emptyDraft(): EventTypeDraft {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    waitlistEnabled: false,
     notifications: defaultNotificationsDraft(),
   }
 }
@@ -179,6 +181,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     isActive: e.isActive,
     isHidden: e.isHidden,
     allowGuests: e.allowGuests,
+    waitlistEnabled: e.waitlist?.enabled ?? false,
     notifications: notificationsFromSettings(e.notifications),
   }
 }
@@ -264,6 +267,12 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (
+    draft.waitlistEnabled &&
+    draft.waitlistEnabled !== baseline?.waitlistEnabled &&
+    (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
+  )
+    errors.waitlist = 'Waitlists support individual event types with one host.'
   // Untouched stored notes may predate tighter write rules; omission preserves them.
   if (
     comparableNotifications(draft.notifications) !==
@@ -467,6 +476,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     isActive: draft.isActive,
     isHidden: draft.isHidden,
     allowGuests: draft.allowGuests,
+    ...(draft.waitlistEnabled && { waitlist: { enabled: true } }),
     ...(comparableNotifications(draft.notifications) !==
       comparableNotifications(defaultNotificationsDraft()) && {
       notifications: notificationsInput(draft.notifications),
@@ -477,6 +487,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // A metadata save must preserve waitlist changes made outside this editor session.
+  if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
+  else body.waitlist = { enabled: draft.waitlistEnabled }
   // Only this session's changes replace the complete notification policy.
   if (
     comparableNotifications(draft.notifications) === comparableNotifications(baseline.notifications)
@@ -538,6 +551,7 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     maxBookingsPerDay: 'Daily limit',
     bookingWindowDays: 'Booking window',
     position: 'Position',
+    waitlist: 'Booking waitlist',
     notifications: 'Reminders and follow-ups',
     'notifications.reminders': 'Pre-meeting reminders',
     'notifications.followUps': 'Post-meeting follow-ups',
@@ -587,6 +601,8 @@ export function serverErrors(
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
+    case 'waitlist_unsupported':
+      return field('waitlist', 'Waitlists support individual event types with one host.')
     case 'automatic_zoom_disabled':
       return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
     case 'automatic_zoom_unavailable':

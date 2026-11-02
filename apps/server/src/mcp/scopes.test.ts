@@ -33,11 +33,19 @@ const all = [
   'update_event_type',
   'list_calendar_connections',
   'list_conference_connections',
+  'get_event_type_waitlist',
+  'set_event_type_waitlist',
+  'list_waitlist_entries',
+  'remove_waitlist_entry',
+  'join_waitlist',
+  'resend_waitlist_verification',
 ]
 const configurationWrites = new Set([
   'create_event_type',
   'update_event_type',
   'set_event_type_notifications',
+  'set_event_type_waitlist',
+  'remove_waitlist_entry',
 ])
 const writes = new Set([
   ...configurationWrites,
@@ -47,12 +55,16 @@ const writes = new Set([
   'retry_conference',
   'retry_calendar_copy',
   'set_event_type_notifications',
+  'join_waitlist',
+  'resend_waitlist_verification',
 ])
 const otherReads = new Set([
   'list_schedules',
   'get_schedule',
   'list_calendar_connections',
   'list_conference_connections',
+  'get_event_type_waitlist',
+  'list_waitlist_entries',
 ])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
@@ -368,6 +380,12 @@ describe('CLI scope parity', () => {
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
+    ['event-waitlist', 'get_event_type_waitlist'],
+    ['set-event-waitlist', 'set_event_type_waitlist'],
+    ['waitlist-entries', 'list_waitlist_entries'],
+    ['remove-waitlist-entry', 'remove_waitlist_entry'],
+    ['join-waitlist', 'join_waitlist'],
+    ['resend-waitlist-verification', 'resend_waitlist_verification'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',

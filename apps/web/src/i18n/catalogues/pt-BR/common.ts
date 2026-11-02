@@ -1,4 +1,29 @@
 export const common = {
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'Para entrar na lista de espera, escolha a duração padrão ({duration}).',
+  'Join the waitlist': 'Entrar na lista de espera',
+  'No available times in this period.': 'Não há horários disponíveis neste período.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'Se um horário ficar disponível, todas as pessoas elegíveis poderão ser avisadas. Nada fica reservado; quem concluir a reserva primeiro fica com o horário.',
+  'From {start} to {end} ({timeZone})': 'De {start} a {end} ({timeZone})',
+  'Wait until {date}. Unconfirmed requests expire after 24 hours.':
+    'A espera termina em {date}. Solicitações não confirmadas expiram após 24 horas.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'Concordo em receber e-mails da lista de espera para este período. Posso sair pelo link em qualquer e-mail da lista.',
+  'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.':
+    'Ao sair, seus dados de contato são apagados. Registros codificados são mantidos por 2 dias para prevenir abusos e por até 64 dias para evitar notificações repetidas.',
+  'Check your email to confirm': 'Confira seu e-mail para confirmar',
+  'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.':
+    'Se sua solicitação puder ser aceita, enviaremos um link de confirmação. Os limites podem impedir o envio. Entrar novamente não reenvia o e-mail.',
+  'Resend confirmation email': 'Reenviar e-mail de confirmação',
+  'Confirmation requested. Check your email; delivery is subject to limits.':
+    'E-mail de confirmação solicitado. Confira sua caixa de entrada; o envio está sujeito a limites.',
+  'Agree to receive waitlist emails before joining.':
+    'Concorde em receber e-mails da lista de espera antes de entrar.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'A lista de espera não está disponível para este período. Confira os horários disponíveis e tente novamente.',
+  'Joining…': 'Entrando…',
+  'Sending…': 'Enviando…',
   'These suggestions have expired. Check the currently available times.':
     'Estas sugestões expiraram. Confira os horários disponíveis agora.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

@@ -14,6 +14,7 @@ export type BookingWithToken = Schemas['BookingWithToken']
 export type PublicBookingResult = Schemas['PublicBookingResult']
 export type CreateBooking = Schemas['CreateBooking']
 export type OneTimeBookingPage = Schemas['OneTimeBookingPage']
+export type JoinWaitlist = Schemas['JoinWaitlist']
 
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
 export class PublicRequestError extends RequestError {
@@ -240,6 +241,50 @@ export async function createBooking(
         }),
   )
   return { result: data, replayed: status === 200 }
+}
+
+export async function joinWaitlist(
+  handle: string,
+  slug: string,
+  body: JoinWaitlist,
+  team = false,
+): Promise<void> {
+  await call(
+    () =>
+      team
+        ? api.POST('/api/v1/public/teams/{handle}/{slug}/waitlist', {
+            params: { path: { handle, slug } },
+            body,
+          })
+        : api.POST('/api/v1/public/{handle}/{slug}/waitlist', {
+            params: { path: { handle, slug } },
+            body,
+          }),
+    undefined,
+    true,
+  )
+}
+
+export async function resendWaitlistVerification(
+  handle: string,
+  slug: string,
+  email: string,
+  team = false,
+): Promise<void> {
+  await call(
+    () =>
+      team
+        ? api.POST('/api/v1/public/teams/{handle}/{slug}/waitlist/resend', {
+            params: { path: { handle, slug } },
+            body: { email },
+          })
+        : api.POST('/api/v1/public/{handle}/{slug}/waitlist/resend', {
+            params: { path: { handle, slug } },
+            body: { email },
+          }),
+    undefined,
+    true,
+  )
 }
 
 export async function getManagedBooking(
