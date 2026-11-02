@@ -253,6 +253,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
       {
         id,
         status: 'confirmed',
+        isRescheduled: false,
         start: '2026-11-02T09:00:00.000Z',
         end: '2026-11-02T09:30:00.000Z',
         cancelledAt: null,
@@ -463,6 +464,41 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     expect(await listTeamAdminBookings(f.ownerCtx, { from: instant('2027-01-01T00:00Z') })).toEqual(
       { data: [], nextCursor: null },
     )
+  })
+
+  async function verifyRescheduled(list: List) {
+    const f = await setup()
+    const original = await booking(f, '2026-11-02T09:00Z', { status: 'cancelled' })
+    const moved = await booking(f, '2026-11-02T10:00Z', {
+      status: 'cancelled',
+      rescheduledFromId: original,
+    })
+    const current = await booking(f, '2026-11-02T11:00Z', { rescheduledFromId: moved })
+    const cancelled = await booking(f, '2026-11-02T12:00Z', { status: 'cancelled' })
+    // The successor can be outside this page's time/status filters or already cancelled.
+    const page = await list(f.ownerCtx, { status: 'cancelled', limit: 1 })
+    expect(
+      page.data.map(({ id, status, isRescheduled }) => ({ id, status, isRescheduled })),
+    ).toEqual([{ id: original, status: 'cancelled', isRescheduled: true }])
+    const all = await list(f.ownerCtx)
+    expect(all.data.map(({ id, isRescheduled }) => ({ id, isRescheduled }))).toEqual([
+      { id: original, isRescheduled: true },
+      { id: moved, isRescheduled: true },
+      { id: current, isRescheduled: false },
+      { id: cancelled, isRescheduled: false },
+    ])
+    expect(TeamAdminBookingPageSchema.safeParse(all).success).toBe(true)
+  }
+
+  it('marks cancelled reschedule predecessors without exposing chain IDs or changing status', () =>
+    verifyRescheduled(listTeamAdminBookings))
+
+  it('detects removal of the reschedule marker with a real assertion failure', async () => {
+    const copy = sourceCopy([
+      "isRescheduled: booking.status === 'cancelled' && rescheduledIds.has(booking.id)",
+      'isRescheduled: false',
+    ])
+    await expect(verifyRescheduled(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
   it('reads real collective reschedule/cancel transitions with their saved inactive hosts', async () => {

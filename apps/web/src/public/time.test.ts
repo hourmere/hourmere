@@ -17,6 +17,10 @@ import {
 } from './time.ts'
 
 const at = (iso: string) => Date.parse(iso)
+const day = (iso: string) => {
+  const [year, month, d] = iso.split('-').map(Number) as [number, number, number]
+  return { year, month, day: d }
+}
 /** Intl puts narrow no-break spaces in some times ("9:00 AM"); compare with plain spaces. */
 const plain = (text: string) => text.replace(/[\u2009\u202f\u00a0]/g, ' ')
 
@@ -54,10 +58,6 @@ describe('wall-clock time in a zone', () => {
   })
 
   it('finds the instant of a wall-clock time, also across and inside DST changes', () => {
-    const day = (iso: string) => {
-      const [year, month, d] = iso.split('-').map(Number) as [number, number, number]
-      return { year, month, day: d }
-    }
     // Berlin's 25-hour day: midnight to midnight across the change back to CET.
     const start = instantOf(day('2026-10-25'), 0, 0, 'Europe/Berlin')
     const next = instantOf(day('2026-10-26'), 0, 0, 'Europe/Berlin')
@@ -75,6 +75,26 @@ describe('wall-clock time in a zone', () => {
     expect(new Date(instantOf(day('2026-11-03'), 0, 0, 'Pacific/Kiritimati')).toISOString()).toBe(
       '2026-11-02T10:00:00.000Z',
     )
+  })
+
+  it.each([
+    ['America/New_York', '2026-03-08', '2026-03-08T07:30:00.000Z'],
+    ['Europe/Berlin', '2026-03-29', '2026-03-29T01:30:00.000Z'],
+  ])('moves skipped 02:30 forward across the gap in %s', (zone, date, expected) => {
+    const instant = instantOf(day(date), 2, 30, zone)
+    expect(new Date(instant).toISOString()).toBe(expected)
+    expect(wallTime(instant, zone)).toMatchObject({ ...day(date), hour: 3, minute: 30 })
+  })
+
+  it.each([
+    ['America/New_York', '2026-11-01', 1, '2026-11-01T05:30:00.000Z'],
+    ['Europe/Berlin', '2026-10-25', 2, '2026-10-25T00:30:00.000Z'],
+  ])('chooses the earlier occurrence of a repeated time in %s', (zone, date, hour, expected) => {
+    const instant = instantOf(day(date), hour, 30, zone)
+    expect(new Date(instant).toISOString()).toBe(expected)
+    expect(wallTime(instant, zone)).toMatchObject({ ...day(date), hour, minute: 30 })
+    // The later instant is the same wall-clock time, so round-tripping alone is insufficient.
+    expect(wallTime(instant + 3_600_000, zone)).toEqual(wallTime(instant, zone))
   })
 })
 

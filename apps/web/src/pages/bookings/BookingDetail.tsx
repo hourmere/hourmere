@@ -1,5 +1,5 @@
-import { type FormEvent, useCallback, useId, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
@@ -12,6 +12,7 @@ import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
+import { formatList } from '../../i18n/formatting.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
@@ -20,6 +21,8 @@ import { useMe } from '../../session.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
+import { TeamBookingDetailPage } from '../team-bookings/TeamBookingDetail.tsx'
+import { BookingOrganization } from './BookingOrganization.tsx'
 import {
   answerText,
   bookingTitle,
@@ -43,17 +46,67 @@ interface Loaded {
 
 export function BookingDetailPage() {
   const { id = '' } = useParams()
-  // Starts over for another booking (e.g. the one it was rescheduled from).
-  return <BookingDetail key={id} id={id} />
+  return <BookingSpace key={id} id={id} />
 }
 
-function BookingDetail({ id }: { id: string }) {
+function BookingSpace({ id }: { id: string }) {
+  const me = useMe()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentLocation = useRef(location)
+  currentLocation.current = location
+  // History state survives the session's organization-keyed remount. A deliberate
+  // space switch must not repeat this entry's automatic booking handoff.
+  const [opening] = useState(() => {
+    const saved = location.state?.bookingSpace
+    return saved?.userId === me.user.id && saved?.id === id ? saved : null
+  })
+  const rememberSpace = useCallback(
+    (organizationId: string, access: 'host' | 'team_admin') => {
+      const current = currentLocation.current
+      navigate(
+        { pathname: current.pathname, search: current.search, hash: current.hash },
+        {
+          replace: true,
+          state: {
+            ...current.state,
+            bookingSpace: { userId: me.user.id, id, organizationId, access },
+          },
+        },
+      )
+    },
+    [navigate, me.user.id, id],
+  )
+  useEffect(() => {
+    if (!opening) rememberSpace(me.organization.id, 'host')
+  }, [opening, rememberSpace, me.organization.id])
+  const saved = location.state?.bookingSpace
+  if (
+    saved?.userId === me.user.id &&
+    saved?.id === id &&
+    saved?.organizationId === me.organization.id &&
+    saved?.access === 'team_admin'
+  )
+    return <TeamBookingDetailPage key={id} id={id} />
+  // Starts over for another booking (e.g. the one it was rescheduled from).
+  return <BookingDetail key={id} id={id} resolveSpace={!opening} rememberSpace={rememberSpace} />
+}
+
+function BookingDetail({
+  id,
+  resolveSpace,
+  rememberSpace,
+}: {
+  id: string
+  resolveSpace: boolean
+  rememberSpace: (organizationId: string, access: 'host' | 'team_admin') => void
+}) {
   const { t, ui } = useI18n()
   const me = useMe()
   const [expectedOrganizationId] = useState(me.organization.id)
 
   const load = useCallback(
-    async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
+    async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve'> => {
       const [booking, profile] = await Promise.all([
         unwrap(api.GET('/api/v1/bookings/{id}', { params: { path: { id } }, signal })).catch(
           (err: unknown) => {
@@ -62,14 +115,16 @@ function BookingDetail({ id }: { id: string }) {
               isNotFound(err, 'booking_not_found') ||
               (err instanceof RequestError && err.status === 400)
             ) {
-              return 'missing' as const
+              return err instanceof RequestError && err.status === 400
+                ? ('missing' as const)
+                : ('resolve' as const)
             }
             throw err
           },
         ),
         loadProfile(signal),
       ])
-      if (booking === 'missing') return 'missing'
+      if (booking === 'missing' || booking === 'resolve') return booking
       let questions: Question[] = []
       if (booking.eventTypeId) {
         // The event type may have been deleted since, or belong to another organization's
@@ -108,7 +163,9 @@ function BookingDetail({ id }: { id: string }) {
       </>
     )
   }
-  if (state.data === 'missing') {
+  if (state.data === 'resolve' && resolveSpace)
+    return <BookingOrganization id={id} rememberSpace={rememberSpace} />
+  if (state.data === 'missing' || state.data === 'resolve') {
     return (
       <MissingRecord
         title={t('Booking not found')}
@@ -298,6 +355,17 @@ function BookingView({
       <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
+          {booking.coHosts && booking.coHosts.length > 0 && (
+            <>
+              <dt>{t('Co-hosts')}</dt>
+              <dd>
+                {formatList(
+                  booking.coHosts.map((host) => host.name.trim() || t('Host')),
+                  displayLocale ?? locale,
+                )}
+              </dd>
+            </>
+          )}
           <dt>{t('Invitee')}</dt>
           <dd>
             {invitee ? (

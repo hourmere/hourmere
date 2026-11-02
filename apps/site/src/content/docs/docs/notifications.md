@@ -406,8 +406,9 @@ including processes on other hosts, then restart every role with the new code. M
 New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the verified
 primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
 including when the booker is a host or the sending mailbox is the host's own address.
-Invitee/guest summaries name the host; host summaries name the invitee. Every recipient gets
-a neutral DESCRIPTION naming the host and Hourmere. REQUEST descriptions also explain that
+Invitee/guest summaries name every required host of a collective booking; host summaries name
+the invitee. Every recipient gets a neutral DESCRIPTION naming all required hosts and Hourmere.
+Single-host and round-robin bookings continue to name their one assigned host. REQUEST descriptions also explain that
 accepting or declining the calendar invitation does not cancel the booking, in the recipient's
 language. Invitees are directed to the confirmation email's cancellation link, hosts to open
 the booking in Hourmere, and guests to contact the person who booked or the host. That
@@ -441,9 +442,21 @@ replace the REQUEST/CANCEL scheduling lifecycle.
 
 From always remains the authenticated, operator-configured `MAIL_FROM`; Hourmere does not
 impersonate a host's mailbox. No redundant Sender header is added. Ordinary email Reply-To
-is the verified primary host for invitee/guest mail, and the booker for host mail. This does
-not route calendar status replies: iTIP clients send those to ORGANIZER, even with SENT-BY.
-An invalid Reply-To is omitted without blocking notification delivery.
+is every current verified required host for collective invitee/guest mail, and the booker
+for host mail. Single-host and round-robin mail still reply to their one assigned host.
+Collective addresses are separate structured mailboxes, with duplicate addresses collapsed;
+the configured From and pinned calendar ORGANIZER do not change. This does not route calendar status replies: iTIP clients send those to ORGANIZER, even with SENT-BY.
+Invalid Reply-To addresses are omitted individually without blocking notification delivery.
+
+Collective booking emails use a locale-aware list of host names in the subject, introduction
+and Host field. Subjects with more than three hosts show the first three names and a localized
+remaining count; the body and calendar title/description retain the full list. Host emails
+also show the other required hosts by name, without adding their contact addresses. Host
+links contain only the booking ID. If it is outside the current space, the server first
+checks current membership and booking-host or team owner/admin access. Only an authorized
+reader switches to that space, with the expected current space checked and the new session
+confirmed. Other readers see the same not-found page without a switch. Team administrators
+receive only the team-administration detail fields; a link grants no host authority.
 
 `NEEDS-ACTION` leaves adding/accepting the invitation to the recipient's calendar. The
 booking itself is already confirmed in Hourmere. `RSVP=FALSE` deliberately does not solicit

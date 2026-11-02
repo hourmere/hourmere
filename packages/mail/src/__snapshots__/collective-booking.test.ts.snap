@@ -1,0 +1,679 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`collective booking mail > de preserves single-host and assigned round-robin output snapshots 1`] = `
+[
+  {
+    "subject": "Bestätigt: Global Sync mit Liam LA am Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Liam LA ist gebucht.
+
+Termin: Global Sync
+Zeit: Mittwoch, 4. November 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Gastgebende Person: Liam LA
+
+Sie erhalten diese E-Mail, weil Sie über Hourmere einen Termin mit Liam LA gebucht haben.
+",
+  },
+  {
+    "subject": "Neue Buchung: Global Sync mit Ivy Invitee am Di., 3. Nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ivy Invitee hat einen Termin mit Ihnen gebucht.
+
+Termin: Global Sync
+Zeit: Dienstag, 3. November 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Ortszeit der buchenden Person: Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Buchende Person: Ivy Invitee <ivy@example.test>
+
+Sie erhalten diese E-Mail, weil Ivy Invitee über Hourmere einen Termin mit Ihnen gebucht hat.
+",
+  },
+  {
+    "subject": "Verschoben: Global Sync mit Liam LA, neu am Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Liam LA wurde verschoben.
+
+Termin: Global Sync
+Zeit: Mittwoch, 4. November 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Gastgebende Person: Liam LA
+
+Sie erhalten diese E-Mail, weil Sie über Hourmere einen Termin mit Liam LA gebucht haben.
+",
+  },
+  {
+    "subject": "Verschoben: Global Sync mit Ivy Invitee, neu am Di., 3. Nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Ivy Invitee wurde verschoben.
+
+Termin: Global Sync
+Zeit: Dienstag, 3. November 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Ortszeit der buchenden Person: Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Buchende Person: Ivy Invitee <ivy@example.test>
+
+Sie erhalten diese E-Mail, weil Ivy Invitee über Hourmere einen Termin mit Ihnen gebucht hat.
+",
+  },
+  {
+    "subject": "Storniert: Global Sync mit Liam LA am Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Liam LA wurde storniert.
+
+Termin: Global Sync
+Zeit: Mittwoch, 4. November 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Gastgebende Person: Liam LA
+
+Sie erhalten diese E-Mail, weil Sie über Hourmere einen Termin mit Liam LA gebucht haben.
+",
+  },
+  {
+    "subject": "Storniert: Global Sync mit Ivy Invitee am Di., 3. Nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Ivy Invitee wurde storniert.
+
+Termin: Global Sync
+Zeit: Dienstag, 3. November 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Ortszeit der buchenden Person: Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Buchende Person: Ivy Invitee <ivy@example.test>
+
+Sie erhalten diese E-Mail, weil Ivy Invitee über Hourmere einen Termin mit Ihnen gebucht hat.
+",
+  },
+  {
+    "subject": "Erinnerung: Global Sync mit Liam LA am Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Liam LA beginnt bald.
+
+Termin: Global Sync
+Zeit: Mittwoch, 4. November 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Gastgebende Person: Liam LA
+
+Sie erhalten diese E-Mail, weil Sie über Hourmere einen Termin mit Liam LA gebucht haben.
+",
+  },
+  {
+    "subject": "Erinnerung: Global Sync mit Ivy Invitee am Di., 3. Nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ihr Termin mit Ivy Invitee beginnt bald.
+
+Termin: Global Sync
+Zeit: Dienstag, 3. November 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Ortszeit der buchenden Person: Mi., 4. Nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Buchende Person: Ivy Invitee <ivy@example.test>
+
+Sie erhalten diese E-Mail, weil Ivy Invitee über Hourmere einen Termin mit Ihnen gebucht hat.
+",
+  },
+]
+`;
+
+exports[`collective booking mail > en preserves single-host and assigned round-robin output snapshots 1`] = `
+[
+  {
+    "subject": "Confirmed: Global Sync with Liam LA on Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Your meeting with Liam LA is booked.
+
+What: Global Sync
+When: Wednesday, November 4, 2026, 1:00 AM – 1:30 AM (Asia/Shanghai, GMT+08:00)
+Host: Liam LA
+
+You received this email because you booked a meeting with Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "New booking: Global Sync with Ivy Invitee on Tue, Nov 3, 9:00 AM (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ivy Invitee booked a meeting with you.
+
+What: Global Sync
+When: Tuesday, November 3, 2026, 9:00 AM – 9:30 AM (America/Los Angeles, GMT-08:00)
+Invitee's time: Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)
+Invitee: Ivy Invitee <ivy@example.test>
+
+You received this email because Ivy Invitee booked a meeting with you via Hourmere.
+",
+  },
+  {
+    "subject": "Rescheduled: Global Sync with Liam LA, now Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Your meeting with Liam LA has moved to a new time.
+
+What: Global Sync
+When: Wednesday, November 4, 2026, 1:00 AM – 1:30 AM (Asia/Shanghai, GMT+08:00)
+Host: Liam LA
+
+You received this email because you booked a meeting with Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Rescheduled: Global Sync with Ivy Invitee, now Tue, Nov 3, 9:00 AM (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Your meeting with Ivy Invitee has moved to a new time.
+
+What: Global Sync
+When: Tuesday, November 3, 2026, 9:00 AM – 9:30 AM (America/Los Angeles, GMT-08:00)
+Invitee's time: Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)
+Invitee: Ivy Invitee <ivy@example.test>
+
+You received this email because Ivy Invitee booked a meeting with you via Hourmere.
+",
+  },
+  {
+    "subject": "Cancelled: Global Sync with Liam LA on Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Your meeting with Liam LA has been cancelled.
+
+What: Global Sync
+When: Wednesday, November 4, 2026, 1:00 AM – 1:30 AM (Asia/Shanghai, GMT+08:00)
+Host: Liam LA
+
+You received this email because you booked a meeting with Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Cancelled: Global Sync with Ivy Invitee on Tue, Nov 3, 9:00 AM (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Your meeting with Ivy Invitee has been cancelled.
+
+What: Global Sync
+When: Tuesday, November 3, 2026, 9:00 AM – 9:30 AM (America/Los Angeles, GMT-08:00)
+Invitee's time: Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)
+Invitee: Ivy Invitee <ivy@example.test>
+
+You received this email because Ivy Invitee booked a meeting with you via Hourmere.
+",
+  },
+  {
+    "subject": "Reminder: Global Sync with Liam LA on Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Your meeting with Liam LA is coming up.
+
+What: Global Sync
+When: Wednesday, November 4, 2026, 1:00 AM – 1:30 AM (Asia/Shanghai, GMT+08:00)
+Host: Liam LA
+
+You received this email because you booked a meeting with Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Reminder: Global Sync with Ivy Invitee on Tue, Nov 3, 9:00 AM (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Your meeting with Ivy Invitee is coming up.
+
+What: Global Sync
+When: Tuesday, November 3, 2026, 9:00 AM – 9:30 AM (America/Los Angeles, GMT-08:00)
+Invitee's time: Wed, Nov 4, 1:00 AM (Asia/Shanghai, GMT+08:00)
+Invitee: Ivy Invitee <ivy@example.test>
+
+You received this email because Ivy Invitee booked a meeting with you via Hourmere.
+",
+  },
+]
+`;
+
+exports[`collective booking mail > es preserves single-host and assigned round-robin output snapshots 1`] = `
+[
+  {
+    "subject": "Confirmación: Global Sync con Liam LA, mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Su reunión con Liam LA está reservada.
+
+Evento: Global Sync
+Fecha y hora: miércoles, 4 de noviembre de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrión: Liam LA
+
+Ha recibido este correo electrónico porque reservó una reunión con Liam LA a través de Hourmere.
+",
+  },
+  {
+    "subject": "Nueva reserva: Global Sync con Ivy Invitee, mar, 3 nov, 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ivy Invitee ha reservado una reunión con usted.
+
+Evento: Global Sync
+Fecha y hora: martes, 3 de noviembre de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horario del asistente: mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)
+Asistente: Ivy Invitee <ivy@example.test>
+
+Ha recibido este correo electrónico porque Ivy Invitee reservó una reunión con usted a través de Hourmere.
+",
+  },
+  {
+    "subject": "Reprogramación: Global Sync con Liam LA, nuevo horario: mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Su reunión con Liam LA se ha reprogramado a un nuevo horario.
+
+Evento: Global Sync
+Fecha y hora: miércoles, 4 de noviembre de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrión: Liam LA
+
+Ha recibido este correo electrónico porque reservó una reunión con Liam LA a través de Hourmere.
+",
+  },
+  {
+    "subject": "Reprogramación: Global Sync con Ivy Invitee, nuevo horario: mar, 3 nov, 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Su reunión con Ivy Invitee se ha reprogramado a un nuevo horario.
+
+Evento: Global Sync
+Fecha y hora: martes, 3 de noviembre de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horario del asistente: mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)
+Asistente: Ivy Invitee <ivy@example.test>
+
+Ha recibido este correo electrónico porque Ivy Invitee reservó una reunión con usted a través de Hourmere.
+",
+  },
+  {
+    "subject": "Cancelación: Global Sync con Liam LA, mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Su reunión con Liam LA se ha cancelado.
+
+Evento: Global Sync
+Fecha y hora: miércoles, 4 de noviembre de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrión: Liam LA
+
+Ha recibido este correo electrónico porque reservó una reunión con Liam LA a través de Hourmere.
+",
+  },
+  {
+    "subject": "Cancelación: Global Sync con Ivy Invitee, mar, 3 nov, 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Su reunión con Ivy Invitee se ha cancelado.
+
+Evento: Global Sync
+Fecha y hora: martes, 3 de noviembre de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horario del asistente: mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)
+Asistente: Ivy Invitee <ivy@example.test>
+
+Ha recibido este correo electrónico porque Ivy Invitee reservó una reunión con usted a través de Hourmere.
+",
+  },
+  {
+    "subject": "Recordatorio: Global Sync con Liam LA, mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Su reunión con Liam LA se celebrará pronto.
+
+Evento: Global Sync
+Fecha y hora: miércoles, 4 de noviembre de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrión: Liam LA
+
+Ha recibido este correo electrónico porque reservó una reunión con Liam LA a través de Hourmere.
+",
+  },
+  {
+    "subject": "Recordatorio: Global Sync con Ivy Invitee, mar, 3 nov, 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Su reunión con Ivy Invitee se celebrará pronto.
+
+Evento: Global Sync
+Fecha y hora: martes, 3 de noviembre de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horario del asistente: mié, 4 nov, 1:00 (Asia/Shanghai, GMT+08:00)
+Asistente: Ivy Invitee <ivy@example.test>
+
+Ha recibido este correo electrónico porque Ivy Invitee reservó una reunión con usted a través de Hourmere.
+",
+  },
+]
+`;
+
+exports[`collective booking mail > fr preserves single-host and assigned round-robin output snapshots 1`] = `
+[
+  {
+    "subject": "Confirmation : Global Sync avec Liam LA le mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Liam LA est réservée.
+
+Événement : Global Sync
+Horaire : mercredi 4 novembre 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Hôte : Liam LA
+
+Vous recevez cet e-mail parce que vous avez réservé une réunion avec Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Nouvelle réservation : Global Sync avec Ivy Invitee le mar. 3 nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ivy Invitee a réservé une réunion avec vous.
+
+Événement : Global Sync
+Horaire : mardi 3 novembre 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horaire du participant : mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participant : Ivy Invitee <ivy@example.test>
+
+Vous recevez cet e-mail parce que Ivy Invitee a réservé une réunion avec vous via Hourmere.
+",
+  },
+  {
+    "subject": "Replanification : Global Sync avec Liam LA, nouvel horaire le mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Liam LA a été replanifiée à un nouvel horaire.
+
+Événement : Global Sync
+Horaire : mercredi 4 novembre 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Hôte : Liam LA
+
+Vous recevez cet e-mail parce que vous avez réservé une réunion avec Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Replanification : Global Sync avec Ivy Invitee, nouvel horaire le mar. 3 nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Ivy Invitee a été replanifiée à un nouvel horaire.
+
+Événement : Global Sync
+Horaire : mardi 3 novembre 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horaire du participant : mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participant : Ivy Invitee <ivy@example.test>
+
+Vous recevez cet e-mail parce que Ivy Invitee a réservé une réunion avec vous via Hourmere.
+",
+  },
+  {
+    "subject": "Annulation : Global Sync avec Liam LA le mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Liam LA a été annulée.
+
+Événement : Global Sync
+Horaire : mercredi 4 novembre 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Hôte : Liam LA
+
+Vous recevez cet e-mail parce que vous avez réservé une réunion avec Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Annulation : Global Sync avec Ivy Invitee le mar. 3 nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Ivy Invitee a été annulée.
+
+Événement : Global Sync
+Horaire : mardi 3 novembre 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horaire du participant : mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participant : Ivy Invitee <ivy@example.test>
+
+Vous recevez cet e-mail parce que Ivy Invitee a réservé une réunion avec vous via Hourmere.
+",
+  },
+  {
+    "subject": "Rappel : Global Sync avec Liam LA le mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Liam LA approche.
+
+Événement : Global Sync
+Horaire : mercredi 4 novembre 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Hôte : Liam LA
+
+Vous recevez cet e-mail parce que vous avez réservé une réunion avec Liam LA via Hourmere.
+",
+  },
+  {
+    "subject": "Rappel : Global Sync avec Ivy Invitee le mar. 3 nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Votre réunion avec Ivy Invitee approche.
+
+Événement : Global Sync
+Horaire : mardi 3 novembre 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horaire du participant : mer. 4 nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participant : Ivy Invitee <ivy@example.test>
+
+Vous recevez cet e-mail parce que Ivy Invitee a réservé une réunion avec vous via Hourmere.
+",
+  },
+]
+`;
+
+exports[`collective booking mail > pt-BR preserves single-host and assigned round-robin output snapshots 1`] = `
+[
+  {
+    "subject": "Confirmado: Global Sync com Liam LA — qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Sua reunião com Liam LA está agendada.
+
+O quê: Global Sync
+Quando: quarta-feira, 4 de novembro de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrião: Liam LA
+
+Você recebeu este e-mail porque agendou uma reunião com Liam LA pelo Hourmere.
+",
+  },
+  {
+    "subject": "Novo agendamento: Global Sync com Ivy Invitee — ter., 3 de nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Ivy Invitee agendou uma reunião com você.
+
+O quê: Global Sync
+Quando: terça-feira, 3 de novembro de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horário do participante: qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participante: Ivy Invitee <ivy@example.test>
+
+Você recebeu este e-mail porque Ivy Invitee agendou uma reunião com você pelo Hourmere.
+",
+  },
+  {
+    "subject": "Reagendado: Global Sync com Liam LA, agora: qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Sua reunião com Liam LA foi alterada para um novo horário.
+
+O quê: Global Sync
+Quando: quarta-feira, 4 de novembro de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrião: Liam LA
+
+Você recebeu este e-mail porque agendou uma reunião com Liam LA pelo Hourmere.
+",
+  },
+  {
+    "subject": "Reagendado: Global Sync com Ivy Invitee, agora: ter., 3 de nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Sua reunião com Ivy Invitee foi alterada para um novo horário.
+
+O quê: Global Sync
+Quando: terça-feira, 3 de novembro de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horário do participante: qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participante: Ivy Invitee <ivy@example.test>
+
+Você recebeu este e-mail porque Ivy Invitee agendou uma reunião com você pelo Hourmere.
+",
+  },
+  {
+    "subject": "Cancelado: Global Sync com Liam LA — qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Sua reunião com Liam LA foi cancelada.
+
+O quê: Global Sync
+Quando: quarta-feira, 4 de novembro de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrião: Liam LA
+
+Você recebeu este e-mail porque agendou uma reunião com Liam LA pelo Hourmere.
+",
+  },
+  {
+    "subject": "Cancelado: Global Sync com Ivy Invitee — ter., 3 de nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Sua reunião com Ivy Invitee foi cancelada.
+
+O quê: Global Sync
+Quando: terça-feira, 3 de novembro de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horário do participante: qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participante: Ivy Invitee <ivy@example.test>
+
+Você recebeu este e-mail porque Ivy Invitee agendou uma reunião com você pelo Hourmere.
+",
+  },
+  {
+    "subject": "Lembrete: Global Sync com Liam LA — qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)",
+    "text": "Hourmere
+
+Sua reunião com Liam LA está se aproximando.
+
+O quê: Global Sync
+Quando: quarta-feira, 4 de novembro de 2026, 1:00 – 1:30 (Asia/Shanghai, GMT+08:00)
+Anfitrião: Liam LA
+
+Você recebeu este e-mail porque agendou uma reunião com Liam LA pelo Hourmere.
+",
+  },
+  {
+    "subject": "Lembrete: Global Sync com Ivy Invitee — ter., 3 de nov., 9:00 (America/Los Angeles, GMT-08:00)",
+    "text": "Hourmere
+
+Sua reunião com Ivy Invitee está se aproximando.
+
+O quê: Global Sync
+Quando: terça-feira, 3 de novembro de 2026, 9:00 – 9:30 (America/Los Angeles, GMT-08:00)
+Horário do participante: qua., 4 de nov., 1:00 (Asia/Shanghai, GMT+08:00)
+Participante: Ivy Invitee <ivy@example.test>
+
+Você recebeu este e-mail porque Ivy Invitee agendou uma reunião com você pelo Hourmere.
+",
+  },
+]
+`;
+
+exports[`collective booking mail > zh-CN preserves single-host and assigned round-robin output snapshots 1`] = `
+[
+  {
+    "subject": "已确认：与 Liam LA 的 Global Sync，11月4日周三，01:00（Asia/Shanghai，GMT+08:00）",
+    "text": "Hourmere
+
+你与 Liam LA 的会议已预约。
+
+活动：Global Sync
+时间：2026年11月4日星期三，01:00 至 01:30（Asia/Shanghai，GMT+08:00）
+主持人：Liam LA
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Liam LA 的会议。
+",
+  },
+  {
+    "subject": "新预约：与 Ivy Invitee 的 Global Sync，11月3日周二，09:00（America/Los Angeles，GMT-08:00）",
+    "text": "Hourmere
+
+Ivy Invitee 预约了与你的会议。
+
+活动：Global Sync
+时间：2026年11月3日星期二，09:00 至 09:30（America/Los Angeles，GMT-08:00）
+预约人当地时间：11月4日周三，01:00（Asia/Shanghai，GMT+08:00）
+预约人：Ivy Invitee <ivy@example.test>
+
+你收到此邮件，是因为 Ivy Invitee 通过 Hourmere 预约了与你的会议。
+",
+  },
+  {
+    "subject": "已改期：与 Liam LA 的 Global Sync，现为 11月4日周三，01:00（Asia/Shanghai，GMT+08:00）",
+    "text": "Hourmere
+
+你与 Liam LA 的会议已改期。
+
+活动：Global Sync
+时间：2026年11月4日星期三，01:00 至 01:30（Asia/Shanghai，GMT+08:00）
+主持人：Liam LA
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Liam LA 的会议。
+",
+  },
+  {
+    "subject": "已改期：与 Ivy Invitee 的 Global Sync，现为 11月3日周二，09:00（America/Los Angeles，GMT-08:00）",
+    "text": "Hourmere
+
+你与 Ivy Invitee 的会议已改期。
+
+活动：Global Sync
+时间：2026年11月3日星期二，09:00 至 09:30（America/Los Angeles，GMT-08:00）
+预约人当地时间：11月4日周三，01:00（Asia/Shanghai，GMT+08:00）
+预约人：Ivy Invitee <ivy@example.test>
+
+你收到此邮件，是因为 Ivy Invitee 通过 Hourmere 预约了与你的会议。
+",
+  },
+  {
+    "subject": "已取消：与 Liam LA 的 Global Sync，11月4日周三，01:00（Asia/Shanghai，GMT+08:00）",
+    "text": "Hourmere
+
+你与 Liam LA 的会议已取消。
+
+活动：Global Sync
+时间：2026年11月4日星期三，01:00 至 01:30（Asia/Shanghai，GMT+08:00）
+主持人：Liam LA
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Liam LA 的会议。
+",
+  },
+  {
+    "subject": "已取消：与 Ivy Invitee 的 Global Sync，11月3日周二，09:00（America/Los Angeles，GMT-08:00）",
+    "text": "Hourmere
+
+你与 Ivy Invitee 的会议已取消。
+
+活动：Global Sync
+时间：2026年11月3日星期二，09:00 至 09:30（America/Los Angeles，GMT-08:00）
+预约人当地时间：11月4日周三，01:00（Asia/Shanghai，GMT+08:00）
+预约人：Ivy Invitee <ivy@example.test>
+
+你收到此邮件，是因为 Ivy Invitee 通过 Hourmere 预约了与你的会议。
+",
+  },
+  {
+    "subject": "提醒：与 Liam LA 的 Global Sync，11月4日周三，01:00（Asia/Shanghai，GMT+08:00）",
+    "text": "Hourmere
+
+你与 Liam LA 的会议即将开始。
+
+活动：Global Sync
+时间：2026年11月4日星期三，01:00 至 01:30（Asia/Shanghai，GMT+08:00）
+主持人：Liam LA
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Liam LA 的会议。
+",
+  },
+  {
+    "subject": "提醒：与 Ivy Invitee 的 Global Sync，11月3日周二，09:00（America/Los Angeles，GMT-08:00）",
+    "text": "Hourmere
+
+你与 Ivy Invitee 的会议即将开始。
+
+活动：Global Sync
+时间：2026年11月3日星期二，09:00 至 09:30（America/Los Angeles，GMT-08:00）
+预约人当地时间：11月4日周三，01:00（Asia/Shanghai，GMT+08:00）
+预约人：Ivy Invitee <ivy@example.test>
+
+你收到此邮件，是因为 Ivy Invitee 通过 Hourmere 预约了与你的会议。
+",
+  },
+]
+`;

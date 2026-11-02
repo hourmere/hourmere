@@ -12,6 +12,7 @@ import {
   bookingAnswerText,
   bookingEmail,
   bookingHostName,
+  bookingHostNames,
   calendarBookingDescription,
   calendarResponseDescription,
   calendarSummary,
@@ -203,6 +204,11 @@ export function inviteeManageLinks(publicUrl: string, token: string): ManageLink
   return { reschedule: `${base}&action=reschedule`, cancel: `${base}&action=cancel` }
 }
 
+/** The booking ID alone locates the page; the server resolves authorized space access. */
+export function hostBookingUrl(publicUrl: string, bookingId: string): string {
+  return new URL(`/app/bookings/${encodeURIComponent(bookingId)}`, publicUrl).href
+}
+
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest()
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -274,6 +280,7 @@ export function answersOf(
 export interface NotificationData {
   booking: {
     id: string
+    organizationId: string
     status: string
     start: Temporal.Instant
     end: Temporal.Instant
@@ -284,7 +291,14 @@ export interface NotificationData {
     cancelReason: string | null
     rescheduledFromId: string | null
   }
-  hosts: { id: string; name: string; email: string; timeZone: string; locale: string | null }[]
+  hosts: {
+    id: string
+    name: string
+    displayName: string
+    email: string
+    timeZone: string
+    locale: string | null
+  }[]
   /** The invitee first, then guests. */
   attendees: {
     id: string
@@ -432,6 +446,7 @@ export function loadNotificationData(
       conferenceRevision: conference?.revision,
       booking: {
         id: b.id,
+        organizationId: b.organization_id,
         status: b.status,
         start: instant(b.start_at),
         end: instant(b.end_at),
@@ -446,6 +461,7 @@ export function loadNotificationData(
       hosts: hosts.map((h) => ({
         id: h.id,
         name: h.name.trim() || h.profile_handle || h.email,
+        displayName: h.name.trim() || h.profile_handle || '',
         email: h.email,
         timeZone: timeZone(h.profile_zone) ?? timeZone(h.schedule_zone) ?? 'UTC',
         locale: h.profile_locale,
@@ -752,9 +768,14 @@ async function deliverBookingNotification(
     replyTo:
       args[2].role === 'host'
         ? { name: invitee.name, email: invitee.email }
-        : organizer
-          ? { name: organizer.name, email: organizer.email }
-          : undefined,
+        : hosts.length > 1
+          ? hosts.map(({ displayName, email }) => ({
+              name: displayName || bookingHostName(args[2].locale),
+              email,
+            }))
+          : organizer
+            ? { name: organizer.name, email: organizer.email }
+            : undefined,
   })
 
   const meeting: BookingEmailMeeting = {
@@ -762,6 +783,7 @@ async function deliverBookingNotification(
     // A logistical failure needs no calendar organizer and must still reach the original
     // invitee when the pinned host was deleted or is no longer verified.
     hostName: organizer?.name ?? bookingHostName(bookingLanguage),
+    hostNames: hosts.length > 1 ? hosts.map((host) => host.displayName) : undefined,
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
     inviteeTimeZone: invitee.timeZone,
@@ -831,7 +853,14 @@ async function deliverBookingNotification(
           summary: calendarSummary(booking.eventName, other, language),
           description:
             [
-              modern ? calendarBookingDescription(calendarOrganizer.name, language) : undefined,
+              modern
+                ? calendarBookingDescription(
+                    meeting.hostNames
+                      ? bookingHostNames(meeting.hostNames, language)
+                      : calendarOrganizer.name,
+                    language,
+                  )
+                : undefined,
               kind !== 'cancelled' ? calendarResponseDescription(role, language) : undefined,
             ]
               .filter(Boolean)
@@ -889,7 +918,9 @@ async function deliverBookingNotification(
         },
         {
           attachment: invitation(
-            meeting.hostName,
+            meeting.hostNames
+              ? bookingHostNames(meeting.hostNames, bookingLanguage)
+              : meeting.hostName,
             bookingLanguage,
             attendee === invitee ? 'invitee' : 'guest',
             hosts.find((h) => h.email.toLowerCase() === attendee.email.toLowerCase())?.id,
@@ -914,6 +945,9 @@ async function deliverBookingNotification(
             email: host.email,
             timeZone: host.timeZone,
             locale: host.locale,
+            coHostNames: hosts
+              .filter((other) => other.id !== host.id)
+              .map((other) => other.displayName),
             answers: answersOf(
               booking.questions,
               booking.responses,
@@ -921,8 +955,7 @@ async function deliverBookingNotification(
             ),
           },
           {
-            bookingUrl: new URL(`/app/bookings/${encodeURIComponent(bookingId)}`, deps.publicUrl)
-              .href,
+            bookingUrl: hostBookingUrl(deps.publicUrl, bookingId),
             attachment: invitation(
               invitee.name,
               interfaceLanguage(host.locale) ?? 'en',

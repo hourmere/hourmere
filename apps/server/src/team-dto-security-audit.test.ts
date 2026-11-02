@@ -435,7 +435,8 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     return response.json() as Promise<Json>
   }
   function assertBooking(item: Json, list = false) {
-    keys(item, bookingKeys)
+    keys(item, list ? [...bookingKeys, 'isRescheduled'] : bookingKeys)
+    if (list) expect(item.isRescheduled).toBe(false)
     keys(item.eventType, list ? ['id', 'title', 'publicBookingPath'] : ['id', 'title'])
     for (const host of item.hosts)
       keys(host, list ? ['userId', 'name', 'timeZone', 'isCurrentMember'] : ['userId', 'name'])

@@ -138,6 +138,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/bookings/{id}/organization` | Browser session only | — |
 | `POST /api/v1/bookings/{id}/calendar-copy/retry` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full, bookings` |
@@ -198,6 +199,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `DELETE /api/v1/schedules/{id}/overrides/{date}` | Session or API key | `full` |
 | `POST /api/v1/schedules/default` | Session or API key | `full` |
 | `GET /api/v1/team/bookings` | Browser session only | — |
+| `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |

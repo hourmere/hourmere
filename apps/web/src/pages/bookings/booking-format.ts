@@ -16,11 +16,14 @@ export function bookingTitle(booking: Booking): UiText {
 
 /** Mutation responses omit host-read metadata; keep it only for the same booking. */
 export function bookingUpdate(current: Booking, updated: Booking): Booking {
-  return current.id === updated.id &&
-    updated.eventTypeTitle === undefined &&
-    current.eventTypeTitle !== undefined
-    ? { ...updated, eventTypeTitle: current.eventTypeTitle }
-    : updated
+  if (current.id !== updated.id) return updated
+  return {
+    ...updated,
+    ...(updated.eventTypeTitle === undefined &&
+      current.eventTypeTitle !== undefined && { eventTypeTitle: current.eventTypeTitle }),
+    ...(updated.coHosts === undefined &&
+      current.coHosts !== undefined && { coHosts: current.coHosts }),
+  }
 }
 
 /** The zone bookings are shown in: the profile's, else the browser's. */

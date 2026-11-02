@@ -10,8 +10,16 @@ Any Authorization header selects the agent credential boundary and is denied, ev
 a valid owner/admin session cookie. The response does not reveal team existence or key validity.
 The route preserves the shared caller middleware's Origin/Referer handling.
 
-The scheduling service exports `listTeamAdminBookings`, `TeamAdminBookingListItemSchema`
-and `TeamAdminBookingListPageSchema` for this list. The base `TeamAdminBookingSchema`,
+`GET /api/v1/team/bookings/{id}` applies the same access check and returns one booking
+through this same whitelist. A missing booking or a booking outside the current team
+receives `404 booking_not_found`. Both reads accept the existing expected-organization
+header, so a page opened in another still-authorized team receives context-change recovery
+before any booking data. Email deep links can use this limited detail after the server
+resolves that the caller is a current owner/admin of the booking's team.
+
+The scheduling service exports `listTeamAdminBookings`, `getTeamAdminBooking`,
+`TeamAdminBookingListItemSchema` and `TeamAdminBookingListPageSchema` for these reads.
+The base `TeamAdminBookingSchema`,
 `TeamAdminBookingPageSchema` and `toTeamAdminBooking` retain the original projection used
 by member departure and removal responses.
 
@@ -21,6 +29,7 @@ List items use this explicit whitelist:
 |---|---|
 | `id` | Identify the booking to inspect or coordinate cancellation. |
 | `status` | `confirmed` or `cancelled`, including cancelled reschedule predecessors. |
+| `isRescheduled` | Read-only boolean: a cancelled booking has a successor in this team. The UI labels it **Rescheduled**; status filters still treat it as `cancelled`. No successor or chain identifier is exposed. |
 | `start`, `end` | Stored booking instants in UTC. |
 | `cancelledAt` | Cancellation instant, or null. |
 | `eventType` | `{ id, title, publicBookingPath }` for the activity; title is null for a deleted activity, and the object is null when no association remains. The additive, nullable path is present only while the activity exists, is enabled and resolves through its public booking endpoint. |
@@ -28,7 +37,7 @@ List items use this explicit whitelist:
 | `attendees` | `{ name, email, timeZone, isBooker }` for the invitee and guests: contact, scheduling and booker identification needed for coordination. |
 
 The list envelope contains only `data` and opaque `nextCursor` (null on the last page).
-The additional fields are read-only and limited to this list. A missing public profile
+The additional fields are read-only and limited to these list/detail reads. A missing public profile
 produces a null host zone; private schedule and calendar data are never a fallback.
 An enabled event can retain its public path after its host configuration is repaired,
 while the original booking host still has `isCurrentMember: false`.
