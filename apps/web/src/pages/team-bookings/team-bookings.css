@@ -102,3 +102,34 @@
     margin-bottom: 0;
   }
 }
+
+/* Share the wide table between the event, invitee and saved-host columns. */
+.team-bookings-page .table-bookings thead th:nth-child(2) {
+  width: 25%;
+}
+
+.team-bookings-page .table-bookings thead th:nth-child(3) {
+  width: 25%;
+}
+
+.team-bookings-page .table-bookings thead th:nth-child(4) {
+  width: 20%;
+}
+
+.team-booking-hosts {
+  margin: 0;
+}
+
+/* Keep the domain together whenever it fits, with one preferred break after @.
+   An unusually long local part or domain may still wrap to fit a phone card. */
+.team-booking-email {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.team-booking-email > span {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}

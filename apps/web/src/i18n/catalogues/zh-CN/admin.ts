@@ -348,6 +348,7 @@ export const admin = {
     '请尝试其他时间范围或清除筛选。新的团队预约会显示在这里。',
   'Deleted event type': '已删除的活动类型',
   ' + {0} guests': ' + {0}位来宾',
+  'Co-hosts': '共同主持人',
   'Team booking details': '团队预约详情',
   'Close details': '关闭详情',
   'Booking ID': '预约ID',

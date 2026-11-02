@@ -706,9 +706,11 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
       'eventType',
       'hosts',
       'id',
+      'isRescheduled',
       'start',
       'status',
     ])
+    expect(row?.isRescheduled).toBe(false)
     for (const action of ['conference/retry', 'calendar-copy/retry']) {
       const retry = () =>
         app.request(`/api/v1/bookings/${f.booking}/${action}`, {

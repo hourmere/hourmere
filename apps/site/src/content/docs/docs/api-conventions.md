@@ -6,6 +6,17 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Booking participants and team status
+
+Authenticated host booking reads may include additive `coHosts: [{ name }]` when other
+saved hosts participate. This names the other actual booking hosts, excluding the caller,
+without exposing their email addresses or identifiers. Single-host responses omit the
+field. Public booking and management-token responses retain their existing fields.
+
+Team administrator list items add read-only `isRescheduled`, so the web app can label a
+cancelled reschedule predecessor **Rescheduled**. Its `status` remains `cancelled`, and
+the existing status filters retain that meaning. No reschedule-chain identifier is added.
+
 ## Versioning
 
 - Product endpoints live under `/api/v1`. A breaking change means `/api/v2`, not an edit.

@@ -355,6 +355,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/organization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve the space of a booking visible to the browser session
+         * @description Read-only browser handoff. Rechecks the verified live session and membership in the booking space. Only a booked host or a team owner/admin receives its organization and access kind. Everyone else receives uniform booking_not_found. API keys and OAuth grants cannot resolve other spaces. Does not switch the session or grant host authority.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Authorized booking space */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            access: "host" | "team_admin";
+                            /** Format: uuid */
+                            organizationId: string;
+                        };
+                    };
+                };
+                /** @description The id is not a UUID (`invalid_request`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/{id}/reschedule": {
         parameters: {
             query?: never;
@@ -2622,6 +2704,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A booking of the session's current team
+         * @description Requires a current verified team owner/admin browser session without Authorization. Returns only the team-administration field whitelist, with no private host detail or conference links. Missing bookings and bookings in another space receive the same 404 booking_not_found. Optional X-Expected-Organization-Id binds the read to the team where the page opened, using the same current-team protection as the list.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "x-expected-organization-id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The team booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamAdminBooking"];
+                    };
+                };
+                /** @description Invalid parameters (invalid_request) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description booking_not_found: booking not found in this team */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/bookings/{id}/cancel": {
         parameters: {
             query?: never;
@@ -3383,6 +3562,10 @@ export interface components {
              */
             cancelledAt: string | null;
             cancelReason: string | null;
+            /** @description Authenticated host reads only: the other booked hosts’ names, with no email addresses or internal identifiers. Omitted for single-host bookings. */
+            coHosts?: {
+                name: string;
+            }[];
             conference?: {
                 /**
                  * @description Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.
@@ -4526,6 +4709,8 @@ export interface components {
             }[];
             /** Format: uuid */
             id: string;
+            /** @description Additive, read-only: whether this cancelled booking was replaced by a rescheduled booking; status and status filters remain unchanged */
+            isRescheduled: boolean;
             /** Format: date-time */
             start: string;
             /** @enum {string} */

@@ -193,6 +193,35 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     )
   })
 
+  it('publishes booked co-host names through the host schema without emails or identifiers', async () => {
+    const f = createFixtures(db)
+    const host = await f.host({ name: 'Liam LA' })
+    const other = await f.host({ name: 'Berta Berlin' })
+    const team = await f.organization()
+    await f.member(host.userId, team)
+    await f.member(other.userId, team)
+    const principal = principals.get('alice') as Principal
+    principals.set('collective-host', {
+      ...principal,
+      user: { ...principal.user, id: host.userId },
+      organization: { ...principal.organization, id: team },
+    })
+    const id = await f.booking(
+      team,
+      [host.userId, other.userId],
+      '2026-11-10T09:00Z',
+      '2026-11-10T09:30Z',
+    )
+    const response = await get(`/api/v1/bookings/${id}`, 'collective-host')
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    const parsed = Booking.parse(body)
+    expect(parsed.coHosts).toEqual([{ name: 'Berta Berlin' }])
+    expect((body as { coHosts: unknown }).coHosts).toEqual([{ name: 'Berta Berlin' }])
+    expect(Object.keys(parsed.coHosts?.[0] ?? {})).toEqual(['name'])
+    expect((await get(`/api/v1/bookings/${id}`, 'bob-team')).status).toBe(404)
+  })
+
   it.each([
     ['?endAfter=invalid', 'invalid_request'],
     ['?endTo=2026-11-04T10:00:00.1234567890Z', 'invalid_request'],

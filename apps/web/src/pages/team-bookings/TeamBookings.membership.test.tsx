@@ -28,6 +28,7 @@ const TEAM: Schemas['Me'] = {
 const BOOKING: Schemas['TeamAdminBooking'] = {
   id: 'b0000000-0000-7000-8000-000000000001',
   status: 'confirmed',
+  isRescheduled: false,
   start: '2030-03-04T09:00:00.000Z',
   end: '2030-03-04T09:30:00.000Z',
   cancelledAt: null,

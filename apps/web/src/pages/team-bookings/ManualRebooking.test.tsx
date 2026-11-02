@@ -32,6 +32,7 @@ function booking(
     start: '2030-03-04T09:00:00.000Z',
     end: '2030-03-04T09:30:00.000Z',
     status: 'confirmed',
+    isRescheduled: false,
     cancelledAt: null,
     eventType: { id: EVENT_ID, title: 'Team discovery call', publicBookingPath: PUBLIC_PATH },
     hosts: [

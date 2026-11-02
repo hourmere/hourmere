@@ -194,6 +194,50 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       followups.every((m) => !m.text.includes('#token=') && !m.text.includes('Secret detail')),
     ).toBe(true)
   })
+  it('names all required hosts and co-hosts in configured reminders and follow-ups', async () => {
+    const { bookingId, host } = await setup({
+      reminders: [rule('before', 120)],
+      followUps: [rule('after', 5)],
+    })
+    const coHost = await f.host({ name: 'Berta Berlin' })
+    await f.member(coHost.userId, host.organizationId)
+    await db
+      .updateTable('auth.user')
+      .set({ name: 'Liam LA' })
+      .where('id', '=', host.userId)
+      .execute()
+    await db
+      .insertInto('booking_hosts')
+      .values({ booking_id: bookingId, user_id: coHost.userId })
+      .execute()
+    const users = await db
+      .selectFrom('auth.user')
+      .select(['id', 'name', 'email'])
+      .where('id', 'in', [host.userId, coHost.userId])
+      .orderBy('id')
+      .execute()
+    const names = users.map((user) => user.name).join(' and ')
+    for (const scheduled of await rows(bookingId)) {
+      await run(scheduled.id, Temporal.Instant.fromEpochMilliseconds(scheduled.due_at.getTime()))
+      const messages = sent.splice(0)
+      expect(messages).toHaveLength(3)
+      const invitee = messages.find((message) => message.to === 'invitee@example.com')
+      expect(invitee?.text).toContain(names)
+      if (scheduled.kind === 'reminder') expect(invitee?.subject).toContain(names)
+      expect(invitee?.replyTo).toEqual(users.map(({ name, email }) => ({ name, email })))
+      for (const user of users) {
+        const message = messages.find((mail) => mail.to === user.email)
+        const other = users.find((otherUser) => otherUser.id !== user.id)
+        expect(message?.text).toContain(`Co-hosts: ${other?.name}`)
+        expect(message?.replyTo).toEqual({ name: 'Invitee', email: 'invitee@example.com' })
+        expect(message?.text).not.toContain(other?.email)
+        expect(message?.text).not.toContain('organizationId=')
+        expect(message?.html).not.toContain('organizationId=')
+        expect(message?.text).toContain(`/app/bookings/${bookingId}`)
+      }
+    }
+  })
+
   it('keeps strict reminder equality and records ineligible rows without catch-up', async () => {
     const start = NOW.add({ hours: 25 })
     const { bookingId } = await setup(
