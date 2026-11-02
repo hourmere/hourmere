@@ -529,6 +529,8 @@ export interface EventTypes {
   is_hidden: Generated<boolean>;
   location: Json | null;
   max_bookings_per_day: number | null;
+  max_bookings_per_month: number | null;
+  max_bookings_per_week: number | null;
   minimum_notice_minutes: Generated<number>;
   notifications: Generated<Json>;
   organization_id: string;

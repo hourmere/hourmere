@@ -1,5 +1,7 @@
 import '@hono/zod-openapi'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import type { Db } from '@hourmere/db'
 import { DEFAULT_NOTIFICATIONS } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
@@ -19,6 +21,31 @@ import {
 const serverUrl = process.env.DATABASE_URL
 
 describe('event type routes in the OpenAPI document', () => {
+  it.each(['maxBookingsPerWeek', 'maxBookingsPerMonth'])(
+    'detects a source-copy mutation exposing internal %s configuration',
+    (field) => {
+      const source = readFileSync(new URL('./event-types.ts', import.meta.url), 'utf8')
+      const projection = source.slice(
+        source.indexOf('const eventTypeResponse ='),
+        source.indexOf('const locationKinds ='),
+      )
+      const omitted = `  ${field}: _${field},\n`
+      expect(projection).toContain(omitted)
+      const verify = (copy: string) => {
+        const project = new Function(
+          `${stripTypeScriptTypes(copy)}; return eventTypeResponse`,
+        )() as (event: Record<string, unknown>) => Record<string, unknown>
+        const result = project({ title: 'Intro', [field]: 1 })
+        expect(result.title).toBe('Intro')
+        expect(result).not.toHaveProperty(field)
+      }
+      verify(projection)
+      expect(() => verify(projection.replace(omitted, ''))).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    },
+  )
+
   it('documents open responses and strict request bodies, down to locations and questions', async () => {
     const doc = await openApiDocument(productApp({} as Db))
     const paths = ['/api/v1/event-types', '/api/v1/event-types/{id}']
@@ -112,6 +139,38 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     ...overrides,
   })
   const idOf = (answer: { body: unknown }) => (answer.body as { id: string }).id
+
+  it('keeps weekly and monthly configuration internal until transport support is added', async () => {
+    const user = await createTestUser(t.db)
+    const created = await api(user).post('/api/v1/event-types', body())
+    expect(created.status).toBe(201)
+    const id = idOf(created)
+    await t.db
+      .updateTable('event_types')
+      .set({
+        max_bookings_per_week: 3,
+        max_bookings_per_month: 8,
+      })
+      .where('id', '=', id)
+      .execute()
+    for (const field of ['maxBookingsPerWeek', 'maxBookingsPerMonth']) {
+      expect(
+        (await api(user).post('/api/v1/event-types', body({ slug: 'new', [field]: 4 }))).status,
+      ).toBe(400)
+      expect((await api(user).patch(`/api/v1/event-types/${id}`, { [field]: 4 })).status).toBe(400)
+      expect((await api(user).get(`/api/v1/event-types/${id}`)).body).not.toHaveProperty(field)
+    }
+    expect(
+      await t.db
+        .selectFrom('event_types')
+        .select(['max_bookings_per_week', 'max_bookings_per_month'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({
+      max_bookings_per_week: 3,
+      max_bookings_per_month: 8,
+    })
+  })
 
   it('assigns collective team hosts through REST and restricts the paged member directory', async () => {
     const owner = await createTestUser(t.db)

@@ -146,6 +146,25 @@ describe('validateEventTypeRules', () => {
     )
   })
 
+  it.each([
+    ['maxBookingsPerDay', 'maxBookingsPerWeek'],
+    ['maxBookingsPerWeek', 'maxBookingsPerMonth'],
+    ['maxBookingsPerDay', 'maxBookingsPerMonth'],
+  ])('requires %s <= %s whenever both are set', (shorter, longer) => {
+    throws(
+      () => validateEventTypeRules({ durationMinutes: 30, [shorter]: 3, [longer]: 2 }),
+      new RegExp(`^eventType\\.${longer} must be at least eventType\\.${shorter}$`),
+    )
+    expect(() =>
+      validateEventTypeRules({ durationMinutes: 30, [shorter]: 3, [longer]: 3 }),
+    ).not.toThrow()
+    expect(() => validateEventTypeRules({ durationMinutes: 30, [longer]: 1 })).not.toThrow()
+    throws(
+      () => validateEventTypeRules({ durationMinutes: 30, [shorter]: 3, [longer]: 2 }, ''),
+      new RegExp(`^${longer} must be at least ${shorter}$`),
+    )
+  })
+
   it('requires a duration and a plain object', () => {
     throws(() => validateEventTypeRules({}), /eventType\.durationMinutes must be a whole number/)
     throws(() => validateEventTypeRules(null, 'rules'), /^rules must be a plain object/)

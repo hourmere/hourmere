@@ -37,6 +37,8 @@ export interface NormalizedInput {
   readonly bufferAfterMinutes: number
   readonly minimumNoticeMinutes: number
   readonly maxBookingsPerDay: number | undefined
+  readonly maxBookingsPerWeek: number | undefined
+  readonly maxBookingsPerMonth: number | undefined
   readonly bookingWindowDays: number | undefined
   readonly busy: readonly InstantInterval[]
   readonly bookings: readonly NormalizedBooking[]
@@ -75,6 +77,8 @@ export const EVENT_TYPE_RULE_BOUNDS = {
   bufferAfterMinutes: { min: 0, max: MINUTES_PER_DAY },
   minimumNoticeMinutes: { min: 0, max: 365 * MINUTES_PER_DAY },
   maxBookingsPerDay: { min: 1, max: 1000 },
+  maxBookingsPerWeek: { min: 1, max: 1000 },
+  maxBookingsPerMonth: { min: 1, max: 1000 },
   bookingWindowDays: { min: 1, max: 3650 },
 } as const satisfies Record<NumericEventTypeRule, { min: number; max: number }>
 
@@ -123,12 +127,38 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
 /** The optional event type rules, with defaults applied. */
 function optionalRules(eventType: EventTypeRules, path: string, durationMinutes: number) {
   const rule = (name: NumericEventTypeRule) => (v: unknown) => bounded(v, path, name)
+  const maxBookingsPerDay = optional(
+    eventType.maxBookingsPerDay,
+    undefined,
+    rule('maxBookingsPerDay'),
+  )
+  const maxBookingsPerWeek = optional(
+    eventType.maxBookingsPerWeek,
+    undefined,
+    rule('maxBookingsPerWeek'),
+  )
+  const maxBookingsPerMonth = optional(
+    eventType.maxBookingsPerMonth,
+    undefined,
+    rule('maxBookingsPerMonth'),
+  )
+  const field = (name: string) => (path ? `${path}.${name}` : name)
+  for (const [shorterName, shorter, longerName, longer] of [
+    ['maxBookingsPerDay', maxBookingsPerDay, 'maxBookingsPerWeek', maxBookingsPerWeek],
+    ['maxBookingsPerWeek', maxBookingsPerWeek, 'maxBookingsPerMonth', maxBookingsPerMonth],
+    ['maxBookingsPerDay', maxBookingsPerDay, 'maxBookingsPerMonth', maxBookingsPerMonth],
+  ] as const) {
+    if (shorter !== undefined && longer !== undefined && longer < shorter)
+      fail(`${field(longerName)} must be at least ${field(shorterName)}`)
+  }
   return {
     slotStepMinutes: optional(eventType.slotStepMinutes, durationMinutes, rule('slotStepMinutes')),
     bufferBeforeMinutes: optional(eventType.bufferBeforeMinutes, 0, rule('bufferBeforeMinutes')),
     bufferAfterMinutes: optional(eventType.bufferAfterMinutes, 0, rule('bufferAfterMinutes')),
     minimumNoticeMinutes: optional(eventType.minimumNoticeMinutes, 0, rule('minimumNoticeMinutes')),
-    maxBookingsPerDay: optional(eventType.maxBookingsPerDay, undefined, rule('maxBookingsPerDay')),
+    maxBookingsPerDay,
+    maxBookingsPerWeek,
+    maxBookingsPerMonth,
     bookingWindowDays: optional(eventType.bookingWindowDays, undefined, rule('bookingWindowDays')),
   }
 }

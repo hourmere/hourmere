@@ -46,9 +46,13 @@ import {
 
 const L = EVENT_TYPE_LIMITS
 
-// Redirect configuration is service-only until its REST/MCP/CLI contract is introduced.
-const eventTypeResponse = ({ successRedirect: _successRedirect, ...eventType }: ServiceEventType) =>
-  eventType
+// These settings remain service-only until their REST/MCP/CLI contract is introduced.
+const eventTypeResponse = ({
+  successRedirect: _successRedirect,
+  maxBookingsPerWeek: _maxBookingsPerWeek,
+  maxBookingsPerMonth: _maxBookingsPerMonth,
+  ...eventType
+}: ServiceEventType) => eventType
 
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },

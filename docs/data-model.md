@@ -117,7 +117,7 @@ calendar-list access.
 | `calendar_oauth_states` | user + session | Short-lived, single-use calendar connection attempts: state digest, encrypted PKCE verifier and expiry; separate from sign-in |
 | `calendars` | user | Calendars inside a connection: conflict checking on/off, sync cursor and push channel |
 | `calendar_busy` | user | Timed busy intervals or all-day date ranges mirrored by incremental sync (recurring events expanded) |
-| `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
+| `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily/weekly/monthly limits, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
 | `one_time_booking_links` | event type + organization | Hash-only booking capabilities, optional expiry and invitee prefill, terminal lifecycle and the confirmed booking that consumed them |
 | `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |
@@ -347,6 +347,53 @@ consumption records. Personal organization deletion still removes personal links
 physical event type or organization deletion cascades to its links. Soft-deleting an
 event type retains its links while making them unavailable. No administrative list is
 introduced here.
+
+## Booking limit contract
+
+`event_types.max_bookings_per_day`, `max_bookings_per_week` and
+`max_bookings_per_month` are independent optional integer ceilings from 1 to 1000;
+NULL means that period has no limit. Migration 0057 adds the weekly and monthly
+columns as NULL without changing existing event types or bookings. Weekly and monthly
+writes are internal service configuration in this slice; REST, MCP, CLI and editor
+controls follow separately.
+
+Configured ceilings must not descend as periods get longer: day ≤ week, week ≤ month,
+and day ≤ month whenever each pair is set. The last rule also applies when week is
+NULL. The service rejects an inconsistent write, and database CHECK constraints enforce
+the same rule. This keeps a longer-period allowance from silently undercutting a
+shorter-period allowance; it is a configuration rule, not a claim that calendar weeks
+are wholly contained in calendar months.
+
+All three limits use each evaluated host's effective schedule IANA time zone, matching
+the existing daily-limit behavior: the event's selected host schedule, or that host's
+default schedule when applicable. They do not use the invitee, profile or database
+session time zone. A booking counts by its start instant's local calendar date. A day
+contains that date; a week contains Monday through Sunday; a month contains its first
+through last local date. These calendar-date intervals include their first date and
+exclude the next period's first date. Normal boundaries fall at local midnight, resolved
+separately in the schedule zone rather than using fixed elapsed hours, so daylight-saving
+transitions, leap days, month ends and year changes retain their local calendar meaning.
+A Monday-based week may cross December/January or a calendar month boundary. The start's
+local date remains authoritative even when a historical midnight rollback briefly
+revisits the preceding day, week or month; query windows conservatively include those
+repeated dates.
+
+Counts include only this event type's bookings for the actual evaluated host with
+`booking_hosts.active = true`: every booking status except `cancelled` (currently
+`confirmed`). All selected durations share the same allowance. Other event types
+still block overlapping time but do not consume this event type's ceilings. Personal
+and individual team events count their host; collective events require capacity for
+every required host in that host's schedule zone; round-robin events evaluate each
+candidate host separately and consume only the assigned host's capacity. There is no
+separate organization-wide or pool-wide quota.
+
+Availability hides starts whose day, week or month is full. Booking creation and
+rescheduling check the same limits under the existing host transaction lock. A successful
+idempotent replay returns its original booking even if it consumed the last allowance.
+A reschedule checks the target periods while excluding its own predecessor; a failed
+move leaves the existing booking intact. Cancellation frees its capacity. Lowering a
+limit never cancels or rewrites existing bookings: periods already at or above that
+ceiling refuse new bookings until capacity is available.
 
 ## Event duration contract
 

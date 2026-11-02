@@ -118,6 +118,8 @@ export interface EventTypeFixture {
   minimumNoticeMinutes?: number
   bookingWindowDays?: number | null
   maxBookingsPerDay?: number | null
+  maxBookingsPerWeek?: number | null
+  maxBookingsPerMonth?: number | null
   location?: Record<string, unknown> | null
   questions?: unknown[]
   isActive?: boolean
@@ -244,6 +246,8 @@ export function createFixtures(db: Db) {
         minimum_notice_minutes: o.minimumNoticeMinutes ?? 0,
         booking_window_days: o.bookingWindowDays ?? null,
         max_bookings_per_day: o.maxBookingsPerDay ?? null,
+        max_bookings_per_week: o.maxBookingsPerWeek ?? null,
+        max_bookings_per_month: o.maxBookingsPerMonth ?? null,
         location: o.location ? JSON.stringify(o.location) : null,
         questions: JSON.stringify(o.questions ?? []),
         is_active: o.isActive ?? true,
