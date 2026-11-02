@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { JSDOM } from 'jsdom'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { interfaceLanguage } from './language.ts'
 import { type InterfaceLanguage, localeRegistry } from './locales.ts'
 import { isPublicTeamSlug, isReservedName } from './reserved.ts'
@@ -95,9 +95,10 @@ function verifyHrefEscaping(format: Renderer) {
 function verifyLabelEscaping(format: Renderer) {
   const markup = `<img src=x onerror=alert(1)> & "quoted" 'label'`
   // Feed markup through the real label formatter, without widening the public renderer input.
-  const formatter = vi
-    .spyOn(Intl.DateTimeFormat.prototype, 'format', 'get')
-    .mockImplementation(() => () => markup)
+  const prototype = Intl.DateTimeFormat.prototype
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, 'format')
+  if (!descriptor?.get) throw new Error('Expected Intl format getter')
+  Object.defineProperty(prototype, 'format', { ...descriptor, get: () => () => markup })
   try {
     const result = format(BASE)
     const document = new JSDOM(result.html).window.document
@@ -110,7 +111,7 @@ function verifyLabelEscaping(format: Renderer) {
     expect(result.html).toContain('&quot;quoted&quot; &#39;label&#39;')
     expect(result.text).toContain(result.slots[0]?.label)
   } finally {
-    formatter.mockRestore()
+    Object.defineProperty(prototype, 'format', descriptor)
   }
 }
 
