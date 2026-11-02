@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { checkSourceMutation, required } from './mutation-testing.ts'
 import type { SourceRow, SourceSnapshot, TargetContext } from './types.ts'
-import { matchIdentityRows, parseUsers } from './users.ts'
+import { matchIdentityRows, parseUsers, validEmail } from './users.ts'
 
 const targetId = '019a4321-1234-7000-8000-000000000001'
 export const target: TargetContext = {
@@ -168,5 +168,27 @@ it('kills a source-copy many-source-to-one-target identity mutation', async () =
           [...target.users, { ...required(target.users[0]), email: 'other@example.com' }],
         ),
       ).toEqual([]),
+  )
+})
+
+it('validates hostile and overlong email inputs with bounded linear scans', async () => {
+  expect(validEmail(['!@!.', '!.'.repeat(500_000)].join(''))).toBe(false)
+  expect(validEmail(['a'.repeat(255), '@example.com'].join(''))).toBe(false)
+  expect(validEmail('a@example.com')).toBe(true)
+  for (const value of [
+    'a@@example.com',
+    'a@example.',
+    '@example.com',
+    'a@.com',
+    'a b@example.com',
+    'a\n@example.com',
+  ])
+    expect(validEmail(value)).toBe(false)
+  await checkSourceMutation(
+    new URL('./users.ts', import.meta.url),
+    'value.length > 254',
+    'false',
+    (m) => m.validEmail as typeof validEmail,
+    (run) => expect(run(['a'.repeat(255), '@example.com'].join(''))).toBe(false),
   )
 })

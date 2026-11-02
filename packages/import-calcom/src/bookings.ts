@@ -4,7 +4,13 @@ import { cleanText } from '../../scheduling/src/text.ts'
 import type { EventPlan } from './events.ts'
 import { parseBookingLocation, type StaticLocation } from './locations.ts'
 import type { MatchedUser, ParseOptions, PlanProblem, SourceRow, SourceSnapshot } from './types.ts'
-import { canonicalTimezone, EMAIL, normalizeEmail, validInstant, validLocale } from './users.ts'
+import {
+  canonicalTimezone,
+  normalizeEmail,
+  validEmail,
+  validInstant,
+  validLocale,
+} from './users.ts'
 
 export interface BusyBookingPlan {
   sourceId: number
@@ -308,7 +314,7 @@ export function parseBookings(
       if (
         !name ||
         !email ||
-        !EMAIL.test(email) ||
+        !validEmail(email) ||
         !timezone ||
         (attendee.locale != null && !validLocale(attendee.locale))
       ) {

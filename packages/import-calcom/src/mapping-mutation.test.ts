@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import type { parseEvents } from './events.ts'
+import type { parseEvents, plainDescription } from './events.ts'
 import type * as Locations from './locations.ts'
 import { baseEvent, snapshot, users } from './mapping-fixtures.ts'
 import { checkSourceMutation } from './mutation-testing.ts'
@@ -466,3 +466,30 @@ locationsMutation(
     expect(problems[0]?.severity).toBe('import_blocker')
   },
 )
+
+it('source-copy mutation: inert HTML parsing omits entire sensitive subtrees', async () => {
+  await checkSourceMutation(
+    new URL('./events.ts', import.meta.url),
+    'if (omittedDescriptionSubtrees.has(tagName)) return',
+    'if (false) return',
+    (module) => module.plainDescription as typeof plainDescription,
+    (parse) => {
+      expect(
+        parse(
+          '<p>Before</p><object><div>private<object>nested private</object>more-private</div></object><script>private script</script><style>private style</style><iframe>private frame</iframe><template>private template</template><p>After</p>',
+        ).text,
+      ).toBe('Before\nAfter')
+    },
+  )
+})
+it('source-copy mutation: inert HTML parsing omits comments', async () => {
+  await checkSourceMutation(
+    new URL('./events.ts', import.meta.url),
+    'if (!defaultTreeAdapter.isElementNode(node)) return',
+    "if (!defaultTreeAdapter.isElementNode(node)) { if ('data' in node) parts.push(node.data); return }",
+    (module) => module.plainDescription as typeof plainDescription,
+    (parse) => {
+      expect(parse('Before<!-- private comment --!><p>After</p>').text).toBe('Before\nAfter')
+    },
+  )
+})

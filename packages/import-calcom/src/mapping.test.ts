@@ -1,5 +1,5 @@
 import { getAvailableSlots } from '@hourmere/core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { plainDescription } from './events.ts'
 import { parseBookingLocation, parseEventLocation, safeMeetingUrl } from './locations.ts'
 import { baseEvent, parseEvent, snapshot, users } from './mapping-fixtures.ts'
@@ -72,6 +72,52 @@ describe('personal event drafts', () => {
     expect(events[0]?.description).toBe('Hello & welcome\nSecond line')
     expect(has(problems, 'event_html_loss')).toBe(true)
     expect(plainDescription('Ordinary < angle').converted).toBe(false)
+  })
+  it.each([
+    [
+      '<p>Before</p><template><div>private <template>nested private</template></div></template><p>After</p>',
+      'Before\nAfter',
+    ],
+    [
+      '<object><div>private<object>nested</object>more-private</div></object><p>Visible</p>',
+      'Visible',
+    ],
+    ['Before<!-- private --!><p>After</p>', 'Before\nAfter'],
+    [
+      '<p title="not a > boundary">Visible &copy; &#x1F642;</p><iframe src="https://example.invalid">private</iframe>',
+      'Visible © 🙂',
+    ],
+    ['<p>A<<script>private</script>B</p>', 'A<B'],
+    ['<div>Safe<script>discard <script>nested</script>visible</div>', 'Safevisible'],
+    ['<script>private incomplete closing</scr<script>ipt><p>never-visible</p>', ''],
+    ['<p>Before</p><style>private incomplete closing</sty<style>le><p>never-visible</p>', 'Before'],
+    ['<!-- omitted comment only -->', ''],
+  ])(
+    'parses nested and malformed HTML without retaining omitted subtree content: %s',
+    (source, expected) => {
+      expect(plainDescription(source)).toEqual({ text: expected, converted: true })
+    },
+  )
+  it.each(['  A &amp; B < 2 > 1  ', '\tPlain &copy;\n', '1 < 2 &amp; 3 > 2'])(
+    'preserves plain text without decoding or trimming it: %s',
+    (source) => {
+      expect(plainDescription(source)).toEqual({ text: source, converted: false })
+    },
+  )
+  it('retains block and BR boundaries and ignores resource attributes without requesting them', () => {
+    const request = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected resource request'))
+    try {
+      expect(
+        plainDescription(
+          '<span>Inline</span><section>Section<br>Second<br><br>Fourth</section><p>Paragraph</p><img src="https://example.invalid/resource"><iframe src="https://example.invalid/frame">Private</iframe>',
+        ),
+      ).toEqual({ text: 'Inline\nSection\nSecond\n\nFourth\nParagraph', converted: true })
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      request.mockRestore()
+    }
   })
   it.each([
     { teamId: 2 },

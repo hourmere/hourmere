@@ -1,5 +1,5 @@
 import { isReservedName } from '@hourmere/core/reserved'
-import { cleanText } from '../../scheduling/src/text.ts'
+import { cleanText, isSingleLineText } from '../../scheduling/src/text.ts'
 import type {
   MatchedUser,
   PlanProblem,
@@ -10,7 +10,15 @@ import type {
 } from './types.ts'
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+/** Match the destination email shape in linear time, with bounds before any scan. */
+export function validEmail(value: string): boolean {
+  if (value.length > 254 || !isSingleLineText(value) || /\s/.test(value)) return false
+  const at = value.indexOf('@')
+  if (at < 1 || at !== value.lastIndexOf('@')) return false
+  const domain = value.slice(at + 1)
+  const dot = domain.lastIndexOf('.')
+  return dot > 0 && dot < domain.length - 1
+}
 const LOCALE = /^[A-Za-z0-9]{1,8}(?:-[A-Za-z0-9]{1,8})*$/
 export const normalizeEmail = (email: string) => email.trim().toLowerCase()
 export function validLocale(value: unknown): value is string {
@@ -41,8 +49,7 @@ function identityProblem(
   targets: readonly TargetUser[],
 ): string | undefined {
   const email = typeof row.email === 'string' ? normalizeEmail(row.email) : ''
-  if (!EMAIL.test(email) || email.length > 254 || !validInstant(row.emailVerified))
-    return 'user_source_unverified'
+  if (!validEmail(email) || !validInstant(row.emailVerified)) return 'user_source_unverified'
   if (
     sources.filter((s) => typeof s.email === 'string' && normalizeEmail(s.email) === email)
       .length !== 1
@@ -196,6 +203,7 @@ export function validateTargetContext(value: unknown): value is TargetContext {
         u &&
         typeof u.email === 'string' &&
         !!cleanText(u.email, { max: 254 }) &&
+        validEmail(u.email.trim()) &&
         UUID.test(u.id) &&
         typeof u.emailVerified === 'boolean' &&
         typeof u.authorized === 'boolean' &&

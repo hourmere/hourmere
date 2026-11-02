@@ -13,7 +13,8 @@
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/scheduling": "*",
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "parse5": "8.0.1"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

@@ -1,4 +1,5 @@
 import { validateEventTypeRules, validateTimeZone } from '@hourmere/core'
+import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parseFragment } from 'parse5'
 import type { Question } from '../../scheduling/src/questions.ts'
 import { cleanText, isMultiLineText } from '../../scheduling/src/text.ts'
 import { parseEventLocation, type StaticLocation } from './locations.ts'
@@ -47,32 +48,81 @@ export interface EventPlan {
   }
 }
 
-/** HTML is parsed as inert text: no DOM, network, script execution or resource loading. */
+const omittedDescriptionSubtrees = new Set(['script', 'style', 'iframe', 'object', 'template'])
+const descriptionBlocks = new Set([
+  'address',
+  'article',
+  'aside',
+  'blockquote',
+  'dd',
+  'div',
+  'dl',
+  'dt',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'form',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'header',
+  'hr',
+  'li',
+  'main',
+  'nav',
+  'ol',
+  'p',
+  'pre',
+  'section',
+  'table',
+  'tr',
+  'ul',
+])
+
+/** parse5 builds an inert syntax tree; attributes and resource URLs are never consumed. */
 export function plainDescription(value: string): { text: string; converted: boolean } {
-  if (!/<\/?[a-z][^>]*>/i.test(value)) return { text: value, converted: false }
-  const text = value
-    .replace(/<(script|style|iframe|object|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<\s*br\s*\/?\s*>|<\/(?:p|div|li|h[1-6]|tr)\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&(?:amp|lt|gt|quot|apos|nbsp);|&#(?:x[0-9a-f]+|\d+);/gi, (entity) => {
-      const known: Record<string, string> = {
-        '&amp;': '&',
-        '&lt;': '<',
-        '&gt;': '>',
-        '&quot;': '"',
-        '&apos;': "'",
-        '&nbsp;': ' ',
-      }
-      if (known[entity.toLowerCase()]) return known[entity.toLowerCase()] as string
-      const hex = /^&#x/i.test(entity)
-      const code = Number.parseInt(entity.slice(hex ? 3 : 2, -1), hex ? 16 : 10)
-      return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
-        ? String.fromCodePoint(code)
-        : '\ufffd'
-    })
-    .trim()
-  return { text, converted: true }
+  if (!value.includes('<')) return { text: value, converted: false }
+  const fragment = parseFragment(value, { sourceCodeLocationInfo: true })
+  const onlyChild = fragment.childNodes[0]
+  // A source-spanning text node is ordinary text, including literal angle brackets
+  // and entity-like text. Preserve it byte for byte rather than decoding or trimming it.
+  if (
+    value === '' ||
+    (fragment.childNodes.length === 1 &&
+      onlyChild &&
+      defaultTreeAdapter.isTextNode(onlyChild) &&
+      onlyChild.sourceCodeLocation?.startOffset === 0 &&
+      onlyChild.sourceCodeLocation.endOffset === value.length)
+  ) {
+    return { text: value, converted: false }
+  }
+  const parts: string[] = []
+  const blockBreak = () => {
+    if (parts.length > 0 && !parts.at(-1)?.endsWith('\n')) parts.push('\n')
+  }
+  const visit = (node: DefaultTreeAdapterTypes.ChildNode): void => {
+    if (defaultTreeAdapter.isTextNode(node)) {
+      if (node.value) parts.push(node.value)
+      return
+    }
+    // Comments and doctypes contribute no visible text.
+    if (!defaultTreeAdapter.isElementNode(node)) return
+    const tagName = node.tagName.toLowerCase()
+    if (omittedDescriptionSubtrees.has(tagName)) return
+    if (tagName === 'br') {
+      parts.push('\n')
+      return
+    }
+    if (descriptionBlocks.has(tagName)) blockBreak()
+    for (const child of node.childNodes) visit(child)
+    if (descriptionBlocks.has(tagName)) blockBreak()
+  }
+  for (const child of fragment.childNodes) visit(child)
+  return { text: parts.join('').trim(), converted: true }
 }
 
 function nonempty(value: unknown): boolean {
