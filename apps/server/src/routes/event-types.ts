@@ -18,6 +18,9 @@ import {
   QuestionSchema,
   type EventType as ServiceEventType,
   SLUG_PATTERN,
+  SUCCESS_REDIRECT_MAX_LENGTH,
+  SUCCESS_REDIRECT_PARAMETERS,
+  type SuccessRedirectParameter,
   updateEventType,
 } from '@hourmere/scheduling'
 import {
@@ -48,7 +51,6 @@ const L = EVENT_TYPE_LIMITS
 
 // These settings remain service-only until their REST/MCP/CLI contract is introduced.
 const eventTypeResponse = ({
-  successRedirect: _successRedirect,
   maxBookingsPerWeek: _maxBookingsPerWeek,
   maxBookingsPerMonth: _maxBookingsPerMonth,
   ...eventType
@@ -180,6 +182,49 @@ const NotificationSettings = z
   })
   .openapi('EventTypeNotifications', { description: notificationsDescription })
 
+// Validate only the transport shape here. URL policy, allowed parameter names, uniqueness
+// and personal-data consent all belong to validateSuccessRedirect in the service.
+const redirectParameter = z.string().openapi({
+  enum: [...SUCCESS_REDIRECT_PARAMETERS],
+}) as z.ZodType<SuccessRedirectParameter>
+const redirectFields = {
+  url: z.string().openapi({
+    description:
+      'Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made.',
+    maxLength: SUCCESS_REDIRECT_MAX_LENGTH,
+  }),
+  parameters: z.array(redirectParameter).optional().openapi({
+    description:
+      'Distinct names to append using URL encoding; existing query text and fragment are preserved. Invitee name/email additionally require includeInviteePersonalData.',
+    default: [],
+    uniqueItems: true,
+  }),
+  includeInviteePersonalData: z.boolean().optional().openapi({
+    description:
+      'Explicit opt-in: selected invitee name/email become visible to the target website and its analytics, and may enter browser history.',
+    default: false,
+  }),
+  allowEmbedParent: z.boolean().optional().openapi({
+    description:
+      'Separate permission for the invitee’s Continue click to navigate the embedding parent. Otherwise embedded continuations open a new tab. There is no automatic redirect.',
+    default: false,
+  }),
+}
+const redirectDescription =
+  'After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target.'
+const SuccessRedirectInput = z.strictObject(redirectFields).nullable().openapi({
+  description: redirectDescription,
+})
+const SuccessRedirect = z
+  .object({
+    ...redirectFields,
+    parameters: z.array(z.enum(SUCCESS_REDIRECT_PARAMETERS)),
+    includeInviteePersonalData: z.boolean(),
+    allowEmbedParent: z.boolean(),
+  })
+  .nullable()
+  .openapi({ description: redirectDescription })
+
 const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
 const minMax = ({ min, max }: { min: number; max: number }) => ({ minimum: min, maximum: max })
@@ -254,6 +299,7 @@ export const EventType = z
     zoomConnectionId: z.uuid().nullable().optional(),
     questions: z.array(Question),
     notifications: NotificationSettings,
+    successRedirect: SuccessRedirect.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -281,6 +327,7 @@ export const EventTypeInput = z
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
+    successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
     allowGuests: fields.allowGuests.optional().openapi({ default: false }),
@@ -312,6 +359,7 @@ export const EventTypeUpdate = z
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
+    successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
     allowGuests: fields.allowGuests.optional(),
@@ -352,7 +400,7 @@ export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 

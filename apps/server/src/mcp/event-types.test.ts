@@ -192,8 +192,8 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
       await expect(
         verifyHostNotePolicy(
           productSourceCopy([
-            '...eventTypeTools({ db, automaticMeet, automaticZoom, followUpHostNotesEnabled })',
-            '...eventTypeTools({ db, automaticMeet, automaticZoom })',
+            '      followUpHostNotesEnabled,\n      successRedirectPolicy,',
+            '      successRedirectPolicy,',
           ]),
           false,
           update,

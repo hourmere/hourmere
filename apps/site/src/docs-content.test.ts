@@ -535,6 +535,7 @@ describe('complete public documentation', () => {
       )
     } else if (guide === 'api-conventions') {
       // Requested policy excerpts mirror the canonical guide rather than diverging.
+      const fieldPolicy = source.match(/An optional `field` string[\s\S]*?older servers\./)?.[0]
       const scopePolicy = source
         .match(/^### API key scopes\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
         ?.replace('](/docs/api-keys)', '](https://hourmere.com/docs/api-keys)')
@@ -551,6 +552,7 @@ describe('complete public documentation', () => {
       const summaryPolicy = source.match(
         /Rows with `invalidReason:[\s\S]*?cancellation remains available\./,
       )?.[0]
+      expect(fieldPolicy).toBeDefined()
       expect(scopePolicy).toBeDefined()
       expect(resendPolicy).toBeDefined()
       expect(acceptancePolicy).toBeDefined()
@@ -561,6 +563,10 @@ describe('complete public documentation', () => {
       expect(read(original)).toBe(
         [
           '[API conventions](https://hourmere.com/docs/api-conventions).',
+          '',
+          '### Validation error fields',
+          '',
+          fieldPolicy,
           '',
           scopePolicy,
           '',

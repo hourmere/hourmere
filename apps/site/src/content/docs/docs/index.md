@@ -17,6 +17,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
+  parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
   through the editor, REST, MCP or CLI, with the booking URL shown once.
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients

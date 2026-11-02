@@ -202,7 +202,7 @@ describe.skipIf(!serverUrl)('booking continuation HTTP contract', () => {
     }
   })
 
-  it('keeps saved redirect configuration inside the service until configuration interfaces are introduced', async () => {
+  it('reads, preserves and updates saved redirect configuration through the owner API', async () => {
     const s = await setup(false, {
       url: 'https://host.example.test/thanks',
       allowEmbedParent: true,
@@ -216,12 +216,13 @@ describe.skipIf(!serverUrl)('booking continuation HTTP contract', () => {
     })
     const list = await app.request('/api/v1/event-types')
     expect(list.status).toBe(200)
-    expect(((await list.json()) as { data: unknown[] }).data[0]).not.toHaveProperty(
+    expect(((await list.json()) as { data: unknown[] }).data[0]).toHaveProperty(
       'successRedirect',
+      s.event.successRedirect,
     )
     const single = await app.request(`/api/v1/event-types/${s.event.id}`)
     expect(single.status).toBe(200)
-    expect(await single.json()).not.toHaveProperty('successRedirect')
+    expect(await single.json()).toHaveProperty('successRedirect', s.event.successRedirect)
     const patch = (body: unknown) =>
       app.request(`/api/v1/event-types/${s.event.id}`, {
         method: 'PATCH',
@@ -230,13 +231,16 @@ describe.skipIf(!serverUrl)('booking continuation HTTP contract', () => {
       })
     const changed = await patch({ title: 'Renamed' })
     expect(changed.status).toBe(200)
-    expect(await changed.json()).not.toHaveProperty('successRedirect')
+    expect(await changed.json()).toHaveProperty('successRedirect', s.event.successRedirect)
     expect((await getEventType(s.ctx, s.event.id)).successRedirect).toEqual(s.event.successRedirect)
-    const forbiddenSetting = await patch({
-      successRedirect: { url: 'https://other.example.test/' },
+    const updated = await patch({ successRedirect: { url: 'https://other.example.test/' } })
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toHaveProperty('successRedirect', {
+      url: 'https://other.example.test/',
+      parameters: [],
+      includeInviteePersonalData: false,
+      allowEmbedParent: false,
     })
-    expect(forbiddenSetting.status).toBe(400)
-    expect(await forbiddenSetting.json()).toMatchObject({ error: 'invalid_request' })
   })
 })
 

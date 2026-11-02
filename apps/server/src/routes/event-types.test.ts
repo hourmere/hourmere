@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Db } from '@hourmere/db'
 import { DEFAULT_NOTIFICATIONS } from '@hourmere/scheduling'
-import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
+import {
+  createFixtures,
+  createTestTeam,
+  createTestUser,
+  type TestUser,
+} from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CHUNK_SIZE, chunkedBody } from '../chunked-body.ts'
 import { EVENT_TYPE_BODY_LIMIT } from './event-types.ts'
@@ -46,6 +51,30 @@ describe('event type routes in the OpenAPI document', () => {
     },
   )
 
+  it('detects a source-copy mutation dropping public redirect configuration', () => {
+    const source = readFileSync(new URL('./event-types.ts', import.meta.url), 'utf8')
+    const projection = source.slice(
+      source.indexOf('const eventTypeResponse ='),
+      source.indexOf('const locationKinds ='),
+    )
+    const verify = (copy: string) => {
+      const project = new Function(`${stripTypeScriptTypes(copy)}; return eventTypeResponse`)() as (
+        event: Record<string, unknown>,
+      ) => Record<string, unknown>
+      const successRedirect = { url: 'https://host.example.test/thanks' }
+      expect(project({ title: 'Intro', successRedirect })).toHaveProperty(
+        'successRedirect',
+        successRedirect,
+      )
+    }
+    verify(projection)
+    const anchor = 'const eventTypeResponse = ({'
+    expect(projection).toContain(anchor)
+    expect(() =>
+      verify(projection.replace(anchor, `${anchor}\n  successRedirect: _successRedirect,`)),
+    ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+  })
+
   it('documents open responses and strict request bodies, down to locations and questions', async () => {
     const doc = await openApiDocument(productApp({} as Db))
     const paths = ['/api/v1/event-types', '/api/v1/event-types/{id}']
@@ -69,6 +98,7 @@ describe('event type routes in the OpenAPI document', () => {
         '$.notifications.reminders[].recipients',
         '$.notifications.followUps[]',
         '$.notifications.followUps[].recipients',
+        '$.successRedirect',
         '$.hosts[]',
       ])
     }
@@ -142,7 +172,19 @@ describe.skipIf(!serverUrl)('event type routes', () => {
 
   it('keeps weekly and monthly configuration internal until transport support is added', async () => {
     const user = await createTestUser(t.db)
-    const created = await api(user).post('/api/v1/event-types', body())
+    const team = await createTestTeam(t.db, [{ user, role: 'owner' }])
+    await createFixtures(t.db).schedule(user.id)
+    const client = t.as(team.as(user))
+    const successRedirect = {
+      url: 'https://host.example.test/thanks',
+      parameters: [],
+      includeInviteePersonalData: false,
+      allowEmbedParent: true,
+    }
+    const created = await client.post(
+      '/api/v1/event-types',
+      body({ schedulingType: 'round_robin', hosts: [{ userId: user.id }], successRedirect }),
+    )
     expect(created.status).toBe(201)
     const id = idOf(created)
     await t.db
@@ -155,10 +197,33 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       .execute()
     for (const field of ['maxBookingsPerWeek', 'maxBookingsPerMonth']) {
       expect(
-        (await api(user).post('/api/v1/event-types', body({ slug: 'new', [field]: 4 }))).status,
+        (await client.post('/api/v1/event-types', body({ slug: 'new', [field]: 4 }))).status,
       ).toBe(400)
-      expect((await api(user).patch(`/api/v1/event-types/${id}`, { [field]: 4 })).status).toBe(400)
-      expect((await api(user).get(`/api/v1/event-types/${id}`)).body).not.toHaveProperty(field)
+      expect((await client.patch(`/api/v1/event-types/${id}`, { [field]: 4 })).status).toBe(400)
+    }
+    const listed = await client.get('/api/v1/event-types')
+    expect(listed.status).toBe(200)
+    const responses = [
+      ['created event', created],
+      [
+        'listed event',
+        { status: listed.status, body: (listed.body as { data: unknown[] }).data[0] },
+      ],
+      ['read event', await client.get(`/api/v1/event-types/${id}`)],
+      ['updated event', await client.patch(`/api/v1/event-types/${id}`, { title: 'Renamed' })],
+      [
+        'notification settings response',
+        await client.put(`/api/v1/event-types/${id}/notifications`, {
+          notifications: DEFAULT_NOTIFICATIONS,
+        }),
+      ],
+      ['activated pool', await client.post(`/api/v1/event-types/${id}/round-robin/activate`, {})],
+    ] as const
+    for (const [name, response] of responses) {
+      expect(response.status, name).toBe(name === 'created event' ? 201 : 200)
+      expect(response.body, name).toHaveProperty('successRedirect', successRedirect)
+      expect(response.body, name).not.toHaveProperty('maxBookingsPerWeek')
+      expect(response.body, name).not.toHaveProperty('maxBookingsPerMonth')
     }
     expect(
       await t.db
@@ -328,6 +393,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       notifications: DEFAULT_NOTIFICATIONS,
+      successRedirect: null,
       isActive: true,
       isHidden: false,
       allowGuests: false,
