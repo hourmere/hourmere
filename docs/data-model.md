@@ -842,12 +842,23 @@ replays do not attach an entry and losing a booking race leaves it waiting.
 Admission checks durable rolling mailbox, IP and event limits under database locks, as
 well as the fifteen-minute resend cooldown and one hundred pending/live entries per event.
 `waitlist_verification_requests` has no cascading foreign keys and retains purpose-separated
-mailbox/IP HMACs for two elapsed days. IPv6 addresses share their /64 bucket; the service
-accepts only an IP resolved by a trusted transport and stores no raw address.
+mailbox/IP HMACs for two elapsed days. IPv4-mapped socket addresses normalize to IPv4;
+IPv6 zone identifiers are stripped and other IPv6 addresses share their /64 bucket. The
+service accepts only an IP resolved by a trusted transport and stores no raw address.
+Admission holds the accounting-key fence, then an event share lock compatible with ordinary
+bookings. Availability computation precedes the instance-wide admission fence, which covers
+only expiry, rolling budgets, duplicate/capacity checks and the bounded write. Database time
+is sampled again after waiting for that fence; no host advisory lock is taken.
 
 Transactional triggers record shared-host invalidations for bookings, event rules, schedules,
 overrides, profiles and cached calendars. Startup/minute maintenance scans committed ordinary
 availability only, in bounded seven-day pages with persisted cursors and fair event scheduling.
+Wakeups and checkpoints use exact `bigint` generations. Scans compute availability outside
+row locks, then publish under a short accounting-key → event share → work → entry lock
+sequence, revalidating the generation and page cursor and rereading live recipients. Booking
+host inserts signal work before waitlist attribution locks an entry; publication acquires no
+host, booking or calendar locks. A concurrent availability change discards the computed page
+and leaves the newer wakeup pending.
 Every eligible verified recipient in a pass enters the same cohort. Each immutable candidate
 contains at most three full matching UTC intervals and expires at the earliest of discovery
 plus twenty-four hours, entry expiry or the first slot's current notice cutoff. There is no

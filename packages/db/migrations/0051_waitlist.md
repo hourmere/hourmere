@@ -8,6 +8,11 @@ migration before 0051. It verifies preservation across both steps, including the
 0050 columns, and compares the result with a fresh installation containing every
 migration through 0051. Reapplying that complete chain must perform no writes.
 
+Availability wakeups and scan checkpoints use `bigint` generations. Host mutation
+triggers can keep advancing them beyond the 32-bit integer boundary without
+rejecting bookings, cancellations or calendar synchronization. Readers preserve
+the exact generation value when comparing or recording a scan checkpoint.
+
 Build first, then stop every old web, all-role and worker process before applying
 the migration. Restart every role on the matching code before enabling waitlists.
 The schema is additive, but old mutation writers do not implement waitlist cleanup

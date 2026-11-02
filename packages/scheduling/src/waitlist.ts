@@ -77,10 +77,12 @@ function admissionHash(value: string, secret: string, purpose: 'email' | 'ip'): 
 
 /** IPv6 textual aliases and address rotation within a /64 share one durable bucket. */
 export function waitlistIpBucket(value: string | undefined): string {
-  const kind = value && isIP(value)
-  if (kind === 4) return value as string
+  // Socket IPv6 addresses may carry an interface-local zone identifier.
+  const normalized = value?.includes(':') ? value.split('%', 1)[0] : value
+  const kind = normalized && isIP(normalized)
+  if (kind === 4) return normalized as string
   if (kind !== 6) return 'unknown'
-  const address = new URL(`http://[${value}]/`).hostname.slice(1, -1)
+  const address = new URL(`http://[${normalized}]/`).hostname.slice(1, -1)
   // URL canonicalization expands mapped IPv4 addresses into hex groups as well.
   const [left, right] = address.split('::')
   const prefix = left ? left.split(':') : []
@@ -89,6 +91,14 @@ export function waitlistIpBucket(value: string | undefined): string {
     right === undefined
       ? prefix
       : [...prefix, ...Array(8 - prefix.length - suffix.length).fill('0'), ...suffix]
+  if (
+    groups.slice(0, 5).every((part) => Number.parseInt(part, 16) === 0) &&
+    Number.parseInt(groups[5] as string, 16) === 0xffff
+  ) {
+    const high = Number.parseInt(groups[6] as string, 16)
+    const low = Number.parseInt(groups[7] as string, 16)
+    return `${high >>> 8}.${high & 255}.${low >>> 8}.${low & 255}`
+  }
   return `${groups
     .slice(0, 4)
     .map((part) => Number.parseInt(part, 16).toString(16))
@@ -181,7 +191,7 @@ export async function resolveWaitlistEvent(
     .selectFrom('event_types')
     .select(['waitlist_enabled', 'is_active', 'deleted_at'])
     .where('id', '=', et.id)
-  if (lock) query = query.forUpdate()
+  if (lock) query = query.forShare()
   const row = await query.executeTakeFirst()
   if (!row?.is_active || row.deleted_at || !row.waitlist_enabled)
     throw new DomainError('conflict', 'waitlist_unavailable')
@@ -277,7 +287,7 @@ function checkWindow(start: Date, end: Date, now: Date) {
     throw new DomainError('invalid', 'invalid_waitlist_window')
 }
 
-/** Expiration is evaluated under the admission event lock, so delayed jobs cannot fill it. */
+/** Expiration shares the short admission fence with capacity checks and writes. */
 async function expireEventEntries(db: Db, eventId: string, now: Date) {
   await db
     .updateTable('waitlist_entries')
@@ -293,7 +303,7 @@ async function expireEventEntries(db: Db, eventId: string, now: Date) {
     .execute()
 }
 
-// One bounded advisory fence serializes all three rolling dimensions across replicas.
+// Called under the admission fence, after availability computation and before any entry locks.
 async function admissionBudget(
   db: Db,
   eventId: string,
@@ -302,7 +312,6 @@ async function admissionBudget(
   secret: string,
   now: Date,
 ) {
-  await sql`SELECT pg_advisory_xact_lock(1752658796, 1633969261)`.execute(db)
   const emailHash = admissionHash(email, secret, 'email')
   const ipHash = admissionHash(waitlistIpBucket(ip), secret, 'ip')
   const hour = new Date(now.getTime() - HOUR),
@@ -470,11 +479,13 @@ export async function joinWaitlist(
       ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
     )
     const et = await resolveWaitlistEvent(db, input, true)
-    await sql`SELECT pg_advisory_xact_lock(1752658796, 1633969261)`.execute(db)
-    const now = await waitlistNow(db, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
-    checkWindow(parsed.start, parsed.end, now)
+    const checkedAt = await waitlistNow(
+      db,
+      ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
+    )
+    checkWindow(parsed.start, parsed.end, checkedAt)
     const slots = await (input.team ? listPublicTeamSlots : listPublicSlots)(
-      { ...ctx, db, now: () => Temporal.Instant.fromEpochMilliseconds(now.getTime()) },
+      { ...ctx, db, now: () => Temporal.Instant.fromEpochMilliseconds(checkedAt.getTime()) },
       {
         handle: input.handle,
         slug: input.slug,
@@ -483,6 +494,11 @@ export async function joinWaitlist(
       },
     )
     if (slots.length) throw new DomainError('conflict', 'availability_changed')
+    // Share the event with ordinary bookings. Only the bounded admission write holds
+    // the instance fence; no availability computation or host lock waits belong here.
+    await sql`SELECT pg_advisory_xact_lock(1752658796, 1633969261)`.execute(db)
+    const now = await waitlistNow(db, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
+    checkWindow(parsed.start, parsed.end, now)
     await expireEventEntries(db, et.id, now)
     const budget = await admissionBudget(db, et.id, parsed.email, ctx.trustedIp, ctx.secret, now)
     if (!budget.allowed) return accepted()

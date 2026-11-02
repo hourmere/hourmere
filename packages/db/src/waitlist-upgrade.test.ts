@@ -391,29 +391,77 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
     expect(
       (await pool.query('SELECT waitlist_enabled FROM event_types WHERE id=$1', [teamEvent])).rows,
     ).toEqual([{ waitlist_enabled: true }])
+  } else if (guard === 'wakeup generation boundary' || guard === 'scan checkpoint boundary') {
+    await pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [
+      entry.event_type_id,
+    ])
+    // One schedule update signals both its old and new host, so it crosses the
+    // int4 boundary and later produces a value beyond Number's exact range.
+    for (const before of [2147483646n, 9007199254740991n]) {
+      await expect(
+        pool.query('UPDATE waitlist_scan_work SET dirty_generation=$2 WHERE event_type_id=$1', [
+          entry.event_type_id,
+          before.toString(),
+        ]),
+      ).resolves.toMatchObject({ rowCount: 1 })
+      await expect(
+        pool.query(
+          `UPDATE schedules SET weekly_hours=weekly_hours WHERE id=(
+            SELECT id FROM schedules
+            WHERE user_id=(SELECT owner_user_id FROM event_types WHERE id=$1)
+            ORDER BY id LIMIT 1)`,
+          [entry.event_type_id],
+        ),
+      ).resolves.toMatchObject({ rowCount: 1 })
+      const after = (before + 2n).toString()
+      expect(
+        (
+          await pool.query<{ dirty_generation: string }>(
+            'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
+            [entry.event_type_id],
+          )
+        ).rows,
+      ).toEqual([{ dirty_generation: after }])
+      await expect(
+        pool.query(
+          'UPDATE waitlist_scan_work SET scanned_generation=dirty_generation WHERE event_type_id=$1',
+          [entry.event_type_id],
+        ),
+      ).resolves.toMatchObject({ rowCount: 1 })
+      expect(
+        (
+          await pool.query<{ scanned_generation: string }>(
+            'SELECT scanned_generation FROM waitlist_scan_work WHERE event_type_id=$1',
+            [entry.event_type_id],
+          )
+        ).rows,
+      ).toEqual([{ scanned_generation: after }])
+    }
   } else if (guard === 'host wakeups') {
     await pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [
       entry.event_type_id,
     ])
     const work = (
-      await pool.query<{ dirty_generation: number }>(
+      await pool.query<{ dirty_generation: string }>(
         'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
         [entry.event_type_id],
       )
     ).rows
     expect(work).toHaveLength(1)
-    const before = work[0]?.dirty_generation as number
+    const before = BigInt(work[0]?.dirty_generation as string)
     await pool.query(
       `UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=(SELECT owner_user_id FROM event_types WHERE id=$1)`,
       [entry.event_type_id],
     )
     expect(
-      (
-        await pool.query<{ dirty_generation: number }>(
-          'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
-          [entry.event_type_id],
-        )
-      ).rows[0]?.dirty_generation,
+      BigInt(
+        (
+          await pool.query<{ dirty_generation: string }>(
+            'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
+            [entry.event_type_id],
+          )
+        ).rows[0]?.dirty_generation as string,
+      ),
     ).toBeGreaterThan(before)
   }
 }
@@ -516,6 +564,16 @@ const guardMutations = [
   ],
   ['host wakeups', 'PERFORM dirty_waitlist_event(event_id);', 'NULL;'],
   [
+    'wakeup generation boundary',
+    'dirty_generation bigint NOT NULL DEFAULT 1',
+    'dirty_generation integer NOT NULL DEFAULT 1',
+  ],
+  [
+    'scan checkpoint boundary',
+    'scanned_generation bigint NOT NULL DEFAULT 0',
+    'scanned_generation integer NOT NULL DEFAULT 0',
+  ],
+  [
     'supported replacement remains enabled',
     'DEFERRABLE INITIALLY DEFERRED\n  FOR EACH ROW EXECUTE FUNCTION enforce_waitlist_host_shape()',
     'NOT DEFERRABLE\n  FOR EACH ROW EXECUTE FUNCTION enforce_waitlist_host_shape()',
@@ -586,12 +644,14 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
         )
       ).rows[0]?.owner_user_id as string
       const generation = async () =>
-        (
-          await pool.query<{ dirty_generation: number }>(
-            'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
-            [entry.event_type_id],
-          )
-        ).rows[0]?.dirty_generation as number
+        BigInt(
+          (
+            await pool.query<{ dirty_generation: string }>(
+              'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
+              [entry.event_type_id],
+            )
+          ).rows[0]?.dirty_generation as string,
+        )
       const sources = [
         `UPDATE profiles SET time_zone=time_zone WHERE user_id=$1`,
         `UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=$1`,

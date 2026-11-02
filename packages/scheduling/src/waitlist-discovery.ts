@@ -19,12 +19,12 @@ interface Entry {
 }
 
 interface Work {
-  dirty_generation: number
+  dirty_generation: string
   cursor_start_at: Date | null
 }
 
 /** Resolve current handles from stable identity; renamed/hidden direct links still work. */
-async function resolveById(db: Db, eventTypeId: string) {
+async function resolveById(db: Db, eventTypeId: string, lock = false) {
   const { rows } = await sql<{
     slug: string
     handle: string | null
@@ -33,7 +33,7 @@ async function resolveById(db: Db, eventTypeId: string) {
   }>`SELECT et.slug, et.owner_user_id, p.handle, o.slug AS team_slug
       FROM event_types et JOIN auth.organization o ON o.id=et.organization_id
       LEFT JOIN profiles p ON p.user_id=et.owner_user_id
-      WHERE et.id=${eventTypeId} FOR SHARE OF et`.execute(db)
+      WHERE et.id=${eventTypeId} ${lock ? sql`FOR SHARE OF et` : sql``}`.execute(db)
   const row = rows[0]
   if (!row) return undefined
   return resolveWaitlistEvent(
@@ -47,6 +47,15 @@ async function resolveById(db: Db, eventTypeId: string) {
   )
 }
 
+async function readEntries(db: Db, eventTypeId: string, at: Date, lock = false) {
+  return (
+    await sql<Entry>`SELECT id,recipient_hash,window_start,window_end,expires_at
+      FROM waitlist_entries WHERE event_type_id=${eventTypeId}
+      AND status IN ('active','notified') AND verified_at IS NOT NULL
+      AND expires_at>${at} ORDER BY id ${lock ? sql`FOR UPDATE` : sql``}`.execute(db)
+  ).rows
+}
+
 const PAGE_MS = 7 * 24 * 60 * 60 * 1000
 
 /** One bounded range page, selecting every matching verified entry without ordering people. */
@@ -54,39 +63,30 @@ export async function scanWaitlistEvent(
   ctx: WaitlistContext,
   eventTypeId: string,
 ): Promise<number> {
-  return ctx.db.transaction().execute(async (trx) => {
+  // Only the short snapshot transaction holds the accounting fence. In particular,
+  // availability computation must hold no work, entry, host or event row locks.
+  const snapshot = await ctx.db.transaction().execute(async (trx) => {
     await ensureWaitlistKey(trx, ctx.secret)
-    // Event before work: configuration writers take these in this order too. No host or
-    // booking lock is taken and no provider or SMTP request occurs during discovery.
     const event = await resolveById(trx, eventTypeId)
-    if (!event) return 0
+    if (!event) return undefined
     await sql`INSERT INTO waitlist_scan_work(event_type_id) VALUES (${eventTypeId})
       ON CONFLICT (event_type_id) DO NOTHING`.execute(trx)
     const work = (
       await sql<Work>`SELECT dirty_generation,cursor_start_at FROM waitlist_scan_work
-        WHERE event_type_id=${eventTypeId} FOR UPDATE`.execute(trx)
+        WHERE event_type_id=${eventTypeId}`.execute(trx)
     ).rows[0]
-    if (!work) return 0
-    const beforeEntries = await waitlistNow(
-      trx,
-      ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
-    )
-    const lockedEntries = (
-      await sql<Entry>`SELECT id,recipient_hash,window_start,window_end,expires_at
-        FROM waitlist_entries WHERE event_type_id=${eventTypeId}
-        AND status IN ('active','notified') AND verified_at IS NOT NULL
-        AND expires_at>${beforeEntries} ORDER BY id FOR UPDATE`.execute(trx)
-    ).rows
-    // Serialize self-removal/attribution with cohort creation, then sample wall time again
-    // after those locks. A removed entry cannot acquire fresh unsent work behind erasure.
+    if (!work) return undefined
     const at = await waitlistNow(trx, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
-    const now = Temporal.Instant.fromEpochMilliseconds(at.getTime())
-    const entries = lockedEntries.filter((entry) => entry.expires_at.getTime() > at.getTime())
-    if (!entries.length) {
-      await finishScan(trx, eventTypeId, work.dirty_generation, at, null)
-      return 0
-    }
-
+    return { event, work, at, entries: await readEntries(trx, eventTypeId, at) }
+  })
+  if (!snapshot) return 0
+  const { event: observedEvent, work: observedWork } = snapshot
+  const observedNow = Temporal.Instant.fromEpochMilliseconds(snapshot.at.getTime())
+  const page = await (async () => {
+    const entries = snapshot.entries
+    const now = observedNow
+    const event = observedEvent
+    const work = observedWork
     // Merge overlapping consent windows and skip gaps. A seven-day page plus one duration
     // of overlap stays below 20,000 starts even at a one-minute step. The overlap allows
     // complete slots crossing a page boundary; ownership is by their UTC start.
@@ -106,19 +106,16 @@ export async function scanWaitlistEvent(
     }
     const cursor = work.cursor_start_at?.getTime() ?? 0
     const window = merged.find((range) => range.end > cursor) ?? merged[0]
-    if (!window) {
-      await finishScan(trx, eventTypeId, work.dirty_generation, at, null)
-      return 0
-    }
+    if (!window) return undefined
     const startMs = cursor >= window.start && cursor < window.end ? cursor : window.start
     const pageEndMs = Math.min(startMs + PAGE_MS, window.end)
     const endMs = Math.min(pageEndMs + event.durationMinutes * 60_000, window.end)
     const rangeStart = Temporal.Instant.fromEpochMilliseconds(startMs)
     const rangeEnd = Temporal.Instant.fromEpochMilliseconds(endMs)
-    // An error aborts this transaction, preserving observations, cursor and tombstones.
+    // An error leaves observations, cursor and tombstones untouched.
     const offered = (
       await (event.team ? listPublicTeamSlots : listPublicSlots)(
-        { ...ctx, db: trx, now: () => now },
+        { ...ctx, now: () => now },
         {
           handle: event.team?.slug ?? event.handle,
           slug: event.slug,
@@ -127,7 +124,43 @@ export async function scanWaitlistEvent(
         },
       )
     ).filter((slot) => Date.parse(slot.start) < pageEndMs)
-    const slots = offered
+    const nextWindow = merged.find((range) => range.start >= window.end)
+    const nextCursor = pageEndMs < window.end ? pageEndMs : (nextWindow?.start ?? null)
+    return { slots: offered, startMs, pageEndMs, nextCursor }
+  })()
+
+  return ctx.db.transaction().execute(async (trx) => {
+    await ensureWaitlistKey(trx, ctx.secret)
+    // Publication never takes host or booking locks. Its event -> work -> entry order
+    // matches configuration writers and booking dirty signals before attribution.
+    // Nothing after these locks waits for or computes ordinary availability.
+    const event = await resolveById(trx, eventTypeId, true)
+    if (!event) return 0
+    const work = (
+      await sql<Work>`SELECT dirty_generation,cursor_start_at FROM waitlist_scan_work
+        WHERE event_type_id=${eventTypeId} FOR UPDATE`.execute(trx)
+    ).rows[0]
+    if (
+      !work ||
+      String(work.dirty_generation) !== String(observedWork.dirty_generation) ||
+      work.cursor_start_at?.getTime() !== observedWork.cursor_start_at?.getTime()
+    )
+      return 0
+    const beforeEntries = await waitlistNow(
+      trx,
+      ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
+    )
+    const lockedEntries = await readEntries(trx, eventTypeId, beforeEntries, true)
+    // Removal/attribution serialize with publication. Sample time after their locks;
+    // erased, expired or unverified entries cannot acquire fresh unsent work.
+    const at = await waitlistNow(trx, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
+    const now = Temporal.Instant.fromEpochMilliseconds(at.getTime())
+    const entries = lockedEntries.filter((entry) => entry.expires_at.getTime() > at.getTime())
+    if (!entries.length || !page) {
+      await finishScan(trx, eventTypeId, work.dirty_generation, at, null)
+      return 0
+    }
+    const { slots, startMs, pageEndMs, nextCursor } = page
 
     await sql`UPDATE waitlist_slots SET is_open=false, observed_at=${at}
       WHERE event_type_id=${eventTypeId} AND start_at>=${new Date(startMs)}
@@ -205,8 +238,6 @@ export async function scanWaitlistEvent(
           ${at},${expiresAt},${at})`.execute(trx)
       count++
     }
-    const nextWindow = merged.find((range) => range.start >= window.end)
-    const nextCursor = pageEndMs < window.end ? pageEndMs : (nextWindow?.start ?? null)
     await finishScan(
       trx,
       eventTypeId,
@@ -221,7 +252,7 @@ export async function scanWaitlistEvent(
 async function finishScan(
   db: Db,
   eventTypeId: string,
-  generation: number,
+  generation: string,
   at: Date,
   cursor: Date | null,
 ) {

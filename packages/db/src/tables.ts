@@ -734,11 +734,11 @@ export interface WaitlistKeyState {
 export interface WaitlistScanWork {
   cursor_entry_id: string | null;
   cursor_start_at: Timestamp | null;
-  dirty_generation: Generated<number>;
+  dirty_generation: Generated<Int8>;
   event_type_id: string;
   last_scanned_at: Timestamp | null;
   next_due_at: Generated<Timestamp>;
-  scanned_generation: Generated<number>;
+  scanned_generation: Generated<Int8>;
   updated_at: Generated<Timestamp>;
 }
 

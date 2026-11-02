@@ -113,8 +113,8 @@ CREATE TABLE waitlist_key_state (
 
 CREATE TABLE waitlist_scan_work (
   event_type_id uuid PRIMARY KEY REFERENCES event_types(id) ON DELETE CASCADE,
-  dirty_generation integer NOT NULL DEFAULT 1,
-  scanned_generation integer NOT NULL DEFAULT 0,
+  dirty_generation bigint NOT NULL DEFAULT 1,
+  scanned_generation bigint NOT NULL DEFAULT 0,
   next_due_at timestamptz NOT NULL DEFAULT now(),
   cursor_entry_id uuid,
   cursor_start_at timestamptz,

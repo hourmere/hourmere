@@ -264,6 +264,261 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     ).toBe(2)
   })
 
+  function pausedAvailability() {
+    const started = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    const reads = new Set<unknown>()
+    let paused = false
+    const pausedDb = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        if (node.kind === 'SelectQueryNode' && JSON.stringify(node).includes('"name":"schedules"'))
+          reads.add(queryId)
+        return node
+      },
+      async transformResult({ queryId, result }) {
+        if (!paused && reads.delete(queryId)) {
+          paused = true
+          started.resolve()
+          await resume.promise
+        }
+        return result
+      },
+    })
+    return { db: pausedDb, started: started.promise, release: () => resume.resolve() }
+  }
+
+  async function settlesWithoutLockWait(operation: Promise<unknown>) {
+    let settled = false
+    operation
+      .finally(() => {
+        settled = true
+      })
+      .catch(() => {})
+    let blocked = false
+    for (let n = 0; !settled && n < 500; n++) {
+      blocked =
+        (
+          await testDb.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS(SELECT FROM pg_stat_activity a
+            WHERE a.datname=current_database() AND a.wait_event_type='Lock'
+              AND cardinality(pg_blocking_pids(a.pid))>0) AS blocked`,
+          )
+        ).rows[0]?.blocked ?? false
+      if (blocked) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(blocked, 'ordinary writer must not wait for discovery locks during availability').toBe(
+      false,
+    )
+    expect(settled, 'ordinary writer must commit while discovery computation is paused').toBe(true)
+    await operation
+  }
+
+  async function verifyUnlockedComputation(
+    kind: 'booking' | 'cancellation' | 'calendar sync' | 'removal',
+    scan = scanWaitlistEvent,
+  ) {
+    const s = await setup()
+    const person = await entry(s)
+    const ordinary = await f.eventType(s.organizationId, s.userId, { slug: 'ordinary' })
+    const existing = kind === 'cancellation' ? await book(s, 'cancel@example.test') : undefined
+    const calendar = kind === 'calendar sync' ? await f.calendarBusy(s.userId, []) : undefined
+    const pause = pausedAvailability()
+    const pending = scan({ ...s.ctx, db: pause.db }, s.eventTypeId)
+    pending.catch(() => {})
+    await pause.started
+    const operation =
+      kind === 'booking'
+        ? createPublicBooking(s.publicCtx, {
+            handle: s.handle,
+            slug: 'ordinary',
+            start: instant(START),
+            invitee: { name: 'Ordinary invitee', email: 'ordinary@example.test', timeZone: 'UTC' },
+          })
+        : kind === 'cancellation'
+          ? cancelManagedBooking(s.publicCtx, existing?.manageToken ?? undefined)
+          : kind === 'calendar sync'
+            ? testDb.pool.query(
+                `INSERT INTO calendar_busy(calendar_id,external_event_id,period)
+                VALUES ($1,'sync-during-scan',tstzrange($2,$3,'[)'))`,
+                [calendar?.calendarId, START, END],
+              )
+            : removeWaitlist(s.ctx, { token: person.token })
+    operation.catch(() => {})
+    try {
+      expect(
+        (
+          await testDb.pool.query<{ enabled: boolean }>(
+            'SELECT waitlist_enabled AS enabled FROM event_types WHERE id=$1',
+            [ordinary],
+          )
+        ).rows[0]?.enabled,
+      ).toBe(false)
+      await settlesWithoutLockWait(operation)
+    } finally {
+      pause.release()
+      await Promise.all([operation, pending])
+    }
+    expect(await candidates(s.eventTypeId)).toHaveLength(0)
+  }
+
+  it.each(['booking', 'cancellation', 'calendar sync', 'removal'] as const)(
+    'keeps %s independent of discovery availability computation',
+    SERIALIZED,
+    async (kind) => {
+      await verifyUnlockedComputation(kind)
+    },
+  )
+
+  it.each(['work', 'entries'] as const)(
+    'detects source-copy %s locks held throughout availability computation',
+    SERIALIZED,
+    async (kind) => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          'const page = await (async () => {',
+          `const page = await ctx.db.transaction().execute(async (trx) => {
+          ${
+            kind === 'work'
+              ? `await sql\`SELECT event_type_id FROM waitlist_scan_work WHERE event_type_id=\${eventTypeId} FOR UPDATE\`.execute(trx)`
+              : 'await readEntries(trx,eventTypeId,snapshot.at,true)'
+          }
+        `,
+        ],
+        ['{ ...ctx, now: () => now },', '{ ...ctx, db: trx, now: () => now },'],
+        ['  })()\n\n  return ctx.db.transaction()', '  })\n\n  return ctx.db.transaction()'],
+      ])
+      await expect(
+        verifyUnlockedComputation(kind === 'work' ? 'booking' : 'removal', copy.scanWaitlistEvent),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
+  async function verifyGenerationRevalidation(scan = scanWaitlistEvent, large = false) {
+    const s = await setup()
+    await entry(s)
+    if (large)
+      await testDb.pool.query(
+        'UPDATE waitlist_scan_work SET dirty_generation=9007199254740992 WHERE event_type_id=$1',
+        [s.eventTypeId],
+      )
+    const pause = pausedAvailability()
+    const pending = scan({ ...s.ctx, db: pause.db }, s.eventTypeId)
+    pending.catch(() => {})
+    await pause.started
+    try {
+      if (large) await testDb.pool.query('SELECT dirty_waitlist_event($1)', [s.eventTypeId])
+      else
+        await testDb.pool.query('UPDATE schedules SET weekly_hours=$1 WHERE id=$2', [
+          '{}',
+          s.scheduleId,
+        ])
+    } finally {
+      pause.release()
+    }
+    expect(await pending, 'a changed dirty generation must discard computed availability').toBe(0)
+    expect(await candidates(s.eventTypeId)).toHaveLength(0)
+    expect(
+      (
+        await testDb.pool.query<{ n: number }>(
+          'SELECT count(*)::int n FROM waitlist_slot_tombstones WHERE event_type_id=$1',
+          [s.eventTypeId],
+        )
+      ).rows[0]?.n,
+    ).toBe(0)
+    const work = (
+      await testDb.pool.query<{ dirty: string; scanned: string }>(
+        'SELECT dirty_generation AS dirty,scanned_generation AS scanned FROM waitlist_scan_work WHERE event_type_id=$1',
+        [s.eventTypeId],
+      )
+    ).rows[0]
+    expect(BigInt(work?.dirty ?? '0') > BigInt(work?.scanned ?? '0')).toBe(true)
+  }
+
+  it('discards stale availability after a concurrent working-hours edit', SERIALIZED, async () => {
+    await verifyGenerationRevalidation()
+  })
+
+  it(
+    'preserves exact dirty generations beyond JavaScript integer precision',
+    SERIALIZED,
+    async () => {
+      await verifyGenerationRevalidation(scanWaitlistEvent, true)
+    },
+  )
+
+  it.each([
+    ['removed', 'false', false],
+    ['lossy', 'Number(work.dirty_generation) !== Number(observedWork.dirty_generation)', true],
+  ] as const)(
+    'detects source-copy %s dirty generation revalidation',
+    SERIALIZED,
+    async (_, replacement, large) => {
+      const copy = sourceCopy('waitlist-discovery', [
+        ['String(work.dirty_generation) !== String(observedWork.dirty_generation)', replacement],
+      ])
+      await expect(
+        verifyGenerationRevalidation(copy.scanWaitlistEvent, large),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
+  it(
+    'detects source-copy reuse of entries removed during availability computation',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          'const lockedEntries = await readEntries(trx, eventTypeId, beforeEntries, true)',
+          'const lockedEntries = snapshot.entries',
+        ],
+      ])
+      await expect(
+        verifyUnlockedComputation('removal', copy.scanWaitlistEvent),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
+  async function verifyCursorRevalidation(scan = scanWaitlistEvent) {
+    const s = await setup()
+    await entry(s, { end: '2026-11-23T08:00:00Z' })
+    const pause = pausedAvailability()
+    const pending = scan({ ...s.ctx, db: pause.db }, s.eventTypeId)
+    pending.catch(() => {})
+    await pause.started
+    try {
+      expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(1)
+      expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(1)
+    } finally {
+      pause.release()
+    }
+    expect(await pending, 'a concurrent scan must not republish an obsolete range page').toBe(0)
+    const work = (
+      await testDb.pool.query<{ cursor: Date }>(
+        'SELECT cursor_start_at AS cursor FROM waitlist_scan_work WHERE event_type_id=$1',
+        [s.eventTypeId],
+      )
+    ).rows[0]
+    expect(work?.cursor.toISOString()).toBe('2026-11-16T08:00:00.000Z')
+  }
+
+  it(
+    'preserves the cursor advanced by concurrent scans during computation',
+    SERIALIZED,
+    async () => {
+      await verifyCursorRevalidation()
+    },
+  )
+
+  it('detects source-copy removal of cursor revalidation', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      ['work.cursor_start_at?.getTime() !== observedWork.cursor_start_at?.getTime()', 'false'],
+    ])
+    await expect(verifyCursorRevalidation(copy.scanWaitlistEvent)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
   it('retains mailbox-slot tombstones across removal and rejoin and keeps another event distinct', async () => {
     const s = await setup()
     const first = await entry(s)
@@ -939,7 +1194,7 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     const copy = sourceCopy('waitlist-discovery', [
       [
         'await (event.team ? listPublicTeamSlots : listPublicSlots)(',
-        'await (async (_ctx, range) => (await findSlots(trx,{eventTypeId,hostUserId:event.hostUserId,rangeStart:range.start,rangeEnd:range.end,now})).map(slot=>({start:toIso(slot.start),end:toIso(slot.end)})))(',
+        'await (async (_ctx, range) => (await findSlots(ctx.db,{eventTypeId,hostUserId:event.hostUserId,rangeStart:range.start,rangeEnd:range.end,now})).map(slot=>({start:toIso(slot.start),end:toIso(slot.end)})))(',
       ],
     ])
     await expect(verifyConferenceGuard(copy.scanWaitlistEvent)).rejects.toMatchObject({
