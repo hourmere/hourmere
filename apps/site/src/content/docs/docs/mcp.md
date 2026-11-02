@@ -89,6 +89,7 @@ notifications and trigger configured integrations.
 | `get_profile` | — | `profile` | `full, read, bookings` |
 | `list_event_types` | — | `catalog` | `full, read, bookings` |
 | `get_event_type` | — | `event` | `full, read, bookings` |
+| `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
 | `list_calendar_connections` | — | — | `full, read` |
@@ -117,7 +118,8 @@ app or through REST.
 | Tool | Input and result |
 |---|---|
 | `list_event_types` | Optional `limit` and `after`; compact summaries of team types and your personal types in the key's organization. Includes inactive configurations, excludes deleted types. |
-| `get_event_type` | An `id` from the list; full configuration, including questions, location and rules. |
+| `get_event_type` | An `id` from the list; full configuration, including questions, location, rules and notification settings. |
+| `set_event_type_notifications` | `{id, notifications}`; replace reminders and follow-ups, returning the full event type. Requires `full` API key scope, or an authorized MCP OAuth grant, and personal-owner/team-owner-or-admin permissions. |
 | `list_schedules` | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations. |
 | `get_schedule` | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate. |
 | `list_calendar_connections` | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination. |
@@ -127,9 +129,18 @@ Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by d
 most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until
 `nextAfter` is null. Cursors exclude the previous row, even if that row was deleted. Pages
 are recalculated, so configuration changes may affect later pages. The list omits large
-detail fields; use the corresponding detail tool when needed. Configuration writes and date
+detail fields; use the corresponding detail tool when needed. Other configuration writes and date
 overrides remain available through REST and the web app. Always check public availability
 with `find_available_slots` before booking an event found in the catalog.
+
+`set_event_type_notifications` replaces both arrays as one value; it never sends mail
+immediately or changes existing booking snapshots. `get_event_type` returns the saved
+canonical value. For example, `{ "id": "<event-type-id>", "notifications": {
+"reminders": [], "followUps": [] } }` disables scheduled messages for new bookings.
+See [notification validation](/docs/api-conventions#event-type-notification-settings)
+for limits and the `invalid_request` / `invalid_notifications` split, and
+[host-note policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls)
+before adding optional follow-up text. `bookings` scope cannot change these settings.
 
 Connection discovery accepts `read`/`full` API keys and enabled MCP OAuth grants and reads only
 your own metadata, without credentials or provider calls. The user's own `full` API keys can change calendar
@@ -458,6 +469,16 @@ valid. A collective team type offers only intervals every required host offers; 
 An activated round-robin type offers the union and assigns one available host. Its booking
 result includes safe `assignedHost` name/time zone; retries and rescheduling retain that
 selection. See [round-robin scheduling](/docs/round-robin-scheduling).
+
+`find_available_slots`, `create_booking` and `reschedule_booking` accept optional
+`durationMinutes`. Select a whole-minute length from the event type's
+`allowedDurationsMinutes` (also returned by `get_event_type`). Slots and new bookings use
+the default when it is omitted. Keep the selection unchanged when continuing slot pages
+and pass the same length when booking. Unsupported lengths fail with `invalid_duration`;
+malformed selections fail with `invalid_request`. Rescheduling without a new selection
+preserves the booking's actual elapsed length, including an option the host has removed.
+An explicit new length must belong to the current allowed list. Booking and reschedule
+results, notifications and calendar invitations use the selected end time.
 
 Both catalog lists accept `limit` (default 20, maximum 100) and `after`. Results are
 `{ data, nextAfter }`, sorted by ID. Set `after` to the previous `nextAfter`, keep the same key

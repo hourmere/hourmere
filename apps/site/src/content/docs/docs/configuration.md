@@ -118,6 +118,7 @@ for configuration and delivery behavior.
 | `SMTP_URL` | Unset | `smtps://user:password@host:465` or `smtp://…:587`; special credential characters must be percent-encoded. Remote SMTP requires TLS/STARTTLS. Without SMTP, emails go to logs. |
 | `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts that can also receive calendar replies; see the requirements below. |
 | `BOOKING_MAX_INVITEE_RESCHEDULES` | `5` | Maximum invitee-initiated reschedules across one booking chain, including through old email links. `0` disables invitee rescheduling. Hosts may still reschedule; cancellation remains available. |
+| `FOLLOW_UP_HOST_NOTES_ENABLED` | `true` | Permit host-written follow-up notes. `false` rejects notification writes containing notes and omits notes from all outgoing follow-ups, including existing booking snapshots. Set identically on web and worker. Hourmere Cloud must set `false` until reviewed host-text abuse controls are implemented. |
 | `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Positive integer. Host emails are exempt. |
 | `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_HOUR` | `5` | Maximum sign-in emails sent to the same trimmed, lowercased address in a rolling hour, separate from booking recipient limits. Positive integer. |
@@ -130,7 +131,16 @@ for configuration and delivery behavior.
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
 
-These limits default on, including when Compose passes empty variables. They accept whole
+For hosted Hourmere Cloud, explicitly set `FOLLOW_UP_HOST_NOTES_ENABLED=false` in the
+deployment environment before exposing notification writes to tenants. Apply the same value
+to every `web`, `worker` and combined `all` process and recreate them together. The bundled
+Compose worker inherits this setting from the app; custom deployments must pass it to both
+roles. The self-hosting default is `true`, and no hostname or attribution setting selects
+a Cloud policy. Keep it disabled until host eligibility, recipient consent and complaint
+controls are reviewed and implemented; the existing mail-volume limits alone are insufficient.
+See [host-note operations](/docs/self-hosting#follow-up-host-notes).
+
+These mail-volume limits default on, including when Compose passes empty variables. They accept whole
 numbers up to 2147483647; negative or fractional values fail startup. Set them identically
 on web and worker processes and recreate both after changing them. Set `MAIL_MAX_PER_HOUR`
 below your SMTP provider's hourly allowance, allowing for the shared 20% host/sign-in

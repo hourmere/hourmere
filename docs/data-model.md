@@ -119,6 +119,7 @@ calendar-list access.
 | `calendar_busy` | user | Timed busy intervals or all-day date ranges mirrored by incremental sync (recurring events expanded) |
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
+| `one_time_booking_links` | event type + organization | Hash-only booking capabilities, optional expiry and invitee prefill, terminal lifecycle and the confirmed booking that consumed them |
 | `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |
 | `organization_operations` | organization | Minimal actual-actor records for cancellation, member removal/leave and role changes; identifiers, origin, role transition and time only |
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
@@ -233,6 +234,91 @@ calendar-list access.
 - **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
   objects shifted by the server's time zone.
 
+## One-time booking link contract
+
+Migration 0053 adds `one_time_booking_links`. Each link belongs to exactly one event type
+and its organization, with the creating user recorded separately. Personal links belong
+to the event type's owner; team links belong to the team, rather than to whichever admin
+created them. The service returns a cryptographically random 256-bit bearer token exactly
+once, on creation. Only its SHA-256 digest is stored, under a unique index. Reads return
+metadata without either the raw token or its digest; revocation returns an empty
+acknowledgement. Callers must keep the creation result private; later transports must
+not log it or place it in analytics.
+
+An optional `expires_at` is an absolute instant. Database wall time decides eligibility,
+including after lock waits, independently of the application clock or transaction start.
+A link with no expiry remains eligible until consumption or revocation. Optional invitee
+name and email are editable booking-form prefill only: they do not prove identity,
+verify an address, restrict who can book, or bypass the normal booking validations.
+
+| State | Meaning |
+|---|---|
+| `active` | Unconsumed, unrevoked and before its optional expiry |
+| `used` | A confirmed booking through this link committed with its claim |
+| `expired` | The expiry instant has passed; reads derive this even if the stored state is still `active` |
+| `revoked` | An authorized owner/admin explicitly withdrew an unused link |
+
+Resolving a token is read-only and never consumes it. Unknown, malformed, expired,
+revoked and used tokens return the same `one_time_link_not_found` error, with no lifecycle
+details. A digest lookup and constant-time digest comparison avoid comparing raw secrets.
+An inactive or deleted event type has the same unavailable result. Hidden event types
+remain eligible through their direct one-time links. Links do not bypass event readiness,
+host membership, availability, notice, daily limits or any other booking rule.
+
+`claimOneTimeBookingLink` accepts the caller's top-level booking transaction. The caller
+must create the confirmed booking and claim the link in that same transaction, and
+propagate a failed claim so the booking rolls back. Only a confirmed booking inserted in
+that transaction for the exact event type and organization can consume a link; updating
+an older booking does not qualify. The database verifies the insertion transaction as
+well as the service.
+Bookings inserted inside a savepoint are not supported by this claim path.
+A conditional row update serializes competing claims; database constraints and a
+transition trigger also prevent terminal links from returning to active or changing
+their consuming booking. The unique booking reference prevents one
+booking from consuming multiple links. A rolled-back booking leaves the link available.
+Cancelling or rescheduling the consuming booking never reactivates the link; the original
+booking reference remains as evidence of consumption.
+
+Creation and revocation recheck current verified membership and permissions inside their
+write transaction. For team-owned event types, only current team owners and admins may
+create or revoke links. Ordinary members may manage links only for event types they own;
+being a host or the creator of a team link grants no team management permission. The
+current organization scopes every operation. Revoking an unknown, foreign, inaccessible
+or already-revoked ID returns the same empty acknowledgement, without exposing its state
+or existence. For the next REST/MCP/CLI task, creation and
+revocation are account-configuration writes requiring API key scope `full`; neither
+`read` nor `bookings` authorizes minting or withdrawing these capabilities. The internal
+services already enforce this API key classification. MCP OAuth creation/revocation is
+also full-account configuration access only: the future transport must explicitly
+authorize that access before exposing or calling these operations. The existing
+`mcp:tools` grant alone must not implicitly opt into these new configuration writes;
+any future limited OAuth grants must exclude them. Existing session, membership and
+ownership permissions still apply. No new OAuth scope or transport is registered here;
+transport registration and public-page consumption follow separately.
+
+Each personal owner or team organization may have at most 1000 active, unexpired links
+across all its event types and creators. An ordinary team member additionally has a
+200-link sub-limit across their own event types in that team; owners/admins share the
+team total without that sub-limit. Creation serializes capacity checks with a transaction
+advisory lock keyed by the personal organization or team, without taking an organization
+row write lock. Used, expired and revoked rows do not consume these allowances.
+
+Used links are retained with their consuming booking as evidence, including after
+cancellation or rescheduling; the cleanup job never deletes them. A consuming booking
+cannot be deleted on its own while its link evidence remains; normal organization/event
+deletion removes both together. An hourly job registered in `packages/jobs` deletes at
+most 500 unused links per run once 90 days have passed since expiry or revocation. Revoked
+links use `revoked_at`, even if their expiry was earlier. Expired links include active
+rows whose `expires_at` has elapsed. Retries are idempotent and locked rows are skipped;
+a backlog can take additional runs. Active links without expiry are retained.
+
+The creator ID is immutable, non-null historical attribution without an account foreign
+key, following migration 0041. Deleting a creator therefore preserves team links and
+consumption records. Personal organization deletion still removes personal links, and
+physical event type or organization deletion cascades to its links. Soft-deleting an
+event type retains its links while making them unavailable. No administrative list is
+introduced here.
+
 ## Event duration contract
 
 `event_types.duration_minutes` remains the default (`durationMinutes` in service and
@@ -244,10 +330,15 @@ the list and duration-only edits of singleton types retain singleton behavior. E
 multi-duration default requires it to remain in the list, or a replacement list in the
 same write. Metadata-only edits preserve the list.
 
-The availability and booking services accept optional `durationMinutes` as the selected
-length; omission uses the default for a new booking. This name is reserved for the later
-REST selection, MCP and CLI parameters too. Configuration REST fields are additive;
-public-page selection, editor controls and MCP/CLI selection parameters follow separately.
+The availability and booking services, public REST endpoints and MCP tools accept optional
+`durationMinutes` as the selected length; omission uses the default for new slots and
+bookings. The CLI exposes the same selection as `--duration-minutes`. Public personal,
+team and embedded booking pages offer a labelled duration choice when multiple lengths are
+available, with the default preselected. Changing the selection refreshes availability
+before the invitee chooses a time. Single-duration pages retain their existing flow.
+If the host changes the available lengths while the page is open, an `invalid_duration`
+booking or slots response refreshes the choices and availability in place, asks the invitee
+to choose again, and preserves their entered details, guests and answers.
 
 Every candidate's end is its start plus the selected elapsed minutes. The same before/after
 buffers apply around that interval; minimum notice and the booking window constrain its
@@ -259,6 +350,10 @@ chooses one eligible host whose availability fits it, using the existing assignm
 A booking's `start_at` and `end_at` store its actual duration. Configuration edits never
 rewrite them. A reschedule with no selected length keeps the original elapsed duration,
 even if that option was removed; an explicit new length must belong to the current list.
+Managed and host reschedule slot queries follow the same rule. The management page uses
+the booking's original elapsed duration for both slot fetching and time-zone day boundaries.
+Confirmation details, management details, email times and calendar invitations use the
+stored interval rather than the event type's current default.
 Existing request fingerprints and exact idempotent replays remain unchanged. An explicitly
 supplied selection participates in the fingerprint, so a changed selection cannot reuse
 the same key as the same request.
@@ -785,7 +880,8 @@ Migration 0049 adds event-type `notifications` settings and the immutable per-bo
 existing bookings keep NULL, which always means that legacy default. Settings edits affect
 only new booking roots. Reschedules materialize or copy the predecessor snapshot and
 recompute offsets from the successor's UTC start and end. Internal configuration services
-serialize complete replacements with the event-type row lock; public transports are unchanged.
+serialize complete replacements with the event-type row lock. Protected REST event types
+expose these settings; REST, MCP and CLI writes share service validation and permissions.
 
 The exact default policy retains the existing generic reminder and conference-ready outbox
 paths. Every other policy uses `booking_scheduled_messages`, uniquely identified by booking,
@@ -821,6 +917,14 @@ tabs and line endings allowed; other C0/C1 controls, bidi embedding/isolate cont
 malformed Unicode are rejected. Reminders cannot carry a note. See
 [the 0052 upgrade note](../packages/db/migrations/0052_follow_up_host_note.md) for the
 predecessor-preservation checks and rollout constraints.
+
+Public writes apply the 2026-10-31 note contract before storage: CRLF becomes LF, bidi
+embedding/isolate controls are removed, and the normalized value must be well-formed,
+at most 2000 UTF-16 code units and free of other controls (including tabs). This is stricter
+than migration 0052's storage envelope; published migration SQL stays unchanged and
+legacy saved snapshots remain readable. `FOLLOW_UP_HOST_NOTES_ENABLED=false` rejects
+explicit note writes and omits even saved snapshot notes when sending, without rewriting
+stored settings or changing default reminders.
 
 ## Booking webhooks
 

@@ -73,7 +73,7 @@ describe.skipIf(!serverUrl)('selected duration availability in Postgres', () => 
     }
   }
 
-  it('offers each configured length and preserves the default public response', async () => {
+  it('offers each configured length and exposes the public choices with its default', async () => {
     const s = await setup()
     for (const durationMinutes of [15, 30, 60]) {
       const slots = await listPublicSlots(s.ctx, { ...s.page, ...range, durationMinutes })
@@ -94,6 +94,7 @@ describe.skipIf(!serverUrl)('selected duration availability in Postgres', () => 
       title: 'Intro call',
       description: null,
       durationMinutes: 30,
+      allowedDurationsMinutes: [15, 30, 60],
       location: null,
       questions: [],
       allowGuests: false,

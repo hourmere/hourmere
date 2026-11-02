@@ -13,6 +13,7 @@ import type { BookingNotifier, PublicContext, ServiceContext } from './context.t
 import {
   createEventType,
   deleteEventType,
+  getEventType,
   getEventTypeNotifications,
   setEventTypeNotifications,
   updateEventType,
@@ -47,7 +48,7 @@ const CUSTOM: NotificationSettings = {
       id: 'after',
       offsetMinutes: 60,
       recipients,
-      hostNote: '<a href="https://example.test">Host & invitee</a>\r\n后续资料\t😀',
+      hostNote: '<a href="https://example.test">Host & invitee</a>\n后续资料 😀',
     },
   ],
 }
@@ -924,6 +925,141 @@ describe.skipIf(!serverUrl)('booking notification settings storage', () => {
     expect(await savedSnapshot(created.booking.id)).toEqual(createNotificationSnapshot(CUSTOM))
     expect(await messageRows(created.booking.id)).toEqual(before)
   })
+
+  type ConfigurationServices = Pick<
+    typeof import('./event-types.ts'),
+    'createEventType' | 'updateEventType' | 'setEventTypeNotifications'
+  >
+  async function verifyConfigurationWrites(
+    services: ConfigurationServices = {
+      createEventType,
+      updateEventType,
+      setEventTypeNotifications,
+    },
+  ) {
+    const owner = await createTestUser(db, 'Settings owner')
+    const context = testContext(db, owner.principal, () => NOW)
+    const disabled = { ...context, followUpHostNotesEnabled: false }
+    const input = { slug: 'write-policy', title: 'Write policy', durationMinutes: 30 }
+    const initial = await services.createEventType(context, input)
+    expect(initial.notifications).toEqual(DEFAULT_NOTIFICATIONS)
+    expect((await getEventType(context, initial.id)).notifications).toEqual(DEFAULT_NOTIFICATIONS)
+    const custom = await services.createEventType(context, {
+      ...input,
+      slug: 'custom-policy',
+      notifications: CUSTOM,
+    })
+    expect(custom.notifications).toEqual(CUSTOM)
+    const updatedTime = async () =>
+      (
+        await sql<{
+          time: string
+        }>`SELECT updated_at::text AS time FROM event_types WHERE id=${custom.id}::uuid`.execute(db)
+      ).rows[0]?.time
+    const beforeNoop = await updatedTime()
+    expect(await services.updateEventType(context, custom.id, { notifications: CUSTOM })).toEqual(
+      custom,
+    )
+    expect(await updatedTime()).toBe(beforeNoop)
+    expect(
+      (await services.updateEventType(disabled, custom.id, { title: 'Untouched notes' }))
+        .notifications,
+    ).toEqual(CUSTOM)
+    expect(
+      (await services.updateEventType(context, initial.id, { notifications: CUSTOM }))
+        .notifications,
+    ).toEqual(CUSTOM)
+    for (const hostNote of ['Explicit host note', '']) {
+      const notifications = {
+        reminders: [],
+        followUps: [{ id: 'after', offsetMinutes: 60, recipients, hostNote }],
+      }
+      await expect(
+        services.createEventType(disabled, {
+          ...input,
+          slug: `disabled-${hostNote ? 'text' : 'empty'}`,
+          notifications,
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_notifications' })
+      await expect(
+        services.updateEventType(disabled, initial.id, { notifications }),
+      ).rejects.toMatchObject({ code: 'invalid_notifications' })
+      await expect(
+        services.setEventTypeNotifications(disabled, initial.id, notifications),
+      ).rejects.toMatchObject({ code: 'invalid_notifications' })
+    }
+    expect(
+      (await services.updateEventType(disabled, initial.id, { notifications: CHANGED }))
+        .notifications,
+    ).toEqual(CHANGED)
+    expect(
+      await services.setEventTypeNotifications(disabled, initial.id, DEFAULT_NOTIFICATIONS),
+    ).toEqual(DEFAULT_NOTIFICATIONS)
+  }
+  it('writes settings through create, update and narrow replacement, preserving omitted policies and enforcing the operator switch', () =>
+    verifyConfigurationWrites())
+  it.each<Replacement>([
+    ['notificationsChanged ||', 'notifications !== undefined ||'],
+    [
+      'const notifications = validateNotifications(value, ctx)',
+      'const notifications = validateNotifications(value)',
+    ],
+    [
+      'input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)',
+      'input.notifications === undefined ? undefined : validateNotifications(input.notifications)',
+    ],
+    [
+      'const changes = defined(input)\n  const notifications =\n    input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)',
+      'const changes = defined(input)\n  const notifications =\n    input.notifications === undefined ? undefined : validateNotifications(input.notifications)',
+    ],
+  ])(
+    'detects removing operator policy from a write path with a real assertion failure',
+    async (from, to) => {
+      const copy = await sourceCopy<ConfigurationServices>(
+        'event-types.ts',
+        ['createEventType', 'updateEventType', 'setEventTypeNotifications'],
+        [from, to],
+      )
+      await expect(verifyConfigurationWrites(copy)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
+  async function verifyHistoricalNotes(module: BookingModule = bookings) {
+    const b = await setup()
+    const legacy = {
+      ...CUSTOM,
+      followUps: CUSTOM.followUps.map((rule) => ({
+        ...rule,
+        hostNote: 'Original\ttext\r\nStored\runchanged',
+      })),
+    }
+    await db
+      .updateTable('event_types')
+      .set({ notifications: JSON.stringify(legacy) })
+      .where('id', '=', b.eventTypeId)
+      .execute()
+    expect((await getEventType(b.service, b.eventTypeId)).notifications).toEqual(legacy)
+    expect(await getEventTypeNotifications(b.service, b.eventTypeId)).toEqual(legacy)
+    expect(
+      (
+        await updateEventType({ ...b.service, followUpHostNotesEnabled: false }, b.eventTypeId, {
+          title: 'Preserve historical note',
+        })
+      ).notifications,
+    ).toEqual(legacy)
+    const created = await module.createPublicBooking(publicContext(), b.input)
+    expect(await savedSnapshot(created.booking.id)).toEqual(createNotificationSnapshot(legacy))
+    const moved = await module.rescheduleManagedBooking(
+      publicContext(),
+      created.manageToken as string,
+      { start: NEXT },
+    )
+    expect(await savedSnapshot(moved.booking.id)).toEqual(createNotificationSnapshot(legacy))
+  }
+  it('preserves historical tab and CRLF host notes on reads, unrelated updates, booking snapshots and reschedules', () =>
+    verifyHistoricalNotes())
 
   async function verifyAccess(get = getEventTypeNotifications, set = setEventTypeNotifications) {
     const owner = await createTestUser(db, 'Owner')

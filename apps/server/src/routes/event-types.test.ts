@@ -1,5 +1,7 @@
+import '@hono/zod-openapi'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { DEFAULT_NOTIFICATIONS } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CHUNK_SIZE, chunkedBody } from '../chunked-body.ts'
@@ -35,6 +37,11 @@ describe('event type routes in the OpenAPI document', () => {
         ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
         '$.conferenceOrganizer',
         '$.questions[]',
+        '$.notifications',
+        '$.notifications.reminders[]',
+        '$.notifications.reminders[].recipients',
+        '$.notifications.followUps[]',
+        '$.notifications.followUps[].recipients',
         '$.hosts[]',
       ])
     }
@@ -62,6 +69,7 @@ describe('event type routes in the OpenAPI document', () => {
       ['/api/v1/event-types/{id}', 'patch'],
       ['/api/v1/event-types/{id}', 'delete'],
       ['/api/v1/event-types/{id}/round-robin/activate', 'post'],
+      ['/api/v1/event-types/{id}/notifications', 'put'],
     ] as const) {
       const forbidden = paths[path]?.[method]?.responses['403']
       expect(forbidden).toHaveProperty('description', expect.stringContaining('insufficient_role'))
@@ -238,6 +246,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       hosts: [{ userId: user.id }],
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
+      notifications: DEFAULT_NOTIFICATIONS,
       isActive: true,
       isHidden: false,
       allowGuests: false,
@@ -463,6 +472,19 @@ describe.skipIf(!serverUrl)('event type routes', () => {
         required: false,
         options: Array.from({ length: 50 }, (_, o) => pad(`${q}-${o}-`, 200)),
       })),
+      notifications: {
+        reminders: Array.from({ length: 5 }, (_, i) => ({
+          id: pad(`reminder-${i}`, 64),
+          offsetMinutes: 1440 + i,
+          recipients: { invitee: true, guests: true, host: true },
+        })),
+        followUps: Array.from({ length: 3 }, (_, i) => ({
+          id: pad(`follow-up-${i}`, 64),
+          offsetMinutes: 1440 + i,
+          recipients: { invitee: true, guests: true, host: true },
+          hostNote: pad('Follow-up', 2000),
+        })),
+      },
     }
     const create = escapedJson({ ...body({ slug: pad('s', 64) }), ...largest })
     expect(create.length).toBeGreaterThan(1_200_000)

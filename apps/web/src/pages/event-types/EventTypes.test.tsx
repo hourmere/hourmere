@@ -497,6 +497,8 @@ describe('creating an event type', () => {
     eventTypeServer([], { 'POST /api/v1/event-types': () => response })
     await openNew()
     await user.type(field('Title'), 'Intro call')
+    await user.clear(field('Booking link'))
+    await user.type(field('Booking link'), 'chosen-link')
     await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'link')
     await user.type(field('Meeting link'), 'https://meet.example.com/ada')
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
@@ -1160,7 +1162,7 @@ describe('team booking links', () => {
     expect(screen.queryByText(/Choose your handle/)).toBeNull()
     await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
-    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
       'Configuration checks passed',
     )
     expect(document.querySelector('.booking-link .preview')?.textContent).toBe(

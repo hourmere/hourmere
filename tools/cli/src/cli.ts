@@ -7,6 +7,7 @@ export const COMMANDS = {
   profile: 'get_profile',
   catalog: 'list_event_types',
   event: 'get_event_type',
+  'set-event-notifications': 'set_event_type_notifications',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
   slots: 'find_available_slots',
@@ -19,10 +20,12 @@ export const COMMANDS = {
 } as const
 
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
+       hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere --help | --version
 
-Commands: whoami, profile, catalog, event, schedules, schedule, slots,
+Commands: whoami, profile, catalog, event, set-event-notifications, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
+Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
@@ -37,6 +40,7 @@ interface Options {
   input?: string
   output?: string
   url?: string
+  durationMinutes?: number
 }
 
 function parse(argv: readonly string[]): Options {
@@ -47,7 +51,11 @@ function parse(argv: readonly string[]): Options {
   for (let i = 0; i < rest.length; i += 2) {
     const flag = rest[i]
     const value = rest[i + 1]
-    if (!flag || !['--input', '--output', '--url'].includes(flag) || seen.has(flag))
+    if (
+      !flag ||
+      !['--input', '--output', '--url', '--duration-minutes'].includes(flag) ||
+      seen.has(flag)
+    )
       throw new CliError('invalid_options')
     if (!value || (value.startsWith('-') && !(flag === '--input' && value === '-')))
       throw new CliError('invalid_options')
@@ -55,6 +63,13 @@ function parse(argv: readonly string[]): Options {
     if (flag === '--input') options.input = value
     if (flag === '--output') options.output = value
     if (flag === '--url') options.url = value
+    if (flag === '--duration-minutes') {
+      if (!['slots', 'book', 'reschedule'].includes(command)) throw new CliError('invalid_options')
+      const durationMinutes = Number(value)
+      if (!/^[0-9]+$/.test(value) || durationMinutes < 1 || durationMinutes > 1440)
+        throw new CliError('invalid_request')
+      options.durationMinutes = durationMinutes
+    }
   }
   return options
 }
@@ -138,6 +153,11 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    if (args.durationMinutes !== undefined) {
+      if (Object.hasOwn(input, 'durationMinutes') && input.durationMinutes !== args.durationMinutes)
+        throw new CliError('invalid_duration')
+      input.durationMinutes = args.durationMinutes
+    }
     if (Object.hasOwn(input, 'manageToken')) {
       if (typeof input.manageToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(input.manageToken))
         throw new CliError('invalid_manage_token')
@@ -175,6 +195,7 @@ export async function runCli(options: {
       printable(
         {
           error: code,
+          ...(error instanceof CliError && error.detail !== undefined && { message: error.detail }),
           ...(error instanceof CliError && error.status !== undefined && { status: error.status }),
           ...(error instanceof CliError &&
             error.retryAfterSeconds !== undefined && {

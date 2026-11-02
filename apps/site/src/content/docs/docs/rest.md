@@ -53,6 +53,27 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Configure reminders and follow-ups
+
+Use a `full` API key and an event-type ID from `GET /api/v1/event-types`. Protected event
+reads include `notifications`. To replace only that setting:
+
+```sh
+curl --fail-with-body -X PUT "$HOURMERE_URL/api/v1/event-types/<event-type-id>/notifications" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"notifications":{"reminders":[{"id":"one-day","offsetMinutes":1440,"recipients":{"invitee":true,"guests":true,"host":true}}],"followUps":[{"id":"thanks","offsetMinutes":60,"recipients":{"invitee":true,"guests":false,"host":false},"hostNote":"Thank you for your time."}]}}'
+```
+
+The response is the full event type. Creation and PATCH also accept optional
+`notifications`; omission keeps creation defaults or the saved value respectively. A
+replacement must include both arrays. Personal types require their owner and team types
+an owner or admin; `bookings` and `read` keys cannot write these settings. Saves affect
+only new bookings and send no immediate mail. Read the
+[complete validation contract](/docs/api-conventions#event-type-notification-settings)
+and [host-note operating policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls)
+before enabling follow-ups or host-written text.
+
 ## Find a time
 
 Choose a future UTC range within the event type's booking window, at most 62 days.
@@ -70,6 +91,12 @@ Adjust these example dates so they remain in the future. Take the desired return
 performs that conversion. A selected Google calendar with missing, failed or stale sync yields
 `calendar_sync_unavailable`; fix or deliberately disable that calendar instead of assuming
 unknown busy data is free.
+
+An event type with several lengths includes `allowedDurationsMinutes` in its public event
+details. Add `durationMinutes=<allowed length>` to the slots query and the same numeric
+`durationMinutes` to the booking JSON to select that length. Omission uses the event type's
+default `durationMinutes`; a length outside the allowed list returns `400 invalid_duration`.
+The personal and `/api/v1/public/teams/{handle}/{slug}` endpoints share this contract.
 
 ## Create and manage one booking
 
@@ -130,6 +157,12 @@ host moves. The token in a booking email always follows the reschedule chain. Tr
 in a fragment (`/booking#token=…`); API calls use headers, never query parameters. Set `HOURMERE_MANAGE_TOKEN` privately to the
 current returned token before running either management example.
 
+`GET /api/v1/bookings/manage/slots?start=…&end=…` uses the booking's original length,
+including after the host changes the event default or removes that length. An optional
+`durationMinutes` query parameter selects a current allowed length instead; send the same
+number in the reschedule JSON. Omitting it from reschedule preserves the original length.
+The response's `start` and `end` always describe the actual booked interval.
+
 List the key owner's hosted bookings with `GET /api/v1/bookings`. A key does not grant access
 to arbitrary hosts' private bookings. Results default to ascending start time and ID; request
 `order=desc` for newest first. Pass `nextCursor` as `cursor` and keep the time filters and
@@ -152,6 +185,9 @@ booking, so the new time may overlap it. A host move returns the successor booki
 `manageToken: null` and preserves existing invitee links. The web booking detail page uses
 these same public APIs. Do not retry a move automatically; inspect your booking list if
 the answer is lost.
+
+Host slot queries and reschedule JSON accept the same optional `durationMinutes`, with
+the same original-length default and current-allowed-list validation as invitee moves.
 
 Team owners/admins can also read `GET /api/v1/team/invitations` using a verified browser
 session in the current team. It returns paginated invitation lifecycle and safe current

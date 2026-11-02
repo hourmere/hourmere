@@ -44,6 +44,7 @@ export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
   auditState: () => Promise<AuditFixtureState>
   screenshotState: () => Promise<ScreenshotFixtureState>
@@ -467,6 +468,14 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        configureDurations: async () => {
+          await db
+            .updateTable('event_types')
+            .set({ allowed_durations_minutes: [15, 30, 60] })
+            .where('organization_id', 'in', [host.organizationId, team])
+            .where('slug', '=', 'call')
+            .execute()
+        },
         configureSuccessRedirect: async (allowEmbedParent) => {
           const settings = validateSuccessRedirect({
             url: 'https://continuation.example/thanks?x=%zz&flag&a;b',

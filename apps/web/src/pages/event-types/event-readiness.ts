@@ -8,19 +8,6 @@ export type SelfEventReadiness = Schemas['SelfReadinessPage']['eventTypes']['dat
 export type TeamEventReadiness = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
 export type EventReadiness = SelfEventReadiness | TeamEventReadiness
 
-/** Use the service's team result; a partial pool still has an eligible candidate. */
-export function teamReadinessAllowsSharing(item: EventReadiness | undefined) {
-  return (
-    item !== undefined &&
-    'reasonCodes' in item &&
-    item.completeness === 'complete' &&
-    (item.summary === 'checks_passed' || item.summary === 'partial_pool') &&
-    !item.reasonCodes.some(
-      (reason) => reason === 'check_failed' || reason === 'check_not_performed',
-    )
-  )
-}
-
 /** Preserve existing links unless the service reports a configuration problem. */
 export function teamReadinessBlocksSharing(item: EventReadiness | undefined) {
   if (!item || !('reasonCodes' in item) || item.summary === 'partial_pool') return false
@@ -47,7 +34,7 @@ export function readinessErrorStatus(me: Me, err: unknown): 'unavailable' | 'err
     : 'error'
 }
 
-export function useEventReadiness(me: Me) {
+export function useEventReadiness(me: Me, refreshVersion = 0) {
   const [state, setState] = useState<
     | { status: 'loading' | 'error' | 'unavailable' }
     | { status: 'ready'; data: Map<string, EventReadiness> }
@@ -68,7 +55,7 @@ export function useEventReadiness(me: Me) {
       },
     )
     return () => controller.abort()
-  }, [me, version])
+  }, [me, version, refreshVersion])
   const retry = () => {
     setState({ status: 'loading' })
     setVersion((value) => value + 1)
