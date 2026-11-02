@@ -278,16 +278,16 @@ describe.skipIf(!process.env.DATABASE_URL)('redirect configuration across REST a
   it.each<Change>([
     ['successRedirect: SuccessRedirectInput.optional(),', ''],
     [
-      "            c.req.valid('json'),\n          ),\n          201,",
-      "            {...c.req.valid('json'), successRedirect: undefined},\n          ),\n          201,",
+      "              c.req.valid('json'),\n            ),\n          ),\n          201,",
+      "              {...c.req.valid('json'), successRedirect: undefined},\n            ),\n          ),\n          201,",
     ],
     [
       "await getEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id)",
       "({...await getEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id), successRedirect: undefined})",
     ],
     [
-      "            c.req.valid('json'),\n          ),\n          200,\n        ),\n    )\n\n    app.openapi(\n      createRoute({\n        ...route,\n        middleware: callerWithBodyLimit(caller, 1024)",
-      "            {...c.req.valid('json'), successRedirect: undefined},\n          ),\n          200,\n        ),\n    )\n\n    app.openapi(\n      createRoute({\n        ...route,\n        middleware: callerWithBodyLimit(caller, 1024)",
+      "              c.req.valid('json'),\n            ),\n          ),\n          200,\n        ),\n    )\n\n    app.openapi(\n      createRoute({\n        ...route,\n        middleware: callerWithBodyLimit(caller, 1024)",
+      "              {...c.req.valid('json'), successRedirect: undefined},\n            ),\n          ),\n          200,\n        ),\n    )\n\n    app.openapi(\n      createRoute({\n        ...route,\n        middleware: callerWithBodyLimit(caller, 1024)",
     ],
   ])('detects removal of a REST configuration contract', async (from, to) => {
     await expect(verifyRest(routeSourceCopy([from, to]))).rejects.toMatchObject({
