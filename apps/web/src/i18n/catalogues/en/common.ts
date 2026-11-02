@@ -1,5 +1,9 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'This booking link is unavailable': 'This booking link is unavailable',
+  'Contact the host for a new booking link.': 'Contact the host for a new booking link.',
+  'These details were filled in for convenience. You can change them.':
+    'These details were filled in for convenience. You can change them.',
   'Your team context changed. Reload before making changes.':
     'Your team context changed. Reload before making changes.',
   '{count} min': '{count} min',

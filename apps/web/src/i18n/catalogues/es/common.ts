@@ -1,4 +1,8 @@
 export const common = {
+  'This booking link is unavailable': 'Este enlace de reserva no está disponible',
+  'Contact the host for a new booking link.': 'Pide al anfitrión un nuevo enlace de reserva.',
+  'These details were filled in for convenience. You can change them.':
+    'Estos datos se han rellenado para facilitarte la reserva. Puedes cambiarlos.',
   'Your team context changed. Reload before making changes.':
     'El contexto de su equipo ha cambiado. Vuelva a cargar la página antes de realizar cambios.',
   '{count} min': '{count} min',

@@ -294,7 +294,25 @@ authorize that access before exposing or calling these operations. The existing
 `mcp:tools` grant alone must not implicitly opt into these new configuration writes;
 any future limited OAuth grants must exclude them. Existing session, membership and
 ownership permissions still apply. No new OAuth scope or transport is registered here;
-transport registration and public-page consumption follow separately.
+creation/revocation transport registration follows separately.
+
+Public consumption opens `/book/{token}` and uses `/api/v1/book/{token}` for the
+page, with `/slots` and `/bookings` for availability and booking creation. The raw
+capability is accepted only in the URL path, never in a query parameter. These
+responses use `Referrer-Policy: no-referrer` and `Cache-Control: no-store`; request
+logging excludes capability paths and error diagnostics omit their input. Dedicated
+embeds and framing are refused. The normal duration, questions, readiness and
+availability checks apply, and suggested name/email remain editable.
+
+Unknown, expired, revoked and used links all show the same neutral unavailable page,
+including a browser that loses a simultaneous booking race. There is no public
+used-state oracle. An exact retry with the winning request's random idempotency key
+returns its original booking without another claim; its fingerprint includes the
+link identity, so another link or an ordinary booking cannot borrow that replay.
+The claim runs immediately after insertion in the existing top-level booking
+transaction, before conference and notification work. A later failure rolls back
+both. Cancellation and rescheduling use the normal management link and retain the
+original link's terminal consumption evidence.
 
 Each personal owner or team organization may have at most 1000 active, unexpired links
 across all its event types and creators. An ordinary team member additionally has a

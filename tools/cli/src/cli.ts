@@ -31,6 +31,7 @@ Secrets are never accepted as command-line flags. No .env or credential store is
 stdout is JSON with management capabilities redacted. --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
+For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
 See https://hourmere.com/docs/cli for complete usage.
 `
 
@@ -157,6 +158,17 @@ export async function runCli(options: {
         throw new CliError('invalid_duration')
       input.durationMinutes = args.durationMinutes
     }
+    if (Object.hasOwn(input, 'oneTimeToken')) {
+      if (
+        args.command !== 'book' ||
+        typeof input.oneTimeToken !== 'string' ||
+        !/^[A-Za-z0-9_-]{43}$/.test(input.oneTimeToken)
+      )
+        throw new CliError('invalid_one_time_token')
+      secrets.push(input.oneTimeToken)
+      if (['handle', 'teamSlug', 'slug'].some((field) => Object.hasOwn(input, field)))
+        throw new CliError('invalid_request')
+    }
     if (Object.hasOwn(input, 'manageToken')) {
       if (typeof input.manageToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(input.manageToken))
         throw new CliError('invalid_manage_token')
@@ -178,14 +190,14 @@ export async function runCli(options: {
       input,
       fetch: options.fetch,
     })
-    const inputToken = typeof input.manageToken === 'string' ? input.manageToken : ''
+    const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     if (output) {
-      await output.writeFile(printable(result, [key]))
+      await output.writeFile(printable(result, [key, oneTimeToken]))
       await output.sync()
       options.stdout('{"outputWritten":true}\n')
     } else {
       const token = typeof result.manageToken === 'string' ? result.manageToken : ''
-      options.stdout(printable(result, [key, inputToken, token]))
+      options.stdout(printable(result, [...secrets, token]))
     }
     return 0
   } catch (error) {

@@ -57,6 +57,12 @@ npm run dev --workspace @hourmere/web
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
 `/team/{teamSlug}/{slug}` for individual, collective and activated round-robin team types). After signing in, people only return to pages under `/app`.
 
+One-time booking links open `/book/{token}`. They offer the usual booking form,
+including editable invitee prefill, and are consumed only when a booking commits.
+Every unavailable link shows the same neutral page. These links cannot be embedded;
+their pages and API responses send no referrer and are not cached. Link generation
+and the administrator list are not yet available through the public interfaces.
+
 Saving an event type opens its saved version's **View and share** actions. Open the public
 booking page or copy its full link there; unsaved address changes cannot be copied as a
 published link. When setup or enablement needs attention, the panel links to the relevant

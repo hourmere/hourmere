@@ -77,6 +77,7 @@ notifications and trigger configured integrations.
 | `create_booking` | — | `book` | `full, bookings` |
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
+| `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |

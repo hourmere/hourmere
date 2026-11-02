@@ -8,6 +8,7 @@ import {
   type BookingOrigin,
   cancelHostBooking,
   cancelManagedBooking,
+  createOneTimeBooking,
   createPublicBooking,
   createPublicTeamBooking,
   DomainError,
@@ -127,7 +128,15 @@ const CreateBookingInput = z
       description:
         'Exact-case team organization slug from /team/{teamSlug}/{slug}; give exactly one of handle or teamSlug',
     }),
-    slug,
+    slug: slug.optional(),
+    oneTimeToken: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{43}$/)
+      .optional()
+      .openapi({
+        description:
+          'Secret token from the path of /book/{token}. Give this instead of handle, teamSlug and slug to consume a one-time link; keep it private. Prefilled name/email are editable and do not prove identity.',
+      }),
     ...CreateBooking.omit({ source: true }).shape,
     start: CreateBooking.shape.start.openapi({
       description: 'The exact `start` of a slot from find_available_slots, unchanged',
@@ -137,9 +146,13 @@ const CreateBookingInput = z
         'Makes retries safe: a retry with the same key and the same arguments returns the original booking (replayed: true, manageToken null) instead of booking again; the same key with different arguments fails with idempotency_key_reused. Use a new random value (e.g. a UUIDv4) per booking; 1–255 printable ASCII characters. Keys are scoped to your API key.',
     }),
   })
-  .refine((v) => (v.handle === undefined) !== (v.teamSlug === undefined), {
-    message: 'Give exactly one of handle or teamSlug',
-  })
+  .refine(
+    (v) =>
+      v.oneTimeToken !== undefined
+        ? v.handle === undefined && v.teamSlug === undefined && v.slug === undefined
+        : (v.handle === undefined) !== (v.teamSlug === undefined) && v.slug !== undefined,
+    { message: 'Give oneTimeToken, or exactly one of handle or teamSlug together with slug' },
+  )
 
 const CreateBookingOutput = BookingWithToken.extend({
   replayed: z.boolean().openapi({
@@ -309,12 +322,17 @@ export function bookingTools({
 
   const createBooking = defineTool({
     name: 'create_booking',
-    scopeModes: ['personal', 'team'],
+    scopeModes: ['personal', 'team', 'oneTimeLink'],
+    privateInput: (args) => typeof args === 'object' && args !== null && 'oneTimeToken' in args,
     scopeMode: (args) =>
-      typeof args === 'object' && args !== null && 'teamSlug' in args ? 'team' : 'personal',
+      typeof args === 'object' && args !== null && 'oneTimeToken' in args
+        ? 'oneTimeLink'
+        : typeof args === 'object' && args !== null && 'teamSlug' in args
+          ? 'team'
+          : 'personal',
     title: 'Create a booking',
     description:
-      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice.",
+      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken.",
     input: CreateBookingInput,
     output: CreateBookingOutput,
     annotations: {
@@ -325,13 +343,28 @@ export function bookingTools({
     },
     async run(args, call) {
       call.rateLimit(bookLimit)
+      if (args.oneTimeToken !== undefined) {
+        return createOneTimeBooking(
+          pub,
+          {
+            token: args.oneTimeToken,
+            start: Temporal.Instant.from(args.start),
+            durationMinutes: args.durationMinutes,
+            invitee: args.invitee,
+            guests: args.guests,
+            responses: args.responses,
+            idempotencyKey: args.idempotencyKey,
+          },
+          origin(call.caller),
+        )
+      }
       const { replayed, ...result } = await (args.teamSlug !== undefined
         ? createPublicTeamBooking
         : createPublicBooking)(
         pub,
         {
           handle: (args.teamSlug ?? args.handle) as string,
-          slug: args.slug,
+          slug: args.slug as string,
           start: Temporal.Instant.from(args.start),
           durationMinutes: args.durationMinutes,
           invitee: args.invitee,

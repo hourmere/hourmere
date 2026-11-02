@@ -71,6 +71,8 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   scopeModes?: readonly string[]
   /** Identifies a dispatch branch only; permission decisions belong to the shared policy. */
   scopeMode?(args: unknown): string
+  /** Capability-bearing requests must not repeat validation input or error causes. */
+  privateInput?(args: unknown): boolean
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
 }
@@ -149,6 +151,7 @@ export async function runTool(
   call: ToolCall,
   logError: ToolErrorLog,
 ): Promise<CallToolResult> {
+  const privateInput = tool.privateInput?.(args) === true
   try {
     requireApiKeyOperation(call.caller, `mcp:${tool.name}`)
     if (tool.scopeMode)
@@ -157,11 +160,17 @@ export async function runTool(
       return errorResult({ error: 'invalid_request', message: UNSAFE_TEXT })
     const parsed = tool.input.safeParse(args ?? {})
     if (!parsed.success) {
-      return errorResult({ error: 'invalid_request', message: describeIssues(parsed.error.issues) })
+      return errorResult({
+        error: 'invalid_request',
+        message: privateInput ? 'Invalid booking request' : describeIssues(parsed.error.issues),
+      })
     }
     const result = tool.output.safeParse(await tool.run(parsed.data, call))
     if (!result.success) {
-      logError(`${tool.name} returned a result outside its output schema: `, result.error)
+      logError(
+        `${tool.name} returned a result outside its output schema: `,
+        privateInput ? 'Private booking result rejected' : result.error,
+      )
       return errorResult({ error: 'internal_error' })
     }
     // Clients that predate structuredContent read the text.
@@ -182,12 +191,15 @@ export async function runTool(
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
-      if (err.cause !== undefined) logError(`${tool.name}: ${err.code} caused by `, err.cause)
+      if (err.cause !== undefined && !privateInput)
+        logError(`${tool.name}: ${err.code} caused by `, err.cause)
       return errorResult(
-        err.detail ? { error: err.code, message: err.detail } : { error: err.code },
+        err.detail && !privateInput
+          ? { error: err.code, message: err.detail }
+          : { error: err.code },
       )
     }
-    logError(`${tool.name}: `, err)
+    logError(`${tool.name}: `, privateInput ? 'Private booking call failed' : err)
     return errorResult({ error: 'internal_error' })
   }
 }

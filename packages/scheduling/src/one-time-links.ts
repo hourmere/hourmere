@@ -415,6 +415,22 @@ function toLink(row: LinkRow, expired: boolean): OneTimeBookingLink {
   }
 }
 
+/** Internal replay lookup: a used credential may only retrieve its own winning request. */
+export async function oneTimeBookingReplayTarget(
+  ctx: Pick<PublicContext, 'db'>,
+  token: string | undefined,
+): Promise<(ResolvedOneTimeBookingLink & { bookingId: string }) | undefined> {
+  const row = await lookupToken(ctx.db, token)
+  if (row?.state !== 'used' || row.booking_id === null) return undefined
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    eventTypeId: row.event_type_id,
+    prefill: { name: row.prefill_name, email: row.prefill_email },
+    bookingId: row.booking_id,
+  }
+}
+
 function validExpiry(value: unknown): string | null {
   if (value === undefined || value === null) return null
   if (typeof value !== 'string') throw invalid()

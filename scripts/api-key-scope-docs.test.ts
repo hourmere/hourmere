@@ -81,7 +81,7 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
   const rows = [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
     .map(([, row]) => [...(row ?? '').matchAll(/<td>([\s\S]*?)<\/td>/g)].map(([, cell]) => cell))
     .filter((cells) => cells.length > 0)
-  expect(rows).toHaveLength(23)
+  expect(rows).toHaveLength(24)
   for (const cells of rows) {
     expect(cells).toHaveLength(4)
     expect(cells[0]).toMatch(/^<code>\w+<\/code>$/)
@@ -89,6 +89,12 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
     expect(cells[2]).toMatch(/^(?:<code>[\w, -]+<\/code>|—)$/)
     expect(cells[3]).toMatch(/^<code>(?:full|read|bookings)(?:, (?:full|read|bookings))*<\/code>$/)
   }
+  expect(rows).toContainEqual([
+    '<code>create_booking</code>',
+    '<code>oneTimeLink</code>',
+    '<code>book</code>',
+    '<code>full, bookings</code>',
+  ])
   expect(rows).toContainEqual([
     '<code>reschedule_booking</code>',
     '<code>host</code>',
