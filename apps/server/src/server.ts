@@ -155,6 +155,7 @@ export function productRoutes({
       socialProviders,
       automaticMeet,
       automaticZoom,
+      followUpHostNotesEnabled,
       hostedSignupUrl,
       privacyPolicyUrl,
       termsUrl,
