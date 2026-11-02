@@ -140,6 +140,8 @@ Read notifications with `event --input event.json`, where the file contains
 
 The command returns the full event type and changes only future new bookings, without
 immediate email. Both arrays are required; two empty arrays disable scheduled messages.
+See [Reminders and follow-ups](/docs/reminders-and-follow-ups) for timing, recipients,
+host notes and known limitations.
 Use a `full` key with personal-owner or team-owner/admin permissions. The server applies
 the same [validation rules](/docs/api-conventions#event-type-notification-settings)
 as REST and MCP; failure retains the error code and exits 1. Follow-up notes also require
