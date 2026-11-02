@@ -78,6 +78,20 @@ function sourceCopy(change?: readonly [string, string]): typeof runCli {
   ) as typeof runCli
 }
 
+function clientSourceCopy(change?: readonly [string, string]): typeof callTool {
+  let source = readFileSync('tools/cli/src/client.ts', 'utf8')
+  if (change) {
+    expect(source.includes(change[0]), 'mutation must match source').toBe(true)
+    source = source.replace(...change)
+  }
+  source = source.replace(
+    /export const \{ version \} = JSON.parse\([\s\S]*?as \{ version: string \}/,
+    '',
+  )
+  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  return new Function('version', `${source}; return callTool`)(client.version) as typeof callTool
+}
+
 describe('CLI transport and arguments', () => {
   const oneTimeToken = 'synthetic_one_time_capability_sentinel_1234'
   async function verifyOneTimePrivacy(runner = runCli, privateFile = false) {
@@ -184,6 +198,317 @@ describe('CLI transport and arguments', () => {
       await verifyEventTypeWrite(sourceCopy(), update)
     },
   )
+
+  async function verifyRedirectFlags(runner = runCli) {
+    for (const command of ['create-event', 'update-event']) {
+      const redirect = {
+        url: 'https://target.example/thanks?from=calendar#done',
+        parameters: ['eventTypeSlug', 'start', 'inviteeName', 'inviteeEmail'],
+        includeInviteePersonalData: true,
+        allowEmbedParent: false,
+      }
+      const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+        const sent = JSON.parse(String(init?.body)).params.arguments
+        expect(sent.successRedirect).toEqual(redirect)
+        return response({ id: 'event-id', successRedirect: sent.successRedirect })
+      })
+      const result = await run(
+        [
+          command,
+          '--success-redirect-url',
+          redirect.url,
+          '--success-redirect-parameters',
+          redirect.parameters.join(','),
+          '--success-redirect-include-invitee-personal-data',
+          'true',
+          '--success-redirect-allow-embed-parent',
+          'false',
+        ],
+        undefined,
+        { runner, fetch: fetcher },
+      )
+      expect(result.code).toBe(0)
+      expect(JSON.parse(result.stdout).successRedirect).toEqual(redirect)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    }
+  }
+
+  async function verifyRedirectClear(runner = runCli) {
+    const result = await run(['update-event', '--clear-success-redirect'], undefined, { runner })
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params.arguments).toEqual({ successRedirect: null })
+  }
+
+  async function verifyRedirectConflict(runner = runCli) {
+    const result = await run(
+      ['update-event', '--input', '-', '--success-redirect-url', 'https://new.example'],
+      { successRedirect: { url: 'https://saved.example' } },
+      { runner },
+    )
+    expect(result.code).toBe(1)
+    expect(JSON.parse(result.stderr).error).toBe('invalid_success_redirect_options')
+    expect(result.fetcher).not.toHaveBeenCalled()
+  }
+
+  async function verifyRedirectRejection(runner: typeof runCli, argv: string[], input?: unknown) {
+    const result = await run(argv, input, { runner })
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+  }
+
+  it('round-trips all after-booking flags through existing event-type write tools', () =>
+    verifyRedirectFlags())
+  it('clears the redirect explicitly without needing an input file', () => verifyRedirectClear())
+  it('rejects conflicting JSON settings before making a write', () => verifyRedirectConflict())
+  it('merges matching JSON and flags and supports an empty parameter list', async () => {
+    const result = await run(
+      [
+        'update-event',
+        '--input',
+        '-',
+        '--success-redirect-url',
+        'https://target.example',
+        '--success-redirect-parameters',
+        '',
+        '--success-redirect-include-invitee-personal-data',
+        'false',
+      ],
+      {
+        id: 'event-id',
+        successRedirect: { url: 'https://target.example', allowEmbedParent: true },
+      },
+    )
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params.arguments).toEqual({
+      id: 'event-id',
+      successRedirect: {
+        url: 'https://target.example',
+        parameters: [],
+        includeInviteePersonalData: false,
+        allowEmbedParent: true,
+      },
+    })
+  })
+  it('round-trips JSON configuration, null and event reads without injecting untouched settings', async () => {
+    for (const command of ['create-event', 'update-event', 'event']) {
+      for (const input of [
+        { id: 'event-id' },
+        { successRedirect: null },
+        {
+          successRedirect: {
+            url: 'https://target.example',
+            parameters: ['hostName'],
+            allowEmbedParent: true,
+          },
+        },
+      ]) {
+        const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+          expect(JSON.parse(String(init?.body)).params.arguments).toEqual(input)
+          return response(input)
+        })
+        const result = await run([command, '--input', '-'], input, { fetch: fetcher })
+        expect(result.code).toBe(0)
+        expect(JSON.parse(result.stdout)).toEqual(input)
+      }
+    }
+  })
+  it('leaves URL and parameter policy validation to the service', async () => {
+    const result = await run([
+      'update-event',
+      '--success-redirect-url',
+      'http://localhost',
+      '--success-redirect-parameters',
+      'unknown,unknown',
+    ])
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params.arguments.successRedirect).toEqual({
+      url: 'http://localhost',
+      parameters: ['unknown', 'unknown'],
+    })
+  })
+  it.each([
+    ['event', '--success-redirect-url', 'https://target.example'],
+    ['book', '--clear-success-redirect'],
+    ['update-event', '--clear-success-redirect', 'false'],
+    [
+      'update-event',
+      '--clear-success-redirect',
+      '--success-redirect-url',
+      'https://target.example',
+    ],
+    ['update-event', '--clear-success-redirect', '--clear-success-redirect'],
+    [
+      'update-event',
+      '--success-redirect-url',
+      'https://target.example',
+      '--success-redirect-url',
+      'https://target.example',
+    ],
+    ['update-event', '--success-redirect-allow-embed-parent', 'yes'],
+    ['update-event', '--success-redirect-include-invitee-personal-data', '1'],
+  ])('rejects invalid after-booking options %j', (...argv) => verifyRedirectRejection(runCli, argv))
+  it.each([null, false, 'invalid'])('refuses redirect flags over JSON %j', (successRedirect) =>
+    verifyRedirectRejection(
+      runCli,
+      ['update-event', '--input', '-', '--success-redirect-url', 'https://target.example'],
+      { successRedirect },
+    ),
+  )
+  it('refuses a clear flag that conflicts with JSON configuration', () =>
+    verifyRedirectRejection(runCli, ['update-event', '--input', '-', '--clear-success-redirect'], {
+      successRedirect: { url: 'https://target.example' },
+    }))
+  it('exercises unchanged after-booking source copies before mutation controls', async () => {
+    await verifyRedirectFlags(sourceCopy())
+    await verifyRedirectClear(sourceCopy())
+    await verifyRedirectConflict(sourceCopy())
+  })
+  it.each<[string, readonly [string, string], (runner: typeof runCli) => Promise<void>]>([
+    ['flag forwarding', ['input.successRedirect = redirect', ''], verifyRedirectFlags],
+    ['explicit clearing', ['input.successRedirect = null', ''], verifyRedirectClear],
+    [
+      'JSON conflict guard',
+      ['JSON.stringify(redirect[field]) !== JSON.stringify(value)', 'false'],
+      verifyRedirectConflict,
+    ],
+    [
+      'event command restriction',
+      ["redirectFlag && !['create-event', 'update-event'].includes(command)", 'false'],
+      (runner) =>
+        verifyRedirectRejection(runner, [
+          'event',
+          '--success-redirect-url',
+          'https://target.example',
+        ]),
+    ],
+    [
+      'clear and configuration exclusivity',
+      ['options.clearSuccessRedirect && options.successRedirect', 'false'],
+      (runner) =>
+        verifyRedirectRejection(runner, [
+          'update-event',
+          '--clear-success-redirect',
+          '--success-redirect-url',
+          'https://target.example',
+        ]),
+    ],
+    [
+      'boolean syntax',
+      ["value !== 'true' && value !== 'false'", 'false'],
+      (runner) =>
+        verifyRedirectRejection(runner, [
+          'update-event',
+          '--success-redirect-allow-embed-parent',
+          'yes',
+        ]),
+    ],
+    [
+      'JSON object guard',
+      ["Object.hasOwn(input, 'successRedirect') && !isObject(input.successRedirect)", 'false'],
+      (runner) =>
+        verifyRedirectRejection(
+          runner,
+          ['update-event', '--input', '-', '--success-redirect-url', 'https://target.example'],
+          { successRedirect: null },
+        ),
+    ],
+    [
+      'clear JSON conflict guard',
+      ["Object.hasOwn(input, 'successRedirect') && input.successRedirect !== null", 'false'],
+      (runner) =>
+        verifyRedirectRejection(
+          runner,
+          ['update-event', '--input', '-', '--clear-success-redirect'],
+          { successRedirect: { url: 'https://target.example' } },
+        ),
+    ],
+  ])(
+    'kills removed after-booking %s with a real assertion failure',
+    async (_name, change, verify) => {
+      await expect(verify(sourceCopy(change))).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
+  const redirectFields = [
+    'successRedirect',
+    'successRedirect.url',
+    'successRedirect.parameters',
+    'successRedirect.includeInviteePersonalData',
+    'successRedirect.allowEmbedParent',
+  ]
+  const redirectError = (field: string, error = 'invalid_success_redirect') =>
+    Response.json({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error,
+              field,
+              message: 'untrusted server text https://private.example/?email=private@example.test',
+            }),
+          },
+        ],
+      },
+    })
+  async function verifyRedirectField(runner = runCli) {
+    for (const field of redirectFields) {
+      const result = await run(['update-event'], undefined, {
+        runner,
+        fetch: vi.fn<typeof fetch>(async () => redirectError(field)),
+      })
+      expect(result.code).toBe(1)
+      expect(JSON.parse(result.stderr)).toEqual({
+        error: 'invalid_success_redirect',
+        field,
+        outcomeMayBeUnknown: true,
+      })
+      expect(result.stderr).not.toContain('private.example')
+    }
+  }
+  it('reports only stable redirect error fields, with no arbitrary server messages', () =>
+    verifyRedirectField())
+  it('kills removed stable error field forwarding', async () => {
+    await expect(
+      verifyRedirectField(sourceCopy(['error.field !== undefined', 'false'])),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function verifyFieldFilter(caller = callTool) {
+    for (const [field, error, expected] of [
+      ['successRedirect.url', 'invalid_request', 'successRedirect.url'],
+      ['successRedirect.parameters', 'invalid_success_redirect', 'successRedirect.parameters'],
+      ['https://private.example', 'invalid_success_redirect', undefined],
+      ['successRedirect.url', 'insufficient_scope', undefined],
+    ] as const) {
+      await expect(
+        caller({
+          url: new URL('https://hourmere.example/mcp'),
+          key: KEY,
+          tool: 'update_event_type',
+          input: {},
+          fetch: vi.fn<typeof fetch>(async () => redirectError(field, error)),
+        }),
+      ).rejects.toMatchObject({ field: expected })
+    }
+  }
+  it('filters redirect fields by error code and a fixed safe field list', async () => {
+    await verifyFieldFilter()
+    await verifyFieldFilter(clientSourceCopy())
+  })
+  it.each([
+    ["if (!['invalid_request', 'invalid_success_redirect'].includes(code)) return undefined", ''],
+    ['    ].includes(value)', '    ].includes(value) || true'],
+  ] as const)('kills removed client redirect field filter %j', async (before, after) => {
+    await expect(verifyFieldFilter(clientSourceCopy([before, after]))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
   it.each([false, true])(
     'detects a retargeted event type write alias for update=%s',
     async (update) => {

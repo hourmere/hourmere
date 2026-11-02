@@ -60,6 +60,7 @@ import { OneTimeLinks } from './OneTimeLinks.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
+import { SuccessRedirectEditor } from './SuccessRedirectEditor.tsx'
 import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
 interface Loaded {
@@ -807,6 +808,8 @@ function EventTypeForm({
               errors={errors}
             />
           </section>
+
+          <SuccessRedirectEditor draft={draft} errors={errors} set={set} />
 
           <section className="panel" aria-labelledby="rules-heading">
             <h2 id="rules-heading">{t('When people can book')}</h2>

@@ -4130,6 +4130,8 @@ export interface components {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
             errorAlias?: components["schemas"]["ErrorAlias"];
+            /** @description Optional stable validation field name. Known values: successRedirect, successRedirect.url, successRedirect.parameters, successRedirect.includeInviteePersonalData, successRedirect.allowEmbedParent. New values may appear within /api/v1; ignore unknown values. */
+            field?: string;
             /** @description Human-readable detail */
             message?: string;
         };
@@ -4231,6 +4233,14 @@ export interface components {
              * @example intro-call
              */
             slug: string;
+            /** @description After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target. */
+            successRedirect?: {
+                allowEmbedParent: boolean;
+                includeInviteePersonalData: boolean;
+                parameters: ("eventTypeSlug" | "start" | "end" | "timeZone" | "hostName" | "inviteeName" | "inviteeEmail")[];
+                /** @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made. */
+                url: string;
+            } | null;
             /** @example Intro call */
             title: string;
             /** Format: date-time */
@@ -4338,6 +4348,26 @@ export interface components {
              * @example intro-call
              */
             slug: string;
+            /** @description After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target. */
+            successRedirect?: {
+                /**
+                 * @description Separate permission for the invitee’s Continue click to navigate the embedding parent. Otherwise embedded continuations open a new tab. There is no automatic redirect.
+                 * @default false
+                 */
+                allowEmbedParent: boolean;
+                /**
+                 * @description Explicit opt-in: selected invitee name/email become visible to the target website and its analytics, and may enter browser history.
+                 * @default false
+                 */
+                includeInviteePersonalData: boolean;
+                /**
+                 * @description Distinct names to append using URL encoding; existing query text and fragment are preserved. Invitee name/email additionally require includeInviteePersonalData.
+                 * @default []
+                 */
+                parameters: ("eventTypeSlug" | "start" | "end" | "timeZone" | "hostName" | "inviteeName" | "inviteeEmail")[];
+                /** @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made. */
+                url: string;
+            } | null;
             /** @example Intro call */
             title: string;
             zoomConnectionId?: string | null;
@@ -4481,6 +4511,26 @@ export interface components {
              * @example intro-call
              */
             slug?: string;
+            /** @description After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target. */
+            successRedirect?: {
+                /**
+                 * @description Separate permission for the invitee’s Continue click to navigate the embedding parent. Otherwise embedded continuations open a new tab. There is no automatic redirect.
+                 * @default false
+                 */
+                allowEmbedParent: boolean;
+                /**
+                 * @description Explicit opt-in: selected invitee name/email become visible to the target website and its analytics, and may enter browser history.
+                 * @default false
+                 */
+                includeInviteePersonalData: boolean;
+                /**
+                 * @description Distinct names to append using URL encoding; existing query text and fragment are preserved. Invitee name/email additionally require includeInviteePersonalData.
+                 * @default []
+                 */
+                parameters: ("eventTypeSlug" | "start" | "end" | "timeZone" | "hostName" | "inviteeName" | "inviteeEmail")[];
+                /** @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made. */
+                url: string;
+            } | null;
             /** @example Intro call */
             title?: string;
             zoomConnectionId?: string | null;
@@ -6937,7 +6987,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7232,7 +7282,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7400,7 +7450,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;

@@ -133,6 +133,9 @@ Window and correlation identifier before dispatching this event. This is a UI si
 trusted booking, billing or analytics record, and repeated confirmations do not necessarily
 mean new bookings. The popup stays open for the visitor to copy their private manage link.
 
+Configure an optional target and its parameters in the editor or through REST, MCP or CLI;
+see [after-booking redirects](/docs/after-booking).
+
 An event type can have a host-configured continuation link after the normal confirmation,
 calendar information and private manage link. Visitors choose **Continue**; there is no
 automatic navigation. Embedded continuations open a new tab with `noopener noreferrer`
@@ -191,7 +194,9 @@ selected parent. The browser checks every ancestor, so nesting within a differen
 outer frame is not supported. Invalid/missing embedding parameters receive 403.
 
 The iframe is sandboxed without top navigation by default; only a saved event-type opt-in
-adds `allow-top-navigation-by-user-activation`. It sends no Referer and never loads a web
+adds `allow-top-navigation-by-user-activation`. This token permits any user-activated top
+navigation in the frame, so the browser does not restrict it to the configured Continue
+URL. Keep the embedded origin and host-authored content trusted. It sends no Referer and never loads a web
 session or account page. Scripts/forms, user-requested calendar downloads, and separate
 calendar-site popups are allowed. Clipboard writing is delegated for the one-time private
 manage-link copy button. Meeting links and brand links open separately with `noopener`
