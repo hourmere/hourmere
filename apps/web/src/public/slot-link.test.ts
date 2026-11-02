@@ -12,6 +12,25 @@ const valid = query()
 function assertInputs(parse: typeof parseSlotLink) {
   expect(parse('')).toEqual({ status: 'none' })
   expect(parse('?utm_source=email&locale=de&timeZone=UTC')).toEqual({ status: 'none' })
+  for (const unrelated of [
+    'utm_source=100%',
+    'ref=%E0%A4',
+    'ignored=%',
+    'ignored=%2',
+    'ignored=%GG',
+    'ignored=%C0%AF',
+    'ignored=%E2%28%A1',
+    'ignored=%ED%A0%80',
+    'unrelated%GG=value',
+  ]) {
+    expect(parse(`?${unrelated}`), 'ignore unrelated malformed fields without time hints').toEqual({
+      status: 'none',
+    })
+    expect(
+      parse(`${valid}&${unrelated}`),
+      'ignore unrelated malformed fields with time hints',
+    ).toEqual(parse(valid))
+  }
   expect(parse(valid)).toEqual({
     status: 'valid',
     start,
@@ -32,13 +51,11 @@ function assertInputs(parse: typeof parseSlotLink) {
     `${valid}&%73tart=${encodeURIComponent(start)}`,
     `${valid}&durationMinutes=30`,
     `${valid}&duration%4Dinutes=60`,
-    `${valid}&ignored=%`,
-    `${valid}&ignored=%2`,
-    `${valid}&ignored=%GG`,
-    `${valid}&ignored=%C0%AF`,
-    `${valid}&ignored=%E2%28%A1`,
-    `${valid}&ignored=%ED%A0%80`,
+    '?start=%E0%A4&durationMinutes=30',
+    '?%73tart=%&durationMinutes=30',
+    '?start%=2027-06-15T14%3A30%3A00.000Z&durationMinutes=30',
     '?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=%',
+    '?start=2027-06-15T14%3A30%3A00.000Z&duration%4Dinutes=%E0%A4',
   ])
     expect(parse(value), 'reject malformed pairs without partial selection').toEqual({
       status: 'invalid',
@@ -216,7 +233,22 @@ describe('slot link input source-copy controls', () => {
   })
 
   it.each([
-    ['percent decoding', "decodeURIComponent(search.replaceAll('+', ' '))", 'void search'],
+    [
+      'normal flow with unrelated malformed fields',
+      'const params = new URLSearchParams(search)',
+      `try { decodeURIComponent(search.replaceAll('+', ' ')) } catch { return invalid }
+  const params = new URLSearchParams(search)`,
+    ],
+    [
+      'unrelated field isolation with valid hints',
+      "if (key !== 'start' && key !== 'durationMinutes') continue",
+      'if (false) continue',
+    ],
+    [
+      'malformed time encoding fallback',
+      "decodeURIComponent(field.replaceAll('+', ' '))\n    } catch {\n      return invalid",
+      "decodeURIComponent(field.replaceAll('+', ' '))\n    } catch {\n      return { status: 'none' }",
+    ],
     ['duplicate pair', 'starts.length !== 1 || durations.length !== 1', 'false'],
     ['UTF-8 link cap', 'new TextEncoder().encode(pathname + search).byteLength > 2048', 'false'],
     ['integer duration spelling', '!/^[1-9]\\d{0,3}$/.test(duration)', 'false'],

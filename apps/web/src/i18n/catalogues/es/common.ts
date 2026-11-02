@@ -1,6 +1,6 @@
 export const common = {
   'We could not use the time details in this link. Please choose a time.':
-    'No hemos podido utilizar los datos de horario de este enlace. Elija un horario.',
+    'No hemos podido utilizar los datos de fecha y hora de este enlace. Elija un horario.',
   'This meeting length is no longer offered. Please choose a time again.':
     'Esta duración de reunión ya no está disponible. Vuelva a elegir un horario.',
   'Checking the suggested time…': 'Comprobando el horario sugerido…',

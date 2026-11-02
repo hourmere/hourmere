@@ -1,6 +1,6 @@
 export const common = {
   'We could not use the time details in this link. Please choose a time.':
-    'Nous n’avons pas pu utiliser les informations horaires de ce lien. Veuillez choisir un créneau.',
+    'Nous n’avons pas pu utiliser les informations de date et d’heure de ce lien. Veuillez choisir un créneau.',
   'This meeting length is no longer offered. Please choose a time again.':
     'Cette durée de réunion n’est plus proposée. Veuillez choisir à nouveau un créneau.',
   'Checking the suggested time…': 'Vérification du créneau proposé…',

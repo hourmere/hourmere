@@ -156,10 +156,8 @@ test('a suggested slot taken after preselection keeps the draft and uses generic
   )
   await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()
   expect((await conflict).status()).toBe(409)
-  await expect(page.getByText(unavailable, { exact: true })).toBeVisible()
-  await expect(
-    page.getByText('Someone else just booked that time. Please pick another.', { exact: true }),
-  ).toHaveCount(0)
+  await expect(page.getByRole('status')).toHaveText(unavailable)
+  await expect(page.getByRole('alert')).toHaveCount(0)
   await pickSlot(page, page)
   await expect(page.getByLabel('Your name', { exact: true })).toHaveValue('Fixture Invitee')
   await expect(page.getByLabel('Email', { exact: true })).toHaveValue(
@@ -176,6 +174,18 @@ test('dedicated embeds ignore direct-slot query hints and retain their ordinary 
   await page.goto(app.parentUrl)
   const iframe = page.locator('iframe').first()
   await expect(iframe).toBeVisible()
+  const hintedNavigation = page.waitForEvent('framenavigated', {
+    predicate: (frame) => {
+      const url = new URL(frame.url())
+      return (
+        frame.parentFrame() === page.mainFrame() &&
+        url.origin === app.url &&
+        url.pathname === `/embed${app.personalPath}` &&
+        url.searchParams.get('start') === slot.start &&
+        url.searchParams.get('durationMinutes') === '30'
+      )
+    },
+  })
   await iframe.evaluate((element, suggested) => {
     const frame = element as HTMLIFrameElement
     const url = new URL(frame.src)
@@ -183,7 +193,8 @@ test('dedicated embeds ignore direct-slot query hints and retain their ordinary 
     url.searchParams.set('durationMinutes', '30')
     frame.src = url.href
   }, slot)
-  const frame = iframe.contentFrame()
+  const frame = await hintedNavigation
+  await frame.waitForLoadState('load')
   await expect(frame.locator('.calendar-month')).toBeVisible()
   await expect(frame.getByRole('button', { name: 'Confirm booking', exact: true })).toHaveCount(0)
   expect(await app.rows()).toEqual([])

@@ -11,17 +11,22 @@ const instantPattern =
 /** Parse hints only; the caller must restrict the route and freshly check exact availability. */
 export function parseSlotLink(search: string, pathname = ''): SlotIntent {
   const invalid: SlotIntent = { status: 'invalid' }
-  // URLSearchParams tolerates malformed percent sequences and replaces invalid UTF-8.
-  // Decode explicitly before reading it so these cannot become partially valid hints.
-  try {
-    decodeURIComponent(search.replaceAll('+', ' '))
-  } catch {
-    return invalid
-  }
   const params = new URLSearchParams(search)
   const starts = params.getAll('start')
   const durations = params.getAll('durationMinutes')
   if (starts.length === 0 && durations.length === 0) return { status: 'none' }
+  // URLSearchParams tolerates malformed percent sequences and replaces invalid UTF-8.
+  // Check only time hints; unrelated query fields must not change the booking flow.
+  for (const field of search.replace(/^\?/, '').split('&')) {
+    const rawKey = field.split('=', 1)[0] ?? ''
+    const key = new URLSearchParams(`key=${rawKey}`).get('key')
+    if (key !== 'start' && key !== 'durationMinutes') continue
+    try {
+      decodeURIComponent(field.replaceAll('+', ' '))
+    } catch {
+      return invalid
+    }
+  }
   if (new TextEncoder().encode(pathname + search).byteLength > 2048) return invalid
   if (starts.length !== 1 || durations.length !== 1) return invalid
   const start = starts[0] ?? ''

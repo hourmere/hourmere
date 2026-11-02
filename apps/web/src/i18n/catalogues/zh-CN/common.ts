@@ -4,7 +4,7 @@ export const common = {
     '无法使用此链接中的时间信息。请选择时间。',
   'This meeting length is no longer offered. Please choose a time again.':
     '此会议时长已不再提供。请重新选择时间。',
-  'Checking the suggested time…': '正在检查建议时间…',
+  'Checking the suggested time…': '正在检查建议的时间……',
   'The suggested time is selected. Review the details and confirm your booking.':
     '已选中建议时间。请核对详情并确认预约。',
   'We could not check this time. Please try again.': '无法检查此时间。请重试。',

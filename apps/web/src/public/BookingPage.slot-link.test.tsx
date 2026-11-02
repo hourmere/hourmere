@@ -227,6 +227,55 @@ describe('public direct slot links', () => {
     expect(screen.getByRole('main').textContent).not.toContain('private-invalid-input')
   })
 
+  it.each(['?utm_source=100%', '?ref=%E0%A4'])(
+    'keeps the ordinary picker and focus for unrelated malformed encoding: %s',
+    async (search) => {
+      const api = fakeApi(eventRoutes(EVENT, [NEXT]))
+      renderApp(`/ada/intro${search}`)
+      const heading = await picker()
+      await screen.findByText('Pick a day to see its times.')
+      expect(
+        screen.queryByText('We could not use the time details in this link. Please choose a time.'),
+      ).toBeNull()
+      expect(document.activeElement).not.toBe(heading)
+      expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+      expect(api.to(`GET ${API}`)).toHaveLength(1)
+      expect(api.to(`GET ${API}/slots`).some(exact)).toBe(false)
+    },
+  )
+
+  it.each(['utm_source=100%', 'ref=%E0%A4'])(
+    'freshly preselects a valid hint despite unrelated malformed encoding: %s',
+    async (unrelated) => {
+      const api = fakeApi(eventRoutes(EVENT, [START]))
+      renderApp(`/ada/intro${hint()}&${unrelated}`)
+      await selected()
+      expect(api.to(`GET ${API}/slots`).filter(exact)).toHaveLength(1)
+      expect(screen.getByRole('button', { name: 'Confirm booking' })).toBeDefined()
+      expect(api.calls.every((call) => call.method === 'GET')).toBe(true)
+    },
+  )
+
+  it.each([
+    '?start=2026-11-02T14%3A00%3A00.000Z%&durationMinutes=30',
+    '?start=%E0%A4&durationMinutes=30',
+    `${hint()}%`,
+    `?start=${encodeURIComponent(START)}&durationMinutes=%E0%A4`,
+  ])(
+    'falls back and focuses the picker for malformed time parameter encoding: %s',
+    async (search) => {
+      const api = fakeApi(eventRoutes(EVENT, [NEXT]))
+      renderApp(`/ada/intro${search}`)
+      await screen.findByText(
+        'We could not use the time details in this link. Please choose a time.',
+      )
+      const heading = await picker()
+      await waitFor(() => expect(document.activeElement).toBe(heading))
+      expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+      expect(api.to(`GET ${API}/slots`).some(exact)).toBe(false)
+    },
+  )
+
   it.each(['initial', 'refresh', 'slots'])(
     'shows a neutral missing event page after a missing %s read',
     async (stage) => {
