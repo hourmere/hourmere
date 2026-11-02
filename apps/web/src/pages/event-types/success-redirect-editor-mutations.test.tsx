@@ -49,10 +49,9 @@ function detects(
   after: string,
   assertion: (source: string) => void,
 ) {
+  const mutated = mutate(source, before, after)
   assertion(source)
-  expect(() => assertion(mutate(source, before, after))).toThrowError(
-    expect.objectContaining({ name: 'AssertionError' }),
-  )
+  expect(() => assertion(mutated)).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
   assertion(source)
 }
 
@@ -82,6 +81,7 @@ const buildEditor = (source: string) =>
     Field,
     FieldError,
     useI18n,
+    SUCCESS_REDIRECT_PARAMETERS: formFunctions.SUCCESS_REDIRECT_PARAMETERS,
   })
 
 function Harness({ Component }: { Component: typeof editorFunctions.SuccessRedirectEditor }) {
@@ -99,10 +99,9 @@ function Harness({ Component }: { Component: typeof editorFunctions.SuccessRedir
 }
 
 async function assertEditor(
-  source: string,
+  Component: typeof editorFunctions.SuccessRedirectEditor,
   check: (user: ReturnType<typeof userEvent.setup>) => Promise<void>,
 ) {
-  const Component = buildEditor(source).SuccessRedirectEditor
   const view = render(<Harness Component={Component} />)
   try {
     await check(userEvent.setup())
@@ -277,6 +276,7 @@ describe('after-booking editor source-copy mutation controls', () => {
         }
         const value = copy<typeof editorFunctions>(source, '{previewSuccessRedirect}', {
           UnsafeParameters,
+          SUCCESS_REDIRECT_PARAMETERS: formFunctions.SUCCESS_REDIRECT_PARAMETERS,
         })
         const preview =
           value.previewSuccessRedirect({
@@ -325,6 +325,60 @@ describe('after-booking editor source-copy mutation controls', () => {
     )
   })
 
+  it('detects preview parameters returning to selection order', () => {
+    const mutated = mutate(
+      editor,
+      'SUCCESS_REDIRECT_PARAMETERS.filter((key) => draft.successRedirectParameters.includes(key))',
+      'draft.successRedirectParameters',
+    )
+    const original = buildEditor(editor)
+    const mutant = buildEditor(mutated)
+    const assertPreview = (value: typeof editorFunctions) => {
+      const preview = value.previewSuccessRedirect({
+        ...formFunctions.emptyDraft(),
+        successRedirectUrl: 'https://target.example/?flag&a;b#done',
+        successRedirectParameters: ['end', 'start'],
+      })
+      expect(preview).toBe(
+        'https://target.example/?flag&a;b&start=2030-01-15T10%3A00%3A00Z&end=2030-01-15T10%3A30%3A00Z#done',
+      )
+    }
+    assertPreview(original)
+    expect(() => assertPreview(mutant)).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    assertPreview(buildEditor(editor))
+  })
+
+  it.each([
+    {
+      before: 'aria-live="off"',
+      after: '',
+      check: async () => {
+        expect(screen.getByLabelText('Example continuation URL').getAttribute('aria-live')).toBe(
+          'off',
+        )
+      },
+    },
+    {
+      before: 'htmlFor="successRedirect.url"',
+      after: '',
+      check: async () => {
+        expect(screen.getByLabelText('Example continuation URL').getAttribute('for')).toBe(
+          screen.getByLabelText(/Continue to URL/).id,
+        )
+      },
+    },
+  ])('detects lost preview accessibility: $before', async ({ before, after, check }) => {
+    const original = buildEditor(editor).SuccessRedirectEditor
+    const mutant = buildEditor(mutate(editor, before, after)).SuccessRedirectEditor
+    await assertEditor(original, check)
+    await expect(assertEditor(mutant, check)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await assertEditor(buildEditor(editor).SuccessRedirectEditor, check)
+  })
+
   it.each([
     {
       before: '<p id="success-redirect-personal-warning" className="hint">',
@@ -358,10 +412,12 @@ describe('after-booking editor source-copy mutation controls', () => {
       },
     },
   ])('detects weakened personal-data protection: $before', async ({ before, after, check }) => {
-    await assertEditor(editor, check)
-    await expect(assertEditor(mutate(editor, before, after), check)).rejects.toMatchObject({
+    const original = buildEditor(editor).SuccessRedirectEditor
+    const mutant = buildEditor(mutate(editor, before, after)).SuccessRedirectEditor
+    await assertEditor(original, check)
+    await expect(assertEditor(mutant, check)).rejects.toMatchObject({
       name: 'AssertionError',
     })
-    await assertEditor(editor, check)
+    await assertEditor(buildEditor(editor).SuccessRedirectEditor, check)
   })
 })

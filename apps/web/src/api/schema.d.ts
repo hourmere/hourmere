@@ -3938,11 +3938,8 @@ export interface components {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
             errorAlias?: components["schemas"]["ErrorAlias"];
-            /**
-             * @description Stable field name for after-booking redirect validation errors
-             * @enum {string}
-             */
-            field?: "successRedirect" | "successRedirect.url" | "successRedirect.parameters" | "successRedirect.includeInviteePersonalData" | "successRedirect.allowEmbedParent";
+            /** @description Optional stable validation field name. Known values: successRedirect, successRedirect.url, successRedirect.parameters, successRedirect.includeInviteePersonalData, successRedirect.allowEmbedParent. New values may appear within /api/v1; ignore unknown values. */
+            field?: string;
             /** @description Human-readable detail */
             message?: string;
         };
@@ -4049,10 +4046,7 @@ export interface components {
                 allowEmbedParent: boolean;
                 includeInviteePersonalData: boolean;
                 parameters: ("eventTypeSlug" | "start" | "end" | "timeZone" | "hostName" | "inviteeName" | "inviteeEmail")[];
-                /**
-                 * Format: uri
-                 * @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. Validated by the scheduling service; no server-side request is made.
-                 */
+                /** @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made. */
                 url: string;
             } | null;
             /** @example Intro call */
@@ -4179,10 +4173,7 @@ export interface components {
                  * @default []
                  */
                 parameters: ("eventTypeSlug" | "start" | "end" | "timeZone" | "hostName" | "inviteeName" | "inviteeEmail")[];
-                /**
-                 * Format: uri
-                 * @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. Validated by the scheduling service; no server-side request is made.
-                 */
+                /** @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made. */
                 url: string;
             } | null;
             /** @example Intro call */
@@ -4345,10 +4336,7 @@ export interface components {
                  * @default []
                  */
                 parameters: ("eventTypeSlug" | "start" | "end" | "timeZone" | "hostName" | "inviteeName" | "inviteeEmail")[];
-                /**
-                 * Format: uri
-                 * @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. Validated by the scheduling service; no server-side request is made.
-                 */
+                /** @description Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made. */
                 url: string;
             } | null;
             /** @example Intro call */

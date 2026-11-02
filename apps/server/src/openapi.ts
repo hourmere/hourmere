@@ -19,9 +19,12 @@ export const ErrorBody = z
   .object({
     error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
     errorAlias: ErrorAlias.optional(),
-    field: z.enum(SUCCESS_REDIRECT_ERROR_FIELDS).optional().openapi({
-      description: 'Stable field name for after-booking redirect validation errors',
-    }),
+    field: z
+      .string()
+      .optional()
+      .openapi({
+        description: `Optional stable validation field name. Known values: ${SUCCESS_REDIRECT_ERROR_FIELDS.join(', ')}. New values may appear within /api/v1; ignore unknown values.`,
+      }),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })
   .openapi('Error')

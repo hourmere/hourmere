@@ -252,8 +252,6 @@ function adaptJsonSchema(ctx: { zodSchema: unknown; jsonSchema: JsonSchema }): v
   if (meta.example !== undefined) ctx.jsonSchema.examples = [meta.example]
   // Some inputs document service-validated names without duplicating their validation.
   if (Array.isArray(meta.enum)) ctx.jsonSchema.enum = [...meta.enum]
-  for (const key of ['format', 'maxLength', 'uniqueItems', 'default'] as const)
-    if (meta[key] !== undefined) ctx.jsonSchema[key] = structuredClone(meta[key])
   if (typeof ctx.jsonSchema.format === 'string') delete ctx.jsonSchema.pattern
   const def = (ctx.zodSchema as { _zod?: { def?: { type?: string; catchall?: unknown } } })._zod
     ?.def

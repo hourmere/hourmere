@@ -1,7 +1,11 @@
 import { Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
-import type { EventTypeDraft, SuccessRedirectParameter } from './event-type-form.ts'
+import {
+  type EventTypeDraft,
+  SUCCESS_REDIRECT_PARAMETERS,
+  type SuccessRedirectParameter,
+} from './event-type-form.ts'
 
 const PARAMETERS: { value: SuccessRedirectParameter; label: MessageKey }[] = [
   { value: 'eventTypeSlug', label: 'Event type slug' },
@@ -35,7 +39,7 @@ export function previewSuccessRedirect(
     return null
   }
   const parameters = new URLSearchParams(
-    draft.successRedirectParameters
+    SUCCESS_REDIRECT_PARAMETERS.filter((key) => draft.successRedirectParameters.includes(key))
       .filter(
         (key) =>
           draft.includeInviteePersonalData || (key !== 'inviteeName' && key !== 'inviteeEmail'),
@@ -207,6 +211,8 @@ export function SuccessRedirectEditor({
           <output
             className="success-redirect-preview"
             aria-labelledby="success-redirect-preview-label"
+            aria-live="off"
+            htmlFor="successRedirect.url"
           >
             {preview ?? t('Enter a URL to preview the continuation.')}
           </output>

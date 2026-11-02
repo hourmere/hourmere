@@ -182,9 +182,8 @@ const redirectParameter = z.string().openapi({
 const redirectFields = {
   url: z.string().openapi({
     description:
-      'Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. Validated by the scheduling service; no server-side request is made.',
+      'Absolute HTTPS target without user information, whitespace or controls. Local hosts and IP literals require the operator exception or the instance hostname. IDN hosts and Unicode paths are accepted and normalized by the scheduling service, the authoritative validator; no server-side request is made.',
     maxLength: SUCCESS_REDIRECT_MAX_LENGTH,
-    format: 'uri',
   }),
   parameters: z.array(redirectParameter).optional().openapi({
     description:

@@ -37,6 +37,7 @@ const words = {
     warning: /Warning: sharing invitee name or email makes them visible to the target site/,
     slug: 'Event type slug',
     start: 'Start time',
+    end: 'End time',
     preview: 'Example continuation URL',
     save: 'Save changes',
     saved: 'Saved.',
@@ -52,6 +53,7 @@ const words = {
     warning: /警告：分享受邀人的姓名或邮箱后，目标网站及其分析工具将能看到这些信息/,
     slug: '活动类型链接标识',
     start: '开始时间',
+    end: '结束时间',
     preview: '继续访问网址示例',
     save: '保存更改',
     saved: '已保存。',
@@ -86,6 +88,20 @@ function Harness({ initial = emptyDraft() }: { initial?: EventTypeDraft }) {
 }
 
 describe.each(['en', 'zh-CN'] as const)('after-booking editor in %s', (language) => {
+  it('previews the saved whitelist order when end is selected before start', async () => {
+    chooseLanguage(language)
+    const copy = words[language]
+    setup()
+    const user = userEvent.setup()
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await user.type(await screen.findByLabelText(copy.url), settings.url)
+    await user.click(screen.getByLabelText(copy.end))
+    await user.click(screen.getByLabelText(copy.start))
+    expect(screen.getByLabelText(copy.preview).textContent).toBe(
+      'https://target.example/thanks?flag&a;b&start=2030-01-15T10%3A00%3A00Z&end=2030-01-15T10%3A30%3A00Z#complete',
+    )
+  })
+
   it('round trips the redirect and clears it explicitly', async () => {
     chooseLanguage(language)
     const copy = words[language]
@@ -291,7 +307,7 @@ describe('redirect draft and preview contracts', () => {
     expect(previewSuccessRedirect(emptyDraft())).toBeNull()
   })
 
-  it('renders the preview as text without a navigable target', async () => {
+  it('renders a non-live text preview associated with the URL field', async () => {
     render(
       <Harness
         initial={{ ...emptyDraft(), successRedirectUrl: 'https://target.example/?query=<script>' }}
@@ -299,6 +315,8 @@ describe('redirect draft and preview contracts', () => {
     )
     const preview = screen.getByLabelText('Example continuation URL')
     expect(preview.tagName).toBe('OUTPUT')
+    expect(preview.getAttribute('aria-live')).toBe('off')
+    expect(preview.getAttribute('for')).toBe(screen.getByLabelText(/Continue to URL/).id)
     expect(preview.querySelector('a, script')).toBeNull()
     await waitFor(() => expect(preview.textContent).toContain('query=%3Cscript%3E'))
   })

@@ -220,14 +220,19 @@ describe.skipIf(!process.env.DATABASE_URL)('redirect configuration across REST a
         }
       }
       const restRedirect = restDoc.components.schemas.EventTypeInput?.properties?.successRedirect
-      expect(restRedirect?.properties.url).toMatchObject({ format: 'uri', maxLength: 2000 })
+      expect(restRedirect?.properties.url).toMatchObject({ type: 'string', maxLength: 2000 })
+      expect(restRedirect?.properties.url).not.toHaveProperty('format')
       expect(restRedirect?.properties.parameters).toMatchObject({ uniqueItems: true, default: [] })
       for (const name of ['create_event_type', 'update_event_type']) {
         const schema = list.tools.find((tool) => tool.name === name)?.inputSchema.properties
           ?.successRedirect as { anyOf: { properties?: Record<string, unknown> }[] }
-        expect(schema.anyOf.find((branch) => branch.properties)?.properties).toMatchObject(
-          restRedirect?.properties ?? {},
-        )
+        const properties = schema.anyOf.find((branch) => branch.properties)?.properties
+        expect(properties?.url).toMatchObject({ type: 'string' })
+        expect(properties?.url).not.toHaveProperty('format')
+        expect(properties?.parameters).toMatchObject({
+          type: 'array',
+          items: { enum: [...scheduling.SUCCESS_REDIRECT_PARAMETERS] },
+        })
       }
       const created = await client.callTool({
         name: 'create_event_type',
@@ -609,13 +614,8 @@ it('documents additive REST input/output and field-error shapes and shares them 
   )
 })
 
-it.each([
-  ['enum', 'if (Array.isArray(meta.enum)) ctx.jsonSchema.enum = [...meta.enum]'],
-  ['format', "'format', "],
-  ['maxLength', "'maxLength', "],
-  ['uniqueItems', "'uniqueItems', "],
-  ['default', ", 'default'"],
-])('detects losing service-validated %s documentation from MCP', (_name, anchor) => {
+it('detects losing service-validated parameter documentation from MCP', () => {
+  const anchor = 'if (Array.isArray(meta.enum)) ctx.jsonSchema.enum = [...meta.enum]'
   const source = readFileSync('apps/server/src/mcp/tools.ts', 'utf8')
   const body = source.slice(
     source.indexOf('function adaptJsonSchema('),
@@ -634,25 +634,12 @@ it.each([
     adapt({
       zodSchema: z.string().openapi({
         enum: [...scheduling.SUCCESS_REDIRECT_PARAMETERS],
-        format: 'uri',
-        maxLength: 2000,
       }),
       jsonSchema,
     })
     expect(jsonSchema).toMatchObject({
       enum: [...scheduling.SUCCESS_REDIRECT_PARAMETERS],
-      format: 'uri',
-      maxLength: 2000,
     })
-    const parameters: Record<string, unknown> = {}
-    adapt({
-      zodSchema: z.array(z.string()).openapi({ uniqueItems: true, default: [] }),
-      jsonSchema: parameters,
-    })
-    expect(parameters).toMatchObject({ uniqueItems: true, default: [] })
-    const flag: Record<string, unknown> = {}
-    adapt({ zodSchema: z.boolean().openapi({ default: false }), jsonSchema: flag })
-    expect(flag).toMatchObject({ default: false })
   }
   verify(body)
   expect(() => verify(body.replace(anchor, ''))).toThrowError(
