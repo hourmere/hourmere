@@ -154,7 +154,7 @@ must approve publication through the [release workflow](https://github.com/hourm
 - [Automatic Zoom](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/automatic-zoom.md)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
-- [Multiple meeting lengths](https://hourmere.com/docs/multiple-durations) share one set of
+- [Multiple meeting lengths](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/multiple-durations.md) share one set of
   hosts, location and booking rules; per-length overrides are unavailable. Web rescheduling
   keeps the original length; changing it requires REST, MCP or CLI.
 - [Calendar RSVP replies](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/notifications.md#email-headers-mime-and-replies)
