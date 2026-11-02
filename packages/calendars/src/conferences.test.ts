@@ -89,7 +89,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await db.deleteFrom('profiles').execute()
     await db.deleteFrom('schedules').execute()
     await db.deleteFrom('calendar_connections').execute()
-    provider = fakeGoogle()
+    provider = fakeGoogle(() => NOW.epochMilliseconds)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
     provider.controls.pages = [
       {

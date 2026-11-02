@@ -43,7 +43,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
   beforeEach(async () => {
     await db.deleteFrom('calendar_oauth_states').execute()
     await db.deleteFrom('calendar_connections').execute()
-    provider = fakeGoogle()
+    provider = fakeGoogle(() => now)
     now = Date.now()
     deps = {
       db,

@@ -47,8 +47,8 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
   beforeEach(async () => {
     await db.deleteFrom('calendar_oauth_states').execute()
     await db.deleteFrom('calendar_connections').execute()
-    microsoft = fakeMicrosoft()
-    google = fakeGoogle()
+    microsoft = fakeMicrosoft(() => now)
+    google = fakeGoogle(() => now)
     now = Date.now()
     deps = {
       db,

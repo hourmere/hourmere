@@ -241,8 +241,8 @@ and its organization, with the creating user recorded separately. Personal links
 to the event type's owner; team links belong to the team, rather than to whichever admin
 created them. The service returns a cryptographically random 256-bit bearer token exactly
 once, on creation. Only its SHA-256 digest is stored, under a unique index. Reads return
-metadata without either the raw token or its digest; revocation returns an empty
-acknowledgement. Callers must keep the creation result private; later transports must
+metadata without either the raw token or its digest; administrative revocation reports
+the authorized link's resulting state. Callers must keep the creation result private; transports must
 not log it or place it in analytics.
 
 An optional `expires_at` is an absolute instant. Database wall time decides eligibility,
@@ -283,18 +283,31 @@ Creation and revocation recheck current verified membership and permissions insi
 write transaction. For team-owned event types, only current team owners and admins may
 create or revoke links. Ordinary members may manage links only for event types they own;
 being a host or the creator of a team link grants no team management permission. The
-current organization scopes every operation. Revoking an unknown, foreign, inaccessible
-or already-revoked ID returns the same empty acknowledgement, without exposing its state
-or existence. For the next REST/MCP/CLI task, creation and
-revocation are account-configuration writes requiring API key scope `full`; neither
-`read` nor `bookings` authorizes minting or withdrawing these capabilities. The internal
-services already enforce this API key classification. MCP OAuth creation/revocation is
-also full-account configuration access only: the future transport must explicitly
-authorize that access before exposing or calling these operations. The existing
-`mcp:tools` grant alone must not implicitly opt into these new configuration writes;
-any future limited OAuth grants must exclude them. Existing session, membership and
-ownership permissions still apply. No new OAuth scope or transport is registered here;
-creation/revocation transport registration follows separately.
+current organization scopes every operation. The internal revocation helper retains its
+empty acknowledgement for unknown, foreign or inaccessible IDs. The authenticated
+event-type admin endpoints first authorize the event and link, then report the safe
+resulting metadata; an already-revoked or used link is unchanged. Creation and
+revocation require API key scope `full` or `bookings`, using the existing
+`booking_write` classification; `read` cannot mint or withdraw links. Existing
+session, membership and ownership permissions still apply. Administrative reads allow
+full/read API keys. Existing authorized MCP OAuth grants retain their scheduling access
+for creation, listing and revocation.
+
+REST, MCP and CLI share the administrative services. A creation response adds the full
+`<PUBLIC_URL>/book/{token}` URL; list/get/revoke expose neither it nor the token digest.
+Migration 0058 stores an optional creation `idempotency_key` separately from the
+database-generated UUIDv7 link ID, following booking retries. A partial unique index
+scopes the marker to organization, creating user, credential kind and credential record
+ID; no bearer credential or raw creation response is stored. Marker columns are immutable
+and survive credential deletion with their link. Existing 0053 rows retain their IDs,
+capability digests, lifecycle and timestamps, with null markers. The existing row is
+looked up under the capacity lock before minting a token. Administrative pages show
+newest links first by descending UUIDv7 ID, including keyed creates.
+Normalized identical input returns `one_time_link_already_created`; changed input returns
+`idempotency_key_reused`. Both are conflicts, never a second creation. No raw-response
+cache exists, so even an immediate replay cannot return the original URL. Protection
+lasts while the link record survives. See
+[one-time booking links](https://hourmere.com/docs/one-time-links) for recovery steps.
 
 Public consumption opens `/book/{token}` and uses `/api/v1/book/{token}` for the
 page, with `/slots` and `/bookings` for availability and booking creation. The raw
@@ -345,8 +358,11 @@ The creator ID is immutable, non-null historical attribution without an account 
 key, following migration 0041. Deleting a creator therefore preserves team links and
 consumption records. Personal organization deletion still removes personal links, and
 physical event type or organization deletion cascades to its links. Soft-deleting an
-event type retains its links while making them unavailable. No administrative list is
-introduced here.
+event type retains its links while making them unavailable. The administrative list
+shows lifecycle metadata and the original consuming booking ID without credentials.
+Creator labels use current organization membership and display names. Only session
+owners/admins can receive an email fallback for an empty name; other callers and departed
+members receive a null label, rendered as a neutral unknown member in the editor.
 
 ## Booking limit contract
 

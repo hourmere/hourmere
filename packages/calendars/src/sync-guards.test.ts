@@ -56,7 +56,7 @@ describe.skipIf(!url)('Google sync authorization and fail-closed guards (real Po
     )
   beforeEach(async () => {
     await db.deleteFrom('calendar_connections').execute()
-    provider = fakeGoogle()
+    provider = fakeGoogle(() => now)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
     now = Date.parse('2026-11-01T12:00:00Z')
     deps = {

@@ -9,9 +9,10 @@ import { embedParent } from '@hourmere/core/embed'
 import { Hono } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { logger } from 'hono/logger'
+import { routePath } from 'hono/route'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
-import { isOneTimeLinkPath } from './one-time-link-privacy.ts'
+import { isOneTimeCapabilityPath, isOneTimeLinkPath } from './one-time-link-privacy.ts'
 import { securityHeaders } from './security-headers.ts'
 
 const token = `00000000-0000-4000-8000-000000000091.${'w'.repeat(43)}`
@@ -169,7 +170,9 @@ describe('waitlist capability privacy source-copy controls', () => {
         'escapeControlCharacters',
         'redactLogDetails',
         'createMiddleware',
+        'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
+        'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
       )(
@@ -178,7 +181,9 @@ describe('waitlist capability privacy source-copy controls', () => {
         (line: string) => line,
         redactLogDetails,
         createMiddleware,
+        isOneTimeCapabilityPath,
         isOneTimeLinkPath,
+        routePath,
         /x^/,
       )
       const app = new Hono()
@@ -211,7 +216,9 @@ describe('waitlist capability privacy source-copy controls', () => {
         'escapeControlCharacters',
         'redactLogDetails',
         'createMiddleware',
+        'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
+        'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
       )(
@@ -220,7 +227,9 @@ describe('waitlist capability privacy source-copy controls', () => {
         (line: string) => line,
         redactLogDetails,
         createMiddleware,
+        isOneTimeCapabilityPath,
         isOneTimeLinkPath,
+        routePath,
         /x^/,
       )
       const app = new Hono()

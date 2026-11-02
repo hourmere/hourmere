@@ -17,6 +17,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [One-time booking links](/docs/one-time-links): create, list and revoke private links
+  through the editor, REST, MCP or CLI, with the booking URL shown once.
+- [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
+  and optional host notes, with delivery limits and configuration examples.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
@@ -42,6 +46,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Calendar RSVP replies](/docs/notifications#email-headers-mime-and-replies)
   are not processed; declining in a calendar does not cancel an Hourmere booking. Use
   Hourmere's cancellation action; operators must [handle replies manually](/docs/self-hosting#handle-calendar-replies).
+- [Follow-ups](/docs/reminders-and-follow-ups) use the scheduled end regardless of
+  attendance. Invitees cannot stop them after the meeting starts; cancel in Hourmere
+  before the start. Mail limits can permanently suppress a message.
 - PostgreSQL 18+ is required for `uuidv7()`; [PgBouncer is unsupported](/docs/configuration#server-and-database).
   The [upgrade notes](https://github.com/hourmere/hourmere/blob/main/CHANGELOG.md#upgrade-notes)
   cover the database version requirement.
