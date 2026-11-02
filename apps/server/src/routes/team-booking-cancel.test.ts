@@ -931,9 +931,15 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
   }
 
   it('registers the production route and publishes an open session-only response', async () => {
-    const f = await fixture()
-    expect((await cancel(f, { app: application({ production: true }) })).status).toBe(200)
-    await verifyOpenResponse(teamBookingRoutes)
+    // Production wiring reads Temporal.Now rather than this file's injected clock.
+    const clock = vi.spyOn(Temporal.Now, 'instant').mockReturnValue(NOW)
+    try {
+      const f = await fixture()
+      expect((await cancel(f, { app: application({ production: true }) })).status).toBe(200)
+      await verifyOpenResponse(teamBookingRoutes)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   function routeCopy(
