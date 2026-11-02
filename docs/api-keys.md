@@ -165,6 +165,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/event-types/{id}` | Session or API key | `full, read, bookings` |
 | `DELETE /api/v1/event-types/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/event-types/{id}` | Session or API key | `full` |
+| `PUT /api/v1/event-types/{id}/notifications` | Session or API key | `full` |
 | `POST /api/v1/event-types/{id}/round-robin/activate` | Session or API key | `full` |
 | `GET /api/v1/instance` | Public; no key needed | `full, read, bookings` |
 | `GET /api/v1/mcp-oauth/connections` | Browser session only | — |
@@ -236,6 +237,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `get_profile` | — | `profile` | `full, read, bookings` |
 | `list_event_types` | — | `catalog` | `full, read, bookings` |
 | `get_event_type` | — | `event` | `full, read, bookings` |
+| `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
 | `list_calendar_connections` | — | — | `full, read` |

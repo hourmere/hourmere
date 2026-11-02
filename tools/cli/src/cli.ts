@@ -7,6 +7,7 @@ export const COMMANDS = {
   profile: 'get_profile',
   catalog: 'list_event_types',
   event: 'get_event_type',
+  'set-event-notifications': 'set_event_type_notifications',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
   slots: 'find_available_slots',
@@ -22,7 +23,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere --help | --version
 
-Commands: whoami, profile, catalog, event, schedules, schedule, slots,
+Commands: whoami, profile, catalog, event, set-event-notifications, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
@@ -194,6 +195,7 @@ export async function runCli(options: {
       printable(
         {
           error: code,
+          ...(error instanceof CliError && error.detail !== undefined && { message: error.detail }),
           ...(error instanceof CliError && error.status !== undefined && { status: error.status }),
           ...(error instanceof CliError &&
             error.retryAfterSeconds !== undefined && {

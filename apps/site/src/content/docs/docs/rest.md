@@ -53,6 +53,27 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Configure reminders and follow-ups
+
+Use a `full` API key and an event-type ID from `GET /api/v1/event-types`. Protected event
+reads include `notifications`. To replace only that setting:
+
+```sh
+curl --fail-with-body -X PUT "$HOURMERE_URL/api/v1/event-types/<event-type-id>/notifications" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"notifications":{"reminders":[{"id":"one-day","offsetMinutes":1440,"recipients":{"invitee":true,"guests":true,"host":true}}],"followUps":[{"id":"thanks","offsetMinutes":60,"recipients":{"invitee":true,"guests":false,"host":false},"hostNote":"Thank you for your time."}]}}'
+```
+
+The response is the full event type. Creation and PATCH also accept optional
+`notifications`; omission keeps creation defaults or the saved value respectively. A
+replacement must include both arrays. Personal types require their owner and team types
+an owner or admin; `bookings` and `read` keys cannot write these settings. Saves affect
+only new bookings and send no immediate mail. Read the
+[complete validation contract](/docs/api-conventions#event-type-notification-settings)
+and [host-note operating policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls)
+before enabling follow-ups or host-written text.
+
 ## Find a time
 
 Choose a future UTC range within the event type's booking window, at most 62 days.

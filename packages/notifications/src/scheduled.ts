@@ -4,6 +4,7 @@ import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import { bookingEmail, followUpEmail, type MailMessage, MailRejectedError } from '@hourmere/mail'
+import type { NotificationSnapshot } from '@hourmere/scheduling/notification-settings'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -24,16 +25,7 @@ const RETRY_DELAY = (attempt: number) => Math.min(60_000 * 2 ** (attempt - 1), 3
 const instant = (date: Date) => Temporal.Instant.fromEpochMilliseconds(date.getTime())
 const clock = (deps: NotificationDeps) => deps.now?.() ?? Temporal.Now.instant()
 const asDate = (value: Temporal.Instant) => new Date(value.epochMilliseconds)
-interface Rule {
-  id: string
-  offsetMinutes: number
-  recipients: { host: boolean; invitee: boolean; guests: boolean }
-  hostNote?: string | undefined
-}
-interface Snapshot {
-  executionMode: 'legacy_default' | 'configurable'
-  notifications: { reminders: Rule[]; followUps: Rule[] }
-}
+type Snapshot = Pick<NotificationSnapshot, 'executionMode' | 'notifications'>
 export interface ScheduledEmailQueue {
   enqueue(
     name: typeof SCHEDULED_BOOKING_EMAIL_JOB,
@@ -412,7 +404,7 @@ export async function deliverScheduledBookingEmail(
                 locale: recipient.locale,
               },
               {
-                hostNote: rule.hostNote,
+                hostNote: deps.followUpHostNotesEnabled === false ? undefined : rule.hostNote,
                 bookingUrl: recipient.host
                   ? new URL(`/app/bookings/${encodeURIComponent(claim.booking_id)}`, deps.publicUrl)
                       .href
