@@ -86,6 +86,65 @@ function dialog(code: string): Dialog {
 }
 
 describe('one-time link UI production-source negative controls', () => {
+  it('detects dropping safe creator attribution from newly created metadata', async () => {
+    const code = source.slice(
+      source.indexOf('export function oneTimeLinkMetadata('),
+      source.indexOf('/** Server prose'),
+    )
+    await detects(
+      code,
+      'creatorDisplayName: link.creatorDisplayName,',
+      'creatorDisplayName: null,',
+      (value) => {
+        const project = copy<typeof oneTimeLinkMetadata>(value, 'oneTimeLinkMetadata')
+        const metadata = project({
+          creatorDisplayName: 'Grace Hopper',
+          prefill: { name: null, email: null },
+        } as never)
+        expect(metadata.creatorDisplayName).toBe('Grace Hopper')
+      },
+    )
+  })
+
+  it.each([
+    [
+      'member label',
+      'Grace Hopper',
+      'link.creatorDisplayName',
+      'link.creatorUserId',
+      'Grace Hopper',
+    ],
+    ['neutral fallback', null, "t('Unknown member')", 'link.creatorUserId', 'Unknown member'],
+  ] as const)(
+    'detects exposing the creator UUID instead of the %s',
+    async (_case, displayName, before, after, expected) => {
+      const start = source.indexOf("<dt>{t('Created by')}</dt>")
+      const code = source.slice(start, source.indexOf("<dt>{t('Link expiry')}</dt>", start))
+      await detects(code, before, after, (value) => {
+        const Attribution = copy<react.ComponentType>(
+          `function Attribution() { const link={creatorUserId:'creator-uuid',creatorDisplayName:displayName}; const t=(text)=>text; return <dl>${value}</dl> }`,
+          'Attribution',
+          { displayName },
+        )
+        const view = render(<Attribution />)
+        try {
+          expect(screen.getByText('Created by').nextElementSibling?.textContent).toBe(expected)
+          expect(view.container.textContent).not.toContain('creator-uuid')
+        } finally {
+          view.unmount()
+        }
+      })
+    },
+  )
+
+  it('detects removing the literal Chinese spacing before a revoke link id', async () => {
+    const chinese = readFileSync('apps/web/src/i18n/catalogues/zh-CN/admin.ts', 'utf8')
+    await detects(chinese, '撤销一次性链接 {0}', '撤销一次性链接{0}', (value) => {
+      const catalogue = copy<Record<string, string>>(value, 'admin')
+      expect(catalogue['Revoke one-time link {0}']).toBe('撤销一次性链接 {0}')
+    })
+  })
+
   it('detects retaining a creation URL, raw token or hash in list metadata', async () => {
     const code = source.slice(
       source.indexOf('export function oneTimeLinkMetadata('),

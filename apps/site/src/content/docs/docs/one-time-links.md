@@ -74,7 +74,9 @@ mint a second token. The server has no creation-response
 cache and stores only token hashes, so even an immediate retry returns
 `409 one_time_link_already_created` rather than repeating the URL. Reusing the same key
 with different values returns `409 idempotency_key_reused`. After a lost response, inspect
-the list, revoke the unused link and create another with a fresh random key. Do not
+the list with a read/full key, revoke the unused link and create another with a fresh
+random key. A bookings key can revoke using the id from a successful create response;
+ask a manager with history access to find the id after a lost response. Do not
 automatically generate a new key on a network failure. The replay protection lasts while
 the link record remains; physical deletion or retention cleanup ends it.
 
@@ -91,14 +93,17 @@ curl --fail-with-body -X DELETE \
 
 Use your instance's `/api/v1/openapi.json` for the complete request and response schemas.
 Listing defaults to 50 rows, with `limit` from 1 to 100. Pass `nextAfter` as `after`
-for the next page of the same event type; ordering is descending link ID.
+for the next page of the same event type. Newest links appear first, ordered by their
+time-ordered UUIDv7 IDs, including links created with an idempotency key. Retry keys are
+stored separately from link IDs.
 
 ## MCP and CLI
 
 MCP tools are `create_one_time_link`, `list_one_time_links` and `revoke_one_time_link`.
 Creation takes `eventTypeId` and a retained random `idempotencyKey`, plus optional
 `expiresAt` and `prefill`; listing takes `eventTypeId` and optional `limit`/`after`,
-and revocation takes `eventTypeId` and `id`. These use the
+and revocation takes `eventTypeId` and the `id` returned when the link was created, or
+from the list with a read/full key. These use the
 same validation, permissions and replay rules as REST. Revocation wraps its nullable
 metadata result as `{ "link": ... }`. The creation output explicitly
 identifies the URL as shown once. Keep it out of shared transcripts and tool-result logs.

@@ -22,13 +22,18 @@ import { etag } from 'hono/etag'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
+import { routePath } from 'hono/route'
 import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
-import { isOneTimeLinkPath, redactOneTimeLogDetails } from './one-time-link-privacy.ts'
+import {
+  isOneTimeCapabilityPath,
+  isOneTimeLinkPath,
+  redactOneTimeLogDetails,
+} from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
@@ -291,9 +296,12 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
 
 // A one-time capability is carried by the path. Do not hand that request to a
 // URL logger, including malformed tokens and refused embed attempts.
-const requestLogger = createMiddleware((c, next) =>
-  isOneTimeLinkPath(c.req.path) ? next() : ordinaryRequestLogger(c, next),
-)
+const requestLogger = createMiddleware(async (c, next) => {
+  if (isOneTimeCapabilityPath(c.req.path)) return next()
+  if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
+  await next()
+  console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
+})
 
 export function createApp({
   checkDb,
@@ -314,14 +322,22 @@ export function createApp({
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
-  const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) =>
-    (level === 'ERROR' ? console.error : console.warn)(
+  const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) => {
+    const path = isOneTimeCapabilityPath(c.req.path)
+      ? '/book/[redacted]'
+      : isOneTimeLinkPath(c.req.path)
+        ? routePath(c)
+        : c.req.path
+    const message = `${c.req.method} ${path}: ${text}`
+    const write = level === 'ERROR' ? console.error : console.warn
+    write(
       `${new Date().toISOString()} ${level} ${
         isOneTimeLinkPath(c.req.path)
-          ? redactOneTimeLogDetails(`${c.req.method} /book/[redacted]: ${text}`)
-          : escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))
+          ? redactOneTimeLogDetails(message)
+          : escapeControlCharacters(redactLogDetails(message))
       }`,
     )
+  }
   const logError = (c: Context, label: string, detail: unknown) =>
     logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
 

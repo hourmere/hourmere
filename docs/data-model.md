@@ -295,8 +295,14 @@ for creation, listing and revocation.
 
 REST, MCP and CLI share the administrative services. A creation response adds the full
 `<PUBLIC_URL>/book/{token}` URL; list/get/revoke expose neither it nor the token digest.
-An optional random creation idempotency key derives a domain-separated, caller-bound
-link ID. The existing row is checked under the capacity lock before minting a token.
+Migration 0058 stores an optional creation `idempotency_key` separately from the
+database-generated UUIDv7 link ID, following booking retries. A partial unique index
+scopes the marker to organization, creating user, credential kind and credential record
+ID; no bearer credential or raw creation response is stored. Marker columns are immutable
+and survive credential deletion with their link. Existing 0053 rows retain their IDs,
+capability digests, lifecycle and timestamps, with null markers. The existing row is
+looked up under the capacity lock before minting a token. Administrative pages show
+newest links first by descending UUIDv7 ID, including keyed creates.
 Normalized identical input returns `one_time_link_already_created`; changed input returns
 `idempotency_key_reused`. Both are conflicts, never a second creation. No raw-response
 cache exists, so even an immediate replay cannot return the original URL. Protection
@@ -354,6 +360,9 @@ consumption records. Personal organization deletion still removes personal links
 physical event type or organization deletion cascades to its links. Soft-deleting an
 event type retains its links while making them unavailable. The administrative list
 shows lifecycle metadata and the original consuming booking ID without credentials.
+Creator labels use current organization membership and display names. Only session
+owners/admins can receive an email fallback for an empty name; other callers and departed
+members receive a null label, rendered as a neutral unknown member in the editor.
 
 ## Event duration contract
 

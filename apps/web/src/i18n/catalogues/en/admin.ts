@@ -3,6 +3,7 @@ export const admin = {
   Revoked: 'Revoked',
   'Event type': 'Event type',
   'Created by': 'Created by',
+  'Unknown member': 'Unknown member',
   'Load more': 'Load more',
   'This request already created a link, but its URL cannot be retrieved. Review the list and revoke it if needed, then start a new request.':
     'This request already created a link, but its URL cannot be retrieved. Review the list and revoke it if needed, then start a new request.',

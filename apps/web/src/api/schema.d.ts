@@ -1525,7 +1525,7 @@ export interface paths {
         };
         /**
          * List one-time link metadata
-         * @description Requires read or full API-key scope and permission to manage the event type. Ordered by descending link ID; a bounded cursor page never returns tokens, digests or booking URLs. Expiry is evaluated against database wall time.
+         * @description Requires read or full API-key scope and permission to manage the event type. Newest links first, ordered by descending time-ordered UUIDv7 ID, including links created with Idempotency-Key. Pass nextAfter as after for the same event type. A bounded cursor page never returns tokens, digests or booking URLs. Expiry is evaluated against database wall time.
          */
         get: {
             parameters: {
@@ -1600,7 +1600,7 @@ export interface paths {
         put?: never;
         /**
          * Create a private one-time booking link
-         * @description Requires bookings or full API-key scope and permission to manage this event type. Copy the URL now: neither the URL nor token can be retrieved again. Idempotency-Key is scoped to this credential and organization. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: 1000 active unexpired links per personal owner/team, with a 200-link sub-limit for ordinary team members.
+         * @description Requires bookings or full API-key scope and permission to manage this event type. Links always receive time-ordered UUIDv7 IDs; Idempotency-Key is stored separately, scoped to this caller, credential and organization. Copy the URL now: neither the URL nor token can be retrieved again. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: 1000 active unexpired links per personal owner/team, with a 200-link sub-limit for ordinary team members.
          */
         post: operations["createOneTimeBookingLink"];
         delete?: never;
@@ -4717,6 +4717,8 @@ export interface components {
             /** Format: uuid */
             bookingId: string | null;
             createdAt: string;
+            /** @description Current member display name, or email for session managers allowed to view it; null when unknown. */
+            creatorDisplayName: string | null;
             /** Format: uuid */
             creatorUserId: string;
             /** Format: uuid */

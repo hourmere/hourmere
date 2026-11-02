@@ -42,6 +42,10 @@ export const OneTimeLink = z
     organizationId: z.uuid(),
     eventTypeId: z.uuid(),
     creatorUserId: z.uuid(),
+    creatorDisplayName: z.string().nullable().openapi({
+      description:
+        'Current member display name, or email for session managers allowed to view it; null when unknown.',
+    }),
     expiresAt: z.string().nullable(),
     prefill: z.object({ name: z.string().nullable(), email: z.string().nullable() }),
     state: z.enum(['active', 'used', 'expired', 'revoked']),
@@ -107,7 +111,7 @@ export function oneTimeLinkRoutes(deps: ServiceDeps & { publicUrl: string }): Ro
         operationId: 'createOneTimeBookingLink',
         summary: 'Create a private one-time booking link',
         description:
-          'Requires bookings or full API-key scope and permission to manage this event type. Copy the URL now: neither the URL nor token can be retrieved again. Idempotency-Key is scoped to this credential and organization. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: 1000 active unexpired links per personal owner/team, with a 200-link sub-limit for ordinary team members.',
+          'Requires bookings or full API-key scope and permission to manage this event type. Links always receive time-ordered UUIDv7 IDs; Idempotency-Key is stored separately, scoped to this caller, credential and organization. Copy the URL now: neither the URL nor token can be retrieved again. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: 1000 active unexpired links per personal owner/team, with a 200-link sub-limit for ordinary team members.',
         request: {
           params: EventParams,
           headers: ExpectedOrganizationHeaders.extend({ 'idempotency-key': z.string().optional() }),
@@ -146,7 +150,7 @@ export function oneTimeLinkRoutes(deps: ServiceDeps & { publicUrl: string }): Ro
         path: '/api/v1/event-types/{eventTypeId}/one-time-links',
         summary: 'List one-time link metadata',
         description:
-          'Requires read or full API-key scope and permission to manage the event type. Ordered by descending link ID; a bounded cursor page never returns tokens, digests or booking URLs. Expiry is evaluated against database wall time.',
+          'Requires read or full API-key scope and permission to manage the event type. Newest links first, ordered by descending time-ordered UUIDv7 ID, including links created with Idempotency-Key. Pass nextAfter as after for the same event type. A bounded cursor page never returns tokens, digests or booking URLs. Expiry is evaluated against database wall time.',
         request: { params: EventParams, query: OneTimeLinkListQuery },
         responses: {
           200: { description: 'A bounded metadata page', content: json(OneTimeLinkList) },

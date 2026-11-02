@@ -128,7 +128,8 @@ capture and shell redirection. Same-key retries return `one_time_link_already_cr
 without another token; there is no cached response to recover a lost URL. List requires
 `read` or `full`, accepts optional `limit`/`after`, and returns metadata without URLs or
 tokens. Revoke requires `bookings` or `full` plus `eventTypeId` and `id`; its result contains safe
-metadata in `link`, or null for unknown/unrelated IDs. Used links remain used. Existing
+metadata in `link`, or null for unknown/unrelated IDs. Use the id returned when the link
+was created, or from the list with a read/full key. Used links remain used. Existing
 ownership and team permissions still apply. See the
 [one-time link guide](https://hourmere.com/docs/one-time-links) for limits and retention.
 

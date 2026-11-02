@@ -49,6 +49,7 @@ const link: scheduling.OneTimeBookingLink = {
   organizationId: full.organization.id,
   eventTypeId: randomUUID(),
   creatorUserId: full.user.id,
+  creatorDisplayName: full.user.name,
   expiresAt: null,
   prefill: { name: null, email: null },
   state: 'active',

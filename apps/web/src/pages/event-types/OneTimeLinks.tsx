@@ -35,6 +35,7 @@ export function oneTimeLinkMetadata(link: Link): Link {
     organizationId: link.organizationId,
     eventTypeId: link.eventTypeId,
     creatorUserId: link.creatorUserId,
+    creatorDisplayName: link.creatorDisplayName,
     expiresAt: link.expiresAt,
     prefill: { name: link.prefill.name, email: link.prefill.email },
     state: link.state,
@@ -410,9 +411,7 @@ function OneTimeLinkManager({ event }: { event: EventType }) {
                   <time dateTime={link.createdAt}>{formatDate(link.createdAt)}</time>
                 </dd>
                 <dt>{t('Created by')}</dt>
-                <dd>
-                  <code>{link.creatorUserId}</code>
-                </dd>
+                <dd>{link.creatorDisplayName || t('Unknown member')}</dd>
                 <dt>{t('Link expiry')}</dt>
                 <dd>
                   {link.expiresAt ? (

@@ -36,6 +36,7 @@ function link(
     organizationId: ME.organization.id,
     eventTypeId: EVENT_TYPE_ID,
     creatorUserId: ME.user.id,
+    creatorDisplayName: ME.user.name,
     expiresAt: null,
     prefill: { name: null, email: null },
     state: 'active',
@@ -102,6 +103,29 @@ describe('one-time links in the saved event editor', () => {
     ).toBe('true')
   })
 
+  it.each([
+    ['current member name', 'Grace Hopper', 'Grace Hopper'],
+    ['permitted manager email fallback', 'grace@example.test', 'grace@example.test'],
+    ['unavailable or former member', null, 'Unknown member'],
+  ] as const)(
+    'shows the safe creator label for %s without a raw user id',
+    async (_case, label, expected) => {
+      const user = userEvent.setup()
+      const creatorUserId = 'b0000000-0000-7000-8000-000000000001'
+      server({
+        [GET]: () =>
+          json(200, {
+            data: [link({ creatorUserId, creatorDisplayName: label })],
+            nextAfter: null,
+          }),
+      })
+      await open(user)
+      const attribution = await within(region()).findByText('Created by')
+      expect(attribution.nextElementSibling?.textContent).toBe(expected)
+      expect(region().textContent).not.toContain(creatorUserId)
+    },
+  )
+
   it('creates with optional prefill and exact elapsed expiry, and copies the URL only from its dialog', async () => {
     const user = userEvent.setup()
     const logs = ['log', 'warn', 'error', 'info'].map((method) =>
@@ -144,6 +168,9 @@ describe('one-time links in the saved event editor', () => {
     expect(capabilityInDom()).toBe(false)
     expect(privateDialog.isConnected).toBe(false)
     expect(document.activeElement).toBe(create())
+    expect(within(region()).getByText('Created by').nextElementSibling?.textContent).toBe(
+      ME.user.name,
+    )
     expect(within(region()).queryByRole('button', { name: 'Copy one-time link' })).toBeNull()
     expect(storage.mock.calls.some((call) => JSON.stringify(call).includes(TOKEN_MARKER))).toBe(
       false,

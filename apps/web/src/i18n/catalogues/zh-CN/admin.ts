@@ -3,6 +3,7 @@ export const admin = {
   Revoked: '已撤销',
   'Event type': '活动类型',
   'Created by': '创建者',
+  'Unknown member': '未知成员',
   'Load more': '加载更多',
   'This request already created a link, but its URL cannot be retrieved. Review the list and revoke it if needed, then start a new request.':
     '此请求已创建链接，但无法找回网址。请查看列表并按需撤销该链接，然后发起新请求。',
@@ -48,7 +49,7 @@ export const admin = {
   'Used at': '使用时间',
   'Booking reference': '预约编号',
   'Revoke link': '撤销链接',
-  'Revoke one-time link {0}': '撤销一次性链接{0}',
+  'Revoke one-time link {0}': '撤销一次性链接 {0}',
   'Revoke this one-time link? It will stop accepting new bookings.':
     '撤销此一次性链接？撤销后将不再接受新预约。',
   'Copy your one-time link': '复制你的一次性链接',

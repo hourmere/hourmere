@@ -100,6 +100,14 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
     const page = await module.listOneTimeBookingLinks(s.ctx, { eventTypeId: s.eventTypeId })
     expect(page.data).toHaveLength(1)
     expect(page.data[0]?.id).toBe(first.id)
+    const stored = await db
+      .selectFrom('one_time_booking_links')
+      .selectAll()
+      .where('id', '=', first.id)
+      .executeTakeFirstOrThrow()
+    expect(stored.token_hash === createHash('sha256').update(first.token).digest('hex')).toBe(true)
+    expect(stored.idempotency_key).toBe(input.idempotencyKey)
+    expect(stored.id[14]).toBe('7')
     safeMetadata(page, first.token)
     return { s, input, first }
   }
@@ -355,6 +363,33 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
       }),
     ).toBeNull()
   })
+  async function verifyNewestKeyedPages(module = Links) {
+    const s = await setup()
+    const created = []
+    for (let i = 0; i < 8; i++) {
+      const link = await module.createOneTimeBookingLink(s.ctx, {
+        eventTypeId: s.eventTypeId,
+        idempotencyKey: randomUUID(),
+      })
+      expect(link.id[14]).toBe('7')
+      created.push(link)
+    }
+    const data = []
+    let after: string | undefined
+    do {
+      const page = await module.listOneTimeBookingLinks(s.ctx, {
+        eventTypeId: s.eventTypeId,
+        limit: 3,
+        after,
+      })
+      data.push(...page.data)
+      after = page.nextAfter ?? undefined
+    } while (after)
+    expect(data.map((link) => link.id)).toEqual(created.toReversed().map((link) => link.id))
+  }
+  it('lists keyed UUIDv7 links newest first across every cursor page', async () => {
+    await verifyNewestKeyedPages()
+  })
   it('paginates deterministically with bounded pages and validates cursors', async () => {
     const s = await setup()
     for (let i = 0; i < 3; i++)
@@ -471,6 +506,78 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
   it('retains team-owned links when their creating admin leaves or is deleted', async () => {
     await verifyTeamOwnership()
   })
+  async function verifyCreatorDisplay(module = Links) {
+    const owner = await createTestUser(db)
+    const member = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: member, role: 'member' },
+    ])
+    const ctx = (user: typeof owner) => testContext(db, session(team.as(user)))
+    const eventTypeId = await fixtures.eventType(team.id, member.id)
+    await db
+      .updateTable('auth.user')
+      .set({ name: '  Grace  ' })
+      .where('id', '=', member.id)
+      .execute()
+    const link = await module.createOneTimeBookingLink(ctx(member), { eventTypeId })
+    expect(link.creatorDisplayName).toBe('Grace')
+    const teamEvent = await fixtures.eventType(team.id, null)
+    // A team-owned event can outlive its creator; make a manager-created link there.
+    await db.updateTable('auth.user').set({ name: '' }).where('id', '=', owner.id).execute()
+    const managed = await module.createOneTimeBookingLink(ctx(owner), { eventTypeId: teamEvent })
+    expect(managed.creatorDisplayName).toBe(owner.email)
+    for (const role of ['admin,unknown', 'admin,', 'admin,,member']) {
+      await db
+        .updateTable('auth.member')
+        .set({ role })
+        .where('organizationId', '=', team.id)
+        .where('userId', '=', owner.id)
+        .execute()
+      expect(
+        (await module.getOneTimeBookingLink(ctx(owner), { eventTypeId: teamEvent, id: managed.id }))
+          .creatorDisplayName,
+      ).toBeNull()
+    }
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'owner' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', owner.id)
+      .execute()
+    await db.updateTable('auth.user').set({ name: '' }).where('id', '=', member.id).execute()
+    const own = await module.getOneTimeBookingLink(ctx(member), { eventTypeId, id: link.id })
+    expect(own.creatorDisplayName).toBeNull()
+    const agent = testContext(db, {
+      ...team.as(owner),
+      kind: 'oauth',
+      oauthConsentId: randomUUID(),
+      clientId: 'synthetic',
+      scopes: ['mcp:tools'],
+    })
+    expect(
+      (await module.getOneTimeBookingLink(agent, { eventTypeId: teamEvent, id: managed.id }))
+        .creatorDisplayName,
+    ).toBeNull()
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', member.id)
+      .execute()
+    // Move the event to team ownership after departure to preserve management access.
+    await db
+      .updateTable('event_types')
+      .set({ owner_user_id: null })
+      .where('id', '=', eventTypeId)
+      .execute()
+    expect(
+      (await module.getOneTimeBookingLink(ctx(owner), { eventTypeId, id: link.id }))
+        .creatorDisplayName,
+    ).toBeNull()
+  }
+  it('resolves current member names and restricts email fallback to session managers', async () => {
+    await verifyCreatorDisplay()
+  })
   async function verifyUsed(module = Links) {
     const s = await setup()
     let updates = 0
@@ -545,12 +652,64 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
   }
   it('mutation: durable retry marker', async () => {
     await mutation(
-      ['const id = idempotentLinkId(ctx, input.idempotencyKey)', 'const id = undefined'],
+      ['const retry = creationRetry(ctx, input.idempotencyKey)', 'const retry = undefined'],
       verifyRetry,
     )
   })
   it('mutation: credential-bound retry marker', async () => {
-    await mutation(['        credential,\n        key,', '        key,'], verifyCredentialBinding)
+    await mutation(
+      [".where('idempotency_actor_id', '=', retry.credential)", ''],
+      verifyCredentialBinding,
+    )
+  })
+  it('mutation: keyed link IDs retain UUIDv7 ordering', async () => {
+    await mutation(
+      [
+        'idempotency_key: retry?.key ?? null,',
+        'id: sql<string>`gen_random_uuid()`,\n        idempotency_key: retry?.key ?? null,',
+      ],
+      verifyNewestKeyedPages,
+    )
+  })
+  it('mutation: keyed list remains newest first', async () => {
+    await mutation([".orderBy('id', 'desc')", ".orderBy('id', 'asc')"], verifyNewestKeyedPages)
+  })
+  it('mutation: creator names come from current members', async () => {
+    await mutation(
+      [
+        'AND membership."userId" = one_time_booking_links.creator_user_id',
+        'AND membership."userId" = one_time_booking_links.creator_user_id AND false',
+      ],
+      verifyCreatorDisplay,
+    )
+  })
+  it('mutation: ordinary members cannot receive email fallback', async () => {
+    await mutation(
+      ["AND viewer.role ~ '(^|,)\\\\s*(owner|admin)\\\\s*(,|$)'", ''],
+      verifyCreatorDisplay,
+    )
+  })
+  it('mutation: agent credentials cannot receive email fallback', async () => {
+    await mutation(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Match literal source for the mutation.
+      ["${ctx.principal.kind === 'session'} AND EXISTS", 'true AND EXISTS'],
+      verifyCreatorDisplay,
+    )
+  })
+  it('mutation: unknown creator labels never fall back to UUIDs', async () => {
+    await mutation(
+      [
+        'creatorDisplayName: row.creator_display_name ?? null,',
+        'creatorDisplayName: row.creator_display_name ?? row.creator_user_id,',
+      ],
+      verifyCreatorDisplay,
+    )
+  })
+  it('mutation: unknown role tokens cannot receive email fallback', async () => {
+    await mutation(
+      ["WHERE btrim(role.value) NOT IN ('owner', 'admin', 'member')", 'WHERE false'],
+      verifyCreatorDisplay,
+    )
   })
   it('mutation: read key scope', async () => {
     await mutation(

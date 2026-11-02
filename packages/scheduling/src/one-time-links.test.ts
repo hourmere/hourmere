@@ -1310,7 +1310,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
 
   it.each([
     ['return {\n    id: live.id,', 'return {\n    tokenHash: live.token_hash,\n    id: live.id,'],
-    ['return {\n    id: row.id,', 'return {\n    tokenHash: row.token_hash,\n    id: row.id,'],
+    ['return {\n    id: row.id,', "return {\n    tokenHash: 'unsafe digest',\n    id: row.id,"],
   ] as const)(
     'detects leaking credential digests from a metadata projection %#',
     async (from, to) => {
@@ -1319,6 +1319,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
         const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
         const hash = createHash('sha256').update(link.token).digest('hex')
         expect(JSON.stringify(link).includes(hash)).toBe(false)
+        expect(Object.hasOwn(link, 'tokenHash')).toBe(false)
         noCapability(await module.resolveOneTimeBookingLink({ db }, link.token), link.token, hash)
         noCapability(await module.revokeOneTimeBookingLink(s.ctx, link.id), link.token, hash)
       })

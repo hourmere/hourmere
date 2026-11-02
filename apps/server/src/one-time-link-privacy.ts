@@ -1,8 +1,13 @@
 import { escapeControlCharacters, redactLogDetails } from '@hourmere/auth'
 
+/** Only public booking paths carry the capability in the request URL. */
+export function isOneTimeCapabilityPath(path: string): boolean {
+  return /(?:^|\/)book(?:\/|$)/i.test(path)
+}
+
 /** Capability paths and administration include rejected attempts and malformed inputs. */
 export function isOneTimeLinkPath(path: string): boolean {
-  return /(?:^|\/)book(?:\/|$)/i.test(path) || /(?:^|\/)one-time-links(?:\/|$)/i.test(path)
+  return isOneTimeCapabilityPath(path) || /(?:^|\/)one-time-links(?:\/|$)/i.test(path)
 }
 
 /** Keep error messages and stacks useful without allowing a capability into diagnostics. */

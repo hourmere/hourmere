@@ -610,6 +610,9 @@ export interface OneTimeBookingLinks {
   event_type_id: string;
   expires_at: Timestamp | null;
   id: Generated<string>;
+  idempotency_actor_id: string | null;
+  idempotency_actor_kind: string | null;
+  idempotency_key: string | null;
   organization_id: string;
   prefill_email: string | null;
   prefill_name: string | null;
