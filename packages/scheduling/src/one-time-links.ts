@@ -12,6 +12,8 @@ import { cleanText } from './text.ts'
 export const ONE_TIME_BOOKING_LINK_LIMIT = 1000
 /** Ordinary team members share this sub-limit across all of their team event types. */
 export const ONE_TIME_BOOKING_LINK_MEMBER_LIMIT = 200
+export const ONE_TIME_LINK_ALREADY_CREATED_MESSAGE =
+  'This link was already created. Its URL was shown once and cannot be retrieved. Use the id from its creation response, or ask a manager with history access to find it; revoke it before creating a replacement with a new key.'
 
 export type OneTimeBookingLinkState = 'active' | 'used' | 'expired' | 'revoked'
 
@@ -26,6 +28,7 @@ export interface OneTimeBookingLink {
   organizationId: string
   eventTypeId: string
   creatorUserId: string
+  creatorDisplayName: string | null
   expiresAt: string | null
   prefill: OneTimeBookingLinkPrefill
   state: OneTimeBookingLinkState
@@ -38,6 +41,7 @@ export interface OneTimeBookingLink {
 
 export interface CreateOneTimeBookingLinkInput {
   eventTypeId: string
+  idempotencyKey?: string | undefined
   expiresAt?: string | null | undefined
   prefill?: { name?: string | null | undefined; email?: string | null | undefined } | undefined
 }
@@ -49,6 +53,24 @@ export type ResolvedOneTimeBookingLink = Pick<
 >
 
 type LinkRow = Selectable<Database['one_time_booking_links']>
+type MetadataRow = Pick<LinkRow, (typeof metadataColumns)[number]> & {
+  creator_display_name?: string | null
+}
+const metadataColumns = [
+  'id',
+  'organization_id',
+  'event_type_id',
+  'creator_user_id',
+  'expires_at',
+  'prefill_name',
+  'prefill_email',
+  'state',
+  'booking_id',
+  'used_at',
+  'revoked_at',
+  'created_at',
+  'updated_at',
+] as const
 const TOKEN = /^[A-Za-z0-9_-]{43}$/
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const DUMMY_HASH = createHash('sha256').update('hourmere-one-time-link-miss').digest()
@@ -62,11 +84,12 @@ export async function createOneTimeBookingLink(
   ctx: ServiceContext,
   input: CreateOneTimeBookingLinkInput,
 ): Promise<OneTimeBookingLink & { token: string }> {
-  requireFullScope(ctx)
+  requireWriteScope(ctx)
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid()
   if (!isUuid(input.eventTypeId)) throw eventNotFound()
   const expiresAt = validExpiry(input.expiresAt)
   const prefill = validPrefill(input.prefill)
+  const retry = creationRetry(ctx, input.idempotencyKey)
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, input.eventTypeId)
     await lockWriteOwner(trx, ctx)
@@ -77,6 +100,36 @@ export async function createOneTimeBookingLink(
     if (!event.is_active || event.deleted_at !== null)
       throw new DomainError('invalid', 'event_type_inactive')
     if (ctx.principal.kind === 'api_key') await requireActiveApiKey(trx, ctx.principal, Date.now)
+    if (retry !== undefined) {
+      const previous = await trx
+        .selectFrom('one_time_booking_links')
+        .select(metadataColumns)
+        .where('idempotency_key', '=', retry.key)
+        .where('idempotency_actor_kind', '=', retry.kind)
+        .where('idempotency_actor_id', '=', retry.credential)
+        .where('creator_user_id', '=', ctx.principal.user.id)
+        .where('organization_id', '=', event.organization_id)
+        .executeTakeFirst()
+      if (previous) {
+        const same =
+          previous.event_type_id === event.id &&
+          previous.creator_user_id === ctx.principal.user.id &&
+          (previous.expires_at === null ? null : timestamp(previous.expires_at)) === expiresAt &&
+          previous.prefill_name === prefill.name &&
+          previous.prefill_email === prefill.email
+        if (!same)
+          throw new DomainError(
+            'conflict',
+            'idempotency_key_reused',
+            'This Idempotency-Key was already used for a different request.',
+          )
+        throw new DomainError(
+          'conflict',
+          'one_time_link_already_created',
+          ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+        )
+      }
+    }
     if (expiresAt !== null) {
       const { future } = await trx
         .selectNoFrom(sql<boolean>`${expiresAt}::timestamptz > clock_timestamp()`.as('future'))
@@ -103,9 +156,12 @@ export async function createOneTimeBookingLink(
     if (event.memberLimited && Number(creatorCount) >= ONE_TIME_BOOKING_LINK_MEMBER_LIMIT)
       throw new DomainError('conflict', 'one_time_link_limit_reached')
     const token = randomBytes(32).toString('base64url')
-    const row = await trx
+    const inserted = await trx
       .insertInto('one_time_booking_links')
       .values({
+        idempotency_key: retry?.key ?? null,
+        idempotency_actor_kind: retry?.kind ?? null,
+        idempotency_actor_id: retry?.credential ?? null,
         organization_id: event.organization_id,
         event_type_id: event.id,
         creator_user_id: ctx.principal.user.id,
@@ -114,10 +170,145 @@ export async function createOneTimeBookingLink(
         prefill_name: prefill.name,
         prefill_email: prefill.email,
       })
-      .returningAll()
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const row = await metadataQuery(trx, ctx, event.id)
+      .where('id', '=', inserted.id)
       .executeTakeFirstOrThrow()
     return { ...toLink(row, false), token }
   })
+}
+
+/** Administrative reads never select a credential digest, even internally. */
+export async function listOneTimeBookingLinks(
+  ctx: ServiceContext,
+  input: { eventTypeId: string; limit?: number | undefined; after?: string | undefined },
+): Promise<{ data: OneTimeBookingLink[]; nextAfter: string | null }> {
+  requireReadScope(ctx)
+  const limit = input.limit ?? 50
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new DomainError('invalid', 'invalid_limit')
+  if (input.after !== undefined && !isUuid(input.after))
+    throw new DomainError('invalid', 'invalid_cursor')
+  return ctx.db.transaction().execute(async (trx) => {
+    await authorizeAdminRead(trx, ctx, input.eventTypeId)
+    const rows = await metadataQuery(trx, ctx, input.eventTypeId)
+      .$if(input.after !== undefined, (query) => query.where('id', '<', input.after as string))
+      .orderBy('id', 'desc')
+      .limit(limit + 1)
+      .execute()
+    const data = rows.slice(0, limit).map((row) => toLink(row, row.expired))
+    return { data, nextAfter: rows.length > limit ? (data.at(-1)?.id ?? null) : null }
+  })
+}
+
+export async function getOneTimeBookingLink(
+  ctx: ServiceContext,
+  input: { eventTypeId: string; id: string },
+): Promise<OneTimeBookingLink> {
+  requireReadScope(ctx)
+  return ctx.db.transaction().execute(async (trx) => {
+    await authorizeAdminRead(trx, ctx, input.eventTypeId)
+    const row = await metadataQuery(trx, ctx, input.eventTypeId)
+      .where('id', '=', isUuid(input.id) ? input.id : '00000000-0000-0000-0000-000000000000')
+      .executeTakeFirst()
+    if (!row) throw linkNotFound()
+    return toLink(row, row.expired)
+  })
+}
+
+/** An authorized terminal link reports its unchanged state; unrelated IDs stay opaque. */
+export async function revokeManagedOneTimeBookingLink(
+  ctx: ServiceContext,
+  input: { eventTypeId: string; id: string },
+): Promise<OneTimeBookingLink | null> {
+  requireWriteScope(ctx)
+  return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, input.eventTypeId)
+    await authorizeAdminRead(trx, ctx, input.eventTypeId)
+    const row = await metadataQuery(trx, ctx, input.eventTypeId)
+      .where('id', '=', isUuid(input.id) ? input.id : '00000000-0000-0000-0000-000000000000')
+      .forUpdate()
+      .executeTakeFirst()
+    if (!row) return null
+    if (row.state === 'active' && !row.expired) {
+      await trx
+        .updateTable('one_time_booking_links')
+        .set({ revoked_at: sql<Date>`clock_timestamp()`, state: 'revoked' })
+        .where('id', '=', row.id)
+        .where('state', '=', 'active')
+        .where((eb) =>
+          eb.or([
+            eb('expires_at', 'is', null),
+            eb('expires_at', '>', sql<Date>`clock_timestamp()`),
+          ]),
+        )
+        .execute()
+    }
+    const current = await metadataQuery(trx, ctx, input.eventTypeId)
+      .where('id', '=', row.id)
+      .executeTakeFirstOrThrow()
+    return toLink(current, current.expired)
+  })
+}
+
+async function authorizeAdminRead(db: Db, ctx: ServiceContext, eventTypeId: string) {
+  if (!isUuid(eventTypeId)) throw eventNotFound()
+  await lockWriteOwner(db, ctx)
+  await authorizedEvent(db, ctx, eventTypeId)
+  if (ctx.principal.kind === 'api_key') await requireActiveApiKey(db, ctx.principal, Date.now)
+}
+
+function metadataQuery(db: Db, ctx: ServiceContext, eventTypeId: string) {
+  return db
+    .selectFrom('one_time_booking_links')
+    .select(metadataColumns)
+    .select(
+      sql<string | null>`(
+      SELECT COALESCE(NULLIF(btrim(creator.name), ''),
+        CASE WHEN ${ctx.principal.kind === 'session'} AND EXISTS (
+          SELECT 1 FROM auth.member AS viewer
+          WHERE viewer."organizationId" = one_time_booking_links.organization_id
+            AND viewer."userId" = ${ctx.principal.user.id}
+            AND viewer.role ~ '(^|,)\\s*(owner|admin)\\s*(,|$)'
+            AND NOT EXISTS (
+              SELECT 1 FROM regexp_split_to_table(viewer.role, ',') AS role(value)
+              WHERE btrim(role.value) NOT IN ('owner', 'admin', 'member')
+            )
+        ) THEN creator.email ELSE NULL END)
+      FROM auth.member AS membership
+      JOIN auth."user" AS creator ON creator.id = membership."userId"
+      WHERE membership."organizationId" = one_time_booking_links.organization_id
+        AND membership."userId" = one_time_booking_links.creator_user_id
+    )`.as('creator_display_name'),
+    )
+    .select(sql<boolean>`expires_at IS NOT NULL AND expires_at <= clock_timestamp()`.as('expired'))
+    .where('event_type_id', '=', eventTypeId)
+    .where('organization_id', '=', ctx.principal.organization.id)
+}
+
+function requireReadScope(ctx: ServiceContext) {
+  if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope === 'bookings')
+    throw new ApiKeyScopeError()
+}
+
+/** Like booking retries, keep the caller-scoped key separately from the UUIDv7 ID. */
+function creationRetry(ctx: ServiceContext, key: string | undefined) {
+  if (key === undefined) return undefined
+  if (typeof key !== 'string' || !/^[\x21-\x7e]{1,255}$/.test(key))
+    throw new DomainError(
+      'invalid',
+      'invalid_idempotency_key',
+      'Idempotency-Key must be 1 to 255 printable ASCII characters.',
+    )
+  const actor = ctx.principal
+  const credential =
+    actor.kind === 'api_key'
+      ? actor.apiKeyId
+      : actor.kind === 'oauth'
+        ? actor.oauthConsentId
+        : actor.sessionId
+  return { key, kind: actor.kind, credential }
 }
 
 /** Unknown and every unusable capability have the same public result. */
@@ -143,7 +334,7 @@ export async function resolveOneTimeBookingLink(
  * Current principal, organization and API-key checks still apply to every request.
  */
 export async function revokeOneTimeBookingLink(ctx: ServiceContext, id: string): Promise<void> {
-  requireFullScope(ctx)
+  requireWriteScope(ctx)
   const candidateId = isUuid(id) ? id : '00000000-0000-0000-0000-000000000000'
   await ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
@@ -264,8 +455,8 @@ export async function claimOneTimeBookingLink(
   }
 }
 
-function requireFullScope(ctx: ServiceContext) {
-  if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full')
+function requireWriteScope(ctx: ServiceContext) {
+  if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope === 'read')
     throw new ApiKeyScopeError()
 }
 
@@ -422,12 +613,13 @@ async function lookupToken(db: Db, token: string | undefined, activePublic = fal
   return valid && matches ? row : undefined
 }
 
-function toLink(row: LinkRow, expired: boolean): OneTimeBookingLink {
+function toLink(row: MetadataRow, expired: boolean): OneTimeBookingLink {
   return {
     id: row.id,
     organizationId: row.organization_id,
     eventTypeId: row.event_type_id,
     creatorUserId: row.creator_user_id,
+    creatorDisplayName: row.creator_display_name ?? null,
     expiresAt: row.expires_at === null ? null : timestamp(row.expires_at),
     prefill: { name: row.prefill_name, email: row.prefill_email },
     state: row.state === 'active' && expired ? 'expired' : (row.state as OneTimeBookingLinkState),

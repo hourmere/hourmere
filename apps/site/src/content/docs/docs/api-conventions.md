@@ -6,6 +6,20 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## One-time link administration
+
+One-time links use the authenticated event-type subresource
+`/api/v1/event-types/{eventTypeId}/one-time-links`: POST creates, GET lists, and
+`/{id}` supports GET and DELETE. Create/revoke require `bookings` or `full` API key scope; reads
+allow `read` or `full`. Session writes use the existing expected-organization header.
+Only creation returns a booking URL. List/get and revoke contain safe metadata without
+the token or hash; revocation is idempotent and a used link stays used.
+An optional creation `Idempotency-Key` prevents a second link for the same retained
+request. There is no raw-response cache: an exact replay returns
+`409 one_time_link_already_created`, and changed input returns
+`409 idempotency_key_reused`. Read [one-time booking links](/docs/one-time-links) for
+the complete privacy, lifecycle, retention and recovery contract.
+
 ## Booking participants and team status
 
 Authenticated host booking reads may include additive `coHosts: [{ name }]` when other

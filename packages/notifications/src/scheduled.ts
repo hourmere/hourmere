@@ -24,6 +24,12 @@ import {
   sendOnce,
 } from './index.ts'
 
+/**
+ * No reminder when it would go out this soon or sooner after the booking or reschedule. Shared by
+ * the default 24-hour reminder and configured reminders, and pinned by the public docs test.
+ */
+export const REMINDER_MIN_GAP = { hours: 1 } as const
+
 export const SCHEDULED_BOOKING_EMAIL_JOB = 'scheduled-booking-email'
 export const ScheduledBookingEmailPayload = z.strictObject({ messageId: z.uuid() })
 const MAX_ATTEMPTS = 13
@@ -105,7 +111,7 @@ export async function enqueueScheduledBookingEmails(
         Temporal.Instant.compare(due, decisionNow) <= 0
           ? 'offset_not_future'
           : kind === 'reminder' &&
-              Temporal.Instant.compare(due, decisionNow.add({ minutes: 60 })) <= 0
+              Temporal.Instant.compare(due, decisionNow.add(REMINDER_MIN_GAP)) <= 0
             ? 'minimum_gap'
             : null
       const id = randomUUID()
