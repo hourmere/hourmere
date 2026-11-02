@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { parseWhole } from '../../components/forms.tsx'
-import { PROFILE as PROFILE_RULES } from '../../limits.ts'
+import { EVENT_TYPE, PROFILE as PROFILE_RULES } from '../../limits.ts'
 import * as paths from '../../paths.ts'
 import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
@@ -60,22 +60,26 @@ const suggested = form.slice(
 )
 
 describe('first-run editor production-source negative controls', () => {
-  it('detects removing the non-Latin duration fallback', () => {
-    detects(
-      suggested,
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: match production source literally
-      'slugify(title) || `${duration !== null && duration > 0 ? duration : 30}-min`',
-      'slugify(title)',
-      (code) => {
-        const suggest = copy<typeof suggestedBookingSlug>(code, 'suggestedBookingSlug', {
-          parseWhole,
-          slugify,
-        })
-        expect(suggest('初次沟通', '30')).toBe('30-min')
-        expect(suggest('لقاء', '45')).toBe('45-min')
-        expect(suggest('Intro call', '30')).toBe('intro-call')
-      },
-    )
+  it.each([
+    {
+      before:
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: match production source literally
+        '/[a-z]/.test(slug) ? slug : `${duration !== null && duration > 0 ? duration : 30}-min`',
+      after: 'slug',
+    },
+    { before: '/[a-z]/.test(slug)', after: 'Boolean(slug)' },
+  ])('detects weakening the duration fallback: $after', ({ before, after }) => {
+    detects(suggested, before, after, (code) => {
+      const suggest = copy<typeof suggestedBookingSlug>(code, 'suggestedBookingSlug', {
+        parseWhole,
+        slugify,
+      })
+      expect(suggest('初次沟通', '30')).toBe('30-min')
+      expect(suggest('30分钟咨询', '30')).toBe('30-min')
+      expect(suggest('30分钟面谈', '30')).toBe('30-min')
+      expect(suggest('لقاء', '45')).toBe('45-min')
+      expect(suggest('Intro call', '30')).toBe('intro-call')
+    })
   })
 
   it('detects dropping the fallback at the title field call site', () => {
@@ -107,17 +111,68 @@ describe('first-run editor production-source negative controls', () => {
     })
   })
 
-  it('detects removing the first-save collision retry for an automatically chosen link', async () => {
+  it.each([
+    { before: 'slugTouched ||', after: 'true ||' },
+    { before: 'slugTouched ||', after: 'slugTouched || slugify(draft.title) ||' },
+    {
+      before: 'body.slug.slice(0, EVENT_TYPE.slugMaxLength - suffix.length - 1)',
+      after: 'body.slug',
+    },
+  ])('detects losing automatic collision handling: $after', async ({ before, after }) => {
+    const start = editor.indexOf('let created: EventType')
+    const create = editor.slice(start, editor.indexOf('// Left meanwhile:', start))
+    async function assertion(code: string) {
+      for (const [title, slug] of [
+        ['30分钟咨询', '30-min'],
+        ['30分钟面谈', '30-min'],
+        ['Intro call', 'intro-call'],
+        ['a'.repeat(64), 'a'.repeat(64)],
+      ]) {
+        let calls = 0
+        const save = copy<() => Promise<{ slug: string }>>(
+          `async function save() { const body={slug:${JSON.stringify(slug)}}; const draft={title:${JSON.stringify(title)}}; const headers={}; const slugTouched=false; const setDraft=()=>{}; ${code}; return created }`,
+          'save',
+          {
+            EVENT_TYPE,
+            RequestError,
+            slugify,
+            randomHex: () => '1234abcd',
+            unwrap: (value: unknown) => value,
+            api: {
+              POST: async (_path: string, options: { body: { slug: string } }) => {
+                if (++calls === 1) throw new RequestError(409, 'slug_taken', 'Already used')
+                return options.body
+              },
+            },
+          },
+        )
+        let saved: { slug: string } | undefined
+        try {
+          saved = await save()
+        } catch {
+          // Keep the negative control's failure a real user-outcome assertion.
+        }
+        expect(saved?.slug).toBe(`${slug?.slice(0, 55)}-1234abcd`)
+        expect(calls).toBe(2)
+      }
+    }
+    await assertion(create)
+    const mutant = mutate(create, before, after)
+    await expect(assertion(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
+    await assertion(create)
+  })
+
+  it('detects replacing a hand-edited link after a collision', async () => {
     const start = editor.indexOf('let created: EventType')
     const create = editor.slice(start, editor.indexOf('// Left meanwhile:', start))
     async function assertion(code: string) {
       let calls = 0
       const save = copy<() => Promise<{ slug: string }>>(
-        `async function save() { const body={slug:'30-min'}; const draft={title:'初次沟通'}; const headers={}; const slugTouched=false; const setDraft=()=>{}; ${code}; return created }`,
+        `async function save() { const body={slug:'chosen-link'}; const headers={}; const slugTouched=true; const setDraft=()=>{}; ${code}; return created }`,
         'save',
         {
+          EVENT_TYPE,
           RequestError,
-          slugify,
           randomHex: () => '1234abcd',
           unwrap: (value: unknown) => value,
           api: {
@@ -128,18 +183,20 @@ describe('first-run editor production-source negative controls', () => {
           },
         },
       )
-      let saved: { slug: string } | undefined
+      let error: unknown
       try {
-        saved = await save()
-      } catch {
-        // Keep the negative control's failure a real user-outcome assertion.
+        await save()
+      } catch (err) {
+        error = err
       }
-      expect(saved?.slug).toBe('30-min-1234abcd')
-      expect(calls).toBe(2)
+      expect(error).toBeInstanceOf(RequestError)
+      expect(error).toMatchObject({ code: 'slug_taken' })
+      expect(calls).toBe(1)
     }
     await assertion(create)
-    const mutant = mutate(create, 'slugTouched ||', 'true ||')
-    await expect(assertion(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expect(assertion(mutate(create, 'slugTouched ||', 'false ||'))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
     await assertion(create)
   })
 

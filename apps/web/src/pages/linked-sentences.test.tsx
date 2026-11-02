@@ -157,7 +157,7 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
     expect(handle.closest('li')?.querySelector('p')?.textContent).toBe(
       language === 'en'
         ? 'Choose your display name, handle and time zone in Settings.'
-        : '在设置中填写显示名称、预约用户名和时区。',
+        : '在设置中填写显示名称、用户名和时区。',
     )
     expect(handle.getAttribute('href')).toBe('/app/settings')
     expect(handle.closest('ol')).not.toBeNull()

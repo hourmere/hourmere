@@ -497,6 +497,8 @@ describe('creating an event type', () => {
     eventTypeServer([], { 'POST /api/v1/event-types': () => response })
     await openNew()
     await user.type(field('Title'), 'Intro call')
+    await user.clear(field('Booking link'))
+    await user.type(field('Booking link'), 'chosen-link')
     await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'link')
     await user.type(field('Meeting link'), 'https://meet.example.com/ada')
     await user.click(screen.getByRole('button', { name: 'Create event type' }))

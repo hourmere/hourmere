@@ -35,42 +35,75 @@ const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
 
 // Search aliases supplement IANA identifiers; the selected value remains the IANA ID.
 const CHINESE_CITY_NAMES: Readonly<Record<string, string>> = {
+  'Africa/Accra': '阿克拉',
+  'Africa/Addis_Ababa': '亚的斯亚贝巴 亞的斯亞貝巴',
+  'Africa/Algiers': '阿尔及尔 阿爾及爾',
   'Africa/Cairo': '开罗 開羅',
+  'Africa/Casablanca': '卡萨布兰卡 卡薩布蘭卡',
   'Africa/Johannesburg': '约翰内斯堡 約翰內斯堡',
+  'Africa/Lagos': '拉各斯',
+  'Africa/Nairobi': '内罗毕 內羅畢',
+  'Africa/Tunis': '突尼斯',
   'America/Anchorage': '安克雷奇',
+  'America/Argentina/Buenos_Aires': '布宜诺斯艾利斯 布宜諾斯艾利斯',
+  'America/Bogota': '波哥大',
+  'America/Buenos_Aires': '布宜诺斯艾利斯 布宜諾斯艾利斯',
+  'America/Caracas': '加拉加斯',
   'America/Chicago': '芝加哥',
   'America/Denver': '丹佛',
+  'America/Lima': '利马 利馬',
   'America/Los_Angeles': '洛杉矶 洛杉磯',
   'America/Mexico_City': '墨西哥城',
   'America/New_York': '纽约 紐約',
   'America/Phoenix': '凤凰城 鳳凰城',
+  'America/Santiago': '圣地亚哥 聖地亞哥',
   'America/Sao_Paulo': '圣保罗 聖保羅',
   'America/Toronto': '多伦多 多倫多',
   'America/Vancouver': '温哥华 溫哥華',
+  'Asia/Almaty': '阿拉木图 阿拉木圖',
+  'Asia/Baghdad': '巴格达 巴格達',
   'Asia/Bangkok': '曼谷',
   'Asia/Calcutta': '加尔各答 加爾各答',
+  'Asia/Colombo': '科伦坡 科倫坡',
+  'Asia/Dhaka': '达卡 達卡',
   'Asia/Dubai': '迪拜 杜拜',
+  'Asia/Ho_Chi_Minh': '胡志明市 胡志明 西贡 西貢',
   'Asia/Hong_Kong': '香港',
   'Asia/Jakarta': '雅加达 雅加達',
   'Asia/Jerusalem': '耶路撒冷',
+  'Asia/Karachi': '卡拉奇',
   'Asia/Kathmandu': '加德满都 加德滿都',
   'Asia/Katmandu': '加德满都 加德滿都',
   'Asia/Kolkata': '加尔各答 加爾各答',
   'Asia/Kuala_Lumpur': '吉隆坡',
+  'Asia/Kuwait': '科威特',
+  'Asia/Macau': '澳门 澳門',
   'Asia/Manila': '马尼拉 馬尼拉',
+  'Asia/Riyadh': '利雅得',
   'Asia/Seoul': '首尔 首爾',
   'Asia/Shanghai': '上海 北京',
   'Asia/Singapore': '新加坡',
   'Asia/Taipei': '台北 臺北',
+  'Asia/Tashkent': '塔什干',
+  'Asia/Tehran': '德黑兰 德黑蘭',
   'Asia/Tokyo': '东京 東京',
+  'Asia/Urumqi': '乌鲁木齐 烏魯木齊',
+  'Asia/Yangon': '仰光',
+  'Australia/Adelaide': '阿德莱德 阿德萊德',
   'Australia/Brisbane': '布里斯班',
+  'Australia/Darwin': '达尔文 達爾文',
+  'Australia/Hobart': '霍巴特',
   'Australia/Melbourne': '墨尔本 墨爾本',
   'Australia/Perth': '珀斯',
   'Australia/Sydney': '悉尼 雪梨',
   'Europe/Amsterdam': '阿姆斯特丹',
   'Europe/Athens': '雅典',
   'Europe/Berlin': '柏林',
+  'Europe/Bratislava': '布拉迪斯拉发 布拉迪斯拉發',
   'Europe/Brussels': '布鲁塞尔 布魯塞爾',
+  'Europe/Bucharest': '布加勒斯特',
+  'Europe/Budapest': '布达佩斯 布達佩斯',
+  'Europe/Copenhagen': '哥本哈根',
   'Europe/Dublin': '都柏林',
   'Europe/Helsinki': '赫尔辛基 赫爾辛基',
   'Europe/Istanbul': '伊斯坦布尔 伊斯坦堡',
@@ -83,16 +116,38 @@ const CHINESE_CITY_NAMES: Readonly<Record<string, string>> = {
   'Europe/Oslo': '奥斯陆 奧斯陸',
   'Europe/Paris': '巴黎',
   'Europe/Prague': '布拉格',
+  'Europe/Riga': '里加',
   'Europe/Rome': '罗马 羅馬',
+  'Europe/Sofia': '索非亚 索非亞',
   'Europe/Stockholm': '斯德哥尔摩 斯德哥爾摩',
   'Europe/Vienna': '维也纳 維也納',
   'Europe/Warsaw': '华沙 華沙',
   'Europe/Zurich': '苏黎世 蘇黎世',
   'Pacific/Auckland': '奥克兰 奧克蘭',
+  'Pacific/Fiji': '斐济 斐濟',
+  'Pacific/Guam': '关岛 關島',
   'Pacific/Honolulu': '檀香山 火奴鲁鲁 火奴魯魯',
 }
 const cityNames = (id: string) =>
   CHINESE_CITY_NAMES[id] ?? CHINESE_CITY_NAMES[currentZoneId(id)] ?? ''
+
+interface ZoneSearch {
+  haystack: string
+  aliases: readonly string[]
+}
+
+function matchZones<T extends ZoneSearch>(zones: readonly T[], query: string): T[] {
+  const words = normalize(query)
+    .split(/[\s/]+/)
+    .filter(Boolean)
+  const matches = zones.filter((zone) => words.every((word) => zone.haystack.includes(word)))
+  // A city beginning with the query wins over one merely containing it: 柏林 is Berlin,
+  // not 都柏林 (Dublin). Keep substring search when no alias begins with the query.
+  return words.reduce((matches, word) => {
+    const preferred = matches.filter((zone) => zone.aliases.some((alias) => alias.startsWith(word)))
+    return preferred.length ? preferred : matches
+  }, matches)
+}
 
 /**
  * Break opportunities after each slash; the stylesheet's `overflow-wrap: anywhere` still
@@ -139,20 +194,21 @@ export function timeZoneNames(): string[] {
 }
 
 export function matchTimeZones(zones: readonly string[], query: string): string[] {
-  const words = normalize(query)
-    .split(/[\s/]+/)
-    .filter(Boolean)
-  return zones.filter((zone) =>
-    words.every((word) => normalize(`${zone} ${cityNames(zone)}`).includes(word)),
-  )
+  return matchZones(
+    zones.map((id) => ({
+      id,
+      haystack: normalize(`${id} ${cityNames(id)}`),
+      aliases: cityNames(id).split(/\s+/),
+    })),
+    query,
+  ).map((zone) => zone.id)
 }
 
-interface Zone {
+interface Zone extends ZoneSearch {
   id: string
   name: string
   offset: string
   canonical: string
-  haystack: string
 }
 
 function zoneInfo(id: string, now: number, referenceDate?: DateKey): Zone {
@@ -167,6 +223,7 @@ function zoneInfo(id: string, now: number, referenceDate?: DateKey): Zone {
     offset,
     canonical: currentZoneId(id),
     haystack: normalize(`${name} ${id} ${offset} ${cityNames(id)}`),
+    aliases: cityNames(id).split(/\s+/),
   }
 }
 
@@ -226,13 +283,7 @@ export function TimeZonePicker({
   const search = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const text = editable ? value : query
-  const words = normalize(text)
-    .split(/[\s/]+/)
-    .filter(Boolean)
-  const matches =
-    !editable || filtering
-      ? ordered.filter((zone) => words.every((word) => zone.haystack.includes(word)))
-      : ordered
+  const matches = !editable || filtering ? matchZones(ordered, text) : ordered
   const shown = editable && filtering ? matches.slice(0, MAX_SHOWN) : matches
   const optionId = (index: number) => `${id}-option-${index}`
   const current = zones.find((zone) => zone.id === value)

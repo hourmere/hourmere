@@ -391,19 +391,18 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     const id = await booking()
     await notify(id)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
+    const expiredCredentials = encryptCredential(
+      calendarEncryptionKey(TEST_CALENDAR_KEY),
+      `google:${a.user.id}:account-a`,
+      JSON.stringify({
+        accessToken: 'fake-expired',
+        refreshToken: 'fake-refresh',
+        expiresAt: NOW - 1,
+      }),
+    )
     await db
       .updateTable('calendar_connections')
-      .set({
-        credentials: encryptCredential(
-          calendarEncryptionKey(TEST_CALENDAR_KEY),
-          `google:${a.user.id}:account-a`,
-          JSON.stringify({
-            accessToken: 'fake-expired',
-            refreshToken: 'fake-refresh',
-            expiresAt: NOW - 1,
-          }),
-        ),
-      })
+      .set({ credentials: expiredCredentials })
       .where('id', '=', connectionA)
       .execute()
     const outer = new AbortController().signal
@@ -420,6 +419,12 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
       .updateTable('bookings')
       .set({ status: 'cancelled', cancelled_at: new Date(NOW) })
       .where('id', '=', id)
+      .execute()
+    // Exercise cancellation refresh even when the first refresh returned a fresh token.
+    await db
+      .updateTable('calendar_connections')
+      .set({ credentials: expiredCredentials })
+      .where('id', '=', connectionA)
       .execute()
     await writeBookingCalendar(deps, id, outer)
     const second = find.mock.calls[1]?.[3]

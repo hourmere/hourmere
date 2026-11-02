@@ -59,6 +59,8 @@ describe.each(['en', 'zh-CN'] as const)('first-run editor in %s', (language) => 
   it.each([
     ['Intro call', 'intro-call'],
     ['初次沟通', '30-min'],
+    ['30分钟咨询', '30-min'],
+    ['30分钟面谈', '30-min'],
   ])('creates a link for %s without a separate naming step', async (title, slug) => {
     chooseLanguage(language)
     const user = userEvent.setup()
@@ -124,31 +126,57 @@ describe('suggested booking links', () => {
     expect(link.value).toBe('my-call')
   })
 
-  it('retries a collision for an untouched duration link before completing the first save', async () => {
+  it.each([
+    ['30分钟咨询', '30-min'],
+    ['30分钟面谈', '30-min'],
+    ['Intro call', 'intro-call'],
+    ['a'.repeat(64), 'a'.repeat(55)],
+  ])(
+    'retries a collision for the untouched link of %s on the first save',
+    async (title, prefix) => {
+      const user = userEvent.setup()
+      let attempts = 0
+      let saved = eventType()
+      const api = server([], {
+        [CREATE]: ({ body }) => {
+          if (++attempts === 1) return json(409, { error: 'slug_taken' })
+          saved = eventType(body as Partial<EventType>)
+          return json(201, saved)
+        },
+        [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, saved),
+      })
+      renderApp('/app/event-types/new')
+      await screen.findByRole('heading', { name: 'New event type', level: 1 })
+      await user.type(screen.getByLabelText('Title', { exact: true }), title)
+      const suggested = screen.getByLabelText<HTMLInputElement>('Booking link').value
+      await user.click(screen.getByRole('button', { name: 'Create event type' }))
+      await screen.findByRole('region', { name: 'Saved event checks' })
+      const savedSlug = screen.getByLabelText<HTMLInputElement>('Booking link').value
+      expect(savedSlug).toMatch(new RegExp(`^${prefix}-[a-f0-9]{8}$`))
+      expect(savedSlug.length).toBeLessThanOrEqual(64)
+      expect(api.to(CREATE)).toHaveLength(2)
+      expect(api.to(CREATE)[0]?.body).toMatchObject({ title, slug: suggested })
+      expect(api.to(CREATE)[1]?.body).toMatchObject({ title, slug: savedSlug })
+    },
+  )
+
+  it('reports a collision for an edited link without replacing the chosen address', async () => {
     const user = userEvent.setup()
-    let attempts = 0
-    let saved = eventType()
-    const api = server([], {
-      [CREATE]: ({ body }) => {
-        if (++attempts === 1) return json(409, { error: 'slug_taken' })
-        saved = eventType(body as Partial<EventType>)
-        return json(201, saved)
-      },
-      [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, saved),
-    })
+    const api = server([], { [CREATE]: () => json(409, { error: 'slug_taken' }) })
     renderApp('/app/event-types/new')
     await screen.findByRole('heading', { name: 'New event type', level: 1 })
-    await user.type(screen.getByLabelText('Title', { exact: true }), '初次沟通')
+    await user.type(screen.getByLabelText('Title', { exact: true }), '30分钟咨询')
+    const link = screen.getByLabelText<HTMLInputElement>('Booking link')
+    await user.clear(link)
+    await user.type(link, 'chosen-link')
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
-    await screen.findByRole('region', { name: 'Saved event checks' })
-    expect(screen.getByLabelText<HTMLInputElement>('Booking link').value).toMatch(
-      /^30-min-[a-f0-9]{8}$/,
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Another of your event types already uses this link. Choose another.',
     )
-    expect(api.to(CREATE)).toHaveLength(2)
-    expect(api.to(CREATE)[0]?.body).toMatchObject({ slug: '30-min' })
-    expect(api.to(CREATE)[1]?.body).toMatchObject({
-      slug: expect.stringMatching(/^30-min-[a-f0-9]{8}$/),
-    })
+    expect(link.value).toBe('chosen-link')
+    expect(link.getAttribute('aria-invalid')).toBe('true')
+    expect(api.to(CREATE)).toHaveLength(1)
+    expect(api.to(CREATE)[0]?.body).toMatchObject({ slug: 'chosen-link' })
   })
 
   it('keeps the typed address descriptive without a live region on each keystroke', async () => {

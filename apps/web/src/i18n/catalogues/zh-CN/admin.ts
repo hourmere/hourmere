@@ -71,7 +71,7 @@ export const admin = {
     '按自己的节奏完成这些步骤。设置过程中仍可继续使用应用。',
   'Your display name and booking address are set.': '你的显示名称和预约地址已设置。',
   'Choose your display name, handle and time zone in Settings.':
-    '在设置中填写显示名称、预约用户名和时区。',
+    '在设置中填写显示名称、用户名和时区。',
   'Without a display name, your booking page, emails and calendar invitations show your handle instead.':
     '如果未填写显示名称，预约页面、邮件和日历邀请将显示你的用户名。',
   'Complete your profile': '完善个人资料',

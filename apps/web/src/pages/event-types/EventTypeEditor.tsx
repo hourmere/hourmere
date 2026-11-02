@@ -253,16 +253,12 @@ function EventTypeForm({
         try {
           created = await unwrap(api.POST('/api/v1/event-types', { body, headers }))
         } catch (error) {
-          // An automatically suggested non-Latin link should not require a separate
-          // naming step when another event already uses the same duration.
-          if (
-            slugTouched ||
-            slugify(draft.title) ||
-            !(error instanceof RequestError) ||
-            error.code !== 'slug_taken'
-          )
+          // An automatically suggested link should not require a separate naming step
+          // when another event already uses it. Preserve links edited by hand.
+          if (slugTouched || !(error instanceof RequestError) || error.code !== 'slug_taken')
             throw error
-          const slug = `${body.slug}-${randomHex(4)}`
+          const suffix = randomHex(4)
+          const slug = `${body.slug.slice(0, EVENT_TYPE.slugMaxLength - suffix.length - 1).replace(/-+$/, '')}-${suffix}`
           setDraft((current) => ({ ...current, slug }))
           created = await unwrap(
             api.POST('/api/v1/event-types', { body: { ...body, slug }, headers }),
