@@ -246,8 +246,13 @@ export function createFixtures(db: Db) {
         minimum_notice_minutes: o.minimumNoticeMinutes ?? 0,
         booking_window_days: o.bookingWindowDays ?? null,
         max_bookings_per_day: o.maxBookingsPerDay ?? null,
-        max_bookings_per_week: o.maxBookingsPerWeek ?? null,
-        max_bookings_per_month: o.maxBookingsPerMonth ?? null,
+        // Historical upgrade tests also use this fixture before these columns exist.
+        ...(o.maxBookingsPerWeek !== undefined && {
+          max_bookings_per_week: o.maxBookingsPerWeek,
+        }),
+        ...(o.maxBookingsPerMonth !== undefined && {
+          max_bookings_per_month: o.maxBookingsPerMonth,
+        }),
         location: o.location ? JSON.stringify(o.location) : null,
         questions: JSON.stringify(o.questions ?? []),
         is_active: o.isActive ?? true,
