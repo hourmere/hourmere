@@ -26,7 +26,7 @@ import {
   waitlistRecipientHash,
 } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
-import { scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
+import { cleanupWaitlistSignals, scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const instant = (value: string) => Temporal.Instant.from(value)
@@ -65,10 +65,11 @@ function sourceCopy(
   const bindings = { sql, ...availability, ...waitlist }
   return new Function(
     ...Object.keys(bindings),
-    `${source}; return ${file === 'waitlist-discovery' ? '{ scanWaitlistEvent, scanWaitlists }' : '{ attributeWaitlistBooking }'}`,
+    `${source}; return ${file === 'waitlist-discovery' ? '{ cleanupWaitlistSignals, scanWaitlistEvent, scanWaitlists }' : '{ attributeWaitlistBooking }'}`,
   )(...Object.values(bindings)) as {
     scanWaitlistEvent: typeof scanWaitlistEvent
     scanWaitlists: typeof scanWaitlists
+    cleanupWaitlistSignals: typeof cleanupWaitlistSignals
     attributeWaitlistBooking: typeof attributeWaitlistBooking
   }
 }
@@ -86,6 +87,24 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     f = createFixtures(db)
     ctx = { db, secret: SECRET, publicUrl: 'https://booking.example.test', now: () => NOW }
     publicCtx = { db, waitlistSecret: SECRET, now: () => NOW }
+    // Discovery uses historical/DST clocks. Give only this fixture's trigger the
+    // same per-event clock, so real wall time cannot expire its synthetic entries.
+    // The signal-lock and migration suites exercise the unchanged real-now guard.
+    await testDb.pool.query(`CREATE TABLE waitlist_test_clock (
+      event_type_id uuid PRIMARY KEY, at timestamptz NOT NULL
+    )`)
+    const signal = readFileSync('packages/db/migrations/0051_waitlist.sql', 'utf8').match(
+      /CREATE FUNCTION dirty_waitlist_event\(target uuid\) RETURNS void[\s\S]*?\$\$;/,
+    )?.[0]
+    expect(signal).toContain('AND w.expires_at>now()')
+    await testDb.pool.query(
+      (signal as string)
+        .replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION')
+        .replace(
+          'AND w.expires_at>now()',
+          'AND w.expires_at>(SELECT at FROM waitlist_test_clock WHERE event_type_id=target)',
+        ),
+    )
     await db
       .transaction()
       .execute((trx) => ensureWaitlistKey(trx, SECRET, new Date(NOW.epochMilliseconds)))
@@ -140,6 +159,10 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       expiry?: string
     } = {},
   ) {
+    await testDb.pool.query(
+      'INSERT INTO waitlist_test_clock(event_type_id,at) VALUES($1,$2) ON CONFLICT(event_type_id) DO UPDATE SET at=excluded.at',
+      [s.eventTypeId, new Date(s.now.epochMilliseconds)],
+    )
     const email = options.email ?? `${randomUUID()}@example.test`
     const start = options.start ?? START
     const end = options.end ?? END
@@ -395,7 +418,7 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await entry(s)
     if (large)
       await testDb.pool.query(
-        `INSERT INTO waitlist_scan_work(event_type_id,dirty_generation) VALUES($1,9007199254740991)
+        `INSERT INTO waitlist_scan_work(event_type_id,dirty_generation) VALUES($1,9007199254740992)
           ON CONFLICT(event_type_id) DO UPDATE SET dirty_generation=excluded.dirty_generation`,
         [s.eventTypeId],
       )
@@ -507,7 +530,10 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     SERIALIZED,
     async () => {
       const copy = sourceCopy('waitlist-discovery', [
-        ['||\n      (await hasSignals(trx, eventTypeId))', '||\n      false'],
+        [
+          '||\n      (await hasSignals(trx, eventTypeId, snapshot.signalSnapshot))',
+          '||\n      false',
+        ],
       ])
       await expect(verifySignalRevalidation(copy.scanWaitlistEvent)).rejects.toMatchObject({
         name: 'AssertionError',
@@ -522,19 +548,30 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       s.eventTypeId,
     ])
     await testDb.pool.query(
-      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,1001)',
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
       [s.eventTypeId],
     )
-    expect(await scan(s.ctx, s.eventTypeId), 'a backlog must drain in bounded passes').toBe(0)
-    expect(await candidates(s.eventTypeId)).toHaveLength(0)
+    expect(
+      await scan(s.ctx, s.eventTypeId),
+      'an existing backlog must not postpone discovery',
+    ).toBe(1)
+    expect(await candidates(s.eventTypeId)).toHaveLength(1)
     expect(
       (
         await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
           s.eventTypeId,
         ])
       ).rows,
-    ).toHaveLength(1)
-    expect(await scan(s.ctx, s.eventTypeId)).toBe(1)
+    ).toHaveLength(1501)
+    expect(await scan(s.ctx, s.eventTypeId)).toBe(0)
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows,
+    ).toHaveLength(501)
+    expect(await scan(s.ctx, s.eventTypeId)).toBe(0)
     expect(
       (
         await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
@@ -544,9 +581,13 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     ).toHaveLength(0)
   }
 
-  it('consumes at most 1000 signals per event pass before publishing', SERIALIZED, async () => {
-    await verifyBoundedConsumption()
-  })
+  it(
+    'publishes with a backlog while consuming at most 1000 signals per event pass',
+    SERIALIZED,
+    async () => {
+      await verifyBoundedConsumption()
+    },
+  )
 
   it('detects source-copy removal of the signal consumption bound', SERIALIZED, async () => {
     const copy = sourceCopy('waitlist-discovery', [
@@ -559,6 +600,118 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       name: 'AssertionError',
     })
   })
+
+  it(
+    'detects source-copy postponement of discovery behind an existing backlog',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          'const signalSnapshot =',
+          `if ((await sql<{ pending: boolean }>
+          \`SELECT EXISTS(SELECT FROM waitlist_scan_signals WHERE event_type_id=\${eventTypeId}) AS pending\`
+          .execute(trx)).rows[0]?.pending) return undefined
+        const signalSnapshot =`,
+        ],
+      ])
+      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
+  it(
+    'detects source-copy rejection of already observed signals during publication',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          `AND writer_xid>=pg_snapshot_xmin(\${snapshot}::pg_snapshot)
+        AND NOT pg_visible_in_snapshot(writer_xid,\${snapshot}::pg_snapshot)`,
+          '',
+        ],
+      ])
+      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
+  async function verifyOlderSignalDuringComputation(scan = scanWaitlistEvent) {
+    const s = await setup()
+    await entry(s)
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
+      [s.eventTypeId],
+    )
+    const late = await testDb.pool.connect()
+    const signalId = '00000000-0000-7000-8000-000000000002'
+    const pause = pausedAvailability()
+    let pending: Promise<number> | undefined
+    try {
+      // The top-level transaction predates the snapshot, and the tuple itself is
+      // inserted in a savepoint. Neither UUID order nor a snapshot xmax detects it.
+      await late.query('BEGIN')
+      await late.query('SELECT pg_current_xact_id()')
+      await late.query('SAVEPOINT before_signal')
+      await late.query('INSERT INTO waitlist_scan_signals(id,event_type_id) VALUES($1,$2)', [
+        signalId,
+        s.eventTypeId,
+      ])
+      await late.query('RELEASE SAVEPOINT before_signal')
+      // Commit a newer transaction so the late writer is strictly below xmax,
+      // rather than depending on unrelated concurrent activity to advance it.
+      await testDb.pool.query('SELECT pg_current_xact_id()')
+      pending = scan({ ...s.ctx, db: pause.db }, s.eventTypeId)
+      pending.catch(() => {})
+      await pause.started
+      await late.query('COMMIT')
+    } finally {
+      pause.release()
+      await late.query('ROLLBACK')
+      late.release()
+    }
+    expect(await pending, 'an older transaction committing during computation invalidates it').toBe(
+      0,
+    )
+    expect(await candidates(s.eventTypeId)).toHaveLength(0)
+    const signals = (
+      await testDb.pool.query<{ id: string }>(
+        'SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1',
+        [s.eventTypeId],
+      )
+    ).rows
+    expect(signals).toHaveLength(1502)
+    expect(signals.map((signal) => signal.id)).toContain(signalId)
+    expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(1)
+  }
+
+  it(
+    'rejects an older savepoint signal committed during computation despite an existing backlog',
+    SERIALIZED,
+    async () => {
+      await verifyOlderSignalDuringComputation()
+    },
+  )
+
+  it(
+    'detects source-copy reliance on snapshot xmax for older in-progress writers',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          `AND writer_xid>=pg_snapshot_xmin(\${snapshot}::pg_snapshot)
+        AND NOT pg_visible_in_snapshot(writer_xid,\${snapshot}::pg_snapshot)`,
+          `AND writer_xid>=pg_snapshot_xmax(\${snapshot}::pg_snapshot)`,
+        ],
+      ])
+      await expect(
+        verifyOlderSignalDuringComputation(copy.scanWaitlistEvent),
+      ).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
 
   async function verifyLateSignal(scan = scanWaitlists) {
     const s = await setup()
@@ -634,17 +787,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await testDb.pool.query('DELETE FROM waitlist_scan_signals')
     const orphan = randomUUID()
     await testDb.pool.query(
-      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,1001)',
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
       [orphan],
     )
-    await scan(ctx, { limit: 1 })
-    expect(
-      (
-        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
-          orphan,
-        ])
-      ).rows,
-    ).toHaveLength(1)
     await scan(ctx, { limit: 1 })
     expect(
       (
@@ -659,6 +804,11 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await testDb.pool.query('UPDATE event_types SET waitlist_enabled=false WHERE id=$1', [
       disabled.eventTypeId,
     ])
+    // These represent records committed before the event lost its recipients.
+    await testDb.pool.query('INSERT INTO waitlist_scan_signals(event_type_id) VALUES($1),($2)', [
+      empty.eventTypeId,
+      disabled.eventTypeId,
+    ])
     await scan(ctx, { limit: 1 })
     expect(
       (
@@ -671,12 +821,58 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
   }
 
   it(
-    'clears orphaned, disabled and empty-event signals in bounded minute batches',
+    'clears more than one batch of orphaned, disabled and empty-event signals in one scan',
     SERIALIZED,
     async () => {
       await verifyIrrelevantCleanup()
     },
   )
+
+  async function verifyCleanupBudget(cleanup = cleanupWaitlistSignals) {
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    const orphan = randomUUID()
+    const active = await setup()
+    await entry(active)
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
+      [orphan],
+    )
+    await testDb.pool.query('INSERT INTO waitlist_scan_signals(event_type_id) VALUES($1)', [
+      active.eventTypeId,
+    ])
+    // Expire the synthetic run budget after exactly one committed DELETE batch;
+    // wall-clock speed and the number of clock reads cannot affect this assertion.
+    let clock = 0
+    const deletes = new Set<unknown>()
+    const timedDb = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        if (JSON.stringify(node).includes('DELETE FROM waitlist_scan_signals')) deletes.add(queryId)
+        return node
+      },
+      async transformResult({ queryId, result }) {
+        if (deletes.delete(queryId)) clock = 5000
+        return result
+      },
+    })
+    expect(await cleanup({ ...ctx, db: timedDb }, { timeBudgetMs: 5000, now: () => clock })).toBe(
+      1000,
+    )
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          orphan,
+        ])
+      ).rows,
+    ).toHaveLength(1501)
+    expect(await cleanup(ctx)).toBe(1501)
+    expect(
+      (await testDb.pool.query('SELECT event_type_id FROM waitlist_scan_signals')).rows,
+    ).toEqual([{ event_type_id: active.eventTypeId }])
+  }
+
+  it('limits each cleanup batch and yields when its run budget expires', SERIALIZED, async () => {
+    await verifyCleanupBudget()
+  })
 
   it('detects source-copy removal of irrelevant-signal cleanup bounds', SERIALIZED, async () => {
     const copy = sourceCopy('waitlist-discovery', [
@@ -685,10 +881,130 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         'ORDER BY s.id FOR UPDATE OF s SKIP LOCKED',
       ],
     ])
-    await expect(verifyIrrelevantCleanup(copy.scanWaitlists)).rejects.toMatchObject({
+    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
       name: 'AssertionError',
     })
   })
+
+  it('detects source-copy cleanup limited to one batch per run', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [['if (count < SIGNAL_LIMIT) break', 'break']])
+    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it('detects source-copy removal of the cleanup run budget', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      ['if (remaining <= 0) break', 'if (false) break'],
+    ])
+    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  async function verifyCleanupStatementTimeout(cleanup = cleanupWaitlistSignals) {
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    const orphan = randomUUID()
+    await testDb.pool.query('INSERT INTO waitlist_scan_signals(event_type_id) VALUES($1)', [orphan])
+    const holder = await testDb.pool.connect()
+    const observer = await testDb.pool.connect()
+    let pending: Promise<void> | undefined
+    let settled = false
+    let outcome: { value: number } | { error: unknown } | undefined
+    try {
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+        .rows[0]?.pid
+      await holder.query('BEGIN')
+      // SKIP LOCKED skips row locks; an owned-fixture relation lock still blocks
+      // the real DELETE, so the statement budget must interrupt this batch.
+      await holder.query('LOCK TABLE waitlist_scan_signals IN ACCESS EXCLUSIVE MODE')
+      pending = cleanup(ctx, { timeBudgetMs: 100 }).then(
+        (value) => {
+          outcome = { value }
+          settled = true
+        },
+        (error: unknown) => {
+          outcome = { error }
+          settled = true
+        },
+      )
+      await expect
+        .poll(
+          async () => {
+            const { rows } = await observer.query<{ blocked: boolean }>(
+              `SELECT EXISTS(SELECT FROM pg_stat_activity a
+                WHERE a.datname=current_database() AND $1=ANY(pg_blocking_pids(a.pid))
+                  AND a.query LIKE '%WITH discarded AS (%') AS blocked`,
+              [holderPid],
+            )
+            // A short statement timeout can finish before the observation query;
+            // either state proves the cleanup has reached this held lock.
+            return rows[0]?.blocked || settled
+          },
+          { interval: 5, timeout: 2000 },
+        )
+        .toBe(true)
+      await expect.poll(() => settled, { interval: 5, timeout: 2000 }).toBe(true)
+      expect(outcome, 'the timed-out batch must yield while its blocker is still held').toEqual({
+        value: 0,
+      })
+    } finally {
+      // Always release the blocker before awaiting a mutated cleanup with its
+      // statement timeout removed, so a failed assertion cannot leak a query.
+      await holder.query('ROLLBACK')
+      holder.release()
+      observer.release()
+      await pending
+    }
+    expect(await cleanupWaitlistSignals(ctx), 'the next run retries the rolled-back batch').toBe(1)
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          orphan,
+        ])
+      ).rows,
+    ).toHaveLength(0)
+  }
+
+  it(
+    'interrupts a blocked cleanup batch and retries its rolled-back signals next run',
+    SERIALIZED,
+    async () => {
+      await verifyCleanupStatementTimeout()
+    },
+  )
+
+  it('detects source-copy removal of the cleanup statement timeout', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      [
+        `await sql\`SELECT set_config('statement_timeout',\${String(remaining)},true)\`.execute(trx)`,
+        '',
+      ],
+    ])
+    await expect(verifyCleanupStatementTimeout(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it('detects source-copy propagation of cleanup statement timeouts', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      ["if ((error as { code?: string }).code === '57014') break", ''],
+    ])
+    await expect(verifyCleanupStatementTimeout(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it(
+    'detects source-copy omission of irrelevant-signal cleanup from the scan sweep',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [['await cleanupWaitlistSignals(ctx)', '']])
+      await expect(verifyIrrelevantCleanup(copy.scanWaitlists)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
 
   it(
     'detects source-copy reuse of entries removed during availability computation',

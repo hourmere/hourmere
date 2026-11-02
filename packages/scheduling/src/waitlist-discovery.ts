@@ -73,10 +73,12 @@ async function consumeSignals(db: Db, eventTypeId: string, at: Date) {
     WHERE event_type_id=${eventTypeId} AND EXISTS(SELECT FROM consumed)`.execute(db)
 }
 
-async function hasSignals(db: Db, eventTypeId: string) {
+async function hasSignals(db: Db, eventTypeId: string, snapshot: string) {
   return (
     await sql<{ pending: boolean }>`SELECT EXISTS(
       SELECT FROM waitlist_scan_signals WHERE event_type_id=${eventTypeId}
+        AND writer_xid>=pg_snapshot_xmin(${snapshot}::pg_snapshot)
+        AND NOT pg_visible_in_snapshot(writer_xid,${snapshot}::pg_snapshot)
     ) AS pending`.execute(db)
   ).rows[0]?.pending
 }
@@ -98,14 +100,19 @@ export async function scanWaitlistEvent(
       WHERE event_type_id=${eventTypeId} FOR UPDATE`.execute(trx)
     const at = await waitlistNow(trx, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
     await consumeSignals(trx, eventTypeId, at)
-    // A large backlog is consumed in bounded passes before computing availability.
-    if (await hasSignals(trx, eventTypeId)) return undefined
+    // Existing backlog predates the availability reads and must not starve them.
+    // Keep a transaction snapshot, not an ID/time watermark: an older writer can
+    // commit during computation, including from a savepoint, and must invalidate it.
+    const signalSnapshot = (
+      await sql<{ snapshot: string }>`SELECT pg_current_snapshot()::text AS snapshot`.execute(trx)
+    ).rows[0]?.snapshot
+    if (!signalSnapshot) return undefined
     const work = (
       await sql<Work>`SELECT dirty_generation,cursor_start_at FROM waitlist_scan_work
         WHERE event_type_id=${eventTypeId}`.execute(trx)
     ).rows[0]
     if (!work) return undefined
-    return { event, work, at, entries: await readEntries(trx, eventTypeId, at) }
+    return { event, work, at, signalSnapshot, entries: await readEntries(trx, eventTypeId, at) }
   })
   if (!snapshot) return 0
   const { event: observedEvent, work: observedWork } = snapshot
@@ -172,7 +179,7 @@ export async function scanWaitlistEvent(
       !work ||
       String(work.dirty_generation) !== String(observedWork.dirty_generation) ||
       work.cursor_start_at?.getTime() !== observedWork.cursor_start_at?.getTime() ||
-      (await hasSignals(trx, eventTypeId))
+      (await hasSignals(trx, eventTypeId, snapshot.signalSnapshot))
     )
       return 0
     const beforeEntries = await waitlistNow(
@@ -290,6 +297,50 @@ async function finishScan(
     next_due_at=${new Date(at.getTime() + 60_000)} WHERE event_type_id=${eventTypeId}`.execute(db)
 }
 
+/** Drain irrelevant signals in short batches, yielding to event scans after five seconds. */
+export async function cleanupWaitlistSignals(
+  ctx: WaitlistContext,
+  options: { timeBudgetMs?: number; now?: () => number } = {},
+) {
+  const now = options.now ?? (() => performance.now())
+  const deadline = now() + Math.max(0, Math.min(5000, options.timeBudgetMs ?? 5000))
+  let removed = 0
+  while (true) {
+    const remaining = Math.floor(deadline - now())
+    if (remaining <= 0) break
+    let count: number
+    try {
+      count = await ctx.db.transaction().execute(async (trx) => {
+        // Bound the current batch as well as the number of batches begun. A timeout
+        // rolls back only this batch; committed progress survives for the next run.
+        await sql`SELECT set_config('statement_timeout',${String(remaining)},true)`.execute(trx)
+        const at = await waitlistNow(
+          trx,
+          ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
+        )
+        const { rows } = await sql<{ count: number }>`WITH discarded AS (
+          DELETE FROM waitlist_scan_signals WHERE id IN (
+            SELECT s.id FROM waitlist_scan_signals s
+            WHERE NOT EXISTS(SELECT FROM event_types et
+              WHERE et.id=s.event_type_id AND et.waitlist_enabled AND et.is_active
+                AND et.deleted_at IS NULL AND EXISTS(SELECT FROM waitlist_entries e
+                  WHERE e.event_type_id=et.id AND e.status IN ('active','notified')
+                    AND e.verified_at IS NOT NULL AND e.expires_at>${at}))
+            ORDER BY s.id LIMIT ${SIGNAL_LIMIT} FOR UPDATE OF s SKIP LOCKED
+          ) RETURNING id
+        ) SELECT count(*)::int AS count FROM discarded`.execute(trx)
+        return rows[0]?.count ?? 0
+      })
+    } catch (error) {
+      if ((error as { code?: string }).code === '57014') break
+      throw error
+    }
+    removed += count
+    if (count < SIGNAL_LIMIT) break
+  }
+  return removed
+}
+
 /** Fair restart/minute recovery also discovers entries whose dirty job was lost. */
 export async function scanWaitlists(ctx: WaitlistContext, options: { limit?: number } = {}) {
   const limit = Math.max(1, Math.min(100, Math.trunc(options.limit ?? 20)))
@@ -299,23 +350,13 @@ export async function scanWaitlists(ctx: WaitlistContext, options: { limit?: num
       trx,
       ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
     )
-    // Signals have no event FK and can outlive deletion or a last recipient. Drain
-    // irrelevant records too, so disabled/empty events need no scan to clear them.
-    await sql`DELETE FROM waitlist_scan_signals WHERE id IN (
-      SELECT s.id FROM waitlist_scan_signals s
-      WHERE NOT EXISTS(SELECT FROM event_types et
-        WHERE et.id=s.event_type_id AND et.waitlist_enabled AND et.is_active
-          AND et.deleted_at IS NULL AND EXISTS(SELECT FROM waitlist_entries e
-            WHERE e.event_type_id=et.id AND e.status IN ('active','notified')
-              AND e.expires_at>${recoveredAt}))
-      ORDER BY s.id LIMIT ${SIGNAL_LIMIT} FOR UPDATE OF s SKIP LOCKED
-    )`.execute(trx)
     await sql`INSERT INTO waitlist_scan_work(event_type_id,next_due_at)
       SELECT DISTINCT e.event_type_id,${recoveredAt}::timestamptz FROM waitlist_entries e
       JOIN event_types et ON et.id=e.event_type_id
       WHERE et.waitlist_enabled AND e.status IN ('active','notified')
       ON CONFLICT DO NOTHING`.execute(trx)
   })
+  await cleanupWaitlistSignals(ctx)
   const at = await waitlistNow(ctx.db, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
   const now = Temporal.Instant.fromEpochMilliseconds(at.getTime())
   const events = (

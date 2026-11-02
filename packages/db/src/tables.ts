@@ -734,6 +734,7 @@ export interface WaitlistKeyState {
 export interface WaitlistScanSignals {
   event_type_id: string;
   id: Generated<string>;
+  writer_xid: Generated<string>;
 }
 
 export interface WaitlistScanWork {

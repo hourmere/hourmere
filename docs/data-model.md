@@ -861,7 +861,9 @@ is sampled again after waiting for that fence; no host advisory lock is taken.
 
 Transactional triggers append `waitlist_scan_signals` for shared-host changes to bookings,
 event rules, schedules, overrides, profiles and cached calendars. Signals have independent
-UUIDs, no event foreign key and no unique event key. Availability writers never update
+UUIDs, no event foreign key and no unique event key. An indexed, non-locking existence
+check limits writes to events with unexpired verified active/notified entries; the
+periodic sweep covers newly verified entries. Availability writers never update
 shared waitlist work rows, so unrelated bookings sharing hosts do not wait on one another
 because of waitlist signaling. Signals commit or roll back with the availability mutation.
 Startup/minute maintenance scans committed ordinary availability only, in bounded seven-day
@@ -870,11 +872,16 @@ snapshot consumes at most 1,000 committed signals by exact ID and advances the w
 `bigint` generation. It never uses UUID order as a commit watermark: older IDs that commit
 later remain pending. Scans compute availability outside row locks, then publish under a
 short accounting-key → event share → work → entry lock sequence, revalidating the generation,
-page cursor and absence of pending signals and rereading live recipients. Publication
-acquires no host, booking or calendar locks. A committed signal visible at publication
-validation discards the computed page; signals that commit later remain pending for the
-next scan. Bounded cleanup removes signals for deleted or disabled events and events
-without live recipients.
+page cursor and newly committed signals and rereading live recipients. Each signal stores
+its writer's top-level `xid8`; a PostgreSQL transaction snapshot captured before computation
+distinguishes existing backlog from transactions that commit during computation, including
+older UUIDs and savepoint writes. Existing backlog never prevents an event's computation;
+consumption remains bounded to 1,000 per pass. Publication acquires no host, booking or
+calendar locks. A newly committed signal visible at publication validation discards the
+computed page; signals that commit later remain pending for the next scan. Cleanup removes
+signals for deleted or disabled events and events without live recipients in separate
+1,000-row transactions until caught up or its five-second run budget expires. Each batch's
+statement timeout uses the remaining budget; completed batches remain committed.
 Every eligible verified recipient in a pass enters the same cohort. Each immutable candidate
 contains at most three full matching UTC intervals and expires at the earliest of discovery
 plus twenty-four hours, entry expiry or the first slot's current notice cutoff. There is no

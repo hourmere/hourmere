@@ -468,6 +468,12 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
       `UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=(SELECT owner_user_id FROM event_types WHERE id=$1)`,
       [entry.event_type_id],
     )
+    expect(await scanSignals(pool, entry.event_type_id)).toEqual(before)
+    await update(`status='active',verified_at=now()`)
+    await pool.query(
+      `UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=(SELECT owner_user_id FROM event_types WHERE id=$1)`,
+      [entry.event_type_id],
+    )
     expect((await scanSignals(pool, entry.event_type_id)).length).toBeGreaterThan(before.length)
   } else if (guard === 'append-only signal records') {
     await expect(
@@ -691,6 +697,17 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
         `UPDATE booking_hosts SET period=period WHERE user_id=$1`,
         `UPDATE event_type_hosts SET schedule_id=schedule_id WHERE user_id=$1`,
       ]
+      // Pending enrollment cannot receive candidates, so none of these writers
+      // should create scan work until mailbox verification makes it active.
+      for (const sql of sources) {
+        const before = await scanSignals(pool, entry.event_type_id)
+        await pool.query(sql, [host])
+        expect(await scanSignals(pool, entry.event_type_id), sql).toEqual(before)
+      }
+      await pool.query(
+        "UPDATE waitlist_entries SET status='active',verified_at=now() WHERE id=$1",
+        [entry.id],
+      )
       for (const sql of sources) {
         const before = await scanSignals(pool, entry.event_type_id)
         await pool.query(sql, [host])
@@ -701,7 +718,7 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
       expect(await records(pool, workTables)).toEqual(workBefore)
       expect(
         (await pool.query('SELECT status FROM waitlist_entries WHERE id=$1', [entry.id])).rows,
-      ).toEqual([{ status: 'pending_verification' }])
+      ).toEqual([{ status: 'active' }])
       const before = await scanSignals(pool, entry.event_type_id)
       const transaction = await pool.connect()
       try {

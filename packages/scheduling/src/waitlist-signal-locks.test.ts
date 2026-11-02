@@ -1,12 +1,13 @@
 // Drive the real bookings -> sync_booking_hosts -> waitlist signal cascade.
 // Test-only gates pause each writer after its first host, so success is based on
 // observed PostgreSQL locks rather than how quickly concurrent queries happen to run.
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createFixtures } from './testing.ts'
+import { createFixtures, type Fixtures } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const GATE = 1752658797
@@ -22,10 +23,11 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
   let hostIds: string[]
   let eventIds: string[]
   let bookingIds: string[]
+  let f: Fixtures
 
   beforeAll(async () => {
     testDb = await createTestDatabase(serverUrl as string, undefined, { tag: 'waitlist_signal' })
-    const f = createFixtures(createDb(testDb.pool))
+    f = createFixtures(createDb(testDb.pool))
     const hosts = await Promise.all([f.host(), f.host()])
     const owner = required(hosts[0])
     hostIds = hosts.map((host) => host.userId).sort()
@@ -33,6 +35,7 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
     for (const host of hosts) {
       const eventId = await f.eventType(host.organizationId, host.userId)
       await testDb.pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [eventId])
+      await entry(host.organizationId, eventId, 'active')
       eventIds.push(eventId)
     }
     bookingIds = [
@@ -60,6 +63,92 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
   afterAll(async () => {
     await testDb?.drop()
   })
+
+  type EntryStatus =
+    | 'pending_verification'
+    | 'active'
+    | 'notified'
+    | 'removed'
+    | 'expired'
+    | 'booked'
+
+  async function entry(
+    organizationId: string,
+    eventId: string,
+    status: EntryStatus,
+    expired = false,
+  ) {
+    // Relative database times keep trigger expiry checks meaningful regardless of
+    // the real clock; the immutable preference deadline equals enrollment expiry.
+    await testDb.pool.query(
+      `INSERT INTO waitlist_entries
+        (organization_id,event_type_id,recipient_hash,email,window_start,window_end,
+         time_zone,locale,consent_version,consented_at,status,created_at,expires_at,
+         pending_expires_at,verified_at,terminal_at)
+       SELECT $1,$2,$3,'waitlisted@example.test',created + interval '1 hour',expires,
+         'UTC','en-US','waitlist-v1',created,$4,created,expires,
+         least(created + interval '24 hours',expires),
+         CASE WHEN $4='pending_verification' THEN NULL ELSE created END,
+         CASE WHEN $4 IN ('removed','expired','booked') THEN now() END
+       FROM (SELECT now() - CASE WHEN $5 THEN interval '72 hours' ELSE interval '0 hours' END AS created,
+         now() + CASE WHEN $5 THEN interval '-24 hours' ELSE interval '48 hours' END AS expires) fixture`,
+      [organizationId, eventId, randomBytes(32), status, expired],
+    )
+  }
+
+  async function assertBookingSignals(
+    status?: EntryStatus,
+    { expired = false, enabled = true }: { expired?: boolean; enabled?: boolean } = {},
+  ) {
+    const host = await f.host()
+    const eventId = await f.eventType(host.organizationId, host.userId)
+    if (enabled)
+      await testDb.pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [eventId])
+    if (status) await entry(host.organizationId, eventId, status, expired)
+    const bookingId = await f.booking(
+      host.organizationId,
+      [host.userId],
+      '2026-11-02T08:00Z',
+      '2026-11-02T08:30Z',
+      { eventTypeId: eventId },
+    )
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals WHERE event_type_id=$1', [eventId])
+    await testDb.pool.query('UPDATE bookings SET start_at=start_at WHERE id=$1', [bookingId])
+    const { rows } = await testDb.pool.query<{ count: number }>(
+      'SELECT count(*)::integer AS count FROM waitlist_scan_signals WHERE event_type_id=$1',
+      [eventId],
+    )
+    const count = required(rows[0]).count
+    if (enabled && !expired && (status === 'active' || status === 'notified')) {
+      expect(count, 'bookings with verified live recipients must signal the event').toBeGreaterThan(
+        0,
+      )
+    } else {
+      expect(count, 'bookings without verified live recipients must not write signals').toBe(0)
+    }
+  }
+
+  it.each([undefined, 'pending_verification', 'removed', 'expired', 'booked'] as const)(
+    'writes no booking signal when recipient state is %s',
+    async (status) => {
+      await assertBookingSignals(status)
+    },
+  )
+
+  it('writes no booking signal for expired active recipients', async () => {
+    await assertBookingSignals('active', { expired: true })
+  })
+
+  it('writes no booking signal for an event without an enabled waitlist', async () => {
+    await assertBookingSignals('active', { enabled: false })
+  })
+
+  it.each(['active', 'notified'] as const)(
+    'writes booking signals for verified live %s recipients',
+    async (status) => {
+      await assertBookingSignals(status)
+    },
+  )
 
   async function writer(client: pg.PoolClient, bookingId: string) {
     try {
@@ -177,7 +266,7 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
     },
   )
 
-  async function assertScannerDoesNotBlock() {
+  async function assertScannerDoesNotBlock(lock: 'work' | 'entries' = 'work') {
     // Check an actual scanner row lock as well: booking progress must not depend
     // on scanner transaction length, even during the short publication phase.
     await testDb.pool.query(
@@ -191,7 +280,9 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
     try {
       await scanner.query('BEGIN')
       await scanner.query(
-        'SELECT event_type_id FROM waitlist_scan_work WHERE event_type_id=ANY($1) FOR UPDATE',
+        lock === 'work'
+          ? 'SELECT event_type_id FROM waitlist_scan_work WHERE event_type_id=ANY($1) FOR UPDATE'
+          : 'SELECT id FROM waitlist_entries WHERE event_type_id=ANY($1) FOR UPDATE',
         [eventIds],
       )
       const clients = [scanner, left, right]
@@ -228,8 +319,8 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
           { timeout: 4000, interval: 1 },
         )
         .toBe(true)
-      expect(blockedByScanner, 'booking must not wait for scanner work row').toBe(false)
-      expect(completed, 'both bookings commit while scanner still owns its work row').toEqual([
+      expect(blockedByScanner, `booking must not wait for scanner ${lock} row`).toBe(false)
+      expect(completed, `both bookings commit while scanner still owns its ${lock} rows`).toEqual([
         true,
         true,
       ])
@@ -246,7 +337,14 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
     await assertScannerDoesNotBlock()
   })
 
-  async function withBlockingSignalMutation(assertion: () => Promise<void>) {
+  it('commits both booking updates while a scanner holds their recipient rows', async () => {
+    await assertScannerDoesNotBlock('entries')
+  })
+
+  async function withSignalMutation(
+    change: (original: string) => string,
+    assertion: () => Promise<void>,
+  ) {
     const migration = readFileSync('packages/db/migrations/0051_waitlist.sql', 'utf8')
     const source = migration.match(
       /CREATE FUNCTION dirty_waitlist_event\(target uuid\) RETURNS void[\s\S]*?\$\$;/,
@@ -254,16 +352,7 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
     expect(source, 'mutation must copy the migration function').toBeTruthy()
     expect(source).toContain('INSERT INTO waitlist_scan_signals')
     const original = required(source).replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION')
-    const mutant = original.replace(
-      /AS \$\$[\s\S]*?\$\$;/,
-      () => `AS $$
-      INSERT INTO waitlist_scan_work(event_type_id)
-        SELECT id FROM event_types WHERE id=target AND waitlist_enabled
-      ON CONFLICT (event_type_id) DO UPDATE SET
-        dirty_generation=waitlist_scan_work.dirty_generation+1,
-        next_due_at=least(waitlist_scan_work.next_due_at,now()),updated_at=now();
-    $$;`,
-    )
+    const mutant = change(original)
     expect(mutant).not.toBe(original)
     // Only replace the function inside this owned fixture. The source files and
     // real trigger wiring stay intact, and the original function is restored.
@@ -274,6 +363,73 @@ describe.skipIf(!serverUrl)('non-blocking waitlist booking signals', { timeout: 
       await testDb.pool.query(original)
     }
   }
+
+  async function withBlockingSignalMutation(assertion: () => Promise<void>) {
+    await withSignalMutation(
+      (original) =>
+        original.replace(
+          /AS \$\$[\s\S]*?\$\$;/,
+          () => `AS $$
+      INSERT INTO waitlist_scan_work(event_type_id)
+        SELECT id FROM event_types WHERE id=target AND waitlist_enabled
+      ON CONFLICT (event_type_id) DO UPDATE SET
+        dirty_generation=waitlist_scan_work.dirty_generation+1,
+        next_due_at=least(waitlist_scan_work.next_due_at,now()),updated_at=now();
+    $$;`,
+        ),
+      assertion,
+    )
+  }
+
+  it.each([undefined, 'pending_verification', 'removed', 'expired', 'booked'] as const)(
+    'kills the unguarded signal source-copy mutation when recipient state is %s',
+    async (status) => {
+      await withSignalMutation(
+        (original) => original.replace(/AND EXISTS \([\s\S]*?\)\s*;/, ';'),
+        async () => {
+          await expect(assertBookingSignals(status)).rejects.toThrow(
+            'bookings without verified live recipients must not write signals',
+          )
+        },
+      )
+    },
+  )
+
+  it('kills the source-copy mutation that signals for expired active recipients', async () => {
+    await withSignalMutation(
+      (original) => original.replace('AND w.expires_at>now()', ''),
+      async () => {
+        await expect(assertBookingSignals('active', { expired: true })).rejects.toThrow(
+          'bookings without verified live recipients must not write signals',
+        )
+      },
+    )
+  })
+
+  it.each(['active', 'notified'] as const)(
+    'kills the source-copy mutation that drops signals for %s recipients',
+    async (status) => {
+      await withSignalMutation(
+        (original) => original.replace('AND w.expires_at>now()', 'AND false'),
+        async () => {
+          await expect(assertBookingSignals(status)).rejects.toThrow(
+            'bookings with verified live recipients must signal the event',
+          )
+        },
+      )
+    },
+  )
+
+  it('kills the source-copy mutation that locks recipient rows during booking signals', async () => {
+    await withSignalMutation(
+      (original) => original.replace('AND w.expires_at>now()', 'AND w.expires_at>now() FOR SHARE'),
+      async () => {
+        await expect(assertScannerDoesNotBlock('entries')).rejects.toThrow(
+          'booking must not wait for scanner entries row',
+        )
+      },
+    )
+  })
 
   it.each(['reversed', 'sorted'] as const)(
     'kills the blocking signal source-copy mutation with %s host row order',

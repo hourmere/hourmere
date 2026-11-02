@@ -49,6 +49,8 @@ CREATE INDEX waitlist_entries_pending_expiry ON waitlist_entries(pending_expires
   WHERE status='pending_verification';
 CREATE INDEX waitlist_entries_terminal ON waitlist_entries(terminal_at,id)
   WHERE terminal_at IS NOT NULL;
+CREATE INDEX waitlist_entries_signal ON waitlist_entries(event_type_id,expires_at)
+  WHERE status IN ('active','notified') AND verified_at IS NOT NULL;
 
 CREATE TABLE waitlist_capabilities (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -127,9 +129,11 @@ CREATE INDEX waitlist_scan_work_due ON waitlist_scan_work(next_due_at,event_type
 -- even an event deletion or a scanner holding work cannot stall a booking writer.
 CREATE TABLE waitlist_scan_signals (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
-  event_type_id uuid NOT NULL
+  event_type_id uuid NOT NULL,
+  writer_xid xid8 NOT NULL DEFAULT pg_current_xact_id()
 );
 CREATE INDEX waitlist_scan_signals_event ON waitlist_scan_signals(event_type_id,id);
+CREATE INDEX waitlist_scan_signals_writer ON waitlist_scan_signals(event_type_id,writer_xid);
 
 CREATE TABLE waitlist_slots (
   event_type_id uuid NOT NULL REFERENCES event_types(id) ON DELETE CASCADE,
@@ -285,7 +289,14 @@ CREATE TRIGGER waitlist_entries_retire_work AFTER UPDATE OF status ON waitlist_e
 CREATE FUNCTION dirty_waitlist_event(target uuid) RETURNS void
 LANGUAGE sql SET search_path = public, pg_temp AS $$
   INSERT INTO waitlist_scan_signals(event_type_id)
-    SELECT id FROM event_types WHERE id=target AND waitlist_enabled;
+    SELECT id FROM event_types WHERE id=target AND waitlist_enabled
+    -- MVCC reads use the small live-entry index without taking recipient locks:
+    -- ordinary bookings must never wait for verification, removal or a scanner.
+    AND EXISTS (
+      SELECT FROM waitlist_entries w WHERE w.event_type_id=target
+        AND w.status IN ('active','notified') AND w.verified_at IS NOT NULL
+        AND w.expires_at>now()
+    );
 $$;
 CREATE FUNCTION dirty_waitlist_host(target uuid) RETURNS void
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
