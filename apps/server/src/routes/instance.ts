@@ -20,6 +20,10 @@ const Instance = z
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
+    embedAllowedOrigins: z.array(z.url()).max(32).optional().openapi({
+      description:
+        'Exact website origins approved for embedding; empty when disabled, absent when unknown',
+    }),
     signIn: z
       .object({
         email: z.boolean().openapi({ description: 'Sign-in links sent by email' }),
@@ -34,6 +38,7 @@ const Instance = z
  * What this instance offers, for clients deciding what to show before anyone signs in (the
  * web app's sign-in buttons). Public and the same for every caller; it never carries
  * secrets; the public hosted sign-up destination is safe to share.
+ * Approved embed origins are public policy, also observable in embed framing headers.
  */
 export function instanceRoutes({
   publicUrl,
@@ -41,6 +46,7 @@ export function instanceRoutes({
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
+  embedAllowedOrigins,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -52,6 +58,8 @@ export function instanceRoutes({
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
+  /** Normalized EMBED_ALLOWED_ORIGINS; undefined preserves unknown capability readiness. */
+  embedAllowedOrigins?: readonly string[]
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -64,6 +72,7 @@ export function instanceRoutes({
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     followUpHostNotesEnabled,
+    ...(embedAllowedOrigins !== undefined && { embedAllowedOrigins: [...embedAllowedOrigins] }),
     signIn: {
       email: true,
       google: socialProviders.google !== undefined,

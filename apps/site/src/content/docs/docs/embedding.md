@@ -39,6 +39,25 @@ fall back to a style element inside the shadow root; that fallback needs the par
 to permit those inline styles. Prefer a browser with constructable stylesheet support when
 the parent uses a strict policy.
 
+## Copy from the editor
+
+In **Event types**, save the event type, then choose **Embed** in its **View and share**
+panel or its row's **More actions** menu. Choose an inline widget or popup button and copy
+the generated code into your website. The code uses the instance's `PUBLIC_URL` and the
+saved booking address; save address changes before copying again. If clipboard access is
+unavailable, select the code and copy it manually.
+
+The dialog shows the allowed website origins when the instance configuration is available.
+If embedding is disabled, ask the instance operator to set `EMBED_ALLOWED_ORIGINS` using
+the example above and restart the web process. You can still copy the code while waiting
+for that configuration. A loading or unavailable configuration does not confirm whether
+embedding is enabled. The dialog does not load the booking widget inside the admin page;
+test the copied code on an allowed website.
+
+Hidden event types can be embedded through their saved address without appearing in a
+public listing. Inactive event types offer no embed code until they are enabled. One-time
+booking links cannot be embedded; use the event type's reusable public address.
+
 ## Inline
 
 ```html

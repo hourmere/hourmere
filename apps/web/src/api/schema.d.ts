@@ -4304,6 +4304,8 @@ export interface components {
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
+            /** @description Exact website origins approved for embedding; empty when disabled, absent when unknown */
+            embedAllowedOrigins?: string[];
             /** @description Whether hosts may add plain-text notes to follow-up emails */
             followUpHostNotesEnabled?: boolean;
             /**

@@ -22,6 +22,7 @@ const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx'
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
 const share = readFileSync('apps/web/src/pages/event-types/SavedEventShare.tsx', 'utf8')
 const shareFunction = share.slice(share.indexOf('export function SavedEventShare('))
+const EmptyEmbedAction = () => null
 
 /** Only in-memory copies are mutated; the production files stay intact. */
 function copy<T>(source: string, exported: string, dependencies: Record<string, unknown> = {}): T {
@@ -268,6 +269,7 @@ describe('first-run editor production-source negative controls', () => {
   ])('detects a lost no-schedule repair: $expected', ({ before, after, expected }) => {
     detects(shareFunction, before, after, (code) => {
       const Share = copy<typeof SavedEventShare>(code, 'SavedEventShare', {
+        EventEmbedAction: EmptyEmbedAction,
         ...paths,
         useEffect,
         useRef,

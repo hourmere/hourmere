@@ -1,5 +1,35 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Enter button text so visitors can identify the button.':
+    'Enter button text so visitors can identify the button.',
+  Embed: 'Embed',
+  'More actions': 'More actions',
+  'More actions for {0}': 'More actions for {0}',
+  'Embed {0}': 'Embed {0}',
+  'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
+    'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.',
+  'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:':
+    'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:',
+  'Allowed website origins': 'Allowed website origins',
+  'Loading instance settings…': 'Loading instance settings…',
+  'This event type is inactive. Enable it and save before generating embed code.':
+    'This event type is inactive. Enable it and save before generating embed code.',
+  'Complete the saved event setup before generating embed code.':
+    'Complete the saved event setup before generating embed code.',
+  'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.':
+    'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.',
+  'Embed mode': 'Embed mode',
+  Inline: 'Inline',
+  'Popup button': 'Popup button',
+  'Initial height (pixels)': 'Initial height (pixels)',
+  'Use a whole number from 240 to 2000. The widget resizes automatically.':
+    'Use a whole number from 240 to 2000. The widget resizes automatically.',
+  'Button text': 'Button text',
+  'Embed code': 'Embed code',
+  'Copy embed code': 'Copy embed code',
+  'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
+  'Book a meeting': 'Book a meeting',
   'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
     'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.',
   'Reminders and follow-ups': 'Reminders and follow-ups',

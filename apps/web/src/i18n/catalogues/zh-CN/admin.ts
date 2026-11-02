@@ -1,5 +1,35 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Enter button text so visitors can identify the button.':
+    '请输入按钮文字，以便访客了解按钮的用途。',
+  Embed: '嵌入',
+  'More actions': '更多操作',
+  'More actions for {0}': '{0} 的更多操作',
+  'Embed {0}': '嵌入 {0}',
+  'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
+    '暂时无法获取嵌入配置。请联系实例运维人员确认允许的网站来源。',
+  'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:':
+    '嵌入功能已停用。实例运维人员需要设置 EMBED_ALLOWED_ORIGINS 并重启网页服务。例如：',
+  'Allowed website origins': '允许的网站来源',
+  'Loading instance settings…': '正在加载实例设置……',
+  'This event type is inactive. Enable it and save before generating embed code.':
+    '此活动类型已停用。请先启用并保存，再生成嵌入代码。',
+  'Complete the saved event setup before generating embed code.':
+    '请先完善已保存活动的设置，再生成嵌入代码。',
+  'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.':
+    '此活动类型未公开列出，但仍可嵌入。任何获得代码或直接链接的人都可以预约。',
+  'Embed mode': '嵌入方式',
+  Inline: '内嵌',
+  'Popup button': '弹窗按钮',
+  'Initial height (pixels)': '初始高度（像素）',
+  'Use a whole number from 240 to 2000. The widget resizes automatically.':
+    '请输入 240 到 2000 之间的整数。嵌入组件会自动调整高度。',
+  'Button text': '按钮文字',
+  'Embed code': '嵌入代码',
+  'Copy embed code': '复制嵌入代码',
+  'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    '公开预约地址暂时无法用于嵌入。请联系实例运维人员检查 PUBLIC_URL。',
+  'Book a meeting': '预约会议',
   'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
     '请在会议开始前于 Hourmere 中取消预约。会议开始后，受邀人无法停止会后消息。',
   'Reminders and follow-ups': '提醒与会后消息',

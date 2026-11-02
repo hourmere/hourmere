@@ -13,7 +13,7 @@ const appWith = (
   hostedSignupUrl?: string,
   options: Pick<
     Parameters<typeof instanceRoutes>[0],
-    'privacyPolicyUrl' | 'termsUrl' | 'followUpHostNotesEnabled'
+    'privacyPolicyUrl' | 'termsUrl' | 'followUpHostNotesEnabled' | 'embedAllowedOrigins'
   > = {},
 ) =>
   createApp({
@@ -211,6 +211,81 @@ describe('GET /api/v1/instance', () => {
     await verifyHostNoteCapability()
   })
 
+  async function verifyPublicEmbedCapability(
+    embedAllowedOrigins: readonly string[] | undefined,
+    factory: typeof instanceRoutes = instanceRoutes,
+  ) {
+    const app = createApp({
+      checkDb: async () => {},
+      publicUrl,
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      routes: [factory({ publicUrl, socialProviders: {}, embedAllowedOrigins })],
+    })
+    for (const headers of [{}, { authorization: 'Bearer hm_unknown' }]) {
+      const response = await app.request('/api/v1/instance', { headers })
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      if (embedAllowedOrigins === undefined) expect(body).not.toHaveProperty('embedAllowedOrigins')
+      else expect(body).toHaveProperty('embedAllowedOrigins', embedAllowedOrigins)
+    }
+  }
+
+  it.each([
+    ['unknown', undefined],
+    ['disabled', []],
+    ['configured', ['https://www.example.com', 'http://localhost:4173']],
+  ] as const)(
+    'publishes %s embed readiness without requiring authentication',
+    async (_, origins) => {
+      await verifyPublicEmbedCapability(origins)
+    },
+  )
+
+  async function verifyEmbedCapabilityWiring(factory: typeof productRoutes = productRoutes) {
+    const databaseUrl = 'postgres://instance-test@127.0.0.1:9/instance-test'
+    const db = createDb(createPool(databaseUrl))
+    try {
+      for (const configured of [
+        undefined,
+        '',
+        'https://WWW.example.com:443, https://blog.example.com',
+      ]) {
+        const config = loadConfig({
+          DATABASE_URL: databaseUrl,
+          BETTER_AUTH_SECRET: 'instance-route-test-secret-at-least-32-characters',
+          PUBLIC_URL: publicUrl,
+          EMBED_ALLOWED_ORIGINS: configured,
+        })
+        const app = createApp({
+          checkDb: async () => {},
+          publicUrl,
+          authHandler: async () => new Response(null, { status: 404 }),
+          resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+          routes: factory({
+            db,
+            publicUrl,
+            socialProviders: {},
+            embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
+            invitationMailLimits: { secret: 'instance-route-test-mail-secret' },
+          }),
+        })
+        const response = await app.request('/api/v1/instance')
+        expect(response.status).toBe(200)
+        expect(await response.json()).toHaveProperty(
+          'embedAllowedOrigins',
+          configured ? ['https://www.example.com', 'https://blog.example.com'] : [],
+        )
+      }
+    } finally {
+      await db.destroy()
+    }
+  }
+
+  it('publishes normalized embed origins through server route composition', async () => {
+    await verifyEmbedCapabilityWiring()
+  })
+
   async function sourceCopy<T>(file: string, replacement?: [string, string]): Promise<T> {
     const location = new URL(file, import.meta.url)
     let source = readFileSync(location, 'utf8')
@@ -251,11 +326,55 @@ describe('GET /api/v1/instance', () => {
 
   it('detects a public response that hides the disabled host-note switch', async () => {
     const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
-      '    followUpHostNotesEnabled,\n    signIn:',
-      '    followUpHostNotesEnabled: true,\n    signIn:',
+      '    followUpHostNotesEnabled,\n',
+      '    followUpHostNotesEnabled: true,\n',
     ])
     await expect(verifyPublicHostNoteCapability(false, copy.instanceRoutes)).rejects.toMatchObject({
       name: 'AssertionError',
+    })
+  })
+
+  it('passes embed readiness assertions with unmodified isolated source copies', async () => {
+    const publicCopy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts')
+    await verifyPublicEmbedCapability(undefined, publicCopy.instanceRoutes)
+    await verifyPublicEmbedCapability([], publicCopy.instanceRoutes)
+    await verifyPublicEmbedCapability(['https://www.example.com'], publicCopy.instanceRoutes)
+    const serverCopy = await sourceCopy<typeof import('../server.ts')>('../server.ts')
+    await verifyEmbedCapabilityWiring(serverCopy.productRoutes)
+  })
+
+  it('detects classifying unknown embed readiness as disabled', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      '  embedAllowedOrigins,\n',
+      '  embedAllowedOrigins = [],\n',
+    ])
+    await expect(verifyPublicEmbedCapability(undefined, copy.instanceRoutes)).rejects.toMatchObject(
+      {
+        name: 'AssertionError',
+        message: expect.stringContaining('embedAllowedOrigins'),
+      },
+    )
+  })
+
+  it('detects hiding known disabled embed readiness', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      '...(embedAllowedOrigins !== undefined && { embedAllowedOrigins: [...embedAllowedOrigins] })',
+      '...(embedAllowedOrigins?.length && { embedAllowedOrigins: [...embedAllowedOrigins] })',
+    ])
+    await expect(verifyPublicEmbedCapability([], copy.instanceRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('embedAllowedOrigins'),
+    })
+  })
+
+  it('detects removing configured embed origins from product route wiring', async () => {
+    const copy = await sourceCopy<typeof import('../server.ts')>('../server.ts', [
+      '      hostedSignupUrl,\n      embedAllowedOrigins,\n',
+      '      hostedSignupUrl,\n',
+    ])
+    await expect(verifyEmbedCapabilityWiring(copy.productRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('embedAllowedOrigins'),
     })
   })
 
@@ -287,5 +406,13 @@ describe('GET /api/v1/instance', () => {
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     })
     expect(instance?.required).not.toContain('followUpHostNotesEnabled')
+    expect(instance?.properties).toHaveProperty('embedAllowedOrigins', {
+      type: 'array',
+      items: { type: 'string', format: 'uri' },
+      maxItems: 32,
+      description:
+        'Exact website origins approved for embedding; empty when disabled, absent when unknown',
+    })
+    expect(instance?.required).not.toContain('embedAllowedOrigins')
   })
 })

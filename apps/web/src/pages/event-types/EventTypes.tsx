@@ -28,6 +28,7 @@ import {
 import { type Me, useMe } from '../../session.tsx'
 import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
+import { EventEmbedAction } from './EventEmbedAction.tsx'
 import { teamReadinessBlocksSharing, useEventReadiness } from './event-readiness.ts'
 import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
 
@@ -334,6 +335,17 @@ function EventTypeTable({
                   >
                     {t('Edit')}
                   </Link>
+                  <EventEmbedAction
+                    inMenu
+                    event={{ ...e, isActive }}
+                    bookingPath={
+                      e.schedulingType === 'round_robin' && !roundRobinActive
+                        ? null
+                        : url
+                          ? new URL(url).pathname
+                          : null
+                    }
+                  />
                 </td>
               </tr>
             )
