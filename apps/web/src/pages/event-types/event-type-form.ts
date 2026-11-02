@@ -425,7 +425,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     slug: draft.slug.trim(),
     description: draft.description.trim() || null,
     durationMinutes: whole(draft.durationMinutes) as number,
-    allowedDurationsMinutes: [...draft.allowedDurationsMinutes],
+    ...(draft.allowedDurationsMinutes.length > 1 && {
+      allowedDurationsMinutes: [...draft.allowedDurationsMinutes],
+    }),
     slotStepMinutes: whole(draft.slotStepMinutes),
     bufferBeforeMinutes: whole(draft.bufferBeforeMinutes) as number,
     bufferAfterMinutes: whole(draft.bufferAfterMinutes) as number,
@@ -451,6 +453,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // Preserve a concurrent API edit when this session did not change the offered lengths.
+  if (draft.allowedDurationsMinutes.join() === baseline.allowedDurationsMinutes.join())
+    delete body.allowedDurationsMinutes
+  else body.allowedDurationsMinutes = draft.allowedDurationsMinutes.slice()
   const sameHosts =
     draft.schedulingType === baseline.schedulingType &&
     [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()

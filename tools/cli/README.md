@@ -94,8 +94,9 @@ the retained request and idempotency key; **rescheduling is not idempotent**.
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.
-`durationMinutes` is the default; `allowedDurationsMinutes` is the complete ordered list
-of 1–12 distinct whole-minute lengths from 1 to 1440, including that default.
+`durationMinutes` is the default; `allowedDurationsMinutes` is the complete list
+of 1–12 distinct whole-minute lengths from 1 to 1440, kept in ascending order and including
+that default. Supplied lengths are sorted before storage.
 For example, save `{ "slug": "intro", "title": "Introduction", "durationMinutes": 30,
 "allowedDurationsMinutes": [15, 30, 60] }` to a request file and run
 `hourmere create-event --input event-request.json`. Updates use a flat object with `id`

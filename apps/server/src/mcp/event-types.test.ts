@@ -113,7 +113,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
     slug: `lengths-${randomUUID()}`,
     title: 'Choose a meeting length',
     durationMinutes: 30,
-    allowedDurationsMinutes: [15, 30, 60],
+    allowedDurationsMinutes: [60, 30, 15],
   })
   const notifications = {
     reminders: [],
@@ -163,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
       await s.call('update_event_type', {
         id: created.id,
         durationMinutes: 60,
-        allowedDurationsMinutes: [30, 60, 90],
+        allowedDurationsMinutes: [90, 60, 30],
       }),
     )
     expect(updated).toHaveProperty('notifications', notifications)
@@ -227,7 +227,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
       await s.call('update_event_type', {
         id: created.id,
         durationMinutes: 60,
-        allowedDurationsMinutes: [30, 60, 90],
+        allowedDurationsMinutes: [90, 60, 30],
       }),
     )
     expect(updated).toMatchObject({ durationMinutes: 60, allowedDurationsMinutes: [30, 60, 90] })
@@ -380,10 +380,17 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
     const updated = await cli('update-event', {
       id: created.data.id,
       durationMinutes: 90,
-      allowedDurationsMinutes: [30, 90],
+      allowedDurationsMinutes: [90, 30],
     })
     expect(updated.code).toBe(0)
     expect(updated.data).toMatchObject({ durationMinutes: 90, allowedDurationsMinutes: [30, 90] })
+    expect(
+      await db
+        .selectFrom('event_types')
+        .select('allowed_durations_minutes')
+        .where('id', '=', created.data.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ allowed_durations_minutes: [30, 90] })
     const invalid = await cli('update-event', {
       id: created.data.id,
       allowedDurationsMinutes: [30],

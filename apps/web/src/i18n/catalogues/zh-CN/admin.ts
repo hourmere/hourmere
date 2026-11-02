@@ -2,7 +2,7 @@
 export const admin = {
   'Allowed durations': '可选时长',
   'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
-    '提供 1–12 种不同时长，每种为 1–1,440 分钟。受邀人先选择时长，再选择时间。',
+    '提供 1–12 种不同时长，每种为 1–1440 分钟。受邀人先选择时长，再选择时间。',
   'Offered lengths': '已提供的时长',
   'Keep at least one length. Removing the default selects the first remaining length.':
     '请保留至少一种时长。移除默认时长后，将使用剩余的第一种时长作为默认值。',

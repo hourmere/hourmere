@@ -112,8 +112,9 @@ scoped keys as full access. Use the supported backup/restore procedure for rollb
 
 MCP `create_event_type` and `update_event_type` configure event types with the same
 validation and permissions as REST. API keys need `full` scope, not `bookings` or `read`.
-`durationMinutes` is the default; `allowedDurationsMinutes` is an ordered list of 1–12
-distinct whole-minute lengths from 1 to 1440 inclusive and must include the default.
+`durationMinutes` is the default; `allowedDurationsMinutes` is a list of 1–12
+distinct whole-minute lengths from 1 to 1440 inclusive, kept in ascending order, and must
+include the default. Supplied lengths are sorted before storage.
 Creation requires `slug`, `title` and `durationMinutes`; omitting the list creates
 `[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,

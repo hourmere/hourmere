@@ -157,8 +157,8 @@ with a `full` API key; MCP OAuth grants do not authenticate REST requests.
 ## Configure meeting lengths
 
 Use `create_event_type` with `slug`, `title` and `durationMinutes`; optionally supply
-`allowedDurationsMinutes`, the ordered list of 1–12 distinct whole-minute lengths from
-1 to 1440 inclusive. The list must include `durationMinutes`, the default. Omitting the
+`allowedDurationsMinutes`, the list of 1–12 distinct whole-minute lengths from
+1 to 1440 inclusive, kept in ascending order. Supplied lengths are sorted before storage. The list must include `durationMinutes`, the default. Omitting the
 list creates `[durationMinutes]`. For example:
 
 ```json

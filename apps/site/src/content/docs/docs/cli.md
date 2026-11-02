@@ -152,7 +152,8 @@ distinguishes a reschedule, while `rescheduledFromId` points back to the predece
 
 `create-event` and `update-event` require a `full` API key and keep the same organization,
 role and ownership checks as REST. Their JSON fields are `durationMinutes` for the default
-and `allowedDurationsMinutes` for the complete ordered list. Offer 1–12 distinct lengths,
+and `allowedDurationsMinutes` for the complete list, kept in ascending order. Supplied lengths are sorted before storage.
+Offer 1–12 distinct lengths,
 each 1–1440 whole minutes, and include the default. The `--duration-minutes` option is for
 slot, booking and reschedule selection; use JSON for event-type configuration.
 

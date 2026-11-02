@@ -193,7 +193,7 @@ const fields = {
   durationMinutes: rule('durationMinutes', 'Default length of a meeting'),
   allowedDurationsMinutes: z.array(rule('durationMinutes', 'Permitted meeting length')).openapi({
     description:
-      'Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes]',
+      'Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes]',
     minItems: 1,
     maxItems: MAX_ALLOWED_DURATIONS,
     uniqueItems: true,

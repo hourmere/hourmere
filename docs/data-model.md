@@ -322,9 +322,11 @@ introduced here.
 ## Event duration contract
 
 `event_types.duration_minutes` remains the default (`durationMinutes` in service and
-REST configuration). `allowed_durations_minutes` / `allowedDurationsMinutes` is an ordered
-list of 1–12 distinct whole-minute lengths, each from 1 to 1440 inclusive, and must include
-the default. Migration 0047 backfills each existing event type to `[duration_minutes]`
+REST configuration). `allowed_durations_minutes` / `allowedDurationsMinutes` is a list of
+1–12 distinct whole-minute lengths kept in ascending order, each from 1 to 1440 inclusive,
+and must include the default. REST, MCP and CLI writes are sorted before storage by the
+shared service; existing unsorted lists are displayed in ascending order and normalized on
+their next configuration save. Migration 0047 backfills each existing event type to `[duration_minutes]`
 without changing existing configuration, bookings or timestamps. Legacy inserts that omit
 the list and duration-only edits of singleton types retain singleton behavior. Editing a
 multi-duration default requires it to remain in the list, or a replacement list in the

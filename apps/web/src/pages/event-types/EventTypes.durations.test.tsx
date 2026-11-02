@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -25,6 +25,7 @@ const words = {
     range: 'Enter a number from 1 to 1,440.',
     whole: 'Enter a whole number.',
     count: 'Offer from 1 to 12 durations.',
+    hint: 'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.',
   },
   'zh-CN': {
     title: '标题',
@@ -42,6 +43,7 @@ const words = {
     range: '请输入 1 至 1,440 之间的数字。',
     whole: '请输入整数。',
     count: '请提供 1–12 种时长。',
+    hint: '提供 1–12 种不同时长，每种为 1–1440 分钟。受邀人先选择时长，再选择时间。',
   },
 }
 
@@ -173,12 +175,45 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
     })
   })
 
+  it.each([{ initial: [30] }, { initial: [15, 30, 60] }])(
+    'preserves a concurrently changed offered list when editing only the title (baseline $initial)',
+    async ({ initial }) => {
+      chooseLanguage(language)
+      const copy = words[language]
+      let saved = eventType({ allowedDurationsMinutes: initial })
+      const api = fakeApi({
+        ...signedInAs(ME),
+        ...profile(),
+        'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
+        [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, saved),
+        [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: ({ body }) => {
+          saved = { ...saved, ...(body as Partial<EventType>) }
+          return json(200, saved)
+        },
+      })
+      const user = userEvent.setup()
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const title = await screen.findByLabelText(copy.title, { exact: true })
+      // A separate REST/MCP/CLI client adds a length while this editor remains open.
+      saved = { ...saved, allowedDurationsMinutes: [15, 30, 60, 90] }
+      await user.clear(title)
+      await user.type(title, 'Renamed')
+      await user.click(screen.getByRole('button', { name: copy.save }))
+      await screen.findByText(copy.saved)
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(
+        'allowedDurationsMinutes',
+      )
+      expect(saved.allowedDurationsMinutes).toEqual([15, 30, 60, 90])
+    },
+  )
+
   it('rejects duplicate, fractional and out-of-range custom lengths beside the input', async () => {
     chooseLanguage(language)
     const copy = words[language]
     render(<Harness />)
     const user = userEvent.setup()
     const input = screen.getByLabelText(copy.addInput)
+    expect(screen.getByText(copy.hint)).toBeDefined()
     for (const [value, message] of [
       ['30', copy.duplicate],
       ['0', copy.range],
@@ -198,6 +233,40 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
     }
   })
 
+  it('announces failed Enter additions without moving focus, including repeated duplicates', async () => {
+    chooseLanguage(language)
+    const copy = words[language]
+    render(<Harness />)
+    const user = userEvent.setup()
+    const input = screen.getByLabelText(copy.addInput)
+    const status = screen.getByRole('status')
+    for (const [value, message] of [
+      ['30', copy.duplicate],
+      ['0', copy.range],
+      ['1.5', copy.whole],
+    ] as const) {
+      await user.clear(input)
+      await user.type(input, `${value}{Enter}`)
+      await waitFor(() => expect(status.textContent).toBe(message))
+      expect(document.activeElement).toBe(input)
+    }
+    await user.clear(input)
+    await user.type(input, '30{Enter}')
+    await waitFor(() => expect(status.textContent).toBe(copy.duplicate))
+    const announcements: (string | null)[] = []
+    const observer = new MutationObserver(() => announcements.push(status.textContent))
+    observer.observe(status, { childList: true, characterData: true, subtree: true })
+    try {
+      await user.keyboard('{Enter}')
+      await waitFor(() => expect(announcements).toContain(copy.duplicate))
+      expect(announcements).toContain('')
+      expect(document.activeElement).toBe(input)
+      expect((input as HTMLInputElement).value).toBe('30')
+    } finally {
+      observer.disconnect()
+    }
+  })
+
   it('accepts both bounds and blocks a thirteenth distinct length', async () => {
     chooseLanguage(language)
     const copy = words[language]
@@ -213,6 +282,8 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
       1, 15, 30, 45, 60, 90, 120, 180, 240, 360, 720, 1440,
     ])
     expect(input.getAttribute('aria-invalid')).toBe('true')
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(copy.count))
+    expect(document.activeElement).toBe(input)
   })
 
   it('keeps focus and a valid default when removing the default, and retains one length', async () => {

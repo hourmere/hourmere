@@ -733,7 +733,6 @@ describe('editing an event type', () => {
         slug: 'intro-call',
         description: 'A first call.',
         durationMinutes: 45,
-        allowedDurationsMinutes: [45],
         slotStepMinutes: null,
         bufferBeforeMinutes: 0,
         bufferAfterMinutes: 0,

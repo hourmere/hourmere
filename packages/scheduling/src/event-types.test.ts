@@ -55,6 +55,51 @@ describe.skipIf(!serverUrl)('event type service', () => {
       .execute()
 
   describe('duration options', () => {
+    it('stores supplied lengths in ascending order without mutating caller input', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const allowedDurationsMinutes = [60, 15, 30]
+      const created = await createEventType(ctx, input({ allowedDurationsMinutes }))
+      expect(allowedDurationsMinutes).toEqual([60, 15, 30])
+      expect(created.allowedDurationsMinutes).toEqual([15, 30, 60])
+      const stored = () =>
+        db
+          .selectFrom('event_types')
+          .select('allowed_durations_minutes')
+          .where('id', '=', created.id)
+          .executeTakeFirstOrThrow()
+      expect(await stored()).toEqual({ allowed_durations_minutes: [15, 30, 60] })
+      const changed = await updateEventType(ctx, created.id, {
+        durationMinutes: 90,
+        allowedDurationsMinutes: [90, 30, 45],
+      })
+      expect(changed.allowedDurationsMinutes).toEqual([30, 45, 90])
+      expect(await stored()).toEqual({ allowed_durations_minutes: [30, 45, 90] })
+    })
+
+    it('reads legacy unsorted lengths in ascending order and normalizes them on save', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const created = await createEventType(ctx, input())
+      await db
+        .updateTable('event_types')
+        .set({ allowed_durations_minutes: [60, 30, 15] })
+        .where('id', '=', created.id)
+        .execute()
+      expect((await getEventType(ctx, created.id)).allowedDurationsMinutes).toEqual([15, 30, 60])
+      expect((await listEventTypes(ctx))[0]?.allowedDurationsMinutes).toEqual([15, 30, 60])
+      expect(
+        (await updateEventType(ctx, created.id, { title: 'Renamed' })).allowedDurationsMinutes,
+      ).toEqual([15, 30, 60])
+      expect(
+        await db
+          .selectFrom('event_types')
+          .select('allowed_durations_minutes')
+          .where('id', '=', created.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ allowed_durations_minutes: [15, 30, 60] })
+    })
+
     it('persists options and edits the default without changing the list', async () => {
       const user = await createTestUser(db)
       const ctx = personal(user)

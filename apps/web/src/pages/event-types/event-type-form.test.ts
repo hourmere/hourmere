@@ -311,6 +311,42 @@ describe('explicit Zoom configuration', () => {
 
 describe('multiple duration draft validation', () => {
   const draft = { ...emptyDraft(), title: 'Intro', slug: 'intro' }
+  it.each([30, 45])(
+    'keeps a single-duration create payload unchanged for %i minutes',
+    (minutes) => {
+      const value = {
+        ...draft,
+        durationMinutes: String(minutes),
+        allowedDurationsMinutes: [minutes],
+      }
+      expect(toInput(value)).toHaveProperty('durationMinutes', minutes)
+      expect(toInput(value)).not.toHaveProperty('allowedDurationsMinutes')
+    },
+  )
+
+  it.each([{ durations: [30] }, { durations: [15, 30, 60] }])(
+    'omits an unchanged offered list from a patch (baseline $durations)',
+    ({ durations }) => {
+      const original = { ...draft, allowedDurationsMinutes: durations }
+      expect(toPatchInput({ ...original, title: 'Renamed' }, original)).not.toHaveProperty(
+        'allowedDurationsMinutes',
+      )
+    },
+  )
+
+  it('sends an explicitly reduced single-duration list, but omits it after reverting the edit', () => {
+    const original = { ...draft, allowedDurationsMinutes: [15, 30, 60] }
+    const reduced = { ...draft, allowedDurationsMinutes: [30] }
+    expect(toPatchInput(reduced, original).allowedDurationsMinutes).toEqual([30])
+    expect(
+      toPatchInput({ ...reduced, allowedDurationsMinutes: [15, 30, 60] }, original),
+    ).not.toHaveProperty('allowedDurationsMinutes')
+    // A default-only change leaves the remotely configured offered list alone.
+    expect(toPatchInput({ ...original, durationMinutes: '60' }, original)).not.toHaveProperty(
+      'allowedDurationsMinutes',
+    )
+  })
+
   it.each([
     [[], 'Offer from 1 to 12 durations.'],
     [Array.from({ length: 13 }, (_, index) => index + 1), 'Offer from 1 to 12 durations.'],

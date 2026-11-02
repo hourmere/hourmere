@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
 import { describe, expect, it } from 'vitest'
@@ -59,7 +59,7 @@ const formDeps = {
 const buildForm = (source: string) =>
   copy<typeof formFunctions>(
     source,
-    '{durationToAddProblem, allowedDurationsProblem, draftFromEventType, toInput, emptyDraft, serverErrors}',
+    '{durationToAddProblem, allowedDurationsProblem, draftFromEventType, toInput, toPatchInput, emptyDraft, serverErrors}',
     formDeps,
   )
 
@@ -159,6 +159,38 @@ describe('duration editor production-source mutation controls', () => {
     })
   })
 
+  it('detects adding an unnecessary singleton list to a create payload', () => {
+    detects('draft.allowedDurationsMinutes.length > 1', 'true', (source) => {
+      const values = buildForm(source)
+      expect(values.toInput(values.emptyDraft())).not.toHaveProperty('allowedDurationsMinutes')
+    })
+  })
+
+  it('detects overwriting an unchanged multi-duration list on metadata saves', () => {
+    detects('delete body.allowedDurationsMinutes', 'void 0', (source) => {
+      const values = buildForm(source)
+      const baseline = { ...values.emptyDraft(), allowedDurationsMinutes: [15, 30, 60] }
+      expect(values.toPatchInput({ ...baseline, title: 'Renamed' }, baseline)).not.toHaveProperty(
+        'allowedDurationsMinutes',
+      )
+    })
+  })
+
+  it('detects dropping an explicitly reduced singleton list from a patch', () => {
+    detects(
+      'body.allowedDurationsMinutes = draft.allowedDurationsMinutes.slice()',
+      'delete body.allowedDurationsMinutes',
+      (source) => {
+        const values = buildForm(source)
+        const baseline = { ...values.emptyDraft(), allowedDurationsMinutes: [15, 30, 60] }
+        expect(
+          values.toPatchInput({ ...baseline, allowedDurationsMinutes: [30] }, baseline)
+            .allowedDurationsMinutes,
+        ).toEqual([30])
+      },
+    )
+  })
+
   it('detects dropping the localized server membership refusal', () => {
     detects("detail.includes('include durationMinutes')", 'false', (source) => {
       const values = buildForm(source)
@@ -183,7 +215,9 @@ describe('duration editor production-source mutation controls', () => {
       'allowedDurationsMinutes: [...draft.allowedDurationsMinutes], notifications: { reminders: [], followUps: [] },',
       (source) => {
         const values = buildForm(source)
-        expect(values.toInput(values.emptyDraft())).not.toHaveProperty('notifications')
+        expect(
+          values.toInput({ ...values.emptyDraft(), allowedDurationsMinutes: [15, 30, 60] }),
+        ).not.toHaveProperty('notifications')
       },
     )
   })
@@ -199,7 +233,7 @@ describe('duration editor production-source mutation controls', () => {
           result = values
         },
         setError: () => {},
-        setAnnouncement: () => {},
+        announce: () => {},
         msg,
         length: String,
         defaultSelect: { current: null },
@@ -258,6 +292,7 @@ describe('duration editor production-source mutation controls', () => {
   ) {
     const Component = copy<typeof DurationsEditor>(source, 'DurationsEditor', {
       react,
+      useEffect: react.useEffect,
       useRef: react.useRef,
       useState: react.useState,
       Field,
@@ -316,6 +351,55 @@ describe('duration editor production-source mutation controls', () => {
       },
     },
   ])('detects weakening editor state/focus: $before', async ({ before, after, check }) => {
+    await assertEditor(editor, check)
+    await expect(assertEditor(mutate(editor, before, after), check)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await assertEditor(editor, check)
+  })
+
+  it('detects silently rejecting a duplicate added with Enter', async () => {
+    const check = async (user: ReturnType<typeof userEvent.setup>) => {
+      const input = screen.getByLabelText('Duration to add (minutes)')
+      const status = within(screen.getByRole('group', { name: 'Allowed durations' })).getByRole(
+        'status',
+      )
+      await user.type(input, '30{Enter}')
+      await waitFor(() => expect(status.textContent).toBe('This duration is already in the list.'))
+      expect(document.activeElement).toBe(input)
+    }
+    await assertEditor(editor, check)
+    await expect(
+      assertEditor(mutate(editor, 'announce(problem)', 'void 0'), check),
+    ).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await assertEditor(editor, check)
+  })
+
+  it('detects failing to re-announce an identical Enter error', async () => {
+    const check = async (user: ReturnType<typeof userEvent.setup>) => {
+      const input = screen.getByLabelText('Duration to add (minutes)')
+      const status = within(screen.getByRole('group', { name: 'Allowed durations' })).getByRole(
+        'status',
+      )
+      const message = 'This duration is already in the list.'
+      await user.type(input, '30{Enter}')
+      await waitFor(() => expect(status.textContent).toBe(message))
+      const announcements: (string | null)[] = []
+      const observer = new MutationObserver(() => announcements.push(status.textContent))
+      observer.observe(status, { childList: true, characterData: true, subtree: true })
+      try {
+        await user.keyboard('{Enter}')
+        await waitFor(() => expect(announcements).toContain(message))
+        expect(announcements).toContain('')
+        expect(document.activeElement).toBe(input)
+      } finally {
+        observer.disconnect()
+      }
+    }
+    const before = "    setAnnouncement('')\n    announcementTimer.current = setTimeout"
+    const after = '    announcementTimer.current = setTimeout'
     await assertEditor(editor, check)
     await expect(assertEditor(mutate(editor, before, after), check)).rejects.toMatchObject({
       name: 'AssertionError',

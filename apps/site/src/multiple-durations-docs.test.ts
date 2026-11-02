@@ -16,6 +16,12 @@ const siteDocs = 'apps/site/src/content/docs/docs'
 const guide = () => read(`${siteDocs}/multiple-durations.md`)
 const prose = (source: string) => source.replace(/[*`]/g, '').replace(/\s+/g, ' ')
 
+function assertAscendingOrder(source: string) {
+  const text = prose(source)
+  expect(text).toContain('kept in ascending order')
+  expect(text).toContain('sorted before storage')
+}
+
 function assertDurationLimits(source: string) {
   const text = prose(source)
   const { min, max } = EVENT_TYPE_RULE_BOUNDS.durationMinutes
@@ -69,6 +75,26 @@ describe('multiple meeting length documentation', () => {
 
   it('matches the engine bounds and default membership rule', () => {
     assertDurationLimits(guide())
+  })
+
+  it('states ascending order across the editor, saved configuration and public interfaces', () => {
+    for (const path of [
+      'docs/data-model.md',
+      'docs/multiple-durations.md',
+      'docs/mcp.md',
+      'tools/cli/README.md',
+      ...['multiple-durations', 'rest', 'mcp', 'cli'].map((name) => `${siteDocs}/${name}.md`),
+    ]) {
+      assertAscendingOrder(read(path))
+    }
+  })
+
+  it('rejects a source copy that changes the documented ascending order', () => {
+    const source = guide()
+    expect(source).toContain('kept in ascending order')
+    expect(() =>
+      assertAscendingOrder(source.replaceAll('kept in ascending order', 'kept in submitted order')),
+    ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
 
   it('documents editor actions, personal and team support, and saved sharing', () => {

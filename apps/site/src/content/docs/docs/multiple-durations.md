@@ -20,6 +20,8 @@ Personal, individual team, collective and activated round-robin event types supp
 
 Offer **1–12 distinct lengths**, each **1–1440 whole minutes**, inclusive. The default must
 be one of those lengths. One length works as before, without an invitee duration selector.
+Lengths are kept in ascending order in the editor, saved configuration and public pages.
+REST, MCP and CLI writes are sorted before storage, regardless of the submitted order.
 Team owners and admins use the same controls; host and team permissions still apply.
 
 ## What invitees see
@@ -42,7 +44,7 @@ Event-type configuration uses these fields:
 | Field | Meaning |
 |---|---|
 | `durationMinutes` | Default meeting length, a whole number from 1 to 1440. |
-| `allowedDurationsMinutes` | Ordered list of 1–12 distinct whole numbers from 1 to 1440; must include `durationMinutes`. |
+| `allowedDurationsMinutes` | List of 1–12 distinct whole numbers from 1 to 1440, kept in ascending order; must include `durationMinutes`. |
 
 Create with `POST /api/v1/event-types`, MCP `create_event_type`, or CLI `create-event`.
 All require `slug`, `title` and `durationMinutes`; omitting `allowedDurationsMinutes`

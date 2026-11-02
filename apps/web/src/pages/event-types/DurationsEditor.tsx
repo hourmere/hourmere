@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
 import { formatMinutes } from '../../i18n/duration.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -26,14 +26,25 @@ export function DurationsEditor({
   const [value, setValue] = useState('')
   const [error, setError] = useState<UiText | undefined>()
   const [announcement, setAnnouncement] = useState<UiText>('')
+  const announcementTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const input = useRef<HTMLInputElement>(null)
   const defaultSelect = useRef<HTMLSelectElement>(null)
   const length = (minutes: number) => formatMinutes(minutes, locale)
+
+  useEffect(() => () => clearTimeout(announcementTimer.current), [])
+
+  function announce(message: UiText) {
+    clearTimeout(announcementTimer.current)
+    // Empty the live region in a separate update so identical failures are announced again.
+    setAnnouncement('')
+    announcementTimer.current = setTimeout(() => setAnnouncement(message), 0)
+  }
 
   function add(raw = value) {
     const problem = durationToAddProblem(raw, durations)
     if (problem) {
       setError(problem)
+      announce(problem)
       input.current?.focus()
       return
     }
@@ -44,7 +55,7 @@ export function DurationsEditor({
     )
     setValue('')
     setError(undefined)
-    setAnnouncement(msg('Added {0}.', { '0': length(minutes) }))
+    announce(msg('Added {0}.', { '0': length(minutes) }))
     input.current?.focus()
   }
 
@@ -54,7 +65,7 @@ export function DurationsEditor({
     const nextDefault = Number(defaultDuration) === minutes ? String(remaining[0]) : defaultDuration
     onChange(remaining, nextDefault)
     setError(undefined)
-    setAnnouncement(
+    announce(
       msg('Removed {0}. Default duration: {1}.', {
         '0': length(minutes),
         '1': length(Number(nextDefault)),
@@ -122,6 +133,8 @@ export function DurationsEditor({
             inputMode="numeric"
             value={value}
             onChange={(event) => {
+              clearTimeout(announcementTimer.current)
+              setAnnouncement('')
               setValue(event.target.value)
               setError(undefined)
             }}
@@ -160,7 +173,7 @@ export function DurationsEditor({
           </select>
         )}
       </Field>
-      <p className="visually-hidden" role="status">
+      <p className="visually-hidden" role="status" aria-atomic="true">
         {uiText(announcement)}
       </p>
     </fieldset>
