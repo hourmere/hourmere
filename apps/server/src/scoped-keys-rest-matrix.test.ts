@@ -26,6 +26,7 @@ import {
   fakeGoogle,
   TEST_CALENDAR_KEY,
 } from '../../../packages/calendars/src/testing.ts'
+import { createOneTimeBookingLink } from '../../../packages/scheduling/src/one-time-links.ts'
 import { createApp } from './app.ts'
 import { productRoutes } from './server.ts'
 
@@ -33,6 +34,8 @@ const scopes = ['full', 'read', 'bookings'] as const
 // Do not derive expectations from the production registry being tested.
 const classes = {
   booking_read: [
+    'GET /api/v1/book/{token}',
+    'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
@@ -49,6 +52,7 @@ const classes = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
     'POST /api/v1/bookings/{id}/conference/retry',
@@ -273,6 +277,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       let cleanupEvent: string | undefined
       let cleanupSchedule: string | undefined
       let cleanupWebhook: string | undefined
+      let cleanupOneTimeLink: string | undefined
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
@@ -301,6 +306,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           cleanupEvent,
           cleanupSchedule,
           cleanupWebhook,
+          cleanupOneTimeLink,
         }
       }
       if (
@@ -352,6 +358,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
               })
               .execute()
           expectedStatus = 204
+        }
+      } else if (template.startsWith('/api/v1/book/{token}')) {
+        cleanupEvent = await f.eventType(teamId, null, {
+          slug: nonce,
+          hosts: [{ userId: owner.user.id }],
+        })
+        const link = await createOneTimeBookingLink(
+          { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+          { eventTypeId: cleanupEvent },
+        )
+        cleanupOneTimeLink = link.id
+        path = path.replace('{token}', link.token)
+        if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
+        if (method === 'POST') {
+          payload = {
+            start,
+            invitee: { name: 'Matrix invitee', email: 'matrix@example.test', timeZone: 'UTC' },
+          }
+          expectedStatus = 201
         }
       } else if (template.startsWith('/api/v1/public/')) {
         const team = template.includes('/teams/')
@@ -495,17 +520,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
         cleanupEvent,
         cleanupSchedule,
         cleanupWebhook,
+        cleanupOneTimeLink,
       }
     }
 
-    it('covers the exact 81-operation contract and all 243 scope combinations', () => {
+    it('covers the exact 84-operation contract and all 252 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(81)
-      expect(new Set(ids).size).toBe(81)
+      expect(ids).toHaveLength(84)
+      expect(new Set(ids).size).toBe(84)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(243)
+      expect(cases).toHaveLength(252)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -548,8 +574,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
                 .execute()
           }
         }
+        if (fixture.cleanupOneTimeLink) {
+          const link = await db
+            .selectFrom('one_time_booking_links')
+            .select(['state', 'booking_id'])
+            .where('id', '=', fixture.cleanupOneTimeLink)
+            .executeTakeFirstOrThrow()
+          const consumed = fixture.method === 'POST' && allowed[kind].includes(scope)
+          expect(link.state).toBe(consumed ? 'used' : 'active')
+          expect(link.booking_id !== null).toBe(consumed)
+        }
         expect(response.headers.get('cache-control')).toBe('no-store')
       } finally {
+        // Remove the exact fixture capability before its consuming booking: used-link
+        // evidence deliberately prevents deleting that booking on its own.
+        if (fixture.cleanupOneTimeLink)
+          await db
+            .deleteFrom('one_time_booking_links')
+            .where('id', '=', fixture.cleanupOneTimeLink)
+            .execute()
         if (fixture.cleanupEvent)
           await db
             .deleteFrom('bookings')
