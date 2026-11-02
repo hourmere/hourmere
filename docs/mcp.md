@@ -120,6 +120,13 @@ apply migrations and restart every role with the new code before allowing scoped
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
 
+## Configure an after-booking redirect
+
+`get_event_type` returns `successRedirect`; `create_event_type` and `update_event_type`
+accept the same object or `null` as REST, with `full` API key scope. Omission on update
+preserves the setting. See [after-booking redirects](https://hourmere.com/docs/after-booking)
+for configuration examples, validation fields, privacy warnings and embed permissions.
+
 ## Configure meeting lengths
 
 MCP `create_event_type` and `update_event_type` configure event types with the same

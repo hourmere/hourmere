@@ -86,6 +86,7 @@ const eventKeys = [
   'location',
   'questions',
   'notifications',
+  'successRedirect',
   'isActive',
   'isHidden',
   'allowGuests',
@@ -454,6 +455,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       keys(question, ['id', 'type', 'label', 'required', 'options'])
     expect(item.conferenceOrganizer).toBeNull()
     expect(item.notifications).toEqual(DEFAULT_NOTIFICATIONS)
+    expect(item.successRedirect).toBeNull()
     expect(JSON.stringify(item)).not.toContain(privateMarker)
   }
   function assertSlots(page: Json) {

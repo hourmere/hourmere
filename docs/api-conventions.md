@@ -1,5 +1,14 @@
 [API conventions](https://hourmere.com/docs/api-conventions).
 
+### Validation error fields
+
+An optional `field` string identifies a stable validation field name. Known values are
+`successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
+`successRedirect.includeInviteePersonalData` and `successRedirect.allowEmbedParent`.
+New values may appear within `/api/v1`; clients must ignore unknown values and fall back
+to the error code and optional message. The published schema is an open string, not a
+closed enum. The field may be absent, including when talking to older servers.
+
 ### API key scopes
 
 Keys have one immutable scope: `full`, `read` or `bookings`. The web creation form defaults
