@@ -221,11 +221,12 @@ describe('event type waitlist management', () => {
       [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, eventType()),
     })
     renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-    await screen.findByText('Waitlist management is unavailable for this account.')
+    await screen.findByText('Checking waitlist management access…')
     expect(screen.queryByRole('checkbox', { name: checkboxName })).toBeNull()
     expect(api.to(`GET ${entriesPath}`)).toHaveLength(0)
     await pending.answer(json(500, { error: 'internal_error' }))
-    expect(screen.getByText('Waitlist management is unavailable for this account.')).toBeDefined()
+    await screen.findByText('Could not check waitlist management access. Try again.')
+    expect(screen.queryByText('Waitlist management is unavailable for this account.')).toBeNull()
     expect(screen.queryByText('Only team owners and admins can manage the waitlist.')).toBeNull()
   })
 
@@ -273,6 +274,7 @@ describe('event type waitlist management', () => {
     allowed = false
     await userEvent.setup().click(within(section).getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(screen.queryByText(entry.email)).toBeNull())
+    expect(screen.getByText('Could not check waitlist management access. Try again.')).toBeDefined()
     expect(screen.queryByText('No waitlist entries.')).toBeNull()
   })
 
@@ -324,6 +326,19 @@ describe('event type waitlist management', () => {
             ]
           : ['等待邮箱验证', '等待空闲时段', '已通知', '已预约', '已移除', '已过期']
       for (const state of states) expect(await screen.findByText(state)).toBeDefined()
+      const rows = screen
+        .getAllByRole('listitem')
+        .filter(
+          (row) => row.querySelector('dt')?.textContent === (locale === 'en' ? 'Status' : '状态'),
+        )
+      expect(rows).toHaveLength(6)
+      const neverNotified = locale === 'en' ? 'Not notified yet' : '尚未通知'
+      const unknown = locale === 'en' ? 'Notification time unavailable' : '通知时间未知'
+      for (const index of [0, 1]) {
+        expect(within(rows[index] as HTMLElement).getByText(neverNotified)).toBeDefined()
+        expect(within(rows[index] as HTMLElement).queryByText(unknown)).toBeNull()
+      }
+      expect(within(rows[3] as HTMLElement).getByText(unknown)).toBeDefined()
       expect(document.querySelector('time[datetime="2030-03-02T09:00:00.000Z"]')).not.toBeNull()
       if (locale === 'zh-CN') expect(screen.queryByText('Waitlist entries')).toBeNull()
     },

@@ -113,13 +113,15 @@ export function WaitlistJoin({
         </FocusHeading>
         <p role="status">
           {t(
-            'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.',
+            'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.',
           )}
         </p>
         <ErrorSummary errors={{}} message={error} attempt={attempt} />
         {resent && (
           <p role="status">
-            {t('Confirmation requested. Check your email; delivery is subject to limits.')}
+            {t(
+              'Confirmation email requested. Check your email; sending limits may prevent delivery.',
+            )}
           </p>
         )}
         <button
@@ -154,6 +156,11 @@ export function WaitlistJoin({
           }}
         >
           <FocusHeading level={3}>{t('Join the waitlist')}</FocusHeading>
+          <p>
+            {t(
+              'The host or the team’s owners and admins can see your email, name and requested period.',
+            )}
+          </p>
           <p id={`${id}-period`}>
             {t('From {start} to {end} ({timeZone})', {
               start: when(start),
@@ -162,9 +169,12 @@ export function WaitlistJoin({
             })}
           </p>
           <p>
-            {t('Wait until {date}. Unconfirmed requests expire after 24 hours.', {
-              date: when(expires),
-            })}
+            {t(
+              'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.',
+              {
+                date: when(expires),
+              },
+            )}
           </p>
           <ErrorSummary errors={errors} message={error} attempt={attempt} />
           {error === UNAVAILABLE && onRefresh && (
@@ -218,7 +228,7 @@ export function WaitlistJoin({
           </div>
           <p className="hint">
             {t(
-              'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.',
+              'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.',
             )}
           </p>
           <button type="submit" className="button button-primary" disabled={busy}>

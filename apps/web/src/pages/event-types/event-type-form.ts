@@ -272,7 +272,7 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
     draft.waitlistEnabled !== baseline?.waitlistEnabled &&
     (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
   )
-    errors.waitlist = 'Waitlists support individual event types with one host.'
+    errors.waitlist = 'Waitlists are available for event types with a single host.'
   // Untouched stored notes may predate tighter write rules; omission preserves them.
   if (
     comparableNotifications(draft.notifications) !==
@@ -602,7 +602,7 @@ export function serverErrors(
   const detail = err.message
   switch (err.code) {
     case 'waitlist_unsupported':
-      return field('waitlist', 'Waitlists support individual event types with one host.')
+      return field('waitlist', 'Waitlists are available for event types with a single host.')
     case 'automatic_zoom_disabled':
       return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
     case 'automatic_zoom_unavailable':

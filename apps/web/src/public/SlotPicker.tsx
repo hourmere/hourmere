@@ -240,15 +240,16 @@ export function SlotPicker({
   }, [state, timeZone, month, excludeStart])
   const available = useMemo(() => new Set(byDay.keys()), [byDay])
   const ready = state.status === 'ready'
+  const autoAdvancePending =
+    !available.size && autoAdvanced.current < AUTO_ADVANCE && compareMonths(month, lastMonth) < 0
 
   // The first month shown may have nothing left (late in the month, or a booking window that
   // opens later): move on by itself, a couple of times at most.
   useEffect(() => {
-    if (renderWaitlist || !ready || available.size || autoAdvanced.current >= AUTO_ADVANCE) return
-    if (compareMonths(month, lastMonth) >= 0) return
+    if (!ready || !autoAdvancePending) return
     autoAdvanced.current += 1
     setMonth(addMonths(month, 1))
-  }, [ready, available, month, lastMonth, renderWaitlist])
+  }, [ready, autoAdvancePending, month])
 
   // The chosen day must be in the month shown and still have times (another zone can move a
   // day's times to the day before or after); keyboard focus stays in the month shown.
@@ -321,7 +322,7 @@ export function SlotPicker({
   // Where clocks go back, one wall time happens twice: add the zone's abbreviation then.
   const repeated = new Set(labels.filter((l, i) => labels.indexOf(l) !== i))
   const emptyWindow =
-    ready && (day ? !daySlots.length : !available.size)
+    ready && (day ? !daySlots.length : !available.size) && !autoAdvancePending
       ? waitlistWindow(month, day, timeZone, now)
       : null
 

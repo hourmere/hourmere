@@ -1,22 +1,31 @@
 export const common = {
+  'The host or the team’s owners and admins can see your email, name and requested period.':
+    'Die gastgebende Person oder die Inhaber und Administratoren des Teams können Ihre E-Mail-Adresse, Ihren Namen und den gewünschten Zeitraum sehen.',
+  '{count} second': '{count} Sekunde',
+  '{count} seconds': '{count} Sekunden',
+  '{count} minute': '{count} Minute',
+  '{count} minutes': '{count} Minuten',
+  '{count} hour': '{count} Stunde',
+  '{count} hours': '{count} Stunden',
+
   'To join the waitlist, choose the default meeting length ({duration}).':
     'Wählen Sie die Standarddauer ({duration}), um sich auf die Warteliste setzen zu lassen.',
-  'Join the waitlist': 'Auf die Warteliste setzen',
+  'Join the waitlist': 'Auf die Warteliste setzen lassen',
   'No available times in this period.': 'In diesem Zeitraum sind keine Termine verfügbar.',
   'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
-    'Wenn ein Termin frei wird, können alle passenden Interessierten benachrichtigt werden. Es wird nichts reserviert; wer zuerst erfolgreich bucht, erhält den Termin.',
+    'Wenn ein Termin frei wird, können alle infrage kommenden Personen benachrichtigt werden. Es wird nichts reserviert; wer zuerst erfolgreich bucht, erhält den Termin.',
   'From {start} to {end} ({timeZone})': 'Von {start} bis {end} ({timeZone})',
-  'Wait until {date}. Unconfirmed requests expire after 24 hours.':
-    'Die Warteliste gilt bis {date}. Unbestätigte Anfragen verfallen nach 24 Stunden.',
+  'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.':
+    'Sie können bis {date} auf der Warteliste bleiben. Unbestätigte Anfragen verfallen nach 24 Stunden.',
   'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
-    'Ich möchte für diesen Zeitraum Wartelisten-E-Mails erhalten. Über den Link in jeder Wartelisten-E-Mail kann ich mich abmelden.',
-  'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.':
-    'Beim Abmelden werden Ihre Kontaktdaten gelöscht. Codierte Datensätze bleiben zur Missbrauchsvermeidung 2 Tage und zur Vermeidung wiederholter Benachrichtigungen bis zu 64 Tage erhalten.',
-  'Check your email to confirm': 'Prüfen Sie Ihr Postfach zur Bestätigung',
-  'If your request can be accepted, we will send a confirmation link. Limits may prevent delivery. Repeated joins do not resend email.':
-    'Wenn Ihre Anfrage angenommen werden kann, senden wir einen Bestätigungslink. Versandlimits können die Zustellung verhindern. Erneutes Anmelden löst keinen weiteren Versand aus.',
+    'Ich bin damit einverstanden, für diesen Zeitraum Wartelisten-E-Mails zu erhalten. Über den Link in jeder Wartelisten-E-Mail kann ich mich von der Warteliste abmelden.',
+  'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.':
+    'Beim Abmelden werden Ihre Kontaktdaten gelöscht. Wir bewahren gehashte Einträge (nicht lesbare Datensätze) 2 Tage zur Missbrauchsvermeidung und bis zu 64 Tage zur Vermeidung wiederholter Benachrichtigungen auf.',
+  'Check your email to confirm': 'Prüfen Sie Ihr E-Mail-Postfach, um Ihre Anmeldung zu bestätigen',
+  'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.':
+    'Wenn Ihre Anfrage angenommen werden kann, senden wir einen Bestätigungslink. Versandlimits können die Zustellung verhindern. Erneutes Absenden des Formulars löst keinen weiteren Versand der Bestätigungs-E-Mail aus.',
   'Resend confirmation email': 'Bestätigungs-E-Mail erneut anfordern',
-  'Confirmation requested. Check your email; delivery is subject to limits.':
+  'Confirmation email requested. Check your email; sending limits may prevent delivery.':
     'Bestätigungs-E-Mail angefordert. Prüfen Sie Ihr Postfach; der Versand unterliegt Limits.',
   'Agree to receive waitlist emails before joining.':
     'Stimmen Sie vor der Anmeldung dem Empfang von Wartelisten-E-Mails zu.',
@@ -317,8 +326,8 @@ export const common = {
   'To be confirmed by the host': 'Von der gastgebenden Person zu bestätigen',
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     'Um eine Buchung anzusehen, zu verschieben oder zu stornieren, öffnen Sie den Link aus Ihrer Bestätigungs-E-Mail oder den bei der Buchung gespeicherten Link. Zu Ihrer Sicherheit wird er nach dem Öffnen aus der Adressleiste entfernt. Zum Neuladen dieser Seite benötigen Sie den Link erneut.',
-  'Too many requests from your network. Try again in {0} seconds.':
-    'Zu viele Anfragen aus Ihrem Netzwerk. Versuchen Sie es in {0} Sekunden erneut.',
+  'Too many requests from your network. Try again in {duration}.':
+    'Zu viele Anfragen aus Ihrem Netzwerk. Versuchen Sie es in {duration} erneut.',
   'Too many requests from your network. Wait a minute and try again.':
     'Zu viele Anfragen aus Ihrem Netzwerk. Warten Sie eine Minute und versuchen Sie es erneut.',
   'Too many requests. Wait a minute and try again.':

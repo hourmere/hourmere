@@ -271,17 +271,41 @@ describe('waitlist editor production-source mutation controls', () => {
   })
   it('detects treating unknown management access as confirmed lack of permission', async () => {
     await detectsEditor(
-      "access.status === 'ready'\n                ?",
-      'true\n                ?',
+      "access.status === 'error'\n                  ?",
+      'false\n                  ?',
       async () => {
         expect(
-          screen.queryByText('Waitlist management is unavailable for this account.'),
+          screen.queryByText('Could not check waitlist management access. Try again.'),
         ).not.toBeNull()
         expect(
           screen.queryByText('Only team owners and admins can manage the waitlist.'),
         ).toBeNull()
       },
       { personal: false, status: 'error' },
+    )
+  })
+  it('detects describing unchecked management access as an account limitation', async () => {
+    await detectsEditor(
+      "'Checking waitlist management access…'",
+      "'Waitlist management is unavailable for this account.'",
+      async () => {
+        expect(screen.queryByText('Checking waitlist management access…')).not.toBeNull()
+        expect(
+          screen.queryByText('Waitlist management is unavailable for this account.'),
+        ).toBeNull()
+      },
+      { personal: false, status: 'loading' },
+    )
+  })
+  it('detects suggesting that an active entry was notified at an unknown time', async () => {
+    await detectsEditor(
+      "entry.state === 'pending_verification' || entry.state === 'active'",
+      'false',
+      async (user) => {
+        await open(user)
+        expect(screen.queryByText('Not notified yet')).not.toBeNull()
+        expect(screen.queryByText('Notification time unavailable')).toBeNull()
+      },
     )
   })
   it('detects enabling an unsupported type through the switch', async () => {
@@ -324,6 +348,26 @@ describe('waitlist editor production-source mutation controls', () => {
         await user.click(screen.getByRole('button', { name: 'Remove entry' }))
         await user.click(screen.getByRole('button', { name: 'Remove entry' }))
         await waitFor(() => expect(screen.queryByText(contact)).toBeNull())
+      },
+      { removeStatus: 403 },
+    )
+  })
+  it('detects presenting a refused entry request as an account limitation', async () => {
+    await detectsEditor(
+      '<p role="status">{t(\'Could not check waitlist management access. Try again.\')}</p>',
+      '<p role="status">{t(\'Waitlist management is unavailable for this account.\')}</p>',
+      async (user) => {
+        await open(user)
+        await user.click(screen.getByRole('button', { name: 'Remove entry' }))
+        await user.click(screen.getByRole('button', { name: 'Remove entry' }))
+        await waitFor(() =>
+          expect(
+            screen.queryByText('Could not check waitlist management access. Try again.'),
+          ).not.toBeNull(),
+        )
+        expect(
+          screen.queryByText('Waitlist management is unavailable for this account.'),
+        ).toBeNull()
       },
       { removeStatus: 403 },
     )

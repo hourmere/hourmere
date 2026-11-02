@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -144,6 +144,7 @@ describe('public waitlist production-source mutation controls', () => {
           onTimeZoneChange={() => {}}
           locale="en-US"
           now={at}
+          initialPosition={{ month: { year: 2026, month: 11 }, day: null }}
           selected={null}
           onSelect={() => {}}
           version={0}
@@ -164,10 +165,81 @@ describe('public waitlist production-source mutation controls', () => {
     await check(pickerSource)
   })
   it.each([
+    [
+      'if (!ready || !autoAdvancePending) return',
+      'if (renderWaitlist || !ready || !autoAdvancePending) return',
+      'automatic advance',
+    ],
+    [' && !autoAdvancePending\n      ?', '\n      ?', 'transient empty range'],
+  ])('detects waitlist regression in %s', async (before, after, kind) => {
+    const check = async (source: string) => {
+      const Picker = copy<typeof SlotPicker>(source, 'SlotPicker', {
+        react,
+        ...react,
+        ...calendar,
+        ...time,
+        ...windowFunctions,
+        useI18n,
+        TimeZonePicker,
+        MonthCalendar,
+        failureMessage,
+        loadSlotsInRange,
+      })
+      const slot = { start: '2026-12-05T14:00:00Z', end: '2026-12-05T14:30:00Z' }
+      const offers: string[] = []
+      const view = render(
+        <Picker
+          load={async (start, end) =>
+            kind === 'automatic advance' &&
+            Date.parse(slot.start) >= Date.parse(start) &&
+            Date.parse(slot.end) <= Date.parse(end)
+              ? [slot]
+              : []
+          }
+          durationMinutes={30}
+          timeZone="UTC"
+          onTimeZoneChange={() => {}}
+          locale="en-US"
+          now={Date.parse('2026-11-30T12:00:00Z')}
+          selected={null}
+          onSelect={() => {}}
+          version={0}
+          renderWaitlist={(window) => {
+            offers.push(window.start)
+            return <p>waitlist offer fixture</p>
+          }}
+        />,
+      )
+      try {
+        await act(async () => {})
+        if (kind === 'automatic advance') {
+          expect(screen.queryByRole('heading', { name: 'December 2026' })).not.toBeNull()
+          expect(offers).toEqual([])
+        } else {
+          expect(screen.queryByRole('heading', { name: 'January 2027' })).not.toBeNull()
+          expect(offers.length).toBeGreaterThan(0)
+          expect(offers.every((start) => start === '2027-01-01T00:00:00.000Z')).toBe(true)
+        }
+      } finally {
+        view.unmount()
+      }
+    }
+    await check(pickerSource)
+    await expect(check(mutate(pickerSource, before, after))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await check(pickerSource)
+  })
+  it.each([
     ['if (!consent)', 'if (false)', 'consent'],
     ['if (!resend && start < now())', 'if (false)', 'expired'],
     ['if (inFlight.current) return', 'if (false) return', 'duplicate'],
     ['<ErrorSummary errors={errors} message={error} attempt={attempt} />', '<div />', 'a11y'],
+    [
+      "'The host or the team’s owners and admins can see your email, name and requested period.'",
+      "''",
+      'disclosure',
+    ],
   ])('detects weakening join %s', async (before, after, kind) => {
     const check = async (source: string) => {
       let current = at
@@ -195,6 +267,12 @@ describe('public waitlist production-source mutation controls', () => {
       try {
         const user = userEvent.setup()
         await user.click(screen.getByRole('button', { name: 'Join the waitlist' }))
+        if (kind === 'disclosure')
+          expect(
+            screen.queryByText(
+              'The host or the team’s owners and admins can see your email, name and requested period.',
+            ),
+          ).not.toBeNull()
         if (kind !== 'a11y') await user.type(screen.getByLabelText('Email'), 'ada@example.invalid')
         if (kind === 'expired' || kind === 'duplicate')
           await user.click(screen.getByLabelText(/I agree to receive/))

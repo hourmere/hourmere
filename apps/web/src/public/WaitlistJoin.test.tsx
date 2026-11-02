@@ -20,8 +20,19 @@ beforeEach(() => {
 const enabled = { ...EVENT, waitlist: { enabled: true as const } }
 const consent = /I agree to receive waitlist emails/
 const success = 'Check your email to confirm'
-async function openForm() {
+async function showNovember() {
   const user = userEvent.setup()
+  // Empty calendars retain the normal bounded advance. Choose the desired visible
+  // range explicitly before consenting to a waitlist window.
+  await screen.findByRole('heading', { name: 'January 2027' })
+  await user.click(screen.getByRole('button', { name: 'Previous month' }))
+  await screen.findByRole('heading', { name: 'December 2026' })
+  await user.click(screen.getByRole('button', { name: 'Previous month' }))
+  await screen.findByRole('heading', { name: 'November 2026' })
+  return user
+}
+async function openForm() {
+  const user = await showNovember()
   await user.click(await screen.findByRole('button', { name: 'Join the waitlist' }))
   return user
 }
@@ -49,6 +60,11 @@ describe('public waitlist entry', () => {
     const user = await openForm()
     expect(screen.getByText(/Nothing is reserved/)).toBeDefined()
     expect(screen.getByText(/Unconfirmed requests expire after 24 hours/)).toBeDefined()
+    expect(
+      screen.getByText(
+        'The host or the team’s owners and admins can see your email, name and requested period.',
+      ),
+    ).toBeDefined()
     expect(screen.getByLabelText(/Your name/).getAttribute('required')).toBeNull()
     expect(screen.queryByLabelText('Guests')).toBeNull()
     await fill(user)
@@ -67,7 +83,7 @@ describe('public waitlist entry', () => {
     expect(api.calls.some((call) => /\/me$|\/api\/auth/.test(call.path))).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Resend confirmation email' }))
     await screen.findByText(
-      'Confirmation requested. Check your email; delivery is subject to limits.',
+      'Confirmation email requested. Check your email; sending limits may prevent delivery.',
     )
     expect(api.to(`POST ${endpoint}/waitlist/resend`)).toHaveLength(1)
   })
@@ -110,8 +126,8 @@ describe('public waitlist entry', () => {
   it('does not offer ranges beyond the 62-day limit', async () => {
     fakeApi(eventRoutes(enabled, []))
     renderApp('/ada/intro')
+    const user = await showNovember()
     await screen.findByRole('button', { name: 'Join the waitlist' })
-    const user = userEvent.setup()
     for (let i = 0; i < 3; i++) await user.click(screen.getByRole('button', { name: 'Next month' }))
     await screen.findByRole('heading', { name: 'February 2027' })
     await waitFor(() => expect(screen.getByText('No available times this month.')).toBeDefined())
@@ -205,7 +221,7 @@ describe('public waitlist entry', () => {
   it('uses the default meeting length for waitlist consent', async () => {
     fakeApi(eventRoutes({ ...enabled, allowedDurationsMinutes: [30, 60] }, []))
     renderApp('/ada/intro')
-    const user = userEvent.setup()
+    const user = await showNovember()
     await screen.findByRole('button', { name: 'Join the waitlist' })
     await user.click(screen.getByRole('radio', { name: '1 h' }))
     await screen.findByText('No available times this month.')
@@ -248,7 +264,18 @@ describe('waitlist boundaries and public locales', () => {
       'Check your email to confirm',
       'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.',
       'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.',
-      'Leaving clears your contact details. Coded records remain for abuse prevention for 2 days and to prevent repeat notifications for up to 64 days.',
+      'The host or the team’s owners and admins can see your email, name and requested period.',
+      'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.',
+      'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.',
+      'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.',
+      'Confirmation email requested. Check your email; sending limits may prevent delivery.',
+      'Too many requests from your network. Try again in {duration}.',
+      '{count} second',
+      '{count} seconds',
+      '{count} minute',
+      '{count} minutes',
+      '{count} hour',
+      '{count} hours',
       'The waitlist is unavailable for this period. Check available times and try again.',
       'Resend confirmation email',
     ]
@@ -256,7 +283,9 @@ describe('waitlist boundaries and public locales', () => {
       for (const key of keys) {
         const value = commonCatalogues[`./catalogues/${code}/common.ts`]?.[key]
         expect(value, `${code}: ${key}`).toBeTypeOf('string')
-        if (code !== 'en') expect(value).not.toBe(key)
+        if (code !== 'en' && !key.startsWith('{count}')) expect(value).not.toBe(key)
+        expect(value?.match(/\{\w+\}/g)?.sort() ?? []).toEqual(key.match(/\{\w+\}/g)?.sort() ?? [])
+        if (code === 'zh-CN') expect(value).not.toContain('您')
       }
   })
 })

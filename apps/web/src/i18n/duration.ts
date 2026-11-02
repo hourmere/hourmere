@@ -1,5 +1,19 @@
 import { interfaceLanguage } from '@hourmere/core/language'
-import { translate } from './translate.ts'
+import { msg, translate, type UiMessage } from './translate.ts'
+
+/** A rounded-up wait, translated when rendered so public errors follow the active locale. */
+export function durationMessage(seconds: number): UiMessage {
+  if (seconds >= 3600) {
+    const count = Math.ceil(seconds / 3600)
+    return msg(count === 1 ? '{count} hour' : '{count} hours', { count })
+  }
+  if (seconds >= 60) {
+    const count = Math.ceil(seconds / 60)
+    return msg(count === 1 ? '{count} minute' : '{count} minutes', { count })
+  }
+  const count = Math.ceil(seconds)
+  return msg(count === 1 ? '{count} second' : '{count} seconds', { count })
+}
 
 /** "30 min", "1 h", "1 h 30 min", "2 days", "1 day 4 h". */
 export function formatMinutes(total: number, locale = 'en'): string {

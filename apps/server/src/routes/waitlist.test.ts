@@ -4,14 +4,14 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import { createEventType, setEventTypeWaitlist } from '@hourmere/scheduling'
+import { createEventType, joinWaitlist, setEventTypeWaitlist } from '@hourmere/scheduling'
 import {
   createFixtures,
   createTestTeam,
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { eventTypeRoutes } from './event-types.ts'
 import { publicRoutes } from './public.ts'
 import {
@@ -147,6 +147,9 @@ describe.skipIf(!bootstrap)('waitlist REST surfaces', () => {
   afterAll(async () => {
     await t?.drop()
   })
+  beforeEach(async () => {
+    await t.db.deleteFrom('waitlist_verification_requests').execute()
+  })
 
   async function setup(team = false) {
     const user = await createTestUser(t.db)
@@ -183,7 +186,7 @@ describe.skipIf(!bootstrap)('waitlist REST surfaces', () => {
       locale: 'zh-CN',
       consent: true,
     }
-    return { user, member, principal, organization, event, path, input }
+    return { user, member, principal, organization, event, path, input, handle }
   }
   const appWith = (factory = publicRoutes, principals = new Map<string, Principal>()) =>
     productApp(t.db, principals, [
@@ -326,6 +329,48 @@ describe.skipIf(!bootstrap)('waitlist REST surfaces', () => {
         .execute(),
     ).toHaveLength(5)
   })
+
+  it.each(['join', 'resend'] as const)(
+    'hides listed and unlisted targets in the six-request %s IP-limit probe',
+    async (kind) => {
+      const sequences: number[][] = []
+      for (const listed of [true, false]) {
+        const f = await setup()
+        if (listed)
+          await joinWaitlist(
+            {
+              db: t.db,
+              secret,
+              publicUrl: 'http://localhost:3000',
+              trustedIp: '192.0.2.81',
+            },
+            { ...f.input, handle: f.handle, slug: 'full', consent: true },
+          )
+        const app = appWith()
+        const statuses: number[] = []
+        for (let index = 0; index < 6; index++) {
+          const resend = index === 0 && kind === 'resend'
+          const email = index === 0 ? f.input.email : `probe-${randomUUID()}@example.test`
+          const response = await app.request(
+            `${f.path}/waitlist${resend ? '/resend' : ''}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(resend ? { email } : { ...f.input, email }),
+            },
+            { incoming: { socket: { remoteAddress: listed ? '198.51.100.81' : '198.51.100.82' } } },
+          )
+          statuses.push(response.status)
+          expect(await response.json()).toEqual(
+            index < 5 ? { accepted: true } : { error: 'rate_limited' },
+          )
+        }
+        sequences.push(statuses)
+      }
+      expect(sequences[0]).toEqual(sequences[1])
+      expect(sequences[0]).toEqual([202, 202, 202, 202, 202, 429])
+    },
+  )
 
   it('enforces read scopes for manager contact lists, full for settings/removal and bookings for anonymous joins with a supplied bearer', async () => {
     const f = await setup(true)

@@ -9,7 +9,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as scheduling from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp, hasUnsafeJsonText } from '../app.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
@@ -597,6 +597,9 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI waitlist with shared ser
   afterAll(async () => {
     await owned?.drop()
   })
+  beforeEach(async () => {
+    await db.deleteFrom('waitlist_verification_requests').execute()
+  })
   const tools = () => waitlistTools({ db, secret, publicUrl, now })
   it('round-trips settings and returns identical acceptance for new and existing email', async () => {
     const registry = tools()
@@ -653,6 +656,92 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI waitlist with shared ser
       data: [{ state: 'removed', email: null, name: null, preferredWindow: null }],
     })
   })
+  it.each(['join', 'resend'] as const)(
+    'hides listed and unlisted targets in the six-request %s IP-limit probe through MCP',
+    async (kind) => {
+      const sequences: string[][] = []
+      for (const listed of [true, false]) {
+        const fixtures = createFixtures(db)
+        const host = await fixtures.host({ timeZone: 'UTC' })
+        const event = await fixtures.eventType(host.organizationId, host.userId, { slug: 'probe' })
+        await db
+          .updateTable('event_types')
+          .set({ waitlist_enabled: true })
+          .where('id', '=', event)
+          .execute()
+        const input = {
+          ...args,
+          handle: host.handle,
+          slug: 'probe',
+          email: `target-${randomUUID()}@example.test`,
+        }
+        if (listed)
+          await scheduling.joinWaitlist(
+            { db, secret, publicUrl, now, trustedIp: '192.0.2.83' },
+            { ...input, consent: true },
+          )
+        const app = createApp({
+          publicUrl,
+          checkDb: async () => {},
+          authHandler: async () => new Response(null, { status: 404 }),
+          resolveCaller: async () => ({ ok: true, principal: owner, setCookie: [] }),
+          mcp: mcpEndpoint({ tools: tools() }),
+        })
+        const outcomes: string[] = []
+        for (let index = 0; index < 6; index++) {
+          const resend = index === 0 && kind === 'resend'
+          const email = index === 0 ? input.email : `probe-${randomUUID()}@example.test`
+          const response = await app.request(
+            '/mcp',
+            {
+              method: 'POST',
+              headers: {
+                authorization: 'Bearer hm_synthetic_waitlist_probe',
+                'content-type': 'application/json',
+                accept: 'application/json, text/event-stream',
+              },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: index,
+                method: 'tools/call',
+                params: {
+                  name: resend ? 'resend_waitlist_verification' : 'join_waitlist',
+                  arguments: resend
+                    ? { handle: input.handle, slug: input.slug, email }
+                    : { ...input, email },
+                },
+              }),
+            },
+            { incoming: { socket: { remoteAddress: listed ? '198.51.100.83' : '198.51.100.84' } } },
+          )
+          expect(response.status).toBe(200)
+          const body = await response.text()
+          const data = body.split('\n').find((line) => line.startsWith('data: '))
+          const result = JSON.parse(data ? data.slice(6) : body).result as Awaited<
+            ReturnType<typeof runTool>
+          >
+          if (result.isError) {
+            const refusal = error(result)
+            expect(refusal).toEqual({ error: 'rate_limited', retryAfterSeconds: 3600 })
+            outcomes.push(refusal.error)
+          } else {
+            expect(result.structuredContent).toEqual({ accepted: true })
+            outcomes.push('accepted')
+          }
+        }
+        sequences.push(outcomes)
+      }
+      expect(sequences[0]).toEqual(sequences[1])
+      expect(sequences[0]).toEqual([
+        'accepted',
+        'accepted',
+        'accepted',
+        'accepted',
+        'accepted',
+        'rate_limited',
+      ])
+    },
+  )
   it('runs CLI waitlist commands through real MCP and preserves machine-readable output', async () => {
     const app = createApp({
       publicUrl,

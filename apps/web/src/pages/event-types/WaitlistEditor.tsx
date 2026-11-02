@@ -39,9 +39,11 @@ export function WaitlistEditor({
         <>
           <p>
             {t(
-              access.status === 'ready'
-                ? 'Only team owners and admins can manage the waitlist.'
-                : 'Waitlist management is unavailable for this account.',
+              access.status === 'loading'
+                ? 'Checking waitlist management access…'
+                : access.status === 'error'
+                  ? 'Could not check waitlist management access. Try again.'
+                  : 'Only team owners and admins can manage the waitlist.',
             )}
           </p>
           {access.status === 'error' && (
@@ -70,7 +72,9 @@ export function WaitlistEditor({
             )}
           </p>
           {!supported && (
-            <p className="hint">{t('Waitlists support individual event types with one host.')}</p>
+            <p className="hint">
+              {t('Waitlists are available for event types with a single host.')}
+            </p>
           )}
           {errors.waitlist && <FieldError id="waitlist-error">{errors.waitlist}</FieldError>}
           {eventTypeId &&
@@ -180,7 +184,7 @@ function WaitlistEntries({ eventTypeId, disabled }: { eventTypeId: string; disab
           </button>
         </>
       ) : revoked ? (
-        <p role="status">{t('Waitlist management is unavailable for this account.')}</p>
+        <p role="status">{t('Could not check waitlist management access. Try again.')}</p>
       ) : state.status === 'loading' ? (
         <p role="status">{t('Loading waitlist entries…')}</p>
       ) : state.status === 'error' ? (
@@ -194,7 +198,7 @@ function WaitlistEntries({ eventTypeId, disabled }: { eventTypeId: string; disab
         <>
           <p className="hint">
             {t(
-              'Last notified shows the latest retained mail-server acceptance, not inbox delivery. Older notification records may have been cleared.',
+              '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.',
             )}
           </p>
           {state.data.data.length === 0 ? (
@@ -241,7 +245,11 @@ function WaitlistEntries({ eventTypeId, disabled }: { eventTypeId: string; disab
                             {format(entry.lastNotifiedAt)}
                           </time>
                         ) : (
-                          t('Notification time unavailable')
+                          t(
+                            entry.state === 'pending_verification' || entry.state === 'active'
+                              ? 'Not notified yet'
+                              : 'Notification time unavailable',
+                          )
                         )}
                       </dd>
                     </dl>

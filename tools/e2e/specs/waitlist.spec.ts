@@ -24,10 +24,16 @@ for (const kind of ['personal', 'team', 'embed'] as const)
     )
     const scope =
       kind === 'embed' ? page.locator('[data-hourmere-inline] iframe').contentFrame() : page
-    await expect(scope.locator('.calendar-grid')).toBeVisible()
-    if (!(await scope.locator(`[data-day="${occupiedDay}"]`).count()))
-      await scope.getByRole('button', { name: 'Next month', exact: true }).click()
+    await expect(scope.locator('.calendar-grid')).toHaveAttribute('aria-busy', 'false')
+    // Empty initial months still auto-advance. Browse back to the occupied day
+    // explicitly so the join covers the date the invitee is actually viewing.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (await scope.locator(`[data-day="${occupiedDay}"]`).count()) break
+      await scope.getByRole('button', { name: 'Previous month', exact: true }).click()
+      await expect(scope.locator('.calendar-grid')).toHaveAttribute('aria-busy', 'false')
+    }
     await expect(scope.locator(`[data-day="${occupiedDay}"]`)).toBeVisible()
+    await scope.locator(`[data-day="${occupiedDay}"]`).click()
     await expect(
       scope.getByRole('button', { name: 'Join the waitlist', exact: true }),
     ).toBeVisible()

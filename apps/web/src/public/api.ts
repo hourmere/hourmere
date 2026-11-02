@@ -3,6 +3,7 @@
 // token travels in the X-Manage-Token header, never in a URL.
 import { api, type Schemas } from '../api/client.ts'
 import { errorMessage, RequestError, requestError, UNREACHABLE } from '../api/errors.ts'
+import { durationMessage } from '../i18n/duration.ts'
 import { msg, type UiText } from '../i18n/translate.ts'
 
 export type PublicHost = Schemas['PublicHost']
@@ -71,8 +72,8 @@ async function call<T>(
 export function failureMessage(err: unknown): UiText {
   if (err instanceof PublicRequestError && err.status === 429) {
     return err.retryAfter
-      ? msg('Too many requests from your network. Try again in {0} seconds.', {
-          '0': err.retryAfter,
+      ? msg('Too many requests from your network. Try again in {duration}.', {
+          duration: durationMessage(err.retryAfter),
         })
       : 'Too many requests from your network. Wait a minute and try again.'
   }

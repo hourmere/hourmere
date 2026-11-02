@@ -1,5 +1,9 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Checking waitlist management access…': '正在检查候补名单管理权限……',
+  'Could not check waitlist management access. Try again.': '无法检查候补名单管理权限，请重试。',
+  'Not notified yet': '尚未通知',
+
   'Booking waitlist': '预约候补',
   'Only team owners and admins can manage the waitlist.':
     '只有团队所有者和管理员可以管理候补名单。',
@@ -7,9 +11,9 @@ export const admin = {
   'Let invitees join a waitlist when no times are available':
     '没有可预约时间时，允许受邀人加入候补名单',
   'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
-    '所有符合条件的受邀人会在同一批次收到通知。系统不预留时段，以最先成功预约者为准。关闭此功能会移除现有候补条目，不会发送邮件。',
-  'Waitlists support individual event types with one host.':
-    '候补功能仅支持由一名主持人负责的单人活动类型。',
+    '系统会统一向符合条件的受邀人发送通知。不会预留任何时段，最先成功预约的人获得该时段。关闭此功能会移除现有候补条目，且不会发送邮件。',
+  'Waitlists are available for event types with a single host.':
+    '候补名单仅适用于只有一位主持人的活动类型。',
   'View waitlist entries': '查看候补名单',
   'Pending verification': '等待邮箱验证',
   'Waiting for a time': '等待空闲时段',
@@ -18,8 +22,8 @@ export const admin = {
   'Waitlist entries': '候补名单',
   'Loading waitlist entries…': '正在加载候补名单……',
   'Could not load waitlist entries.': '无法加载候补名单。',
-  'Last notified shows the latest retained mail-server acceptance, not inbox delivery. Older notification records may have been cleared.':
-    '最近通知显示保留记录中最近一次被邮件服务器接受的时间，不代表已送达收件箱。较早的通知记录可能已被清除。',
+  '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.':
+    '“最近通知”显示现有记录中邮件服务器最近一次接受通知邮件的时间，并不代表邮件已送达收件箱。较早的通知记录可能已被清除。',
   'No waitlist entries.': '暂无候补条目。',
   'Contact details cleared': '联系信息已清除',
   'Requested period': '期望时段',
@@ -29,7 +33,7 @@ export const admin = {
   'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.':
     '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
   'Could not remove the waitlist entry.': '无法移除此候补条目。',
-  'Back to first page': '返回首页',
+  'Back to first page': '返回第一页',
   'Next page': '下一页',
   Refresh: '刷新',
 

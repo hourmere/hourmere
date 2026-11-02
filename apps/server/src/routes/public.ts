@@ -173,7 +173,7 @@ export const WaitlistJoinBody = z
   })
   .openapi('JoinWaitlist', {
     description:
-      'Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention.',
+      'Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. The personal event owner or authorized team owners/admins can see the submitted email, optional name and requested period. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention.',
   })
 export const WaitlistResendBody = z.strictObject({ email }).openapi('ResendWaitlistVerification')
 const WaitlistAccepted = z.object({ accepted: z.literal(true) }).openapi('WaitlistAccepted')

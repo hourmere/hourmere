@@ -1,5 +1,10 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Checking waitlist management access…': 'Checking waitlist management access…',
+  'Could not check waitlist management access. Try again.':
+    'Could not check waitlist management access. Try again.',
+  'Not notified yet': 'Not notified yet',
+
   'Booking waitlist': 'Booking waitlist',
   'Only team owners and admins can manage the waitlist.':
     'Only team owners and admins can manage the waitlist.',
@@ -9,8 +14,8 @@ export const admin = {
     'Let invitees join a waitlist when no times are available',
   'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
     'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.',
-  'Waitlists support individual event types with one host.':
-    'Waitlists support individual event types with one host.',
+  'Waitlists are available for event types with a single host.':
+    'Waitlists are available for event types with a single host.',
   'View waitlist entries': 'View waitlist entries',
   'Pending verification': 'Pending verification',
   'Waiting for a time': 'Waiting for a time',
@@ -19,8 +24,8 @@ export const admin = {
   'Waitlist entries': 'Waitlist entries',
   'Loading waitlist entries…': 'Loading waitlist entries…',
   'Could not load waitlist entries.': 'Could not load waitlist entries.',
-  'Last notified shows the latest retained mail-server acceptance, not inbox delivery. Older notification records may have been cleared.':
-    'Last notified shows the latest retained mail-server acceptance, not inbox delivery. Older notification records may have been cleared.',
+  '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.':
+    '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.',
   'No waitlist entries.': 'No waitlist entries.',
   'Contact details cleared': 'Contact details cleared',
   'Requested period': 'Requested period',
