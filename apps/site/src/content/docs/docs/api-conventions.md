@@ -136,6 +136,14 @@ for the generic cases in the table below (services cannot use them): `invalid_re
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
 renamed within `/api/v1`.
 
+Notification writes return `invalid_notifications` with a `message` identifying the array
+or zero-based rule index, field and violated constraint, for example
+`notifications.followUps[1].offsetMinutes: must be between 5 and 43200 minutes` or
+`notifications.followUps: at most 3 messages are allowed`. Positions refer to the submitted
+arrays before sorting. REST, MCP and CLI return the same detail; submitted values and
+host-note content are never included. Branch on `error`, since human-readable messages
+may change. Malformed shapes remain `invalid_request`.
+
 An optional `errorAlias` provides an additive, preferred code without renaming `error`.
 The OpenAPI `ErrorAlias` schema lists the documented alias code set, generated from the
 same registry as the server's response mapping. That set may grow within `/api/v1`.

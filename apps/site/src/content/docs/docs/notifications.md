@@ -62,9 +62,10 @@ built-in follow-up. Saved notes are retained, so enabling the switch again permi
 in future unsent follow-ups. No mail is backfilled by changing the switch.
 
 Hourmere Cloud must explicitly set `FOLLOW_UP_HOST_NOTES_ENABLED=false` before exposing
-notification writes to tenants. Enabling host-written mail there needs a separate reviewed
-abuse policy for host eligibility, recipient consent and complaints, in addition to the
-shared limits above. There is no automatic hosted-mode detection; attribution URLs do not
+notification writes to tenants, on every web and worker process (including the combined
+`all` role). Keep it disabled until separate abuse controls for host eligibility, recipient
+consent and complaints are reviewed and implemented, in addition to the shared limits
+above. There is no automatic hosted-mode detection; attribution URLs do not
 select this policy. See [configuration](/docs/configuration#email-and-registration).
 
 ## Jobs

@@ -178,7 +178,7 @@ exports[`event-type notification OpenAPI contract > publishes additive open resp
             },
           },
         },
-        "description": "invalid_request: malformed shape; invalid_notifications: rule values or disabled host notes",
+        "description": "invalid_request: malformed shape; invalid_notifications: message identifies the notification array or zero-based rule index, field and violated constraint, e.g. notifications.followUps[0].offsetMinutes: must be between 5 and 43200 minutes. Submitted values and host-note content are never included.",
       },
       "401": {
         "content": {

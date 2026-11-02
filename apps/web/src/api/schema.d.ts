@@ -6171,7 +6171,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (rule values or disabled host notes), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6313,7 +6313,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (rule values or disabled host notes), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6398,7 +6398,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request: malformed shape; invalid_notifications: rule values or disabled host notes */
+            /** @description invalid_request: malformed shape; invalid_notifications: message identifies the notification array or zero-based rule index, field and violated constraint, e.g. notifications.followUps[0].offsetMinutes: must be between 5 and 43200 minutes. Submitted values and host-note content are never included. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6481,7 +6481,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (rule values or disabled host notes), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;

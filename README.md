@@ -319,8 +319,8 @@ Configure event-type reminders and follow-ups through REST, MCP
 Follow-up rules may carry bounded plain-text host notes. These are sent from the instance's
 mail domain to unverified invitee addresses; operators can disable writes and sending of
 notes with `FOLLOW_UP_HOST_NOTES_ENABLED=false` (self-hosting default: `true`). Configure
-web and worker identically. Hourmere Cloud must disable notes until its text-abuse policy
-is approved. See [notification settings and host-note policy](https://hourmere.com/docs/notifications#configure-reminders-and-follow-ups).
+web and worker identically. Hourmere Cloud must explicitly set this to `false` until
+reviewed host-text abuse controls are implemented. See [notification settings and host-note policy](https://hourmere.com/docs/notifications#configure-reminders-and-follow-ups).
 
 Organization owners can view first-party [booking activity](https://hourmere.com/docs/analytics) at
 `/app/analytics`: daily creations, reschedules and actual cancellations, without visitor

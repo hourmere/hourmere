@@ -1,17 +1,26 @@
 import { Console } from 'node:console'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { Server as HttpServer } from 'node:http'
+import { stripTypeScriptTypes } from 'node:module'
 import { connect, createServer, type Socket } from 'node:net'
 import { Writable } from 'node:stream'
 import { createAuth, createAuthPool } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
-import { BOOKING_NOTIFICATION_JOB, bookingNotificationJob } from '@hourmere/notifications'
+import {
+  BOOKING_NOTIFICATION_JOB,
+  bookingNotificationJob,
+  enqueueScheduledBookingEmails,
+  scheduledBookingEmailJob,
+} from '@hourmere/notifications'
+import { createNotificationSnapshot } from '@hourmere/scheduling/notification-settings'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { fakeSmtpServer } from '../../../packages/mail/src/smtp-testing.ts'
 import { type RunningServer, startServer } from './server.ts'
 import { trickle } from './slow-client-testing.ts'
 
@@ -712,4 +721,137 @@ describe.skipIf(!serverUrl)('startServer', () => {
       }
     })
   }, 40_000)
+
+  async function verifyWorkerHostNoteSwitch(
+    enabled: boolean,
+    start: typeof startServer = startServer,
+  ) {
+    const db = createDb(testDb.pool)
+    const f = createFixtures(db)
+    const host = await f.host()
+    const now = Temporal.Now.instant().round({ smallestUnit: 'second', roundingMode: 'floor' })
+    const end = now.subtract({ minutes: 10 })
+    const hostNote = 'StoredHostNoteFromBeforeOperatorSwitch'
+    const bookingId = await f.booking(
+      host.organizationId,
+      [host.userId],
+      end.subtract({ minutes: 30 }).toString(),
+      end.toString(),
+    )
+    const snapshot = createNotificationSnapshot({
+      reminders: [],
+      followUps: [
+        {
+          id: 'after',
+          offsetMinutes: 5,
+          recipients: { host: false, invitee: true, guests: false },
+          hostNote,
+        },
+      ],
+    })
+    await db
+      .updateTable('bookings')
+      .set({ notification_snapshot: JSON.stringify(snapshot) })
+      .where('id', '=', bookingId)
+      .execute()
+    const producer = createJobs({
+      connectionString: testDb.url,
+      definitions: [scheduledBookingEmailJob({} as never)],
+      work: false,
+      migrate: true,
+      maxConnections: 2,
+      log: () => {},
+    })
+    const smtp = fakeSmtpServer()
+    let worker: RunningServer | undefined
+    await new Promise<void>((resolve) => smtp.server.listen(0, '127.0.0.1', resolve))
+    try {
+      await producer.start()
+      await db.transaction().execute((trx) =>
+        // Queue as the original booking transaction would have before its due time.
+        enqueueScheduledBookingEmails(producer, trx, bookingId, end),
+      )
+      await producer.stop()
+      worker = await start({
+        DATABASE_URL: testDb.url,
+        PORT: '0',
+        PUBLIC_URL: 'http://localhost',
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        HOURMERE_ROLE: 'worker',
+        FOLLOW_UP_HOST_NOTES_ENABLED: String(enabled),
+        SMTP_URL: `smtp://127.0.0.1:${(smtp.server.address() as { port: number }).port}`,
+        MAIL_FROM: 'Hourmere <fixture@example.com>',
+      })
+      await vi.waitFor(
+        async () => {
+          const message = await db
+            .selectFrom('booking_scheduled_messages')
+            .select(['state', 'attempts'])
+            .where('booking_id', '=', bookingId)
+            .executeTakeFirstOrThrow()
+          expect(message).toEqual({ state: 'completed', attempts: 1 })
+        },
+        { timeout: 10_000 },
+      )
+      expect(smtp.received.to).toEqual(['RCPT TO:<invitee@example.com>'])
+      // Nodemailer sends both alternatives as quoted-printable; remove soft line breaks
+      // before checking the SMTP payload, so wrapping cannot conceal the synthetic marker.
+      const delivered = (smtp.received.data ?? '').replace(/=\r\n/g, '')
+      expect(delivered).toContain('Content-Type: text/plain')
+      expect(delivered).toContain('Content-Type: text/html')
+      expect(delivered.match(/Content-Transfer-Encoding: quoted-printable/g)).toHaveLength(2)
+      if (enabled) expect(delivered.match(new RegExp(hostNote, 'g'))).toHaveLength(2)
+      else expect(delivered).not.toContain(hostNote)
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('notification_snapshot')
+            .where('id', '=', bookingId)
+            .executeTakeFirstOrThrow()
+        ).notification_snapshot,
+      ).toEqual(snapshot)
+    } finally {
+      await worker?.close()
+      await producer.stop()
+      for (const socket of smtp.sockets) socket.destroy()
+      await new Promise<void>((resolve) => smtp.server.close(() => resolve()))
+      await db.deleteFrom('auth.user').where('id', '=', host.userId).execute()
+    }
+  }
+
+  it.each([true, false])(
+    'passes FOLLOW_UP_HOST_NOTES_ENABLED=%s through real worker wiring to stored-note delivery',
+    async (enabled) => {
+      const printed = await quietly(() => verifyWorkerHostNoteSwitch(enabled))
+      expect(printed.error).toEqual([])
+    },
+    20_000,
+  )
+
+  it('detects a removed worker host-note dependency with the same SMTP assertion', async () => {
+    const location = new URL('./server.ts', import.meta.url)
+    const source = readFileSync(location, 'utf8')
+    const property = '    followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,\n'
+    const anchor = `  const notificationDeps = {\n    db,\n${property}`
+    expect(source.includes(anchor), 'mutation matches the worker dependency wiring').toBe(true)
+    // Compile an isolated source copy: no tracked file or concurrently loaded module changes.
+    const javascript = stripTypeScriptTypes(
+      source.replace(anchor, anchor.replace(property, '')),
+    ).replace(/((?:from|import)\s*)'([^']+)'/g, (_, prefix: string, specifier: string) => {
+      const resolved = specifier.startsWith('.')
+        ? new URL(specifier, location).href
+        : import.meta.resolve(specifier)
+      return `${prefix}'${resolved}'`
+    })
+    const copy: typeof import('./server.ts') = await import(
+      `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+    )
+    await quietly(async () => {
+      await expect(verifyWorkerHostNoteSwitch(false, copy.startServer)).rejects.toMatchObject({
+        name: 'AssertionError',
+        actual: expect.stringContaining('StoredHostNoteFromBeforeOperatorSwitch'),
+      })
+    })
+  }, 20_000)
 })

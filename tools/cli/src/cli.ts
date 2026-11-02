@@ -176,6 +176,7 @@ export async function runCli(options: {
       printable(
         {
           error: code,
+          ...(error instanceof CliError && error.detail !== undefined && { message: error.detail }),
           ...(error instanceof CliError && error.status !== undefined && { status: error.status }),
           ...(error instanceof CliError &&
             error.retryAfterSeconds !== undefined && {

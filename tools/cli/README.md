@@ -118,6 +118,10 @@ future bookings and send no immediate mail. Personal event types require their o
 team types require an owner or admin. `read` and `bookings` keys cannot change them.
 Follow-up notes are plain text, limited to 2000 UTF-16 code units, and may be disabled by
 the instance operator. They are sent from the instance's mail domain to selected recipients.
+Invalid notification values return `invalid_notifications` and a fixed `message` naming
+the array or zero-based rule index, field and constraint, matching REST and MCP. The
+message never includes submitted values or host-note content. Other server messages
+remain suppressed.
 
 Host booking fields from `list` include optional `rescheduledToId`: the immediate successor
 in the same organization that the caller also hosts, or null when none is available, even

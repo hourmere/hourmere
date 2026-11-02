@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: source-copy mutations target literal template strings
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { FOLLOW_UP_HOST_NOTE_MAX_LENGTH } from '@hourmere/core/follow-up-note'
@@ -131,6 +132,95 @@ function verifySemantic(copy: SettingsModule) {
   }
 }
 
+const detailedErrors: [string, unknown, string, { followUpHostNotesEnabled?: boolean }?][] = [
+  [
+    'reminder count',
+    settings(Array.from({ length: 6 }, (_, i) => rule(`r${i}`, 5 + i))),
+    'notifications.reminders: at most 5 messages are allowed',
+  ],
+  [
+    'follow-up count',
+    settings(
+      [],
+      Array.from({ length: 4 }, (_, i) => rule(`f${i}`, 5 + i)),
+    ),
+    'notifications.followUps: at most 3 messages are allowed',
+  ],
+  [
+    'ID grammar',
+    settings([rule('good', 10), rule('bad id')]),
+    'notifications.reminders[1].id: must be 1–64 letters, digits, "_" or "-"',
+  ],
+  [
+    'reserved ID',
+    settings([], [rule('__proto__')]),
+    'notifications.followUps[0].id: must not be __proto__',
+  ],
+  [
+    'cross-category ID uniqueness',
+    settings([rule('same')], [rule('same', 120)]),
+    'notifications.followUps[0].id: must be unique across reminders and followUps',
+  ],
+  [
+    'integer offset',
+    settings([], [rule('valid', 120), rule('fraction', 5.5)]),
+    'notifications.followUps[1].offsetMinutes: must be an integer number of minutes',
+  ],
+  ...[4, 43201].map((offset): [string, unknown, string] => [
+    `offset bound ${offset}`,
+    settings([rule('valid', 60), rule('invalid', offset)]),
+    'notifications.reminders[1].offsetMinutes: must be between 5 and 43200 minutes',
+  ]),
+  [
+    'duplicate offset',
+    settings([rule('first'), rule('second')]),
+    'notifications.reminders[1].offsetMinutes: must be unique within this message category',
+  ],
+  [
+    'recipient selection',
+    settings([], [{ ...rule(), recipients: { invitee: false, guests: false, host: false } }]),
+    'notifications.followUps[0].recipients: at least one recipient must be selected',
+  ],
+  [
+    'note length',
+    {
+      reminders: [],
+      followUps: [rule('valid', 120), { ...rule(), hostNote: 'private-note'.repeat(200) }],
+    },
+    'notifications.followUps[1].hostNote: must contain at most 2000 UTF-16 code units',
+  ],
+  [
+    'note Unicode',
+    { reminders: [], followUps: [{ ...rule(), hostNote: 'private-note\ud800' }] },
+    'notifications.followUps[0].hostNote: must contain well-formed Unicode',
+  ],
+  [
+    'note controls',
+    { reminders: [], followUps: [{ ...rule(), hostNote: 'private-note\tcontent' }] },
+    'notifications.followUps[0].hostNote: must not contain control characters other than LF',
+  ],
+  [
+    'disabled note',
+    { reminders: [], followUps: [rule('valid', 120), { ...rule(), hostNote: 'private-note' }] },
+    'notifications.followUps[1].hostNote: host notes are disabled by the operator',
+    { followUpHostNotesEnabled: false },
+  ],
+]
+
+function verifyDetails(copy: Pick<SettingsModule, 'validateNotifications'>) {
+  for (const [label, value, detail, options] of detailedErrors) {
+    expect(() => copy.validateNotifications(value, options), label).toThrow(
+      expect.objectContaining({ code: 'invalid_notifications', detail }),
+    )
+    try {
+      copy.validateNotifications(value, options)
+    } catch (error) {
+      expect(error).toBeInstanceOf(DomainError)
+      expect((error as DomainError).detail).not.toContain('private-note')
+    }
+  }
+}
+
 function verifyCanonical(copy: SettingsModule) {
   const input = settings(
     [rule('near', 5), rule('far', 43200)],
@@ -249,6 +339,34 @@ function verifyStoredHostNotes(
 }
 
 describe('notification settings contract', () => {
+  it('identifies each invalid input field and constraint without echoing values or host notes', () => {
+    verifyDetails({ validateNotifications })
+    verifyDetails(sourceCopy())
+  })
+
+  it.each<[string, Replacement]>([
+    ['field detail', ['`${path}: ${constraint}`', 'undefined']],
+    [
+      'input rule index',
+      ['`notifications.${category}[${index}]`', '`notifications.${category}[0]`'],
+    ],
+    [
+      'host-note rule index',
+      ['`notifications.followUps[${index}].hostNote`', '`notifications.followUps[0].hostNote`'],
+    ],
+    ['constraint detail', ['`${path}: ${constraint}`', '`${path}: invalid settings`']],
+    [
+      'host-note privacy',
+      [
+        "throw invalid(path, 'must not contain control characters other than LF')",
+        'throw invalid(path, `must not contain control characters other than LF: ${followUp.hostNote}`)',
+      ],
+    ],
+  ])('detects loss of %s with a source-copy assertion failure', (_, replacement) => {
+    const copy = sourceCopy(replacement)
+    expect(() => verifyDetails(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+  })
+
   it('excludes follow-up notes from reminder rules structurally at the type level', () => {
     expectTypeOf<FollowUpRule>().not.toMatchTypeOf<ReminderRule>()
     expectTypeOf<{
