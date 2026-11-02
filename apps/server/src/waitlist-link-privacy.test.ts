@@ -15,6 +15,7 @@ import { isOneTimeLinkPath } from './one-time-link-privacy.ts'
 import { securityHeaders } from './security-headers.ts'
 
 const token = `00000000-0000-4000-8000-000000000091.${'w'.repeat(43)}`
+const encodedToken = [...token].map((letter) => `%${letter.charCodeAt(0).toString(16)}`).join('')
 const suggested = encodeURIComponent('2026-11-02T14:00:00.000Z')
 
 function copy<T>(
@@ -69,6 +70,9 @@ describe('waitlist path capability privacy', () => {
           app.get('/fail/:token', () => {
             throw new Error(`Synthetic failure ${token}`)
           })
+          app.get('/fail-encoded', () => {
+            throw new Error(`Synthetic URL /ada/intro/%77aitlist/${encodedToken}/time`)
+          })
         },
       ],
     })
@@ -96,21 +100,25 @@ describe('waitlist path capability privacy', () => {
     try {
       const a = app()
       expect((await a.request(`/fail/${token}`)).status).toBe(500)
+      expect((await a.request('/fail-encoded')).status).toBe(500)
       await a.request(`/api/v1/waitlist/${token}/${suggested}`)
       expect(output.length).toBeGreaterThan(0)
       expect(JSON.stringify(output).includes(token)).toBe(false)
       expect(JSON.stringify(output).includes('w'.repeat(42))).toBe(false)
+      expect(JSON.stringify(output).includes('%77'.repeat(42))).toBe(false)
       for (const value of [
         token,
         token.replaceAll('.', '%2E'),
         token.replace('.w', '.%77'),
-        [...token].map((letter) => `%${letter.charCodeAt(0).toString(16)}`).join(''),
+        encodedToken,
       ]) {
-        expect(
-          redactLogDetails(
-            `https://schedule.example/ada/intro/waitlist/${value}/${suggested}`,
-          ).includes('w'.repeat(42)),
-        ).toBe(false)
+        for (const segment of ['waitlist', '%77aitlist', '%77%61%69%74%6c%69%73%74']) {
+          const redacted = redactLogDetails(
+            `https://schedule.example/ada/intro/${segment}/${value}/${suggested}`,
+          )
+          expect(redacted.includes('w'.repeat(42))).toBe(false)
+          expect(redacted.includes('%77'.repeat(42))).toBe(false)
+        }
       }
     } finally {
       for (const spy of spies) spy.mockRestore()
@@ -259,25 +267,48 @@ describe('encoded and diagnostic capability source-copy controls', () => {
   }
   function assertRedacted(redact = redactLogDetails) {
     expect(redact(`Synthetic failure ${token}`).includes('w'.repeat(43))).toBe(false)
-    const encoded = [...token].map((letter) => `%${letter.charCodeAt(0).toString(16)}`).join('')
-    const output = redact(`GET /ada/intro/waitlist/${encoded}/time?private-query`)
+    const output = redact(`GET /ada/intro/waitlist/${encodedToken}/time?private-query`)
     expect(output.includes('%77')).toBe(false)
     expect(output.includes('private-query')).toBe(false)
+    for (const diagnostic of [
+      `GET /ada/intro/%77aitlist/${encodedToken}/time`,
+      `GET %2fada%2fintro%2f%77aitlist%2f${encodedToken}%2ftime`,
+      `Synthetic failure ${encodedToken}`,
+    ]) {
+      expect(redact(diagnostic).includes('%77'.repeat(43))).toBe(false)
+    }
+    for (const path of ['/waitlist/intro', '/team/waitlist/intro', '/%77aitlist/intro'])
+      expect(redact(path)).toBe(path)
   }
   it('keeps all source-copy diagnostic and encoded-path assertions passing', () =>
     assertRedacted(redactorCopy(source)))
-  it.each(["'$1[redacted waitlist token]'", "'[redacted waitlist token]'"])(
-    'detects removing %s redaction',
-    (marker) => {
-      assertRedacted()
-      const index = source.indexOf(marker)
-      expect(index).toBeGreaterThan(0)
-      const start = source.lastIndexOf('.replace(', index)
-      const end = source.indexOf('\n      )', index) + '\n      )'.length
-      const copied = redactorCopy(source.slice(0, start) + source.slice(end))
-      expect(() => assertRedacted(copied)).toThrow(
-        expect.objectContaining({ name: 'AssertionError' }),
-      )
-    },
-  )
+  it('detects removing capability redaction from an isolated source copy', () => {
+    assertRedacted()
+    const index = source.indexOf("'[redacted waitlist token]'")
+    expect(index).toBeGreaterThan(0)
+    const start = source.lastIndexOf('.replace(', index)
+    const end = source.indexOf('\n      )', index) + '\n      )'.length
+    const copied = redactorCopy(source.slice(0, start) + source.slice(end))
+    expect(() => assertRedacted(copied)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+  it('detects blanket redaction of ordinary waitlist handle paths', () => {
+    const before = ".replace(UUID, '[redacted UUID]')"
+    expect(source.includes(before), 'mutation must match source').toBe(true)
+    const copied = redactorCopy(
+      source.replace(before, `${before}.replace(/(\\/waitlist\\/)[^\\s/]+/gi, '$1[redacted]')`),
+    )
+    expect(() => assertRedacted(copied)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+  it('detects bypassing candidate decoding in an isolated source copy', () => {
+    const before = 'decodeURIComponent(token)'
+    expect(source.includes(before), 'mutation must match source').toBe(true)
+    const copied = redactorCopy(source.replace(before, 'token'))
+    expect(() => assertRedacted(copied)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
 })

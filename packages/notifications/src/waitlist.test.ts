@@ -858,6 +858,87 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     ).toEqual({ state: 'accepted', attempts: 2 })
   })
 
+  async function crashExhaustionScenario(send: Sender, kind: 'verification' | 'notification') {
+    const s = await setup()
+    const entry = kind === 'verification' ? await s.join() : await s.activate()
+    const id = kind === 'verification' ? entry.outboxId : ((await s.open())[0]?.id as string)
+    const table = kind === 'verification' ? 'waitlist_verification_outbox' : 'waitlist_candidates'
+    const request = { kind, id }
+    const interrupted = sourceCopy(
+      'await deps.db.transaction().execute(async (db) => {\n      const { ensureWaitlistKey }',
+      "throw new Error('simulated_crash_after_claim'); await deps.db.transaction().execute(async (db) => {\n      const { ensureWaitlistKey }",
+    )
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await expect(interrupted(s.deps, request)).rejects.toThrow(
+        'waitlist_email_delivery_unavailable',
+      )
+      expect(
+        await db
+          .selectFrom(table)
+          .select(['state', 'attempts'])
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ state: 'processing', attempts: attempt })
+      s.advance(120_001)
+    }
+    // A new delivery invocation retires the third expired claim without another SMTP call.
+    await send(s.deps, request)
+    s.advance(3_600_000)
+    await send(s.deps, request)
+    expect(s.messages).toHaveLength(0)
+    expect(
+      await db
+        .selectFrom(table)
+        .select(['state', 'attempts', 'error_code', 'claim_token', 'lease_until'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({
+      state: 'failed',
+      attempts: 3,
+      error_code: 'attempts_exhausted',
+      claim_token: null,
+      lease_until: null,
+    })
+    expect(
+      await db
+        .selectFrom('notification_email_sends')
+        .select('sent_at')
+        .where(
+          'recipient_hash',
+          '=',
+          limits.notificationRecipientHash(entry.email as string, SECRET),
+        )
+        .execute(),
+    ).toHaveLength(0)
+    if (kind === 'notification') {
+      const tombstones = await db
+        .selectFrom('waitlist_slot_tombstones')
+        .select('outcome')
+        .where('event_type_id', '=', s.eventTypeId)
+        .execute()
+      expect(tombstones.length).toBeGreaterThan(0)
+      expect(tombstones.every(({ outcome }) => outcome === 'failed')).toBe(true)
+    }
+  }
+  it.each(['verification', 'notification'] as const)(
+    'retires %s after three crashed claims without a fourth send',
+    (kind) => crashExhaustionScenario(deliverWaitlistEmail, kind),
+  )
+  it.each(['verification', 'notification'] as const)(
+    'detects source-copy omission of final %s crash retirement',
+    async (kind) => {
+      await expect(
+        crashExhaustionScenario(
+          sourceCopy(
+            'if (!claim.attempt) return retireUnsendable(deps, request)',
+            'if (!claim.attempt) return',
+          ),
+          kind,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
   it('records the bounded SMTP acceptance/failed-commit duplicate window', async () => {
     const s = await setup()
     await s.activate()
