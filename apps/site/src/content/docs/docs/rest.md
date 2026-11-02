@@ -94,6 +94,16 @@ only new bookings and send no immediate mail. Read the
 and [host-note operating policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls)
 before enabling follow-ups or host-written text.
 
+## Create one-time links
+
+Use `POST /api/v1/event-types/{eventTypeId}/one-time-links` with optional `expiresAt`
+and `prefill`, then save the creation response's URL privately. It is shown once.
+List safe metadata with GET on the same path; revoke with DELETE on its `/{id}` path.
+Create and revoke require `bookings` or `full`, while list/get allow `read` and `full`.
+An exact `Idempotency-Key` retry never creates a second link and returns
+`409 one_time_link_already_created` because the URL cannot be recovered.
+See [one-time booking links](/docs/one-time-links) for examples, permissions and limits.
+
 ## Find a time
 
 Choose a future UTC range within the event type's booking window, at most 62 days.

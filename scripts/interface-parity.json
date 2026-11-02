@@ -47,6 +47,10 @@
     "mcp": "create_booking",
     "cli": "book"
   },
+  "createOneTimeBookingLink": {
+    "mcp": "create_one_time_link",
+    "cli": "one-time-links create"
+  },
   "createPublicBooking": {
     "mcp": "create_booking",
     "cli": "book"
@@ -98,6 +102,10 @@
   "revokeMcpOAuthConnection": {
     "exemption": "browser-session-only",
     "reason": "Revoking an MCP OAuth consent grant requires the user's browser session."
+  },
+  "revokeOneTimeBookingLink": {
+    "mcp": "revoke_one_time_link",
+    "cli": "one-time-links revoke"
   },
   "selectMcpOAuthOrganization": {
     "exemption": "browser-session-only",
