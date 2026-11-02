@@ -871,13 +871,18 @@ dbDescribe('read-only Cal.com source extraction', () => {
   })
   it('checks aggregate byte limits before returning any selected payload', async () => {
     const fixture = fixtures[0] as (typeof fixtures)[number]
-    await fixture.db.pool.query(`INSERT INTO "Booking"
-      SELECT (pg_catalog.jsonb_populate_record(NULL::"Booking",pg_catalog.to_jsonb(b)||
-        pg_catalog.jsonb_build_object('id',g,'uid','aggregate-'||g,
-          'responses',pg_catalog.jsonb_build_object('notes',pg_catalog.repeat('x',980000))))).*
-      FROM "Booking" b CROSS JOIN pg_catalog.generate_series(3000,3034) g WHERE b.id=1000`)
     const { trace, restore } = traceSourcePayloads()
     try {
+      // Clone the small persisted seed first. Passing each 980 kB answer through
+      // jsonb_populate_record repeatedly converts the whole Booking composite and
+      // can consume the test's time budget before extraction starts.
+      await fixture.db.pool.query(`INSERT INTO "Booking"
+        SELECT (pg_catalog.jsonb_populate_record(NULL::"Booking",pg_catalog.to_jsonb(b)||
+          pg_catalog.jsonb_build_object('id',g,'uid','aggregate-'||g))).*
+        FROM "Booking" b CROSS JOIN pg_catalog.generate_series(3000,3034) g WHERE b.id=1000`)
+      await fixture.db.pool.query(`UPDATE "Booking"
+        SET responses=pg_catalog.jsonb_build_object('notes',pg_catalog.repeat('x',980000))
+        WHERE id BETWEEN 3000 AND 3034`)
       await expect(extractSource(options())).rejects.toMatchObject({
         code: 'SOURCE_LIMIT_EXCEEDED',
       })
