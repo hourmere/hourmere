@@ -53,6 +53,23 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Configure meeting lengths
+
+Create an event type with `POST /api/v1/event-types` or edit it with
+`PATCH /api/v1/event-types/{id}`. Set `durationMinutes` to the default and
+`allowedDurationsMinutes` to the complete list of allowed lengths, kept in ascending order, for example
+`{ "durationMinutes": 30, "allowedDurationsMinutes": [15, 30, 60] }`.
+The list must contain 1–12 distinct whole-minute values from 1 to 1440 inclusive and include
+the default. Supplied lengths are sorted before storage. Creation also requires `slug` and `title`; omitting the list creates
+`[durationMinutes]`. These configuration writes require a `full` API key.
+
+On a multi-length type, send both fields to change the default to a length outside the
+saved list. Omitting the list on update preserves it, except that a duration-only edit
+of a single-length type also replaces its sole allowed length. Invalid values return
+`400 invalid_event_type`; malformed request shapes return `400 invalid_request`.
+The [multiple meeting lengths guide](/docs/multiple-durations) covers the editor,
+invitee choices, rescheduling and shared-rule limits.
+
 ## Configure reminders and follow-ups
 
 Use a `full` API key and an event-type ID from `GET /api/v1/event-types`. Protected event

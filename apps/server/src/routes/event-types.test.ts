@@ -179,7 +179,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     const client = api(user)
     const created = await client.post(
       '/api/v1/event-types',
-      body({ allowedDurationsMinutes: [15, 30, 60] }),
+      body({ allowedDurationsMinutes: [60, 30, 15] }),
     )
     expect(created.status).toBe(201)
     expect(created.body).toMatchObject({
@@ -188,8 +188,30 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     })
     const id = idOf(created)
     expect(
+      await t.db
+        .selectFrom('event_types')
+        .select('allowed_durations_minutes')
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ allowed_durations_minutes: [15, 30, 60] })
+    expect(
       (await client.patch(`/api/v1/event-types/${id}`, { durationMinutes: 60 })).body,
     ).toMatchObject({ durationMinutes: 60, allowedDurationsMinutes: [15, 30, 60] })
+    expect(
+      (
+        await client.patch(`/api/v1/event-types/${id}`, {
+          durationMinutes: 60,
+          allowedDurationsMinutes: [60, 15, 30],
+        })
+      ).body,
+    ).toMatchObject({ durationMinutes: 60, allowedDurationsMinutes: [15, 30, 60] })
+    expect(
+      await t.db
+        .selectFrom('event_types')
+        .select('allowed_durations_minutes')
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ allowed_durations_minutes: [15, 30, 60] })
     for (const options of [
       [],
       [15],

@@ -72,7 +72,7 @@ export interface EventType {
   title: string
   description: string | null
   durationMinutes: number
-  /** Distinct permitted lengths; includes durationMinutes, the default. */
+  /** Distinct permitted lengths kept in ascending order; includes durationMinutes, the default. */
   allowedDurationsMinutes: number[]
   /** null = the selected duration. */
   slotStepMinutes: number | null
@@ -875,7 +875,7 @@ function validFields(
     title: validTitle(c.title),
     description: validDescription(c.description),
     durationMinutes: c.durationMinutes as number,
-    allowedDurationsMinutes: [...(allowedDurationsMinutes as number[])],
+    allowedDurationsMinutes: [...(allowedDurationsMinutes as number[])].sort((a, b) => a - b),
     slotStepMinutes: (c.slotStepMinutes ?? null) as number | null,
     bufferBeforeMinutes: c.bufferBeforeMinutes as number,
     bufferAfterMinutes: c.bufferAfterMinutes as number,
@@ -1040,7 +1040,7 @@ function fieldsOf(row: {
     title: row.title,
     description: row.description,
     durationMinutes: row.duration_minutes,
-    allowedDurationsMinutes: row.allowed_durations_minutes,
+    allowedDurationsMinutes: [...row.allowed_durations_minutes].sort((a, b) => a - b),
     slotStepMinutes: row.slot_step_minutes,
     bufferBeforeMinutes: row.buffer_before_minutes,
     bufferAfterMinutes: row.buffer_after_minutes,

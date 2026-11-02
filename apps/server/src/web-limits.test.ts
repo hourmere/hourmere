@@ -20,6 +20,8 @@ interface SchemaObject {
   maximum?: number
   minLength?: number
   maxLength?: number
+  minItems?: number
+  uniqueItems?: boolean
   maxItems?: number
   pattern?: string
   properties?: Record<string, SchemaObject>
@@ -63,6 +65,12 @@ describe("the web app's form limits", () => {
     expect(property(input, 'description').maxLength).toBe(EVENT_TYPE.descriptionMaxLength)
     expect(property(input, 'slug').maxLength).toBe(EVENT_TYPE.slugMaxLength)
     expect(property(input, 'slug').pattern).toBe(EVENT_TYPE.slugPattern.source)
+    expect(property(input, 'allowedDurationsMinutes')).toMatchObject({
+      minItems: 1,
+      maxItems: EVENT_TYPE.maxAllowedDurations,
+      uniqueItems: true,
+      items: { minimum: RULES.durationMinutes.min, maximum: RULES.durationMinutes.max },
+    })
     expect(property(input, 'position')).toMatchObject({
       minimum: EVENT_TYPE.positionMin,
       maximum: EVENT_TYPE.positionMax,

@@ -3,8 +3,10 @@ import { RequestError } from '../../api/errors.ts'
 import { translateMessage } from '../../i18n/translate.ts'
 import { eventType } from '../../test/fixtures.ts'
 import {
+  allowedDurationsProblem,
   comparable,
   draftFromEventType,
+  durationToAddProblem,
   emptyDraft,
   newOption,
   newQuestion,
@@ -304,5 +306,95 @@ describe('explicit Zoom configuration', () => {
     const result = serverErrors(new RequestError(403, code, 'unsafe provider detail'), emptyDraft())
     expect(JSON.stringify(result)).not.toContain('unsafe provider detail')
     expect(Object.keys(result.fields)).toHaveLength(1)
+  })
+})
+
+describe('multiple duration draft validation', () => {
+  const draft = { ...emptyDraft(), title: 'Intro', slug: 'intro' }
+  it.each([30, 45])(
+    'keeps a single-duration create payload unchanged for %i minutes',
+    (minutes) => {
+      const value = {
+        ...draft,
+        durationMinutes: String(minutes),
+        allowedDurationsMinutes: [minutes],
+      }
+      expect(toInput(value)).toHaveProperty('durationMinutes', minutes)
+      expect(toInput(value)).not.toHaveProperty('allowedDurationsMinutes')
+    },
+  )
+
+  it.each([{ durations: [30] }, { durations: [15, 30, 60] }])(
+    'omits an unchanged offered list from a patch (baseline $durations)',
+    ({ durations }) => {
+      const original = { ...draft, allowedDurationsMinutes: durations }
+      expect(toPatchInput({ ...original, title: 'Renamed' }, original)).not.toHaveProperty(
+        'allowedDurationsMinutes',
+      )
+    },
+  )
+
+  it('sends an explicitly reduced single-duration list, but omits it after reverting the edit', () => {
+    const original = { ...draft, allowedDurationsMinutes: [15, 30, 60] }
+    const reduced = { ...draft, allowedDurationsMinutes: [30] }
+    expect(toPatchInput(reduced, original).allowedDurationsMinutes).toEqual([30])
+    expect(
+      toPatchInput({ ...reduced, allowedDurationsMinutes: [15, 30, 60] }, original),
+    ).not.toHaveProperty('allowedDurationsMinutes')
+    // A default-only change leaves the remotely configured offered list alone.
+    expect(toPatchInput({ ...original, durationMinutes: '60' }, original)).not.toHaveProperty(
+      'allowedDurationsMinutes',
+    )
+  })
+
+  it.each([
+    [[], 'Offer from 1 to 12 durations.'],
+    [Array.from({ length: 13 }, (_, index) => index + 1), 'Offer from 1 to 12 durations.'],
+    [[30, 30], 'Offer each duration only once.'],
+    [[15, 60], 'Include the default duration in the allowed durations.'],
+    [[0, 30], 'Enter a number from 1 to 1,440.'],
+    [[30, 1441], 'Enter a number from 1 to 1,440.'],
+    [[1.5, 30], 'Enter a number from 1 to 1,440.'],
+  ])('rejects malformed offered lengths %j with the server rule', (values, problem) => {
+    expect(renderedDraftErrors({ ...draft, allowedDurationsMinutes: values })).toHaveProperty(
+      'allowedDurationsMinutes',
+      problem,
+    )
+  })
+
+  it('accepts twelve distinct lengths including both bounds and retains them through both writes', () => {
+    const values = [1, 15, 30, 45, 60, 90, 120, 180, 240, 360, 720, 1440]
+    const value = { ...draft, allowedDurationsMinutes: values, durationMinutes: '90' }
+    expect(validateDraft(value)).toEqual({})
+    expect(toInput(value)).toMatchObject({ allowedDurationsMinutes: values, durationMinutes: 90 })
+    expect(toPatchInput(value, draft)).toMatchObject({
+      allowedDurationsMinutes: values,
+      durationMinutes: 90,
+    })
+    const saved = draftFromEventType(eventType(toInput(value)))
+    expect(saved.allowedDurationsMinutes).toEqual(values)
+    expect(saved.durationMinutes).toBe('90')
+    expect(comparable(saved)).not.toBe(comparable({ ...saved, allowedDurationsMinutes: [90] }))
+  })
+
+  it.each([
+    [
+      'allowedDurationsMinutes must contain from 1 to 12 durations',
+      'Offer from 1 to 12 durations.',
+    ],
+    ['allowedDurationsMinutes must contain distinct durations', 'Offer each duration only once.'],
+    [
+      'allowedDurationsMinutes must include durationMinutes',
+      'Include the default duration in the allowed durations.',
+    ],
+  ])('maps the server refusal %s to the list', (detail, message) => {
+    const mapped = serverErrors(new RequestError(400, 'invalid_event_type', detail), draft)
+    expect(mapped).toEqual({ fields: { allowedDurationsMinutes: message }, message: null })
+  })
+
+  it('uses the same limits for custom additions and stored lists', () => {
+    expect(durationToAddProblem('30', [30])).toBe('This duration is already in the list.')
+    expect(durationToAddProblem('1440', [30])).toBeNull()
+    expect(allowedDurationsProblem([30, 1440], '1440')).toBeNull()
   })
 })
