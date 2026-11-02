@@ -189,7 +189,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       }
       const check = (id: string, moved = false) => {
         const host = sent.find(to(hostEmail))
-        const url = `${PUBLIC_URL}/app/bookings/${id}`
+        const url = `${PUBLIC_URL}/app/bookings/${id}?organizationId=${organizationId}`
         expect(host).toBeDefined()
         expect(host?.html?.includes(`href="${url}"`)).toBe(true)
         expect(host?.text?.includes(url)).toBe(true)

@@ -3363,6 +3363,10 @@ export interface components {
              */
             cancelledAt: string | null;
             cancelReason: string | null;
+            /** @description Authenticated host reads only: the other booked hosts’ names, with no email addresses or internal identifiers. Omitted for single-host bookings. */
+            coHosts?: {
+                name: string;
+            }[];
             conference?: {
                 /**
                  * @description Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.
@@ -4447,6 +4451,8 @@ export interface components {
             }[];
             /** Format: uuid */
             id: string;
+            /** @description Additive, read-only: whether this cancelled booking was replaced by a rescheduled booking; status and status filters remain unchanged */
+            isRescheduled: boolean;
             /** Format: date-time */
             start: string;
             /** @enum {string} */

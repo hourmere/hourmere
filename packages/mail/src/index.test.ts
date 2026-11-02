@@ -584,6 +584,34 @@ describe('createSmtpMailer', () => {
     expect(data).not.toMatch(/^Bcc:/im)
   })
 
+  it('routes collective replies to distinct sanitized mailboxes and omits unsafe entries', async () => {
+    received.to = []
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'calendar@selfhosted.example',
+    })
+    await mailer.send({
+      to: 'ada@example.com',
+      replyTo: [
+        { name: 'Liam, LA', email: 'liam@example.test' },
+        { name: 'Berta\r\n Berlin', email: 'berta@example.test' },
+        { name: 'Duplicate', email: 'LIAM@example.test' },
+        { name: 'Invalid', email: 'bad@example.test, hidden@example.test' },
+      ],
+      subject: 'Collective booking',
+      text: 'Booked.',
+    })
+    expect(mailboxHeader(received.data ?? '', 'Reply-To')).toEqual([
+      { name: 'Liam, LA', address: 'liam@example.test' },
+      { name: 'Berta Berlin', address: 'berta@example.test' },
+    ])
+    expect(mailboxHeader(received.data ?? '', 'From')).toEqual([
+      { name: '', address: 'calendar@selfhosted.example' },
+    ])
+    expect(received.to).toEqual(['RCPT TO:<ada@example.com>'])
+    expect(received.data).not.toMatch(/^Bcc:/im)
+  })
+
   it.each([
     'grace@example.com, victim@example.com',
     'grace@example.com\r\nBcc: victim@example.com',

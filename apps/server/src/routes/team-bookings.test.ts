@@ -292,6 +292,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       id: seeded.ids[0],
       status: 'cancelled',
       start: '2026-11-04T09:00:00.000Z',
+      isRescheduled: true,
       end: '2026-11-04T09:30:00.000Z',
       cancelledAt: '2026-11-01T12:00:00.000Z',
       eventType: { id: seeded.eventId, title: 'Team consultation', publicBookingPath: null },
@@ -693,6 +694,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       'eventType',
       'hosts',
       'id',
+      'isRescheduled',
       'start',
       'status',
     ])

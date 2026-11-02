@@ -29,6 +29,8 @@ export type MeetingLocation =
 export interface BookingEmailMeeting {
   eventName: string
   hostName: string
+  /** Required hosts for a collective booking, in stable booking order. */
+  hostNames?: readonly string[] | undefined
   /** The invitee who booked. */
   inviteeName: string
   inviteeEmail: string
@@ -69,6 +71,8 @@ export interface HostRecipient {
   locale?: string | null | undefined
   /** The invitee's answers to the booking questions. */
   answers: readonly { question: string; answer: string }[]
+  /** Other required hosts, names only; never contact addresses. */
+  coHostNames?: readonly string[] | undefined
 }
 
 export type BookingEmailRecipient = AttendeeRecipient | HostRecipient
@@ -77,6 +81,38 @@ export type BookingEmailRecipient = AttendeeRecipient | HostRecipient
 export function bookingHostName(locale?: string | null): string {
   return message(interfaceLanguage(locale) ?? 'en', 'Host')
 }
+
+/** Locale-aware names; compact subjects retain a localized count of the remaining hosts. */
+export function bookingHostNames(
+  names: readonly string[],
+  locale?: string | null,
+  compact = false,
+): string {
+  const language = interfaceLanguage(locale) ?? 'en'
+  const cleaned = names.map((name) => singleLine(name) || message(language, 'Host'))
+  const visible = compact && cleaned.length > 3 ? cleaned.slice(0, 3) : cleaned
+  const list =
+    visible.length < cleaned.length
+      ? [
+          ...visible,
+          message(
+            language,
+            cleaned.length - visible.length === 1 ? 'hosts.moreOne' : 'hosts.more',
+            { count: String(cleaned.length - visible.length) },
+          ),
+        ]
+      : visible
+  return new Intl.ListFormat(formattingLocale(language), { type: 'conjunction' }).format(list)
+}
+
+const meetingHosts = (
+  meeting: BookingEmailMeeting,
+  language: InterfaceLanguage,
+  compact = false,
+) =>
+  meeting.hostNames?.length
+    ? bookingHostNames(meeting.hostNames, language, compact)
+    : singleLine(meeting.hostName)
 
 /** Generated answer labels follow the host language; custom answers remain untouched. */
 export function bookingAnswerText(value: unknown, language: InterfaceLanguage): string | undefined {
@@ -366,7 +402,7 @@ export function followUpEmail(
   const language = interfaceLanguage(recipient.locale) ?? 'en'
   const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const event = singleLine(meeting.eventName)
-  const host = singleLine(meeting.hostName)
+  const host = meetingHosts(meeting, language)
   const invitee = singleLine(meeting.inviteeName)
   const isHost = recipient.role === 'host'
   const note = multiLine(normalizeFollowUpHostNote(options.hostNote ?? ''))
@@ -384,6 +420,9 @@ export function followUpEmail(
       field(t('What'), event),
       field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
       field(t('Host'), host),
+      ...(isHost && recipient.coHostNames?.length
+        ? [field(t('Co-hosts'), bookingHostNames(recipient.coHostNames, language))]
+        : []),
     ],
     answers: [],
     bookingUrl,
@@ -407,13 +446,13 @@ export function bookingEmail(
   recipient: BookingEmailRecipient,
   options: { attachment?: MailAttachment | undefined; bookingUrl?: string | undefined } = {},
 ): MailMessage {
+  const language = interfaceLanguage(recipient.locale) ?? 'en'
   const event = singleLine(meeting.eventName)
-  const host = singleLine(meeting.hostName)
+  const host = meetingHosts(meeting, language)
   const invitee = singleLine(meeting.inviteeName)
   const isHost = recipient.role === 'host'
   // Who the meeting is with, from the recipient's side.
   const other = isHost ? invitee : host
-  const language = interfaceLanguage(recipient.locale) ?? 'en'
   const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const when = formatShortTime(meeting.start, recipient.timeZone, language)
   const values = { event, host, invitee, other, when }
@@ -427,7 +466,12 @@ export function bookingEmail(
     cancelled: 'Cancelled: {event} with {other} on {when}',
     reminder: 'Reminder: {event} with {other} on {when}',
   } satisfies Record<BookingEmailKind, MailKey>
-  const subject = t(subjects[kind], values)
+  const subjectHost = meetingHosts(meeting, language, true)
+  const subject = t(subjects[kind], {
+    ...values,
+    host: subjectHost,
+    other: isHost ? invitee : subjectHost,
+  })
   const intros = {
     conference_failed: isHost
       ? 'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.'
@@ -475,6 +519,9 @@ export function bookingEmail(
   }
   if (isHost) {
     fields.push(field(t('Invitee'), `${invitee} <${singleLine(meeting.inviteeEmail)}>`))
+    if (recipient.coHostNames?.length) {
+      fields.push(field(t('Co-hosts'), bookingHostNames(recipient.coHostNames, language)))
+    }
     if (meeting.guests?.length) {
       fields.push(
         field(

@@ -71,5 +71,8 @@
   "teamInvitation.footer": "Si vous ne connaissez pas cette équipe ou ne souhaitez pas la rejoindre, vous pouvez ignorer cet e-mail.",
   "followUp.subject": "Fin du créneau prévu : {event}",
   "followUp.introduction": "Le créneau prévu pour votre réunion avec {other} est terminé.",
-  "followUp.hostNote": "Message de l’hôte"
+  "followUp.hostNote": "Message de l’hôte",
+  "Co-hosts": "Autres hôtes",
+  "hosts.more": "{count} autres personnes",
+  "hosts.moreOne": "{count} autre personne"
 }

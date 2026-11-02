@@ -21,6 +21,7 @@ List items use this explicit whitelist:
 |---|---|
 | `id` | Identify the booking to inspect or coordinate cancellation. |
 | `status` | `confirmed` or `cancelled`, including cancelled reschedule predecessors. |
+| `isRescheduled` | Read-only boolean: a cancelled booking has a successor in this team. The UI labels it **Rescheduled**; status filters still treat it as `cancelled`. No successor or chain identifier is exposed. |
 | `start`, `end` | Stored booking instants in UTC. |
 | `cancelledAt` | Cancellation instant, or null. |
 | `eventType` | `{ id, title, publicBookingPath }` for the activity; title is null for a deleted activity, and the object is null when no association remains. The additive, nullable path is present only while the activity exists, is enabled and resolves through its public booking endpoint. |

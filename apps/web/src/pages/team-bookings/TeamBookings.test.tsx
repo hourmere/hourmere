@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { instantOf } from '../../public/time.ts'
 import {
   fakeApi,
   json,
@@ -43,6 +44,7 @@ function teamBooking(overrides: Partial<TeamBooking> = {}): TeamBooking {
   return {
     id: BOOKING_ID,
     status: 'confirmed',
+    isRescheduled: false,
     start: '2030-03-04T09:00:00.000Z',
     end: '2030-03-04T09:30:00.000Z',
     cancelledAt: null,
@@ -352,7 +354,15 @@ describe('team bookings list and DTO details', () => {
       order: 'asc',
       limit: '25',
       ...Object.fromEntries(
-        Object.entries(values).map(([name, [, value]]) => [name, new Date(value).toISOString()]),
+        Object.entries(values).map(([name, [, value]]) => {
+          const [year = 0, month = 1, day = 1, hour = 0, minute = 0] = value
+            .split(/[-T:]/u)
+            .map(Number)
+          return [
+            name,
+            new Date(instantOf({ year, month, day }, hour, minute, PROFILE.timeZone)).toISOString(),
+          ]
+        }),
       ),
     })
     await user.click(screen.getByText('Filter bookings', { selector: 'summary' }))
@@ -481,34 +491,30 @@ describe('team bookings list and DTO details', () => {
     await openDetail()
     const panel = within(detail())
     expect(panel.getAllByRole('term').map((term) => term.textContent)).toEqual([
-      'Booking ID',
       'Event',
-      'Event type ID',
       'When',
       'Status',
-      'Cancelled',
       'Hosts',
       'People',
     ])
     const values = panel.getAllByRole('definition')
-    expect(values).toHaveLength(8)
-    expect(values[0]?.textContent).toBe(dto.id)
-    expect(values[1]?.textContent).toBe(dto.eventType?.title)
-    expect(values[2]?.textContent).toBe(dto.eventType?.id)
-    expect([...(values[3]?.querySelectorAll('time') ?? [])].map((time) => time.dateTime)).toEqual([
+    expect(values).toHaveLength(5)
+    expect(values[0]?.textContent).toBe(dto.eventType?.title)
+    expect([...(values[1]?.querySelectorAll('time') ?? [])].map((time) => time.dateTime)).toEqual([
       dto.start,
       dto.end,
     ])
-    expect(values[4]?.textContent).toBe('Confirmed')
-    expect(values[5]?.textContent).toBe('Not set')
-    expect(values[6]?.textContent).toContain('Historical host')
-    expect(values[6]?.textContent).toContain(dto.hosts[0]?.userId)
-    expect(values[7]?.textContent).toContain('Grace Hopper')
-    expect(values[7]?.textContent).toContain('grace@example.com')
-    expect(values[7]?.textContent).toContain('America/New York')
-    expect(values[7]?.textContent).toContain('Invitee')
-    expect(values[7]?.textContent).toContain('Alan Turing')
-    expect(values[7]?.textContent).toContain('Guest')
+    expect(values[2]?.textContent).toBe('Confirmed')
+    expect(values[3]?.textContent).toBe('Historical host')
+    expect(values[4]?.textContent).toContain('Grace Hopper')
+    expect(values[4]?.textContent).toContain('grace@example.com')
+    expect(values[4]?.textContent).toContain('America/New York')
+    expect(values[4]?.textContent).toContain('Invitee')
+    expect(values[4]?.textContent).toContain('Alan Turing')
+    expect(values[4]?.textContent).toContain('Guest')
+    expect(detail().textContent).not.toContain(dto.id)
+    expect(detail().textContent).not.toContain(dto.eventType?.id)
+    expect(detail().textContent).not.toContain(dto.hosts[0]?.userId)
     expect(document.body.textContent).not.toContain(poison)
     expect(document.querySelector(`a[href*="${poison}"]`)).toBeNull()
     expect(
@@ -545,11 +551,11 @@ describe('team bookings list and DTO details', () => {
     server({ [LIST]: () => json(200, { data: [dto], nextCursor: null }) })
     renderApp(PAGE)
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Deleted event type' }))
-    expect(within(detail()).getByText('Booking ID')).toBeDefined()
-    expect(within(detail()).getAllByRole('definition')[2]?.textContent).toBe('Not set')
-    expect(within(detail()).getAllByRole('definition')[5]?.querySelector('time')?.dateTime).toBe(
-      dto.cancelledAt,
-    )
+    expect(within(detail()).getByText('Deleted event type')).toBeDefined()
+    const cancelledAt = within(detail()).getByText('Cancelled', {
+      selector: 'dt',
+    }).nextElementSibling
+    expect(cancelledAt?.querySelector('time')?.dateTime).toBe(dto.cancelledAt)
     expect(screen.queryByRole('button', { name: 'Cancel booking…' })).toBeNull()
     expect(screen.queryByRole('link', { name: /reschedule/i })).toBeNull()
   })
@@ -812,12 +818,9 @@ describe('team bookings states and translations', () => {
     await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
     const panel = within(screen.getByRole('region', { name: '团队预约详情' }))
     expect(panel.getAllByRole('term').map((term) => term.textContent)).toEqual([
-      '预约ID',
       '活动',
-      '活动类型ID',
       '时间',
       '状态',
-      '已取消',
       '主持人',
       '人员',
     ])

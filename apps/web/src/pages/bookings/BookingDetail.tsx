@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useId, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
@@ -12,6 +12,7 @@ import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
+import { formatList } from '../../i18n/formatting.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
@@ -20,6 +21,7 @@ import { useMe } from '../../session.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
+import { BookingOrganization } from './BookingOrganization.tsx'
 import {
   answerText,
   bookingTitle,
@@ -43,6 +45,10 @@ interface Loaded {
 
 export function BookingDetailPage() {
   const { id = '' } = useParams()
+  const [search] = useSearchParams()
+  const organizationId = search.get('organizationId')
+  if (organizationId !== null)
+    return <BookingOrganization key={`${id}:${organizationId}`} organizationId={organizationId} />
   // Starts over for another booking (e.g. the one it was rescheduled from).
   return <BookingDetail key={id} id={id} />
 }
@@ -298,6 +304,17 @@ function BookingView({
       <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
+          {booking.coHosts && booking.coHosts.length > 0 && (
+            <>
+              <dt>{t('Co-hosts')}</dt>
+              <dd>
+                {formatList(
+                  booking.coHosts.map((host) => host.name),
+                  displayLocale ?? locale,
+                )}
+              </dd>
+            </>
+          )}
           <dt>{t('Invitee')}</dt>
           <dd>
             {invitee ? (

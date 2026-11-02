@@ -11,3 +11,12 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
+
+Collective booking emails name all current verified required hosts, with locale-aware list
+formatting. Subjects with more than three names abbreviate the remainder by count; bodies
+and calendar summaries/descriptions retain every name. Host emails show co-host names only.
+Invitee/guest Reply-To contains every current verified required host as separate mailboxes
+(duplicates collapsed and invalid addresses omitted); host replies go to the booker.
+Single-host and round-robin replies still go to their one assigned host. This does not alter
+the configured From, the pinned calendar organizer or calendar RSVP routing. Host booking
+links include an organization context hint; the app verifies membership before switching.

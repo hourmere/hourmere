@@ -3,22 +3,25 @@ import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 
 import { Link, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
+import { loadProfile } from '../../api/resources.ts'
 import { BreakableText } from '../../components/BreakableText.tsx'
 import { EmptyState } from '../../components/EmptyState.tsx'
 import { Field } from '../../components/forms.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
-import { browserTimeZone, isKnownTimeZone, zoned } from '../../format.ts'
+import { isKnownTimeZone, zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
 import { PATHS } from '../../paths.ts'
+import { offsetAt, wallTime } from '../../public/time.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { hostZone } from '../bookings/booking-format.ts'
 import { ManualRebooking } from './ManualRebooking.tsx'
 
 type Booking = Schemas['TeamAdminBooking']
@@ -152,6 +155,55 @@ function TeamBookingLists({
   expectedOrganizationId: string
   onRevoked: () => void
 }) {
+  const { t, ui } = useI18n()
+  const [profile, reload] = useLoad(loadProfile)
+  if (profile.status === 'loading') return <PageSkeleton label="Loading team bookings…" />
+  if (profile.status === 'error') {
+    return (
+      <div className="alert alert-error" role="alert">
+        <p>
+          {t('Could not load team bookings.')} {ui(profile.message)}
+        </p>
+        <button type="button" className="button button-small" onClick={reload}>
+          {t('Try again')}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <TeamBookingContent
+      expectedOrganizationId={expectedOrganizationId}
+      onRevoked={onRevoked}
+      {...hostZone(profile.data)}
+    />
+  )
+}
+
+function TimeZoneNote({ timeZone, fromProfile }: { timeZone: string; fromProfile: boolean }) {
+  const { t } = useI18n()
+  const zone = timeZone.replaceAll('_', ' ')
+  if (fromProfile) return t('Times are in {zone}, your time zone.', { zone })
+  const note = t('Times are in {zone}, this browser’s time zone. {0}.', { zone }).split('{0}')
+  return (
+    <>
+      {note[0]}
+      <Link to={PATHS.settings}>{t('Set your time zone')}</Link>
+      {note[1]}
+    </>
+  )
+}
+
+function TeamBookingContent({
+  expectedOrganizationId,
+  onRevoked,
+  timeZone,
+  fromProfile,
+}: {
+  expectedOrganizationId: string
+  onRevoked: () => void
+  timeZone: string
+  fromProfile: boolean
+}) {
   const { t } = useI18n()
   const { reportContextChanged } = useTeamManagementAccess()
   const [params, setParams] = useSearchParams()
@@ -197,11 +249,15 @@ function TeamBookingLists({
           if (!conflict) setParams(next)
         }}
         disabled={!!conflict}
+        timeZone={timeZone}
+        fromProfile={fromProfile}
       />
       <BookingList
         key={displayedParams.toString()}
         params={displayedParams}
         tab={tab}
+        timeZone={timeZone}
+        fromProfile={fromProfile}
         expectedOrganizationId={expectedOrganizationId}
         onRevoked={onRevoked}
         conflict={conflict?.error ?? null}
@@ -214,12 +270,38 @@ function TeamBookingLists({
   )
 }
 
-function localDateTime(value: string | null): string {
+function localDateTime(value: string | null, timeZone: string): string {
   if (!value) return ''
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return ''
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return shifted.toISOString().slice(0, 16)
+  const ms = new Date(value).getTime()
+  if (!Number.isFinite(ms)) return ''
+  const { year, month, day, hour, minute } = wallTime(ms, timeZone)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${String(year).padStart(4, '0')}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`
+}
+
+/** datetime-local has no zone; interpret its wall time in the same zone as the list. */
+function filterInstant(value: string, timeZone: string): string | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return undefined
+  const [year = 0, month = 1, day = 1, hour = 0, minute = 0] = value.split(/[-T:]/u).map(Number)
+  const wall = new Date(0)
+  wall.setUTCFullYear(year, month - 1, day)
+  wall.setUTCHours(hour, minute, 0, 0)
+  const wallMs = wall.getTime()
+  // Try both sides of a possible offset transition. Like datetime-local in the
+  // browser zone, repeated times choose the earlier instant and gaps move forward.
+  const candidates = [-1, 1].map((day) => wallMs - offsetAt(wallMs + day * 86_400_000, timeZone))
+  const exact = candidates.filter((candidate) => {
+    const actual = wallTime(candidate, timeZone)
+    return (
+      actual.year === year &&
+      actual.month === month &&
+      actual.day === day &&
+      actual.hour === hour &&
+      actual.minute === minute
+    )
+  })
+  return new Date(exact.length ? Math.min(...exact) : Math.max(...candidates)).toISOString()
 }
 
 function instant(value: string | null): string | undefined {
@@ -232,10 +314,14 @@ function BookingFilters({
   params,
   onApply,
   disabled,
+  timeZone,
+  fromProfile,
 }: {
   params: URLSearchParams
   onApply: (params: URLSearchParams) => void
   disabled: boolean
+  timeZone: string
+  fromProfile: boolean
 }) {
   const { t } = useI18n()
   const id = useId()
@@ -249,7 +335,7 @@ function BookingFilters({
     const next = new URLSearchParams()
     if (params.has('tab')) next.set('tab', params.get('tab') ?? '')
     for (const { name } of TIME_FILTERS) {
-      const value = instant(String(fields.get(name) ?? ''))
+      const value = filterInstant(String(fields.get(name) ?? ''), timeZone)
       if (value) next.set(name, value)
     }
     const status = fields.get('status')
@@ -264,7 +350,7 @@ function BookingFilters({
       <summary>{t('Filter bookings')}</summary>
       <form onSubmit={submit}>
         <p className="hint">
-          {t('Filter times use this browser’s time zone: {zone}.', { zone: browserTimeZone() })}
+          <TimeZoneNote timeZone={timeZone} fromProfile={fromProfile} />
         </p>
         <fieldset className="field-grid team-booking-filter-fields" disabled={disabled}>
           <legend className="visually-hidden">{t('Filter bookings')}</legend>
@@ -275,7 +361,7 @@ function BookingFilters({
                   {...props}
                   name={name}
                   type="datetime-local"
-                  defaultValue={localDateTime(params.get(name))}
+                  defaultValue={localDateTime(params.get(name), timeZone)}
                 />
               )}
             </Field>
@@ -329,6 +415,8 @@ function BookingFilters({
 function BookingList({
   params,
   tab,
+  timeZone,
+  fromProfile,
   expectedOrganizationId,
   onRevoked,
   conflict,
@@ -336,6 +424,8 @@ function BookingList({
 }: {
   params: URLSearchParams
   tab: Tab
+  timeZone: string
+  fromProfile: boolean
   expectedOrganizationId: string
   onRevoked: () => void
   conflict: unknown
@@ -407,7 +497,7 @@ function BookingList({
   const heading = useRef<HTMLHeadingElement>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const confirmLeave = useConfirmLeave()
-  const format = zoned(browserTimeZone(), formatLocale)
+  const format = zoned(timeZone, formatLocale)
 
   useEffect(() => () => moreController.current?.abort(), [])
   useEffect(() => {
@@ -492,9 +582,7 @@ function BookingList({
       </h2>
       <p className="muted zone-note">
         {query.order === 'desc' ? t('Newest first. ') : t('Oldest first. ')}
-        {t('Times are in {zone}, this browser’s time zone.', {
-          zone: format.timeZone.replaceAll('_', ' '),
-        })}
+        <TimeZoneNote timeZone={format.timeZone} fromProfile={fromProfile} />
       </p>
       <p className="flash" role="status">
         {ui(status)}
@@ -534,6 +622,7 @@ function BookingList({
                 </th>
                 <th scope="col">{t('Event')}</th>
                 <th scope="col">{t('Invitee')}</th>
+                <th scope="col">{t('Hosts')}</th>
                 <th scope="col" className="fit">
                   {t('Status')}
                 </th>
@@ -579,9 +668,7 @@ function BookingList({
                           <>
                             {invitee.name}
                             <br />
-                            <span className="muted">
-                              <BreakableText>{invitee.email}</BreakableText>
-                            </span>
+                            <BookingEmail email={invitee.email} />
                             {booking.attendees.length > 1 && (
                               <span className="muted">
                                 {t(' + {0} guests', { '0': booking.attendees.length - 1 })}
@@ -593,12 +680,25 @@ function BookingList({
                         )}
                       </div>
                     </td>
+                    <td data-label={t('Hosts')} className="user-content">
+                      <div className="table-value">
+                        {booking.hosts.length ? (
+                          <ul className="plain-list team-booking-hosts">
+                            {booking.hosts.map((host) => (
+                              <li key={host.userId}>{host.name}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          t('None')
+                        )}
+                      </div>
+                    </td>
                     <td data-label={t('Status')} className="fit">
                       <div className="table-value">
                         <span
-                          className={`badge ${booking.status === 'cancelled' ? 'badge-danger' : 'badge-success'}`}
+                          className={`badge ${booking.status === 'cancelled' ? (booking.isRescheduled ? '' : 'badge-danger') : 'badge-success'}`}
                         >
-                          {booking.status === 'cancelled' ? t('Cancelled') : t('Confirmed')}
+                          {t(bookingStatus(booking))}
                         </span>
                       </div>
                     </td>
@@ -630,6 +730,7 @@ function BookingList({
         <BookingDetail
           key={selected.id}
           booking={selected}
+          timeZone={timeZone}
           expectedOrganizationId={expectedOrganizationId}
           conflict={conflict}
           onConflict={(error) => {
@@ -663,8 +764,28 @@ function BookingList({
   )
 }
 
+function BookingEmail({ email }: { email: string }) {
+  const separator = email.lastIndexOf('@') + 1
+  return (
+    <span className="muted team-booking-email">
+      <span>{email.slice(0, separator)}</span>
+      <wbr />
+      <span>{email.slice(separator)}</span>
+    </span>
+  )
+}
+
+function bookingStatus(booking: Booking): 'Rescheduled' | 'Cancelled' | 'Confirmed' {
+  return booking.status === 'cancelled'
+    ? booking.isRescheduled
+      ? 'Rescheduled'
+      : 'Cancelled'
+    : 'Confirmed'
+}
+
 function BookingDetail({
   booking,
+  timeZone,
   expectedOrganizationId,
   conflict,
   onConflict,
@@ -674,6 +795,7 @@ function BookingDetail({
   onCancelled,
 }: {
   booking: Booking
+  timeZone: string
   expectedOrganizationId: string
   conflict: unknown
   onConflict: (error: unknown) => void
@@ -684,7 +806,7 @@ function BookingDetail({
 }) {
   const { t, formatLocale } = useI18n()
   const heading = useRef<HTMLHeadingElement>(null)
-  const format = zoned(browserTimeZone(), formatLocale)
+  const format = zoned(timeZone, formatLocale)
   useEffect(() => heading.current?.focus(), [])
   return (
     <section
@@ -707,12 +829,8 @@ function BookingDetail({
         </button>
       </div>
       <dl className="details">
-        <dt>{t('Booking ID')}</dt>
-        <dd>{booking.id}</dd>
         <dt>{t('Event')}</dt>
         <dd>{booking.eventType?.title ?? t('Deleted event type')}</dd>
-        <dt>{t('Event type ID')}</dt>
-        <dd>{booking.eventType?.id ?? t('Not set')}</dd>
         <dt>{t('When')}</dt>
         <dd>
           <time dateTime={booking.start}>{format.dateTime(booking.start)}</time>
@@ -720,25 +838,25 @@ function BookingDetail({
           <time dateTime={booking.end}>{format.dateTime(booking.end)}</time>
         </dd>
         <dt>{t('Status')}</dt>
-        <dd>{booking.status === 'cancelled' ? t('Cancelled') : t('Confirmed')}</dd>
-        <dt>{t('Cancelled')}</dt>
-        <dd>
-          {booking.cancelledAt ? (
-            <time dateTime={booking.cancelledAt}>{format.dateTime(booking.cancelledAt)}</time>
-          ) : (
-            t('Not set')
-          )}
-        </dd>
+        <dd>{t(bookingStatus(booking))}</dd>
+        {booking.status === 'cancelled' && (
+          <>
+            <dt>{t(bookingStatus(booking))}</dt>
+            <dd>
+              {booking.cancelledAt ? (
+                <time dateTime={booking.cancelledAt}>{format.dateTime(booking.cancelledAt)}</time>
+              ) : (
+                t('Not set')
+              )}
+            </dd>
+          </>
+        )}
         <dt>{t('Hosts')}</dt>
         <dd>
           {booking.hosts.length ? (
             <ul className="plain-list">
               {booking.hosts.map((host) => (
-                <li key={host.userId}>
-                  {host.name}
-                  <br />
-                  <span className="muted">{t('Host ID: {0}', { '0': host.userId })}</span>
-                </li>
+                <li key={host.userId}>{host.name}</li>
               ))}
             </ul>
           ) : (
@@ -773,6 +891,7 @@ function BookingDetail({
         (new Date(booking.start).getTime() > Date.now() ? (
           <CancelBooking
             booking={booking}
+            timeZone={timeZone}
             expectedOrganizationId={expectedOrganizationId}
             conflict={conflict}
             onConflict={onConflict}
@@ -794,6 +913,7 @@ function BookingDetail({
 
 function CancelBooking({
   booking,
+  timeZone,
   expectedOrganizationId,
   conflict,
   onConflict,
@@ -802,6 +922,7 @@ function CancelBooking({
   onCancelled,
 }: {
   booking: Booking
+  timeZone: string
   expectedOrganizationId: string
   conflict: unknown
   onConflict: (error: unknown) => void
@@ -935,7 +1056,7 @@ function CancelBooking({
         </>
       ) : (
         <form id={formId} onSubmit={submit} noValidate className="stack">
-          <CancellationSummary booking={booking} />
+          <CancellationSummary booking={booking} timeZone={timeZone} />
           <Field
             id={reasonId}
             label={t('Reason')}
@@ -994,9 +1115,9 @@ function CancelBooking({
   )
 }
 
-function CancellationSummary({ booking }: { booking: Booking }) {
+function CancellationSummary({ booking, timeZone }: { booking: Booking; timeZone: string }) {
   const { t, formatLocale } = useI18n()
-  const format = zoned(browserTimeZone(), formatLocale)
+  const format = zoned(timeZone, formatLocale)
   return (
     <div className="team-booking-confirmation">
       <dl className="details">

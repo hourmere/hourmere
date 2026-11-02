@@ -153,7 +153,7 @@ export async function listTeamAdminBookings(
   const { data, nextCursor } = await readTeamBookingPage(ctx, teamId, input)
   if (!data.length) return { data: [], nextCursor }
   const ids = data.map((booking) => booking.id)
-  const [hosts, events] = await Promise.all([
+  const [hosts, events, replacements] = await Promise.all([
     ctx.db
       .selectFrom('booking_hosts as host')
       .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
@@ -191,8 +191,28 @@ export async function listTeamAdminBookings(
       .where('event.is_active', '=', true)
       .distinct()
       .execute(),
+    ctx.db
+      .selectFrom('bookings as booking')
+      .select('booking.id')
+      .select((eb) =>
+        eb
+          .exists(
+            eb
+              .selectFrom('bookings as successor')
+              .select('successor.id')
+              .whereRef('successor.rescheduled_from_id', '=', 'booking.id')
+              .whereRef('successor.organization_id', '=', 'booking.organization_id'),
+          )
+          .as('is_rescheduled'),
+      )
+      .where('booking.organization_id', '=', teamId)
+      .where('booking.id', 'in', ids)
+      .execute(),
   ])
   const hostFacts = new Map(hosts.map((host) => [`${host.booking_id}:${host.user_id}`, host]))
+  const rescheduledIds = new Set(
+    replacements.filter((booking) => booking.is_rescheduled).map((booking) => booking.id),
+  )
   // Reuse public resolution, including current configured hosts and round-robin activation.
   // Deduplicate events before resolving so repeated bookings share one lookup per page.
   const paths = new Map(
@@ -217,6 +237,7 @@ export async function listTeamAdminBookings(
   return {
     data: data.map((booking) => ({
       ...booking,
+      isRescheduled: booking.status === 'cancelled' && rescheduledIds.has(booking.id),
       eventType:
         booking.eventType === null
           ? null

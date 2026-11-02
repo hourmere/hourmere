@@ -133,6 +133,13 @@ export const Booking = z
       }),
     responses: Responses,
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
+    coHosts: z
+      .array(z.object({ name: z.string() }))
+      .optional()
+      .openapi({
+        description:
+          'Authenticated host reads only: the other booked hosts’ names, with no email addresses or internal identifiers. Omitted for single-host bookings.',
+      }),
     rescheduledFromId: z.uuid().nullable().openapi({
       description: 'The booking this one replaced when it was rescheduled',
     }),

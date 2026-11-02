@@ -71,5 +71,8 @@
   "teamInvitation.footer": "Si no reconoce este equipo o no desea unirse, puede ignorar este correo electrónico.",
   "followUp.subject": "Fin del horario programado: {event}",
   "followUp.introduction": "El horario programado para su reunión con {other} ha finalizado.",
-  "followUp.hostNote": "Nota del anfitrión"
+  "followUp.hostNote": "Nota del anfitrión",
+  "Co-hosts": "Otros anfitriones",
+  "hosts.more": "{count} personas más",
+  "hosts.moreOne": "{count} persona más"
 }

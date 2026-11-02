@@ -175,7 +175,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
           expect(component.getFirstPropertyValue('sequence')).toBe(revision)
           expect(component.getFirstPropertyValue('summary')).toBe(
-            `Fixture booking with ${role === 'host' ? 'Ada Lovelace' : 'Grace Hopper'}`,
+            `Fixture booking with ${role === 'host' ? 'Ada Lovelace' : multi ? 'Grace Hopper and Alan Turing' : 'Grace Hopper'}`,
           )
           expect(component.getFirstProperty('organizer')?.getFirstValue()).toBe(
             `mailto:${senderEmail}`,
@@ -183,7 +183,12 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           expect(message.replyTo).toEqual(
             role === 'host'
               ? { name: 'Ada Lovelace', email: 'ada@outlook.com' }
-              : { name: 'Grace Hopper', email: hostEmail },
+              : multi
+                ? [
+                    { name: 'Grace Hopper', email: hostEmail },
+                    { name: 'Alan Turing', email: 'alan@example.net' },
+                  ]
+                : { name: 'Grace Hopper', email: hostEmail },
           )
           const content = message.attachments?.[0]?.content.replaceAll(info.booking, 'ROOT-BOOKING')
           expect(content).toBe(
@@ -199,7 +204,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
         }
         for (const message of messages) {
           expect(event(message).getFirstPropertyValue('summary')).toBe(
-            `Fixture booking with ${message.to === 'ada@outlook.com' ? 'Grace Hopper' : 'Ada Lovelace'}`,
+            `Fixture booking with ${message.to === 'ada@outlook.com' ? (multi ? 'Grace Hopper and Alan Turing' : 'Grace Hopper') : 'Ada Lovelace'}`,
           )
         }
       }

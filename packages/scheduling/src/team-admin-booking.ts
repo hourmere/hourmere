@@ -40,6 +40,11 @@ export type TeamAdminBookingPage = z.infer<typeof TeamAdminBookingPageSchema>
 
 /** Read-only list additions; departure/removal projections retain their original contract. */
 export const TeamAdminBookingListItemSchema = TeamAdminBookingSchema.extend({
+  isRescheduled: z
+    .boolean()
+    .describe(
+      'Additive, read-only: whether this cancelled booking was replaced by a rescheduled booking; status and status filters remain unchanged',
+    ),
   eventType: TeamAdminBookingSchema.shape.eventType
     .unwrap()
     .extend({

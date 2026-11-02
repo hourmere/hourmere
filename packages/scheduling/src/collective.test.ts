@@ -6,6 +6,9 @@ import { getPublicTeamEventType, listPublicTeamSlots } from './availability.ts'
 import {
   cancelManagedBooking,
   createPublicTeamBooking,
+  getHostBooking,
+  getManagedBooking,
+  listHostBookings,
   rescheduleManagedBooking,
 } from './bookings.ts'
 import {
@@ -88,6 +91,47 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
       invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
     })
   const code = async (fn: () => Promise<unknown>) => (await domainError(fn)).code
+
+  it('returns only other booked hosts’ names to host reads, keeping public and managed DTOs unchanged', async () => {
+    const s = await setup(3)
+    const result = await booking(s)
+    expect(result.booking).not.toHaveProperty('coHosts')
+    expect(await getManagedBooking(s.pub, required(result.manageToken))).not.toHaveProperty(
+      'coHosts',
+    )
+    for (const user of s.users) {
+      const caller = testContext(db, s.team.as(user), now)
+      const expected = s.users
+        .filter((other) => other.id !== user.id)
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((other) => ({ name: other.name }))
+      for (const current of [
+        await getHostBooking(caller, result.booking.id),
+        (await listHostBookings(caller)).data[0],
+      ]) {
+        expect(current?.coHosts).toEqual(expected)
+        for (const other of current?.coHosts ?? []) expect(Object.keys(other)).toEqual(['name'])
+      }
+    }
+    const outsider = await createTestUser(db, 'Other team member')
+    expect(
+      await code(() => getHostBooking(testContext(db, outsider.principal, now), result.booking.id)),
+    ).toBe('booking_not_found')
+  })
+
+  it('omits co-host metadata for a single-host booking', async () => {
+    const user = await createTestUser(db, 'Solo host')
+    const f = createFixtures(db)
+    const id = await f.booking(
+      user.principal.organization.id,
+      [user.id],
+      '2026-11-02T09:00Z',
+      '2026-11-02T09:30Z',
+    )
+    expect(await getHostBooking(testContext(db, user.principal, now), id)).not.toHaveProperty(
+      'coHosts',
+    )
+  })
 
   it('assigns two to eight verified members, normalizes IDs, and preserves omitted configuration', async () => {
     const s = await setup(8)

@@ -350,6 +350,7 @@ export const admin = {
     'Try another time range or clear the filters. New team bookings will appear here.',
   'Deleted event type': 'Deleted event type',
   ' + {0} guests': ' + {0} guests',
+  'Co-hosts': 'Co-hosts',
   'Team booking details': 'Team booking details',
   'Close details': 'Close details',
   'Booking ID': 'Booking ID',

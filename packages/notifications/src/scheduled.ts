@@ -3,12 +3,19 @@ import { randomUUID } from 'node:crypto'
 import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
-import { bookingEmail, followUpEmail, type MailMessage, MailRejectedError } from '@hourmere/mail'
+import {
+  bookingEmail,
+  bookingHostName,
+  followUpEmail,
+  type MailMessage,
+  MailRejectedError,
+} from '@hourmere/mail'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
   answersOf,
   conferenceNotificationAllowed,
+  hostBookingUrl,
   inviteeManageLinks,
   loadNotificationData,
   type NotificationDeps,
@@ -306,6 +313,7 @@ export async function deliverScheduledBookingEmail(
     const meeting = {
       eventName: data.booking.eventName,
       hostName: organizer.name,
+      hostNames: data.hosts.length > 1 ? data.hosts.map((host) => host.displayName) : undefined,
       inviteeName: booker?.name ?? '',
       inviteeEmail: booker?.email ?? '',
       inviteeTimeZone: booker?.timeZone ?? 'UTC',
@@ -360,6 +368,16 @@ export async function deliverScheduledBookingEmail(
           },
           recipient.links,
           (token): MailMessage => {
+            const replyTo = recipient.host
+              ? booker
+                ? { name: booker.name, email: booker.email }
+                : undefined
+              : data.hosts.length > 1
+                ? data.hosts.map(({ displayName, email }) => ({
+                    name: displayName || bookingHostName(recipient.locale),
+                    email,
+                  }))
+                : { name: organizer.name, email: organizer.email }
             if (claim.kind === 'reminder')
               return {
                 ...bookingEmail(
@@ -369,6 +387,9 @@ export async function deliverScheduledBookingEmail(
                     ...(recipient.host
                       ? {
                           role: 'host' as const,
+                          coHostNames: data.hosts
+                            .filter((host) => host.id !== recipient.host?.id)
+                            .map((host) => host.displayName),
                           answers: answersOf(
                             data.booking.questions,
                             data.booking.responses,
@@ -387,25 +408,28 @@ export async function deliverScheduledBookingEmail(
                   },
                   {
                     bookingUrl: recipient.host
-                      ? new URL(
-                          `/app/bookings/${encodeURIComponent(claim.booking_id)}`,
+                      ? hostBookingUrl(
                           deps.publicUrl,
-                        ).href
+                          claim.booking_id,
+                          data.booking.organizationId,
+                        )
                       : undefined,
                   },
                 ),
                 sensitive: data.automaticConference,
-                replyTo: recipient.host
-                  ? booker
-                    ? { name: booker.name, email: booker.email }
-                    : undefined
-                  : { name: organizer.name, email: organizer.email },
+                replyTo,
               }
-            return followUpEmail(
+            const followUp = followUpEmail(
               meeting,
               {
                 ...(recipient.host
-                  ? { role: 'host' as const, answers: [] }
+                  ? {
+                      role: 'host' as const,
+                      answers: [],
+                      coHostNames: data.hosts
+                        .filter((host) => host.id !== recipient.host?.id)
+                        .map((host) => host.displayName),
+                    }
                   : { role: 'attendee' as const }),
                 email: recipient.email,
                 timeZone: recipient.zone,
@@ -414,11 +438,11 @@ export async function deliverScheduledBookingEmail(
               {
                 hostNote: rule.hostNote,
                 bookingUrl: recipient.host
-                  ? new URL(`/app/bookings/${encodeURIComponent(claim.booking_id)}`, deps.publicUrl)
-                      .href
+                  ? hostBookingUrl(deps.publicUrl, claim.booking_id, data.booking.organizationId)
                   : undefined,
               },
             )
+            return { ...followUp, ...(data.hosts.length > 1 && { replyTo }) }
           },
           () => clock(deps),
           sendSignal,

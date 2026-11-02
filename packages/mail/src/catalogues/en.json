@@ -71,5 +71,8 @@
   "teamInvitation.footer": "If you do not recognize this team or do not want to join, you can ignore this email.",
   "followUp.subject": "Scheduled meeting time has ended: {event}",
   "followUp.introduction": "The scheduled time for your meeting with {other} has ended.",
-  "followUp.hostNote": "Note from the host"
+  "followUp.hostNote": "Note from the host",
+  "Co-hosts": "Co-hosts",
+  "hosts.more": "{count} others",
+  "hosts.moreOne": "{count} other"
 }
