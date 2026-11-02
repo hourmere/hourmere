@@ -6,9 +6,17 @@ import { siteCopy } from './ui-copy.ts'
 const read = (path: string) => readFileSync(new URL(path, import.meta.url))
 
 describe('brand raster exports and delivery', () => {
-  it('keeps one-off font tools outside the workspace and site tools out of production installs', () => {
+  it('keeps font tools outside the workspace and limits runtime HTML parsing to the importer', () => {
     const lock = JSON.parse(read('../../../package-lock.json').toString()) as {
-      packages: Record<string, { dev?: boolean; devOptional?: boolean }>
+      packages: Record<
+        string,
+        {
+          version?: string
+          dev?: boolean
+          devOptional?: boolean
+          dependencies?: Record<string, string>
+        }
+      >
     }
     const tools = ['sharp', 'jsdom', 'parse5', 'fontkit', 'wawoff2', 'postcss']
     for (const [path, metadata] of Object.entries(lock.packages)) {
@@ -20,7 +28,10 @@ describe('brand raster exports and delivery', () => {
           expect(manifest[field]?.wawoff2, `${path}: ${field}`).toBeUndefined()
         }
         for (const tool of tools) {
-          expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBeUndefined()
+          // The offline importer parses source HTML at runtime; site tooling stays dev-only.
+          if (path === 'packages/import-calcom' && tool === 'parse5')
+            expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('8.0.1')
+          else expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBeUndefined()
           expect(manifest.optionalDependencies?.[tool], `${path}: optional ${tool}`).toBeUndefined()
         }
       } else if (
@@ -28,7 +39,12 @@ describe('brand raster exports and delivery', () => {
           (tool) => path.endsWith(`/node_modules/${tool}`) || path === `node_modules/${tool}`,
         )
       ) {
-        expect(metadata.dev || metadata.devOptional, `${path}: production lock entry`).toBe(true)
+        if (path === 'node_modules/parse5') {
+          expect(metadata.version).toBe('8.0.1')
+          expect(lock.packages['packages/import-calcom']?.dependencies?.parse5).toBe('8.0.1')
+          expect(metadata.dev || metadata.devOptional).not.toBe(true)
+        } else
+          expect(metadata.dev || metadata.devOptional, `${path}: production lock entry`).toBe(true)
       }
     }
   })
