@@ -10,6 +10,7 @@ export * from './booking.ts'
 export * from './ics.ts'
 export * from './team-invitation.ts'
 export { escapeHtml, formatChineseTemplate, multiLine, singleLine, subjectLine } from './text.ts'
+export * from './waitlist.ts'
 
 export interface MailAttachment {
   /** File name shown to the recipient, e.g. `invite.ics`. */

@@ -113,6 +113,10 @@ export function securityHeaders({
       setDefault('Cross-Origin-Opener-Policy', 'same-origin')
       if (NO_REFERRER_PAGES.test(c.req.path)) setDefault('Referrer-Policy', 'no-referrer')
     }
+    if (/\/waitlist(?:\/|$)/i.test(c.req.path)) {
+      headers.set('Referrer-Policy', 'no-referrer')
+      headers.set('Cache-Control', 'no-store')
+    }
     setDefault('Referrer-Policy', 'strict-origin-when-cross-origin')
   })
 }

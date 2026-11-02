@@ -76,4 +76,15 @@ describe('routing between the app and the public pages', () => {
     ].map((path) => path.split('/')[1] as string)
     for (const segment of topLevel) expect(isReservedName(segment), segment).toBe(true)
   })
+
+  it.each(['verify', 'remove'])(
+    'keeps the existing waitlist handle and %s event page',
+    async (slug) => {
+      const event = { ...EVENT, handle: 'waitlist', slug }
+      fakeApi(eventRoutes(event, []))
+      renderApp(`/waitlist/${slug}`)
+      expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
+      expect(screen.getByTestId('location').textContent).toBe(`/waitlist/${slug}`)
+    },
+  )
 })

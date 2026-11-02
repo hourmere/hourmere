@@ -23,12 +23,30 @@ export function escapeControlCharacters(text: string): string {
 // only whitespace ends a URL token, so its entire query/fragment is removed.
 const URL_TEXT = /(?:\b[a-z][a-z\d+.-]*:|\/)\S*/gi
 const UUID = /\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b/gi
+const WAITLIST_CAPABILITY = /^[\da-f-]{36}\.[A-Za-z\d_-]{43}$/i
 
 /** Preserve diagnostic text while removing identifiers and URL query/fragment values. */
 export function redactLogDetails(text: string): string {
-  return text
-    .replace(URL_TEXT, (url) => url.split(/[?#]/, 1)[0] ?? url)
-    .replace(UUID, '[redacted UUID]')
+  return (
+    text
+      .replace(URL_TEXT, (url) => url.split(/[?#]/, 1)[0] ?? url)
+      // Driver diagnostics may quote an entirely encoded URL, including the waitlist
+      // segment and entry ID. Decode only capability-shaped candidates so ordinary
+      // diagnostic text and public waitlist handle URLs keep their original form.
+      .replace(
+        /(?:[\da-f-]|%[\da-f]{2}){36}(?:\.|%2e)(?:[A-Za-z0-9_-]|%[\da-f]{2}){43}/gi,
+        (token) => {
+          try {
+            return WAITLIST_CAPABILITY.test(decodeURIComponent(token))
+              ? '[redacted waitlist token]'
+              : token
+          } catch {
+            return token
+          }
+        },
+      )
+      .replace(UUID, '[redacted UUID]')
+  )
 }
 
 const MAIL_FAILURE = '[auth] sign-in email not sent'

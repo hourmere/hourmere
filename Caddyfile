@@ -1,10 +1,12 @@
 # Upstream failures use Caddy's global logger too. Omit the complete URI (including
-# encoded capability paths and queries) and all capability-bearing request headers.
+# encoded waitlist/one-time booking capability paths and queries) and all
+# capability-bearing request headers and response headers (redirect Location).
 {
 	log default {
 		format filter {
 			request>uri replace "REDACTED"
 			request>headers delete
+			resp_headers delete
 		}
 	}
 }

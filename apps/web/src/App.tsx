@@ -91,6 +91,14 @@ export const appRoutes = createRoutesFromElements(
     <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
     <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
     <Route path="/booking" element={<ManageBookingPage />} />
+    <Route
+      path="/team/:teamSlug/:slug/waitlist/:waitlistToken/:suggestedStart/:previewExpiresAt"
+      element={<TeamBookingPage />}
+    />
+    <Route
+      path="/:handle/:slug/waitlist/:waitlistToken/:suggestedStart/:previewExpiresAt"
+      element={<BookingPage />}
+    />
     <Route path="/team/:teamSlug/:slug" element={<TeamBookingPage />} />
     <Route path="/:handle" element={<HostPage />} />
     <Route path="/:handle/:slug" element={<BookingPage />} />
