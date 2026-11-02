@@ -74,5 +74,20 @@
   "followUp.hostNote": "Mensagem do anfitrião",
   "Co-hosts": "Outros anfitriões",
   "hosts.more": "mais {count} pessoas",
-  "hosts.moreOne": "mais {count} pessoa"
+  "hosts.moreOne": "mais {count} pessoa",
+  "waitlist.event": "Sua reunião",
+  "waitlist.verify.subject": "Confirme sua solicitação para entrar na lista de espera: {event}",
+  "waitlist.verify.introduction": "Confirme este endereço de e-mail para entrar na lista de espera de “{event}”. Abrir o link não confirma sua solicitação.",
+  "waitlist.verify.action": "Abra o link e confirme na página:",
+  "waitlist.verify.expiry": "Este link de verificação expira em {expiry}, no máximo 30 minutos após a solicitação.",
+  "waitlist.verify.footer": "Se você não fez esta solicitação, ignore este e-mail ou remova a solicitação pelo link acima.",
+  "waitlist.broadcast": "As sugestões são compartilhadas com todas as pessoas elegíveis na lista de espera. Nenhum horário fica reservado; quem primeiro concluir uma reserva com sucesso fica com o horário. Alguns e-mails podem não ser entregues ou chegar com atraso.",
+  "waitlist.remove": "Para sair da lista de espera, abra este link e confirme a remoção:",
+  "waitlist.notice.subject": "Horários sugeridos para {event}",
+  "waitlist.notice.introduction": "Foram encontrados horários para “{event}”. Eles podem já ter sido reservados. Escolha uma sugestão para verificar a disponibilidade atual e fazer uma reserva.",
+  "waitlist.slot": "{start} – {end}",
+  "waitlist.notice.expiry": "Estas sugestões expiram em {expiry}. Esse prazo não reserva um horário.",
+  "waitlist.notice.page": "Confira todos os horários disponíveis no momento na página de reservas:",
+  "waitlist.notice.waiting": "Se um horário não estiver mais disponível, você continuará na lista de espera até o prazo original. Se reservou por outro meio, use o link abaixo para sair.",
+  "waitlist.notice.footer": "Você recebeu este e-mail porque confirmou uma solicitação para entrar na lista de espera desta reunião."
 }

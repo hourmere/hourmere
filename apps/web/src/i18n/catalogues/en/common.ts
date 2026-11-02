@@ -1,5 +1,9 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'These suggestions have expired. Check the currently available times.':
+    'These suggestions have expired. Check the currently available times.',
+  'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':
+    'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.',
   'This booking link is unavailable': 'This booking link is unavailable',
   'Contact the host for a new booking link.': 'Contact the host for a new booking link.',
   'These details were filled in for convenience. You can change them.':

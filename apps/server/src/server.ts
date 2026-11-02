@@ -37,6 +37,7 @@ import {
   conferenceNotificationDispatchJob,
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
+  createWaitlistEmailWorker,
   type InvitationEmailQueue,
   invitationEmailJob,
   invitationEmailRepairJob,
@@ -48,13 +49,16 @@ import {
   scheduledBookingEmailJob,
   scheduledBookingEmailRepairJob,
   signInEmailJobs,
+  waitlistEmailJob,
 } from '@hourmere/notifications'
 import {
   type BookingNotifier,
   cleanupWaitlist,
   ensureWaitlistKey,
   leaveTeamMember,
+  removeWaitlist,
   scanWaitlists,
+  verifyWaitlist,
 } from '@hourmere/scheduling'
 import { webhookBookingNotifier, webhookCleanupJob, webhookDeliveryJob } from '@hourmere/webhooks'
 import { sql } from 'kysely'
@@ -121,6 +125,7 @@ export function productRoutes({
   privacyPolicyUrl,
   termsUrl,
   invitationMailLimits,
+  waitlistSecret,
 }: {
   db: Db
   automaticMeet?: boolean
@@ -132,6 +137,7 @@ export function productRoutes({
   privacyPolicyUrl?: string
   termsUrl?: string
   invitationMailLimits: InvitationSummaryMailLimits
+  waitlistSecret?: string | undefined
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -183,6 +189,7 @@ export function productRoutes({
     }),
     publicRoutes({
       db,
+      waitlistSecret,
       notify,
       automaticMeet,
       automaticZoom,
@@ -428,6 +435,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     automaticMeet: config.GOOGLE_MEET_ENABLED,
     automaticZoom: config.ZOOM_MEETINGS_ENABLED,
   }
+  const runWaitlistEmail = createWaitlistEmailWorker({
+    ...notificationDeps,
+    ...waitlistDeps,
+    smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+    log: (line) => console.info(line),
+  })
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
@@ -437,6 +450,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         continueCleanup: (): Promise<string | null> =>
           jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' }),
       }),
+      waitlistEmailJob(runWaitlistEmail),
       oneTimeBookingLinksRetentionJob(db),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
@@ -508,6 +522,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   if (role !== 'web') {
     try {
       await scanWaitlists(waitlistDeps)
+      await jobs.enqueue('waitlist-email-v1', {}, { singletonKey: 'delivery' })
       await jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' })
     } catch {
       console.error('ERROR waitlist-maintenance: startup_scan_unavailable')
@@ -577,12 +592,17 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       hstsMaxAge: config.HSTS_MAX_AGE,
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
+      waitlist: {
+        verify: (token) => verifyWaitlist(waitlistDeps, { token }),
+        remove: (token) => removeWaitlist(waitlistDeps, { token }),
+      },
       // db is closed below.
       routes: productRoutes({
         mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
         publicUrl: config.PUBLIC_URL,
         db,
         invitationMailLimits,
+        waitlistSecret: config.BETTER_AUTH_SECRET,
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,

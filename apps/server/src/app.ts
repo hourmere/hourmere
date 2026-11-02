@@ -35,10 +35,18 @@ import {
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import { VERSION } from './version.ts'
+import { registerWaitlistConfirmation } from './waitlist-confirm.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
   checkDb: () => Promise<void>
+  /** Minimal confirmation transports for emailed waitlist capabilities. */
+  waitlist?:
+    | {
+        verify: (token: string) => Promise<unknown>
+        remove: (token: string) => Promise<unknown>
+      }
+    | undefined
   /** Better Auth's request handler (sign-in, sessions, API keys), served at /api/auth/*. */
   authHandler: (request: Request) => Promise<Response>
   /** Identifies the caller of authenticated routes (session cookie or API key). */
@@ -258,8 +266,23 @@ const COLORS = /\u001b\[[0-9;]*m/g
  * Logs requests without query strings (sign-in links and OAuth callbacks carry secrets
  * there) and without colors.
  */
-const ordinaryRequestLogger = logger((line, ...rest) =>
-  console.log(line.replace(/\?\S*/, '').replace(COLORS, ''), ...rest),
+function isWaitlistLinkPath(path: string): boolean {
+  // Detect encoded segments/slashes too without changing request routing.
+  let decoded = path
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {}
+  return /^\/(?:team\/[^/]+\/[^/]+|[^/]+\/[^/]+)\/waitlist\/[^/]+(?:\/|$)/i.test(decoded)
+}
+
+const requestLineLogger = logger((line, ...rest) =>
+  console.log(escapeControlCharacters(line.replace(/\?\S*/, '').replace(COLORS, '')), ...rest),
+)
+
+// Use the decoded path to catch encoded route segments too. Confirmation transports
+// carry their capabilities in fragments/bodies; booking suggestions carry them here.
+const ordinaryRequestLogger = createMiddleware((c, next) =>
+  isWaitlistLinkPath(c.req.path) ? next() : requestLineLogger(c, next),
 )
 
 // A one-time capability is carried by the path. Do not hand that request to a
@@ -279,6 +302,7 @@ export function createApp({
   webDist,
   routes = [],
   mcp,
+  waitlist,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   const apiNotFound = (c: Context) => c.json({ error: 'not_found' }, 404)
@@ -471,6 +495,7 @@ export function createApp({
 
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
+  if (waitlist) registerWaitlistConfirmation(app, { publicUrl, trustedProxies, ...waitlist })
 
   // Explicit discovery routes are mounted above. Unknown well-known resources must never
   // resolve to a static file or the SPA, including on self-hosted instances.

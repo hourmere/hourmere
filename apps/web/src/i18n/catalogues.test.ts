@@ -46,6 +46,31 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  it('uses the proofread waitlist page keys in every public locale', () => {
+    const expired = 'These suggestions have expired. Check the currently available times.'
+    const waiting =
+      'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.'
+    for (const { code } of registeredLocales) {
+      const catalogue = groups.common[`./catalogues/${code}/common.ts`]
+      expect(catalogue?.[expired], code).toBeTypeOf('string')
+      expect(catalogue?.[waiting], code).toBeTypeOf('string')
+      expect(Object.keys(catalogue ?? {})).not.toContain(
+        'These suggestions have expired. Check the current available times.',
+      )
+      expect(Object.keys(catalogue ?? {})).not.toContain(
+        'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.',
+      )
+    }
+    expect(groups.common['./catalogues/en/common.ts']?.[expired]).toBe(expired)
+    expect(groups.common['./catalogues/en/common.ts']?.[waiting]).toBe(waiting)
+    expect(groups.common['./catalogues/de/common.ts']?.[waiting]).toBe(
+      'Wenn Sie noch auf der Warteliste stehen, können Sie dort bis zum ursprünglichen Ablaufdatum bleiben. Es wird kein Termin reserviert.',
+    )
+    expect(groups.common['./catalogues/zh-CN/common.ts']?.[waiting]).toBe(
+      '如果你仍在候补名单中，可以继续等待，直至原定截止时间。我们不会为你预留时段。',
+    )
+  })
+
   for (const [locale, name] of [
     ['de', 'German'],
     ['fr', 'French'],

@@ -99,3 +99,28 @@ guest details and calendar attachments. Only a host recipient may receive the op
 authenticated HTTP(S) booking URL. Every follow-up is marked `sensitive: true`, so the
 development log mailer redacts its private content. Pre-meeting reminder rendering is
 unchanged.
+
+## Waitlist messages
+
+`waitlistVerificationEmail` and `waitlistNotificationEmail` render complete plain-text and
+HTML messages in every shipped public mail language. Both are sensitive messages, so the
+development mailer never prints their addresses, private content or capabilities.
+
+The renderer constructs all links from the trusted canonical `publicUrl` origin. Verification
+opens `/booking/waitlist/verify#token=<verification>&management=<management>`; removal opens
+`/booking/waitlist/remove#<management>`. Opening either page is read-only; the invitee explicitly
+confirms the action. These are separate purpose-bound capabilities, and the verification
+message states the actual expiry in the recipient's time zone and language at minute
+precision, and the maximum 30-minute verification lifetime.
+
+Notifications accept the current ordinary personal or team `bookingPath`, one to three exact
+UTC slot intervals, the invitee's IANA `timeZone`, and a management capability. Each suggestion
+links to `<bookingPath>/waitlist/<management>/<encoded UTC start>/<notification expiry milliseconds>`. Capabilities never appear
+in a query string. Every endpoint displays its own UTC offset, including slots crossing a
+daylight-saving transition; the underlying instants and booking links stay unchanged.
+
+Both messages explain the shared opportunity, first successful booking and absence of a
+reservation, including partial or delayed email delivery. Notifications also link to the
+ordinary booking page and explain that losing a time leaves the original waitlist deadline
+unchanged. Eligibility, expiry enforcement, dedupe, accounting and delivery belong to the
+worker; rendering does not reserve or send anything.
