@@ -86,6 +86,7 @@ function productSourceCopy(change?: Change): Factory {
     bookingTools: () => [],
     catalogTools: () => [],
     integrationTools: () => [],
+    oneTimeLinkTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),

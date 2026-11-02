@@ -64,6 +64,37 @@ check('accepts real MCP/CLI equivalents and a reasoned exemption', ({ interfaceP
   ).toEqual([])
 })
 
+check('accepts exact nested CLI commands', ({ interfaceParityErrors }) => {
+  expect(
+    interfaceParityErrors(
+      { ...baseline, cli: { 'one-time-links create': 'create_booking' } },
+      { createBooking: { mcp: 'create_booking', cli: 'one-time-links create' } },
+    ),
+  ).toEqual([])
+})
+
+for (const command of [
+  ' one-time-links create',
+  'one-time-links create ',
+  'one-time-links  create',
+  'one-time-links\tcreate',
+  'one-time-links\ncreate',
+  'one-time-links 1create',
+  'one-time-links create;',
+]) {
+  check(
+    `rejects malformed nested CLI command ${JSON.stringify(command)}`,
+    ({ interfaceParityErrors }) => {
+      expect(
+        interfaceParityErrors(
+          { ...baseline, cli: { [command]: 'create_booking' } },
+          { createBooking: { mcp: 'create_booking', cli: command } },
+        ),
+      ).toContain(`createBooking: ${malformedMapping}`)
+    },
+  )
+}
+
 for (const method of ['post', 'put', 'patch', 'delete'] as const) {
   check(
     `requires parity for an unmapped ${method.toUpperCase()} write`,
@@ -630,6 +661,7 @@ describe('source-copy parity guard mutation checks', () => {
     ['operation IDs', '!identifier(operation.operationId)', 'false'],
     ['identifier first character', '/^[A-Za-z_]/.test(value)', 'true'],
     ['identifier character set', '!/[^A-Za-z0-9_.-]/.test(value)', 'true'],
+    ['nested CLI identifiers', "value.split(' ').every(identifier)", 'true'],
     ['duplicate operation IDs', 'if (prior)', 'if (false)'],
     ['mapping root shape', '!isRecord(mapping)', 'false'],
     [
@@ -690,7 +722,7 @@ describe('source-copy parity guard mutation checks', () => {
     ],
     ['strict mapping keys', 'keys.length !== 2 ||', 'false ||'],
     ['MCP name', '!identifier(entry.mcp)', 'false'],
-    ['CLI name', '!identifier(entry.cli)', 'false'],
+    ['CLI name', '!cliCommand(entry.cli)', 'false'],
     ['registered MCP tool', '!tools.has(entry.mcp)', 'false'],
     ['existing CLI command', '!Object.hasOwn(inventory.cli, entry.cli)', 'false'],
     ['CLI target', 'inventory.cli[entry.cli] !== entry.mcp', 'false'],

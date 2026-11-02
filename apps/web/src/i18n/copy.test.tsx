@@ -147,6 +147,12 @@ describe('Chinese copy and punctuation', () => {
     }
   })
 
+  it('separates the Chinese one-time revoke label from its UUID during interpolation', () => {
+    const id = 'a0000000-0000-7000-8000-000000000001'
+    expect(admin['Revoke one-time link {0}']).toBe('撤销一次性链接{0}')
+    expect(translate('zh-CN', 'Revoke one-time link {0}', { '0': id })).toBe(`撤销一次性链接 ${id}`)
+  })
+
   it.each([
     ['09:00–12:00', '11:00–14:00', '09:00–12:00 与 11:00–14:00'],
     ['上午', '下午', '上午与下午'],

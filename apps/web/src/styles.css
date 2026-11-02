@@ -2002,6 +2002,33 @@ input[type="radio"] {
   list-style: none;
 }
 
+.one-time-link-form {
+  margin-top: var(--space-5);
+}
+
+.one-time-links-list code {
+  overflow-wrap: anywhere;
+}
+
+.one-time-link-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  padding: var(--space-5);
+  overflow: auto;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.one-time-link-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.one-time-link-dialog h2 {
+  margin-top: 0;
+}
+
 .card-list > .panel {
   margin: 0;
 }

@@ -1516,6 +1516,178 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/event-types/{eventTypeId}/one-time-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List one-time link metadata
+         * @description Requires read or full API-key scope and permission to manage the event type. Newest links first, ordered by descending time-ordered UUIDv7 ID, including links created with Idempotency-Key. Pass nextAfter as after for the same event type. A bounded cursor page never returns tokens, digests or booking URLs. Expiry is evaluated against database wall time.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    after?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    eventTypeId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A bounded metadata page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OneTimeBookingLinkList"];
+                    };
+                };
+                /** @description invalid_limit, invalid_cursor */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description event_type_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create a private one-time booking link
+         * @description Requires bookings or full API-key scope and permission to manage this event type. Links always receive time-ordered UUIDv7 IDs; Idempotency-Key is stored separately, scoped to this caller, credential and organization. Copy the URL now: neither the URL nor token can be retrieved again. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: 1000 active unexpired links per personal owner/team, with a 200-link sub-limit for ordinary team members.
+         */
+        post: operations["createOneTimeBookingLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/event-types/{eventTypeId}/one-time-links/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one-time link metadata */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    eventTypeId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Metadata without a token, digest or URL */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OneTimeBookingLink"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description event_type_not_found, one_time_link_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a one-time booking link
+         * @description Requires bookings or full API-key scope and event management permission. Idempotent: used, revoked and expired links retain their state and consuming booking. Unknown or unrelated link IDs return null without revealing their existence.
+         */
+        delete: operations["revokeOneTimeBookingLink"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/event-types/{id}": {
         parameters: {
             query?: never;
@@ -3929,6 +4101,24 @@ export interface components {
             /** @description Optional waitlist attribution capability; grants no booking priority or permission */
             waitlistToken?: string;
         };
+        CreatedOneTimeBookingLink: components["schemas"]["OneTimeBookingLink"] & {
+            /**
+             * Format: uri
+             * @description Private booking URL shown only in this creation response. Copy it now; it cannot be recovered.
+             */
+            url: string;
+        };
+        CreateOneTimeBookingLink: {
+            /**
+             * Format: date-time
+             * @description A future absolute instant with an offset; omitted or null means no expiry.
+             */
+            expiresAt?: string | null;
+            prefill?: {
+                email?: string | null;
+                name?: string | null;
+            };
+        };
         DisplayName: {
             name: string;
         };
@@ -4572,6 +4762,35 @@ export interface components {
             reason: "member_removed";
             /** Format: date-time */
             removedAt: string;
+        };
+        OneTimeBookingLink: {
+            /** Format: uuid */
+            bookingId: string | null;
+            createdAt: string;
+            /** @description Current member display name, or email for session managers allowed to view it; null when unknown. */
+            creatorDisplayName: string | null;
+            /** Format: uuid */
+            creatorUserId: string;
+            /** Format: uuid */
+            eventTypeId: string;
+            expiresAt: string | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            organizationId: string;
+            prefill: {
+                email: string | null;
+                name: string | null;
+            };
+            revokedAt: string | null;
+            /** @enum {string} */
+            state: "active" | "used" | "expired" | "revoked";
+            updatedAt: string;
+            usedAt: string | null;
+        };
+        OneTimeBookingLinkList: {
+            data: components["schemas"]["OneTimeBookingLink"][];
+            nextAfter: string | null;
         };
         OneTimeBookingPage: {
             eventType: components["schemas"]["OneTimeEventType"];
@@ -6794,6 +7013,159 @@ export interface operations {
                 };
             };
             /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createOneTimeBookingLink: {
+        parameters: {
+            query?: never;
+            header?: {
+                "idempotency-key"?: string;
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                eventTypeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOneTimeBookingLink"];
+            };
+        };
+        responses: {
+            /** @description The new link, with its booking URL shown once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedOneTimeBookingLink"];
+                };
+            };
+            /** @description invalid_request, invalid_one_time_link, invalid_idempotency_key, event_type_inactive */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description one_time_link_limit_reached, one_time_link_already_created, idempotency_key_reused, organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeOneTimeBookingLink: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                eventTypeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe metadata, or null for an unrelated/unknown ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OneTimeBookingLink"] & (Record<string, never> | null);
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;

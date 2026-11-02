@@ -33,9 +33,12 @@ with at least one enabled. Hosts mean the booking's actual assigned hosts. An em
 disables that category. Omitted settings on creation retain the all-recipient 24-hour
 reminder and no follow-ups; omitted settings on update preserve the saved value.
 
-Custom reminders still require their due time to be strictly more than an hour after
-booking or rescheduling; a missed or too-close reminder is skipped. UTC elapsed offsets
-do not move with daylight saving or display time zones. Follow-ups say only that the
+Reminders require their due time to be strictly more than one hour after booking or
+rescheduling; a past or too-close reminder is skipped and never sent late to catch up.
+Exactly one hour is insufficient: the default reminder is skipped when a meeting is
+booked exactly 25 hours before its start. Eligible mail may still be delayed by bounded
+delivery retries, described below. UTC elapsed offsets do not move with daylight saving
+or display time zones. Follow-ups say only that the
 scheduled meeting time has ended, carry no meeting link or calendar attachment, and do
 not claim attendance. Declining in a calendar does not cancel an Hourmere booking. There
 is currently no invitee stop-follow-ups action after the meeting starts; explain this
@@ -149,10 +152,12 @@ default of 10 seconds cuts long jobs short (they are retried, so nothing is lost
 
 Lifecycle notifications and the unchanged default reminder go through `booking-notification`, with payload
 `{ bookingId, kind }` (queue policy `exclusive`, singleton key `<bookingId>:<kind>`).
+The table below describes bookings that retain the default notification settings;
+custom settings use their saved rules instead of the fixed reminder.
 
 | Event (service) | Jobs queued in its transaction |
 |---|---|
-| Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away |
+| Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, only if that send time is more than one hour away |
 | Booking rescheduled (`rescheduleManagedBooking`, `rescheduleHostBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
 | Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`, `cancelTeamAdminBooking`) | `cancelled` now |
 
@@ -161,8 +166,9 @@ agent makes, moves or cancels sends exactly the emails a person's would.
 
 `enqueueBookingNotifications(jobs, trx, event, now)` does exactly this, and refuses to run
 outside a transaction. The reminder offset is an absolute 24 hours, so across a daylight
-saving change it arrives an hour earlier or later on the recipient's clock; a booking made
-less than 25 hours ahead gets no reminder, as it would come right after the confirmation.
+saving change it appears an hour earlier or later on the recipient's clock. A default
+reminder is skipped when the booking is made 25 hours or less before the start, including
+exactly 25 hours; it is never sent immediately to catch up.
 
 Other notification settings use durable `booking_scheduled_messages` and the
 `scheduled-booking-email` job, keyed by booking version, category and rule ID. Booking
@@ -170,13 +176,15 @@ snapshots, messages and initial jobs commit together. Each message has at most t
 attempts; reminders stop at the start and follow-ups stop twenty-four hours after their
 due time. Cancellation or rescheduling prevents pending predecessor messages from sending.
 
-Every email goes to each host first (they most need to know), then the invitee, then the
-guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
-booking's `booking_hosts` whose address is verified: accounts start verified, and one that
+For each message, selected eligible hosts go first, then the invitee, then the guests,
+so a guest address that is slow to answer cannot hold up the others. Lifecycle messages
+and the default reminder select every class; configurable rules use their recipient flags.
+Hosts are the booking's `booking_hosts` whose address is verified: accounts start verified, and one that
 is not (it should not exist; see [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md)) is neither emailed nor named in the
-invitation. Without a verified host, confirmations, reschedules and reminders send nothing
-(the job logs one WARN line naming the booking and kind). Cancellations and conference-failure
-notices still reach the invitee and guests. A removed team host receives no host notice;
+invitation. Without a usable verified organizer, confirmations, reschedules, reminders and
+follow-ups send nothing. Cancellations can still reach the invitee and guests;
+conference-failure notices go to the original invitee without a guest fallback.
+A removed team host receives no host notice;
 cancellation uses the saved organizer for its calendar attachment, or sends text only when
 that historical snapshot is unavailable. Guests are
 addresses an anonymous booker typed (up to 10 per booking); invitee/guest emails share
@@ -184,10 +192,11 @@ per-recipient and instance-wide [abuse limits](#email-abuse-controls). Times are
 (spaces instead of underscores) and the GMT offset for the meeting date: the attendee's
 zone from `booking_attendees`, a host's from their profile, else their default schedule,
 else UTC. Host emails also show the invitee's local time when the saved invitee zone
-differs from the host email's zone. Host emails add the invitee's contact details, guests
-and answers; only the invitee's email has manage links.
+differs from the host email's zone. Host booking notices add the invitee's contact details,
+guests and answers; follow-ups omit answers. Invitee confirmations, reschedules, reminders
+and conference-failure notices carry manage links; follow-ups create no new management capability.
 Invitee/guest confirmations and reschedules carry an invitation (`METHOD:REQUEST`),
-cancellations a cancellation (`METHOD:CANCEL`); reminders carry none. New host notifications
+cancellations a cancellation (`METHOD:CANCEL`); reminders and follow-ups carry none. New host notifications
 carry the same calendar item only when there is no pinned provider calendar copy (details
 below). Legacy host notifications retain their invitations and cancellations.
 
@@ -231,6 +240,7 @@ The job reads the booking when it runs and sends only what is still true:
 | `confirmed` | the booking is confirmed and has not started |
 | `rescheduled` | the booking is confirmed, has not started, and replaced an earlier booking that is cancelled |
 | `reminder` | the booking is confirmed and has not started |
+| `follow_up` | the booking is confirmed, has not been replaced, and its scheduled end plus the configured offset has passed; the send window closes exactly 24 hours after that due time |
 | `cancelled` | the booking is cancelled and no booking replaced it |
 
 The status and start are read again inside each recipient's send transaction (without a
@@ -247,10 +257,12 @@ transaction and would miss any path that changes a booking without knowing about
 
 ### Sent once, with a narrow duplicate window
 
-`booking_notifications` has one row per email: primary key (booking, kind, recipient), the
+`booking_notifications` has one row per email: primary key (booking, kind, message key, recipient), the
 recipient being `host:<user id>` or `attendee:<attendee id>` (so someone who books their own
-event type gets both emails). For each recipient the job, in one transaction, inserts the
-row (`ON CONFLICT DO NOTHING`); if it already exists the email has a terminal sent,
+event type gets both emails). The message key is the stable rule ID for configurable
+messages and empty for lifecycle/default messages, so separate offsets remain independent.
+For each recipient the job, in one transaction, inserts the row (`ON CONFLICT DO NOTHING`);
+if it already exists the email has a terminal sent,
 rejected or suppressed outcome and is skipped; otherwise it checks the abuse limits,
 sends the email if permitted, and commits.
 
@@ -404,7 +416,7 @@ including processes on other hosts, then restart every role with the new code. M
 | Invitee and guests | REQUEST/CANCEL; invitee/guests are `NEEDS-ACTION;RSVP=FALSE` | REQUEST/CANCEL with original `ACCEPTED;RSVP=FALSE` policy |
 | Host without a pinned provider copy | Same REQUEST/CANCEL; primary host is `CHAIR;PARTSTAT=ACCEPTED`, other hosts accepted required participants | Original host notification REQUEST/CANCEL |
 | Host with a pinned provider copy | Ordinary email; provider writeback updates/removes its calendar item | Keep REQUEST/CANCEL to update an existing emailed copy |
-| Reminder or conference failure | Ordinary email, no calendar part | Ordinary email, no calendar part |
+| Reminder, follow-up or conference failure | Ordinary email, no calendar part | Ordinary email, no calendar part |
 
 New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the verified
 primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
@@ -476,7 +488,7 @@ role. The invitee's hint sits next to Cancel / Reschedule near the top of the bo
 are directed to cancel in Hourmere, and guests are directed to contact the booker or host.
 Guests never receive the invitee's management link or token. Suppressed invitations
 (including hosts with provider copies and invitees using the same address), cancellations,
-reminders and conference-failure notices have no calendar-response hint. Reminders carry no
+reminders, follow-ups and conference-failure notices have no calendar-response hint. Reminders carry no
 ICS; their invitee management links still work.
 
 SMTP uses Nodemailer's `icalEvent`: a `text/calendar; method=REQUEST` (or CANCEL) alternative
@@ -598,7 +610,7 @@ off, including for event types created before migration 0015. REST and MCP expos
 a disabled event type return `400 guests_not_allowed` before any booking, attendee or
 notification is stored. Enabled types retain the ten-guest cap and existing rate limits.
 
-Turning the setting off affects new bookings. Existing guests remain eligible for reminders
+Turning the setting off affects new bookings. Existing guests remain eligible for reminders and follow-ups
 and calendar updates/cancellations, subject to the email limits below; retries of a
 successfully committed booking preserve the original result.
 

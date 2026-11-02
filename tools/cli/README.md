@@ -136,6 +136,20 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 `set-event-notifications`, `schedules`, `schedule`, `slots`, `book`, `list`, `reschedule`,
 `cancel`, `retry-meeting`, `retry-calendar-copy`.
 
+`one-time-links create`, `one-time-links list` and `one-time-links revoke` manage private
+booking links for an `eventTypeId`. Create requires a `bookings` or `full` key and a retained random
+`idempotencyKey`; optional `expiresAt` is a future absolute instant, and `prefill` accepts
+optional `name` and `email`. It prints the new `/book/{token}` URL once to stdout and
+refuses `--output`; it never writes config, history or result files. Protect terminal
+capture and shell redirection. Same-key retries return `one_time_link_already_created`
+without another token; there is no cached response to recover a lost URL. List requires
+`read` or `full`, accepts optional `limit`/`after`, and returns metadata without URLs or
+tokens. Revoke requires `bookings` or `full` plus `eventTypeId` and `id`; its result contains safe
+metadata in `link`, or null for unknown/unrelated IDs. Use the id returned when the link
+was created, or from the list with a read/full key. Used links remain used. Existing
+ownership and team permissions still apply. See the
+[one-time link guide](https://hourmere.com/docs/one-time-links) for limits and retention.
+
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.
 Exit codes: `0` success, `1` usage/input/domain/protocol error, `3` transport failure.

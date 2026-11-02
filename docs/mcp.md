@@ -79,6 +79,9 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `get_schedule` | — | `schedule` | `full, read` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
+| `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
+| `list_one_time_links` | — | `one-time-links list` | `full, read` |
+| `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 
@@ -90,13 +93,21 @@ existing authorized bookings. Both can expose existing visible attendee details 
 meeting links. `full` does not authorize browser-only operations or API key management.
 MCP OAuth keeps its existing `mcp:tools` grant rather than adopting these API key scopes.
 
-Future one-time booking link creation and revocation are full-account configuration
-writes, for both API key and MCP OAuth access. API keys require `full`; `read` and
-`bookings` cannot mint or withdraw links. For OAuth, transport registration must explicitly
-authorize full configuration access before exposing or calling these new operations;
-the existing `mcp:tools` grant alone does not implicitly opt into them. Any future limited
-OAuth grant must exclude them. These operations are currently internal services only;
-this contract note adds no MCP tools or OAuth scopes.
+`create_one_time_link` and `revoke_one_time_link` require a `full` or `bookings` API key
+and permission to manage the event type; `read` cannot mint or withdraw links.
+`list_one_time_links` accepts `full` or `read` keys. Existing authorized `mcp:tools`
+OAuth connections retain scheduling access to all three tools. No new scope or
+broader account-configuration permission is introduced.
+
+Create takes `eventTypeId`, a retained random `idempotencyKey`, optional `expiresAt` and
+optional `prefill` (`name`, `email`). Its full `/book/{token}` URL is shown only in that
+response. Copy it privately now; lists and detail reads cannot recover it. A repeat with
+the same key and normalized input returns `one_time_link_already_created`, without
+minting another token or recovering the URL; changed input returns `idempotency_key_reused`.
+Retention or event deletion can eventually remove the retained idempotency marker.
+List takes `eventTypeId` and optional `limit`/`after`; revoke takes `eventTypeId` and `id`
+and returns metadata in `link`, or null for unknown/unrelated IDs. Used links retain their
+state and consuming booking. See [one-time booking links](https://hourmere.com/docs/one-time-links).
 
 Scope cannot be edited. Create a replacement at `/app/api-keys`, update the client and
 revoke the old key; reconnect or refresh tool discovery because clients can cache tools.

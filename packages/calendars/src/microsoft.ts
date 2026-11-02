@@ -60,6 +60,7 @@ export function hasMicrosoftCalendarListAccess(scopes: readonly string[] | undef
 export function createMicrosoftCalendarClient(
   config: { clientId: string; clientSecret: string; publicUrl: string },
   request: typeof fetch = fetch,
+  now: () => number = Date.now,
 ) {
   const redirectUri = new URL(MICROSOFT_CALENDAR_CALLBACK, config.publicUrl).href
   const tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
@@ -138,7 +139,7 @@ export function createMicrosoftCalendarClient(
     return {
       accessToken: t.access_token,
       refreshToken: t.refresh_token,
-      expiresAt: Date.now() + t.expires_in * 1000,
+      expiresAt: now() + t.expires_in * 1000,
       scopes: scope
         ?.split(/\s+/)
         .filter(Boolean)

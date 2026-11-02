@@ -79,6 +79,9 @@ field errors, privacy warning and policy-change behavior.
 
 ## Configure reminders and follow-ups
 
+See [Reminders and follow-ups](/docs/reminders-and-follow-ups) for editor steps, timing,
+recipients and known limitations.
+
 Use a `full` API key and an event-type ID from `GET /api/v1/event-types`. Protected event
 reads include `notifications`. To replace only that setting:
 
@@ -97,6 +100,16 @@ only new bookings and send no immediate mail. Read the
 [complete validation contract](/docs/api-conventions#event-type-notification-settings)
 and [host-note operating policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls)
 before enabling follow-ups or host-written text.
+
+## Create one-time links
+
+Use `POST /api/v1/event-types/{eventTypeId}/one-time-links` with optional `expiresAt`
+and `prefill`, then save the creation response's URL privately. It is shown once.
+List safe metadata with GET on the same path; revoke with DELETE on its `/{id}` path.
+Create and revoke require `bookings` or `full`, while list/get allow `read` and `full`.
+An exact `Idempotency-Key` retry never creates a second link and returns
+`409 one_time_link_already_created` because the URL cannot be recovered.
+See [one-time booking links](/docs/one-time-links) for examples, permissions and limits.
 
 ## Find a time
 

@@ -12,6 +12,7 @@ import { conferenceRoutes } from './conferences.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { memberDepartureImpactRoutes } from './member-departure-impact.ts'
 import { memberRemovalRoutes } from './member-removal.ts'
+import { oneTimeLinkRoutes } from './one-time-links.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
 import { readinessRoutes } from './readiness.ts'
@@ -67,6 +68,7 @@ export const productRoutes = (db: Db) => [
   webhookRoutes({ db, enabled: false }),
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
+  oneTimeLinkRoutes({ db, publicUrl: PUBLIC_URL }),
   bookingRoutes({ db }),
   teamBookingRoutes({ db }),
   teamInvitationRoutes({ db, invitationMailLimits: { secret: 'synthetic-route-test-only' } }),
