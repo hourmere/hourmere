@@ -167,6 +167,9 @@ const schema = z
       ),
     ),
     MAIL_FROM: optional(z.string()),
+    FOLLOW_UP_HOST_NOTES_ENABLED: optional(z.enum(['true', 'false'])).transform(
+      (value) => value !== 'false',
+    ),
     BOOKING_MAX_INVITEE_RESCHEDULES: emailLimit('BOOKING_MAX_INVITEE_RESCHEDULES', 5, 0),
     MAIL_RECIPIENT_MAX_PER_HOUR: emailLimit('MAIL_RECIPIENT_MAX_PER_HOUR', 5, 1),
     MAIL_RECIPIENT_MAX_PER_DAY: emailLimit('MAIL_RECIPIENT_MAX_PER_DAY', 20, 1),
