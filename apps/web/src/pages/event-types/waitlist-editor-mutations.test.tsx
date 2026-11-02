@@ -106,6 +106,9 @@ async function assertEditor(
     personal?: boolean
     status?: string
     role?: string | null
+    roles?: string[] | null
+    reload?: () => void
+    confirmReload?: () => void
     supported?: boolean
     removeStatus?: number
     removeCode?: string
@@ -122,8 +125,9 @@ async function assertEditor(
   const management = {
     status: options.status ?? 'ready',
     role: options.role ?? null,
+    roles: options.roles === undefined ? ['member'] : options.roles,
     revoke: vi.fn(),
-    reload: vi.fn(),
+    reload: options.reload ?? vi.fn(),
   }
   const Component = copy<typeof WaitlistEditor>(source, 'WaitlistEditor', {
     react,
@@ -141,7 +145,7 @@ async function assertEditor(
       ...ME,
       organization: { ...ME.organization, personal: options.personal ?? true },
     }),
-    useSession: () => ({ confirmReload: vi.fn() }),
+    useSession: () => ({ confirmReload: options.confirmReload ?? vi.fn() }),
     useTeamManagementAccess: () => management,
     ImmediateAction,
   })
@@ -271,8 +275,8 @@ describe('waitlist editor production-source mutation controls', () => {
   })
   it('detects treating unknown management access as confirmed lack of permission', async () => {
     await detectsEditor(
-      "access.status === 'error'\n                  ?",
-      'false\n                  ?',
+      "access.status === 'error' ||",
+      'false ||',
       async () => {
         expect(
           screen.queryByText('Could not check waitlist management access. Try again.'),
@@ -282,6 +286,38 @@ describe('waitlist editor production-source mutation controls', () => {
         ).toBeNull()
       },
       { personal: false, status: 'error' },
+    )
+  })
+  it('detects presenting revoked team access with unknown roles as a confirmed member role', async () => {
+    await detectsEditor(
+      'access.roles === null',
+      'false',
+      async () => {
+        expect(
+          screen.queryByText('Could not check waitlist management access. Try again.'),
+        ).not.toBeNull()
+        expect(
+          screen.queryByText('Only team owners and admins can manage the waitlist.'),
+        ).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeNull()
+      },
+      { personal: false, roles: null },
+    )
+  })
+  it('detects retrying revoked team access without resetting the session provider', async () => {
+    const reload = vi.fn()
+    const confirmReload = vi.fn()
+    await detectsEditor(
+      "onClick={access.status === 'error' ? access.reload : confirmReload}",
+      'onClick={access.reload}',
+      async (user) => {
+        reload.mockClear()
+        confirmReload.mockClear()
+        await user.click(screen.getByRole('button', { name: 'Try again' }))
+        expect(confirmReload).toHaveBeenCalledTimes(1)
+        expect(reload).not.toHaveBeenCalled()
+      },
+      { personal: false, roles: null, reload, confirmReload },
     )
   })
   it('detects describing unchecked management access as an account limitation', async () => {

@@ -278,6 +278,52 @@ describe('event type waitlist management', () => {
     expect(screen.queryByText('No waitlist entries.')).toBeNull()
   })
 
+  it.each([false, true])(
+    'keeps revoked team waitlist access neutral after a refused entry read (refresh=%s)',
+    async (refresh) => {
+      let allowed = refresh
+      const calls = fakeApi({
+        ...signedInAs(team),
+        ...profile(),
+        'GET /api/auth/organization/get-active-member': () =>
+          json(200, {
+            userId: team.user.id,
+            organizationId: team.organization.id,
+            role: 'owner',
+          }),
+        'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
+        'GET /api/v1/event-type-hosts': () =>
+          json(200, { data: [{ id: team.user.id, name: team.user.name }], nextAfter: null }),
+        [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, eventType()),
+        [`GET ${entriesPath}`]: () =>
+          allowed
+            ? json(200, { data: [entry], nextAfter: null })
+            : json(403, { error: 'forbidden' }),
+      })
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'View waitlist entries' }))
+      if (refresh) {
+        await screen.findByText(entry.email)
+        allowed = false
+        await user.click(screen.getByRole('button', { name: 'Refresh' }))
+      }
+      await screen.findByText('Could not check waitlist management access. Try again.')
+      expect(screen.queryByText('Only team owners and admins can manage the waitlist.')).toBeNull()
+      expect(screen.queryByText('Waitlist management is unavailable for this account.')).toBeNull()
+      expect(screen.queryByText(entry.email)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'View waitlist entries' })).toBeNull()
+      expect(screen.queryByRole('checkbox', { name: checkboxName })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
+      expect(calls.to(`GET ${entriesPath}`)).toHaveLength(refresh ? 2 : 1)
+      allowed = true
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
+      await user.click(await screen.findByRole('button', { name: 'View waitlist entries' }))
+      await screen.findByText(entry.email)
+      expect(calls.to(`GET ${entriesPath}`)).toHaveLength(refresh ? 3 : 2)
+    },
+  )
+
   it.each(['en', 'zh-CN'] as const)(
     'localizes every state and provides requested and notification dates in %s',
     async (locale) => {

@@ -30,8 +30,11 @@ export function WaitlistEditor({
   const { t } = useI18n()
   const me = useMe()
   const access = useTeamManagementAccess()
+  const { confirmReload } = useSession()
   const [showEntries, setShowEntries] = useState(false)
   const canManage = me.organization.personal || (access.status === 'ready' && access.role !== null)
+  const accessUnknown =
+    access.status === 'error' || (access.status === 'ready' && access.roles === null)
   return (
     <section className="panel" aria-labelledby="waitlist-heading">
       <h2 id="waitlist-heading">{t('Booking waitlist')}</h2>
@@ -41,13 +44,17 @@ export function WaitlistEditor({
             {t(
               access.status === 'loading'
                 ? 'Checking waitlist management access…'
-                : access.status === 'error'
+                : accessUnknown
                   ? 'Could not check waitlist management access. Try again.'
                   : 'Only team owners and admins can manage the waitlist.',
             )}
           </p>
-          {access.status === 'error' && (
-            <button type="button" className="button button-small" onClick={access.reload}>
+          {accessUnknown && (
+            <button
+              type="button"
+              className="button button-small"
+              onClick={access.status === 'error' ? access.reload : confirmReload}
+            >
               {t('Try again')}
             </button>
           )}
