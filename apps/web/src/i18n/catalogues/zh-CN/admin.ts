@@ -37,6 +37,66 @@ export const admin = {
   'Next page': '下一页',
   Refresh: '刷新',
 
+  Revoked: '已撤销',
+  'Event type': '活动类型',
+  'Created by': '创建者',
+  'Unknown member': '未知成员',
+  'Load more': '加载更多',
+  'This request already created a link, but its URL cannot be retrieved. Review the list and revoke it if needed, then start a new request.':
+    '此请求已创建链接，但无法找回网址。请查看列表并按需撤销该链接，然后发起新请求。',
+  'Start a new request': '发起新请求',
+  'This link is no longer active.': '此链接已失效。',
+  'One-time links': '一次性链接',
+  'Create a private link that can be used for one booking. Each new URL is shown only once.':
+    '创建仅可完成一次预约的私密链接。每个新网址只显示一次。',
+  'These links belong to the team and remain with it when their creator leaves.':
+    '这些链接归团队所有，创建者离开后仍保留在团队中。',
+  'Close one-time links': '收起一次性链接',
+  'Manage one-time links': '管理一次性链接',
+  'Your space has reached its active one-time link limit. Revoke an unused link and try again.':
+    '当前空间的有效一次性链接已达上限。请撤销一个未使用的链接后重试。',
+  'Enable and save this event type before creating a one-time link.':
+    '请先启用并保存此活动类型，再创建一次性链接。',
+  'Check the expiry and invitee details, then try again.': '请检查到期时间和受邀人信息后重试。',
+  'One-time links are unavailable with your current permissions.':
+    '你当前的权限无法管理一次性链接。',
+  'Could not update one-time links. Try again.': '无法更新一次性链接。请重试。',
+  'In 1 hour': '1 小时后',
+  'In 1 day': '1 天后',
+  'In 7 days': '7 天后',
+  Used: '已使用',
+  'Create a one-time link': '创建一次性链接',
+  'Link expiry': '链接到期时间',
+  'A day is exactly 24 hours, including daylight-saving changes.':
+    '一天为整整 24 小时，夏令时切换时也一样。',
+  'Prefilled invitee name': '预填受邀人姓名',
+  'Prefilled invitee email': '预填受邀人邮箱',
+  'Invitees can edit these details. Prefill does not restrict who can book.':
+    '受邀人可以修改这些信息。预填信息不会限制谁可以预约。',
+  'Create one-time link': '创建一次性链接',
+  'Existing one-time links': '已有一次性链接',
+  'URLs cannot be retrieved from this list. Revoke an unused link if you no longer need it.':
+    '无法从此列表找回网址。不再需要未使用的链接时，请将其撤销。',
+  'Could not load one-time links. Your access may have changed.':
+    '无法加载一次性链接。你的访问权限可能已改变。',
+  'No one-time links yet. Create one above to share this event privately.':
+    '还没有一次性链接。请在上方创建一个，以私密方式分享此活动。',
+  'One-time link': '一次性链接',
+  'Link ID': '链接编号',
+  'Used at': '使用时间',
+  'Booking reference': '预约编号',
+  'Revoke link': '撤销链接',
+  'Revoke one-time link {0}': '撤销一次性链接{0}',
+  'Revoke this one-time link? It will stop accepting new bookings.':
+    '撤销此一次性链接？撤销后将不再接受新预约。',
+  'Copy your one-time link': '复制你的一次性链接',
+  'Link created. Copy and save it privately now. After you close this dialog, the URL cannot be shown again.':
+    '链接已创建。请立即复制并妥善保管。关闭此对话框后，将无法再次显示网址。',
+  'One-time booking URL': '一次性预约网址',
+  'Copy one-time link': '复制一次性链接',
+  'Close and forget URL': '关闭并清除网址',
+  'This link was already used. Its booking is unchanged.': '此链接已使用。对应预约保持不变。',
+  'Link revoked.': '链接已撤销。',
   'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
     '请在会议开始前于 Hourmere 中取消预约。会议开始后，受邀人无法停止会后消息。',
   'Reminders and follow-ups': '提醒与会后消息',

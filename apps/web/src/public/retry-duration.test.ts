@@ -33,7 +33,46 @@ const waits = {
   'zh-CN': ['1小时', '24小时'],
 } as const
 
+const grammar = {
+  en: {
+    message: 'Too many requests from your network. Try again in {duration}.',
+    units: ['1 second', '2 seconds', '1 minute', '2 minutes', '1 hour', '2 hours'],
+  },
+  de: {
+    message: 'Zu viele Anfragen aus Ihrem Netzwerk. Versuchen Sie es in {duration} erneut.',
+    units: ['1 Sekunde', '2 Sekunden', '1 Minute', '2 Minuten', '1 Stunde', '2 Stunden'],
+  },
+  fr: {
+    message: 'Trop de requêtes depuis votre réseau. Réessayez dans {duration}.',
+    units: ['1 seconde', '2 secondes', '1 minute', '2 minutes', '1 heure', '2 heures'],
+  },
+  es: {
+    message: 'Demasiadas solicitudes desde su red. Vuelva a intentarlo en {duration}.',
+    units: ['1 segundo', '2 segundos', '1 minuto', '2 minutos', '1 hora', '2 horas'],
+  },
+  'pt-BR': {
+    message: 'Muitas solicitações da sua rede. Tente novamente em {duration}.',
+    units: ['1 segundo', '2 segundos', '1 minuto', '2 minutos', '1 hora', '2 horas'],
+  },
+  'zh-CN': {
+    message: '你的网络请求过多。请在{duration}后重试。',
+    units: ['1秒', '2秒', '1分钟', '2分钟', '1小时', '2小时'],
+  },
+} as const
+
 describe('public rate-limit wait durations', () => {
+  it.each(registeredLocales)(
+    'uses natural singular and plural seconds, minutes and hours in $code',
+    ({ code }) => {
+      const expected = grammar[code]
+      for (const [index, seconds] of [1, 2, 60, 120, 3600, 7200].entries()) {
+        const text = translateMessage(code, failureMessage(error(seconds)))
+        const message = expected.message.replace('{duration}', expected.units[index] ?? '')
+        // Chinese applies the shared Han/Latin digit-boundary spacing at render time.
+        expect(code === 'zh-CN' ? text.replaceAll(' ', '') : text).toBe(message)
+      }
+    },
+  )
   it.each(registeredLocales)('formats durable waitlist limits naturally in $code', ({ code }) => {
     for (const [index, seconds] of [3600, 86400].entries()) {
       const text = translateMessage(code, failureMessage(error(seconds)))

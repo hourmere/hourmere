@@ -177,6 +177,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `PUT /api/v1/event-types/{id}/waitlist` | Session or API key | `full` |
 | `GET /api/v1/event-types/{id}/waitlist/entries` | Session or API key | `full, read` |
 | `DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}` | Session or API key | `full` |
+| `GET /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, read` |
+| `POST /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, bookings` |
+| `GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, read` |
+| `DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, bookings` |
 | `POST /api/v1/event-types/{id}/round-robin/activate` | Session or API key | `full` |
 | `GET /api/v1/instance` | Public; no key needed | `full, read, bookings` |
 | `GET /api/v1/mcp-oauth/connections` | Browser session only | — |
@@ -259,6 +263,9 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `get_schedule` | — | `schedule` | `full, read` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
+| `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
+| `list_one_time_links` | — | `one-time-links list` | `full, read` |
+| `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 | `get_event_type_waitlist` | — | `event-waitlist` | `full, read` |

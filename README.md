@@ -60,8 +60,10 @@ Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/ap
 One-time booking links open `/book/{token}`. They offer the usual booking form,
 including editable invitee prefill, and are consumed only when a booking commits.
 Every unavailable link shows the same neutral page. These links cannot be embedded;
-their pages and API responses send no referrer and are not cached. Link generation
-and the administrator list are not yet available through the public interfaces.
+their pages and API responses send no referrer and are not cached. Create, list and
+revoke them in the event editor, REST, MCP or CLI; the full URL is shown only in the
+creation response. See [one-time booking links](https://hourmere.com/docs/one-time-links)
+for permissions, replay handling and limits.
 
 Saving an event type opens its saved version's **View and share** actions. Open the public
 booking page or copy its full link there; unsaved address changes cannot be copied as a

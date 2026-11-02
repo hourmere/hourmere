@@ -56,6 +56,7 @@ import {
 import { HostAssignment } from './HostAssignment.tsx'
 import { NotificationsEditor } from './NotificationsEditor.tsx'
 import { pruneNotificationErrors } from './notifications-form.ts'
+import { OneTimeLinks } from './OneTimeLinks.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -995,6 +996,8 @@ function EventTypeForm({
           </p>
         </StickyFormActions>
       </form>
+
+      {saved && <OneTimeLinks event={saved} disabled={contextChanged} />}
 
       {saved && (
         <section className="panel panel-danger" aria-labelledby="delete-heading">

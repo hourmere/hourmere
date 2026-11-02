@@ -12,19 +12,28 @@ import {
   redactLogDetails,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
-import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
+import {
+  DomainError,
+  type DomainErrorKind,
+  ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+} from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
 import { etag } from 'hono/etag'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
+import { routePath } from 'hono/route'
 import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
-import { isOneTimeLinkPath, redactOneTimeLogDetails } from './one-time-link-privacy.ts'
+import {
+  isOneTimeCapabilityPath,
+  isOneTimeLinkPath,
+  redactOneTimeLogDetails,
+} from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
@@ -299,9 +308,12 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
 
 // A one-time capability is carried by the path. Do not hand that request to a
 // URL logger, including malformed tokens and refused embed attempts.
-const requestLogger = createMiddleware((c, next) =>
-  isOneTimeLinkPath(c.req.path) ? next() : ordinaryRequestLogger(c, next),
-)
+const requestLogger = createMiddleware(async (c, next) => {
+  if (isOneTimeCapabilityPath(c.req.path)) return next()
+  if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
+  await next()
+  console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
+})
 
 export function createApp({
   checkDb,
@@ -325,11 +337,18 @@ export function createApp({
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
     const text = isWaitlistAdmissionPath(c.req.path) ? 'private waitlist request failed' : detail
-    return (level === 'ERROR' ? console.error : console.warn)(
+    const path = isOneTimeCapabilityPath(c.req.path)
+      ? '/book/[redacted]'
+      : isOneTimeLinkPath(c.req.path)
+        ? routePath(c)
+        : c.req.path
+    const message = `${c.req.method} ${path}: ${text}`
+    const write = level === 'ERROR' ? console.error : console.warn
+    write(
       `${new Date().toISOString()} ${level} ${
         isOneTimeLinkPath(c.req.path)
-          ? redactOneTimeLogDetails(`${c.req.method} /book/[redacted]: ${text}`)
-          : escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))
+          ? redactOneTimeLogDetails(message)
+          : escapeControlCharacters(redactLogDetails(message))
       }`,
     )
   }
@@ -378,6 +397,10 @@ export function createApp({
         error: err.code,
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail && !isOneTimeLinkPath(c.req.path) && { message: err.detail }),
+        ...(err.code === 'one_time_link_already_created' &&
+          /\/one-time-links(?:\/|$)/i.test(c.req.path) && {
+            message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+          }),
       }
       if (isWaitlistAdmissionPath(c.req.path)) delete body.message
       return c.json(body, domainStatus[err.kind])

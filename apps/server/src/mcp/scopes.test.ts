@@ -31,6 +31,9 @@ const all = [
   'get_schedule',
   'create_event_type',
   'update_event_type',
+  'create_one_time_link',
+  'list_one_time_links',
+  'revoke_one_time_link',
   'list_calendar_connections',
   'list_conference_connections',
   'get_event_type_waitlist',
@@ -54,6 +57,8 @@ const writes = new Set([
   'cancel_booking',
   'retry_conference',
   'retry_calendar_copy',
+  'create_one_time_link',
+  'revoke_one_time_link',
   'set_event_type_notifications',
   'join_waitlist',
   'resend_waitlist_verification',
@@ -65,6 +70,7 @@ const otherReads = new Set([
   'list_conference_connections',
   'get_event_type_waitlist',
   'list_waitlist_entries',
+  'list_one_time_links',
 ])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
@@ -386,6 +392,9 @@ describe('CLI scope parity', () => {
     ['remove-waitlist-entry', 'remove_waitlist_entry'],
     ['join-waitlist', 'join_waitlist'],
     ['resend-waitlist-verification', 'resend_waitlist_verification'],
+    ['one-time-links create', 'create_one_time_link'],
+    ['one-time-links list', 'list_one_time_links'],
+    ['one-time-links revoke', 'revoke_one_time_link'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',
@@ -397,7 +406,7 @@ describe('CLI scope parity', () => {
         const fetcher = vi.fn<typeof fetch>(async (input, init) => target.request(input, init))
         const key = `hm_${scope}`
         const code = await runCli({
-          argv: [command, '--input', '-'],
+          argv: [...command.split(' '), '--input', '-'],
           env: { HOURMERE_URL: URL, HOURMERE_API_KEY: key },
           stdin: (async function* () {
             yield JSON.stringify({ idempotencyKey: 'scope-matrix-test' })

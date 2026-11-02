@@ -111,6 +111,7 @@ function apiCopy(text = apiSource) {
   return compile<typeof publicApi>(text, {
     '../api/client.ts': client,
     '../api/errors.ts': errors,
+    '../i18n/duration.ts': duration,
     '../i18n/translate.ts': translate,
   })
 }

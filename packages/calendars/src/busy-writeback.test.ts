@@ -73,7 +73,7 @@ describe.skipIf(!serverUrl)('timed writeback replaces synced all-day dates', () 
         })
         .returning('id')
         .executeTakeFirstOrThrow()
-      const provider = fakeGoogle()
+      const provider = fakeGoogle(() => NOW.epochMilliseconds)
       provider.controls.storedEvents.set('busy-event', {
         id: 'busy-event',
         iCalUID: `${root}@hourmere`,

@@ -23,8 +23,7 @@ import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import type { RateLimiter } from '../rate-limit.ts'
 
 /**
- * Who calls a tool. MCP accepts API keys only for now; OAuth access tokens (later) will
- * resolve to the same kind of principal, so tools do not change.
+ * MCP accepts API keys and verified OAuth grants; both retain resource permissions.
  */
 export type McpCaller = Extract<Principal, { kind: 'api_key' | 'oauth' }>
 
@@ -335,13 +334,8 @@ export function registerTools(
   const catalog = new Map(tools.map((prepared) => [prepared.tool.name, prepared]))
   server.server.setRequestHandler('tools/call', async (request) => {
     const known = catalog.get(request.params.name)
-    try {
-      if (known) requireApiKeyOperation(caller, `mcp:${known.tool.name}`)
-    } catch (err) {
-      if (err instanceof ApiKeyScopeError)
-        return errorResult({ error: err.error, message: err.message })
-      throw err
-    }
+    if (known && !apiKeyAllows(caller, `mcp:${known.tool.name}`))
+      return runTool(known.tool, request.params.arguments, call, logError)
     const prepared = visible.get(request.params.name)
     if (!prepared)
       throw new ProtocolError(

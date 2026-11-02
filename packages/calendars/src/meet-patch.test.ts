@@ -42,7 +42,7 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
     await db.deleteFrom('profiles').execute()
     await db.deleteFrom('schedules').execute()
     await db.deleteFrom('calendar_connections').execute()
-    provider = fakeGoogle()
+    provider = fakeGoogle(() => NOW.epochMilliseconds)
     deps = {
       db,
       google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY },

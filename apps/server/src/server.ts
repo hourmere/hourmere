@@ -71,6 +71,7 @@ import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
+import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -86,6 +87,7 @@ import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { oneTimeBookingRoutes } from './routes/one-time-bookings.ts'
+import { oneTimeLinkRoutes } from './routes/one-time-links.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
@@ -204,6 +206,7 @@ export function productRoutes({
       automaticZoom,
       successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
     }),
+    oneTimeLinkRoutes({ db, publicUrl }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
@@ -251,6 +254,7 @@ export function productTools({
     }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
     ...eventTypeTools({ db, automaticMeet, automaticZoom, followUpHostNotesEnabled }),
+    ...oneTimeLinkTools({ db, publicUrl }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },

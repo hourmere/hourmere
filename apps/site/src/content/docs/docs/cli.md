@@ -43,6 +43,11 @@ Use an HTTPS origin with no credentials, path, query or fragment. HTTP is accept
 `localhost`, `127.0.0.1` or `[::1]` development instances. Redirects are refused before a key
 can be forwarded. Requests time out after 30 seconds and are never automatically retried.
 
+For `hourmere one-time-links create|list|revoke`, see
+[one-time booking links](/docs/one-time-links). Creation prints its private URL once to
+stdout and refuses `--output`; list/revoke use metadata IDs without the booking token.
+Create/revoke require `bookings` or `full` API key scope, while listing allows `read` or `full`.
+
 ## Commands and JSON arguments
 
 Arguments are the corresponding [MCP tool's](/docs/mcp#tools) JSON object. Supply them with
@@ -67,6 +72,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
+| `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
+| `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
+| `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -205,8 +213,15 @@ directory or symlink, preventing accidental overwrites and token loss through a 
 path. The file is flushed before the CLI reports `{"outputWritten":true}`. Keep request and
 result files out of Git, backups shared with others and logs. Stdout otherwise carries the
 JSON result with management tokens and API keys redacted, including copies in nested text;
-the CLI never prints management capabilities. Other returned information, such as attendee
+the CLI never prints booking management capabilities. Other returned information, such as attendee
 email addresses, remains private booking data: redirect it only to destinations you trust.
+
+`one-time-links create` is the exception to secret redaction: it prints its new private
+booking URL once to stdout so you can copy it. It refuses `--output` before contacting the
+server and never writes the URL to config, history or other files. Keep terminal capture
+and shell redirection private. The retained `idempotencyKey` prevents a retry from creating
+another link, but no response cache can recover a lost URL. See
+[one-time booking links](/docs/one-time-links) for UI, REST, MCP and CLI examples.
 
 Use `reschedule --input move-request.json --output moved-result.json` to retain the new
 booking's result. Host moves return `manageToken: null` and preserve the invitee's existing

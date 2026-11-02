@@ -52,6 +52,8 @@ const classes = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/event-types/{eventTypeId}/one-time-links',
+    'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
@@ -67,6 +69,8 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links',
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -265,6 +269,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           mcpAuth: auth,
+          publicUrl,
           googleCalendar: calendar.google,
           socialProviders: {},
           invitationMailLimits: { secret },
@@ -457,6 +462,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 201
         }
         if (method === 'DELETE') expectedStatus = 204
+      } else if (template.includes('/one-time-links')) {
+        cleanupEvent = await f.eventType(teamId, null, {
+          slug: nonce,
+          hosts: [{ userId: owner.user.id }],
+        })
+        path = path.replace('{eventTypeId}', cleanupEvent)
+        if (method === 'POST') {
+          headers['Idempotency-Key'] = randomUUID()
+          expectedStatus = 201
+        } else {
+          const link = await createOneTimeBookingLink(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            { eventTypeId: cleanupEvent },
+          )
+          cleanupOneTimeLink = link.id
+          id = link.id
+        }
       } else if (template.startsWith('/api/v1/event-types')) {
         if (method !== 'GET' && template.includes('{id}')) {
           cleanupEvent = await f.eventType(teamId, null, {
@@ -585,14 +607,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 94-operation contract and all 282 scope combinations', () => {
+    it('covers the exact 98-operation contract and all 294 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(94)
-      expect(new Set(ids).size).toBe(94)
+      expect(ids).toHaveLength(98)
+      expect(new Set(ids).size).toBe(98)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(282)
+      expect(cases).toHaveLength(294)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -639,14 +661,27 @@ describe.skipIf(!process.env.DATABASE_URL)(
                 .execute()
           }
         }
+        if (operation === 'POST /api/v1/event-types/{eventTypeId}/one-time-links') {
+          const issued = await db
+            .selectFrom('one_time_booking_links')
+            .select('id')
+            .where('event_type_id', '=', fixture.cleanupEvent as string)
+            .execute()
+          expect(issued).toHaveLength(allowed[kind].includes(scope) ? 1 : 0)
+          fixture.cleanupOneTimeLink = issued[0]?.id
+        }
         if (fixture.cleanupOneTimeLink) {
           const link = await db
             .selectFrom('one_time_booking_links')
             .select(['state', 'booking_id'])
             .where('id', '=', fixture.cleanupOneTimeLink)
             .executeTakeFirstOrThrow()
-          const consumed = fixture.method === 'POST' && allowed[kind].includes(scope)
-          expect(link.state).toBe(consumed ? 'used' : 'active')
+          const consumed =
+            operation === 'POST /api/v1/book/{token}/bookings' && allowed[kind].includes(scope)
+          const revoked =
+            operation === 'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}' &&
+            allowed[kind].includes(scope)
+          expect(link.state).toBe(consumed ? 'used' : revoked ? 'revoked' : 'active')
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe('no-store')

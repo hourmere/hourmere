@@ -25,15 +25,20 @@ export const COMMANDS = {
   cancel: 'cancel_booking',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
+  'one-time-links create': 'create_one_time_link',
+  'one-time-links list': 'list_one_time_links',
+  'one-time-links revoke': 'revoke_one_time_link',
 } as const
 
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
+       hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere --help | --version
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
+          one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
@@ -46,6 +51,9 @@ stdout is JSON with management capabilities redacted. --output creates a new 060
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
+one-time-links create requires bookings or full scope, eventTypeId and an explicit idempotencyKey.
+Its secret URL is printed once to stdout; --output is refused and nothing is stored.
+one-time-links list requires read or full; revoke requires bookings or full and eventTypeId plus id.
 See https://hourmere.com/docs/cli for complete usage.
 `
 
@@ -58,7 +66,10 @@ interface Options {
 }
 
 function parse(argv: readonly string[]): Options {
-  const [command, ...rest] = argv
+  const parts = [...argv]
+  const first = parts.shift()
+  const command = first === 'one-time-links' ? `${first} ${parts.shift() ?? ''}` : first
+  const rest = parts
   if (!command || !Object.hasOwn(COMMANDS, command)) throw new CliError('invalid_command')
   const options: Options = { command: command as keyof typeof COMMANDS }
   const seen = new Set<string>()
@@ -85,6 +96,8 @@ function parse(argv: readonly string[]): Options {
       options.durationMinutes = durationMinutes
     }
   }
+  if (command === 'one-time-links create' && options.output)
+    throw new CliError('one_time_link_output_forbidden')
   return options
 }
 
@@ -194,9 +207,14 @@ export async function runCli(options: {
       secrets.push(input.waitlistToken)
     }
     if (
-      args.command === 'book' &&
+      ['book', 'one-time-links create'].includes(args.command) &&
       (typeof input.idempotencyKey !== 'string' ||
         !/^[\x20-\x7e]{1,255}$/.test(input.idempotencyKey))
+    )
+      throw new CliError('idempotency_key_required')
+    if (
+      args.command === 'one-time-links create' &&
+      !/^[\x21-\x7e]{1,255}$/.test(input.idempotencyKey as string)
     )
       throw new CliError('idempotency_key_required')
     // Reserve the private output before making a booking: a path error must not lose its token.
