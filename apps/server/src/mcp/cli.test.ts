@@ -54,6 +54,11 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         title: 'CLI Test Meeting',
         durationMinutes: 30,
       })
+      await db
+        .updateTable('event_types')
+        .set({ allowed_durations_minutes: [15, 30, 60] })
+        .where('id', '=', event)
+        .execute()
       const other = await fixtures.host({ name: 'CLI Other Host', handle: 'cli-other' })
       const key = await auth.api.createApiKey({
         body: { userId: host.userId, name: 'cli-integration' },
@@ -83,13 +88,21 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       async function run(
         command: string,
         input: Record<string, unknown> = {},
-        options: { key?: string; output?: string } = {},
+        options: { key?: string; output?: string; durationMinutes?: number } = {},
       ) {
         let stdout = ''
         let stderr = ''
         let returnedTokenCount = 0
         const code = await runCli({
-          argv: [command, '--input', '-', ...(options.output ? ['--output', options.output] : [])],
+          argv: [
+            command,
+            '--input',
+            '-',
+            ...(options.output ? ['--output', options.output] : []),
+            ...(options.durationMinutes === undefined
+              ? []
+              : ['--duration-minutes', String(options.durationMinutes)]),
+          ],
           env: { HOURMERE_URL: url, HOURMERE_API_KEY: options.key ?? key.key },
           stdin: (async function* () {
             yield JSON.stringify(input)
@@ -150,6 +163,24 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(slots.code).toBe(0)
       expect(slots.data.slots).toHaveLength(2)
       expect(typeof slots.data.nextAfter).toBe('string')
+      const slotQuery = {
+        handle: 'cli-host',
+        slug: 'intro',
+        startDate: '2026-11-02',
+        endDate: '2026-11-02',
+        timeZone: 'Europe/Berlin',
+        maxSlots: 2,
+      }
+      const selectedSlots = await run('slots', slotQuery, { durationMinutes: 60 })
+      expect(selectedSlots.code).toBe(0)
+      expect(
+        Temporal.Instant.from(selectedSlots.data.slots[0].end)
+          .since(Temporal.Instant.from(selectedSlots.data.slots[0].start))
+          .total('minutes'),
+      ).toBe(60)
+      expect((await run('slots', slotQuery, { durationMinutes: 45 })).error.error).toBe(
+        'invalid_duration',
+      )
       const next = await run('slots', {
         handle: 'cli-host',
         slug: 'intro',
@@ -164,6 +195,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         handle: 'cli-host',
         slug: 'intro',
         start: slots.data.slots[0].start,
+        durationMinutes: 60,
         invitee: {
           name: 'CLI Test Invitee',
           email: 'cli-invitee@example.test',
@@ -173,11 +205,36 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         idempotencyKey: randomUUID(),
       }
       const createdPath = join(directory, 'created.json')
-      expect((await run('book', request, { output: createdPath })).code).toBe(0)
+      expect((await run('book', request, { output: createdPath, durationMinutes: 60 })).code).toBe(
+        0,
+      )
       const created = JSON.parse(await readFile(createdPath, 'utf8'))
       expect(typeof created.manageToken === 'string').toBe(true)
       secrets.push(created.manageToken)
       expect(created.booking.source).toBe('mcp')
+      expect(
+        Temporal.Instant.from(created.booking.end)
+          .since(Temporal.Instant.from(created.booking.start))
+          .total('minutes'),
+      ).toBe(60)
+      expect(
+        (await run('book', { ...request, durationMinutes: 45, idempotencyKey: randomUUID() })).error
+          .error,
+      ).toBe('invalid_duration')
+      for (const authority of [
+        { bookingId: created.booking.id },
+        { manageToken: created.manageToken },
+      ]) {
+        expect(
+          (
+            await run(
+              'reschedule',
+              { ...authority, start: '2026-11-02T12:00:00Z' },
+              { durationMinutes: 45 },
+            )
+          ).error.error,
+        ).toBe('invalid_duration')
+      }
       expect(created.booking.attendees).toEqual(
         expect.arrayContaining([expect.objectContaining({ locale: 'pt-BR' })]),
       )
@@ -216,6 +273,11 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(moved.manageToken === null).toBe(true)
       expect(moved.booking.rescheduledFromId).toBe(created.booking.id)
       expect(moved.booking.source).toBe('mcp')
+      expect(
+        Temporal.Instant.from(moved.booking.end)
+          .since(Temporal.Instant.from(moved.booking.start))
+          .total('minutes'),
+      ).toBe(60)
       expect(moved.booking.attendees).toEqual(created.booking.attendees)
       expect(
         (
@@ -237,13 +299,22 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(printedBooking.code).toBe(0)
       expect(printedBooking.returnedTokenCount).toBe(1)
       expect(printedBooking.data.manageToken === '[redacted]').toBe(true)
-      const printedMove = await run('reschedule', {
-        bookingId: printedBooking.data.booking.id,
-        start: next.data.slots[0].start,
-      })
+      const printedMove = await run(
+        'reschedule',
+        {
+          bookingId: printedBooking.data.booking.id,
+          start: next.data.slots[0].start,
+        },
+        { durationMinutes: 15 },
+      )
       expect(printedMove.code).toBe(0)
       expect(printedMove.returnedTokenCount).toBe(0)
       expect(printedMove.data.manageToken === null).toBe(true)
+      expect(
+        Temporal.Instant.from(printedMove.data.booking.end)
+          .since(Temporal.Instant.from(printedMove.data.booking.start))
+          .total('minutes'),
+      ).toBe(15)
       expect((await run('cancel', { bookingId: printedMove.data.booking.id })).data.status).toBe(
         'cancelled',
       )

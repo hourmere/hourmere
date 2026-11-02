@@ -134,7 +134,7 @@ export function SavedEventShare({
                   ? 'Configuration check failed'
                   : 'Configuration not checked',
           )}{' '}
-          <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+          <a href="#saved-readiness-heading">{t('Review saved event checks')}</a>
           {checksRetryable &&
             readiness.status !== 'loading' &&
             (readiness.status !== 'unavailable' || canRetryUnavailable) && (
@@ -194,7 +194,7 @@ export function SavedEventShare({
           )}
           {missingHandle && (
             <li>
-              {t('Set a booking username in Settings before sharing this event type.')}{' '}
+              {t('Set a handle in Settings before sharing this event type.')}{' '}
               <Link to={PATHS.settings}>{t('Complete your profile')}</Link>
             </li>
           )}
@@ -203,18 +203,26 @@ export function SavedEventShare({
               {t(
                 event.scheduleId
                   ? 'Host availability needs attention before you share this event type.'
-                  : 'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.',
+                  : schedules.length === 0
+                    ? 'You have no working hours yet. Use the setup guide to add a default schedule.'
+                    : 'Choose a default schedule with valid weekly hours. Other schedules do not complete this step.',
               )}{' '}
               <Link
                 to={
                   event.scheduleId && effectiveSchedule
                     ? schedulePath(event.scheduleId)
                     : schedules.length === 0
-                      ? PATHS.newSchedule
+                      ? `${PATHS.eventTypes}#personal-setup-heading`
                       : PATHS.availability
                 }
               >
-                {t(event.scheduleId ? 'Review schedule' : 'Review default availability')}
+                {t(
+                  event.scheduleId
+                    ? 'Review schedule'
+                    : schedules.length === 0
+                      ? 'Set working hours with the setup guide'
+                      : 'Review default availability',
+                )}
               </Link>
             </li>
           )}
@@ -241,7 +249,7 @@ export function SavedEventShare({
           {configurationNeedsReview && !hostAvailabilityMissing && !hostConfigurationMissing && (
             <li>
               {t('Configuration needs attention')}{' '}
-              <a href="#saved-readiness-heading">{t('Review saved version readiness')}</a>
+              <a href="#saved-readiness-heading">{t('Review saved event checks')}</a>
             </li>
           )}
           {invalidTeamSlug && (

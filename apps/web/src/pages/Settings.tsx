@@ -417,6 +417,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
 
   const handle = draft.handle.trim()
   const changingHandle = saved !== null && handle !== saved.handle
+  const handleHint = t('Your booking links start with {path}.').split('{path}')
 
   return (
     <form className="stack" onSubmit={submit} noValidate>
@@ -433,12 +434,17 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           error={errors.handle}
           hint={
             <>
-              {t('Your booking links start with')}{' '}
+              {handleHint[0]}
+              {locale === 'zh-CN' ? ' ' : ''}
               <span className="mono preview">
                 <BreakableText>{`/${handle || t('your-handle')}/`}</BreakableText>
               </span>
-              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}
-              {t('.')}
+              {locale === 'zh-CN' ? ' ' : ''}
+              {handleHint[1]}
+              {locale === 'zh-CN' ? '' : ' '}
+              {t('Use only lowercase letters, digits and hyphens, up to {count} characters.', {
+                count: PROFILE.handleMaxLength,
+              })}
               {changingHandle && (
                 <strong className="warning">
                   {' '}

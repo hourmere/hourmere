@@ -204,4 +204,32 @@ describe('server errors on the form', () => {
       'timeZone',
     )
   })
+
+  it.each([
+    ['en', 'The available meeting lengths have changed. Please choose a length again.'],
+    [
+      'de',
+      'Die verfügbaren Optionen für die Termindauer haben sich geändert. Bitte wählen Sie die Dauer erneut.',
+    ],
+    ['fr', 'Les durées de réunion disponibles ont changé. Choisissez à nouveau une durée.'],
+    ['es', 'Las opciones de duración de la reunión han cambiado. Vuelva a elegir una duración.'],
+    ['pt-BR', 'As opções de duração da reunião mudaram. Escolha uma duração novamente.'],
+    ['zh-CN', '可选的会议时长已更改。请重新选择时长。'],
+  ] as const)(
+    'localizes a changed meeting length in %s without the engine message',
+    (locale, text) => {
+      const rawMessage = 'durationMinutes must be one of allowedDurationsMinutes'
+      const mapped = bookingErrors(error('invalid_duration', rawMessage), questions)
+      expect(mapped).toEqual({
+        fields: {},
+        form: 'The available meeting lengths have changed. Please choose a length again.',
+      })
+      expect(translateMessage(locale, mapped.form)).toBe(text)
+      expect(translateMessage(locale, mapped.form)).not.toContain(rawMessage)
+    },
+  )
+
+  it('uses Termin terminology for the German meeting length label', () => {
+    expect(translateMessage('de', 'Meeting length')).toBe('Termindauer')
+  })
 })

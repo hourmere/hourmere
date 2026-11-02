@@ -123,6 +123,7 @@ export const common = {
   ' ({zone}, {offset})': '（{zone}，{offset}）',
   ' ({offset})': '（{offset}）',
   '{date}, {time}': '{date}，{time}',
+  'Meeting length': '会议时长',
   'About this event': '关于此活动',
   'Add a guest': '添加来宾',
   'Add at most {0} guests.': '最多添加{0}位来宾。',
@@ -226,7 +227,7 @@ export const common = {
   Reschedule: '改期',
   '{title}, {date}, {time}': '{title}，{date}，{time}',
   'Save your link to change or cancel': '保存用于更改或取消的链接',
-  'Search by city or offset': '按城市或时差搜索',
+  'Search by city or offset': '搜索城市（例如上海）或时差',
   'Search time zones': '搜索时区',
   'Show next month': '显示下个月',
   'Someone else just booked that time. Please pick another one.':
@@ -241,6 +242,8 @@ export const common = {
     '链接可能有误，或主持人已移除或重命名此活动。',
   'The questions on this page have changed. Reload the page and try again.':
     '此页面的问题已更改。请刷新页面后重试。',
+  'The available meeting lengths have changed. Please choose a length again.':
+    '可选的会议时长已更改。请重新选择时长。',
   'There is nothing at this address. Check the link you were given.':
     '此地址没有内容。请检查收到的链接。',
   'This answer is required.': '此问题为必答项。',

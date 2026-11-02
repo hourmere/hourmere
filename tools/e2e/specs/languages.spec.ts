@@ -450,7 +450,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     ).toBeVisible()
     await expect(
       page.getByRole('region', {
-        name: other(selected) === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+        name: other(selected) === 'en' ? 'Saved event checks' : '保存后的配置检查',
         exact: true,
       }),
     ).toBeVisible()
@@ -554,9 +554,7 @@ test('zh-CN collective host drafts, validation and public booking preserve every
     page.getByRole('heading', { name: '编辑“Chinese panel interview”', exact: true }),
   ).toBeVisible()
   expect(new URL(page.url()).pathname).toMatch(/^\/app\/event-types\/[0-9a-f-]+$/)
-  await expect(
-    page.getByRole('region', { name: '已保存版本的就绪检查', exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole('region', { name: '保存后的配置检查', exact: true })).toBeVisible()
   await page.getByRole('link', { name: '返回活动类型', exact: true }).click()
   await expect(page.getByRole('heading', { name: '活动类型', exact: true })).toBeVisible()
   await page.goto(`${app.url}/team/FixtureTeam/chinese-panel-interview`)

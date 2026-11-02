@@ -1,11 +1,14 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { constants, readFileSync } from 'node:fs'
+import { mkdtemp, open, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
+import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runCli } from './cli.ts'
+import * as client from './client.ts'
 import { CliError, callTool, endpoint, MAX_INPUT_BYTES } from './client.ts'
 
 // Synthetic sentinels only. Assertions compare presence, so failure output cannot print capabilities.
@@ -36,12 +39,13 @@ async function run(
     env?: NodeJS.ProcessEnv
     fetch?: typeof fetch
     raw?: string
+    runner?: typeof runCli
   } = {},
 ) {
   let stdout = ''
   let stderr = ''
   const fetcher = overrides.fetch ?? vi.fn<typeof fetch>(async () => response())
-  const code = await runCli({
+  const code = await (overrides.runner ?? runCli)({
     argv,
     env: overrides.env ?? env,
     stdin: (async function* () {
@@ -61,7 +65,160 @@ async function run(
   return { code, stdout, stderr, fetcher }
 }
 
+function sourceCopy(change?: readonly [string, string]): typeof runCli {
+  let source = readFileSync('tools/cli/src/cli.ts', 'utf8')
+  if (change) {
+    expect(source.includes(change[0]), 'mutation must match source').toBe(true)
+    source = source.replace(...change)
+  }
+  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  const bindings = { constants, open, ...client }
+  return new Function(...Object.keys(bindings), `${source}; return runCli`)(
+    ...Object.values(bindings),
+  ) as typeof runCli
+}
+
 describe('CLI transport and arguments', () => {
+  async function verifyDurationForwarding(runner = runCli) {
+    for (const command of ['slots', 'book', 'reschedule']) {
+      const input = { idempotencyKey: 'duration-test-key' }
+      const result = await run([command, '--input', '-', '--duration-minutes', '60'], input, {
+        runner,
+      })
+      expect(result.code).toBe(0)
+      const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+      expect(JSON.parse(String(init?.body)).params.arguments).toEqual({
+        ...input,
+        durationMinutes: 60,
+      })
+    }
+  }
+
+  async function verifyDurationRejection(
+    runner: typeof runCli,
+    command: string,
+    value: string,
+    input: Record<string, unknown> = {},
+    error?: string,
+  ) {
+    const result = await run([command, '--input', '-', '--duration-minutes', value], input, {
+      runner,
+    })
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+    if (error) expect(JSON.parse(result.stderr).error).toBe(error)
+  }
+
+  async function verifyInvalidDurationRequest(runner = runCli, value = '1441') {
+    for (const command of ['slots', 'book', 'reschedule']) {
+      await verifyDurationRejection(runner, command, value, {}, 'invalid_request')
+    }
+  }
+
+  it('forwards the duration option on slots, booking and rescheduling', async () => {
+    await verifyDurationForwarding()
+  })
+
+  it.each(['0', '1441', '1.5', '30min', '1e2', 'Infinity', 'NaN', ' 30', '999999999999999999'])(
+    'reports invalid_request for duration option %s before a request',
+    async (value) => {
+      await verifyInvalidDurationRequest(runCli, value)
+    },
+  )
+
+  it.each(['slots', 'book', 'reschedule'])(
+    'preserves invalid_duration from the server for a disallowed %s length',
+    async (command) => {
+      const fetcher = vi.fn<typeof fetch>(async () =>
+        Response.json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: JSON.stringify({ error: 'invalid_duration' }) }],
+          },
+        }),
+      )
+      const result = await run(
+        [command, '--input', '-', '--duration-minutes', '60'],
+        { idempotencyKey: 'duration-test-key' },
+        { fetch: fetcher },
+      )
+      expect(result.code).toBe(1)
+      expect(JSON.parse(result.stderr).error).toBe('invalid_duration')
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('allows a matching JSON selection and refuses a conflicting option', async () => {
+    const accepted = await run(['slots', '--input', '-', '--duration-minutes', '30'], {
+      durationMinutes: 30,
+    })
+    expect(accepted.code).toBe(0)
+    for (const durationMinutes of [15, '30', null]) {
+      await verifyDurationRejection(runCli, 'slots', '30', { durationMinutes })
+    }
+  })
+
+  it('restricts duration options to the three booking commands and refuses duplicates', async () => {
+    await verifyDurationRejection(runCli, 'cancel', '30')
+    const result = await run(['slots', '--duration-minutes', '30', '--duration-minutes', '30'])
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+  })
+
+  it('exercises an unchanged CLI source copy before its negative controls', async () => {
+    const runner = sourceCopy()
+    await verifyDurationForwarding(runner)
+    await verifyInvalidDurationRequest(runner)
+    await verifyDurationRejection(runner, 'slots', '1441')
+    await verifyDurationRejection(runner, 'cancel', '30')
+    await verifyDurationRejection(runner, 'slots', '30', { durationMinutes: 15 })
+  })
+
+  it.each<[string, readonly [string, string], (runner: typeof runCli) => Promise<void>]>([
+    [
+      'duration option forwarding',
+      ['      input.durationMinutes = args.durationMinutes', ''],
+      verifyDurationForwarding,
+    ],
+    [
+      'invalid duration request error code',
+      ["throw new CliError('invalid_request')", "throw new CliError('invalid_duration')"],
+      verifyInvalidDurationRequest,
+    ],
+    [
+      'duration lower bound',
+      ['durationMinutes < 1', 'durationMinutes < 0'],
+      (runner) => verifyDurationRejection(runner, 'slots', '0'),
+    ],
+    [
+      'duration upper bound',
+      ['durationMinutes > 1440', 'durationMinutes > 9999'],
+      (runner) => verifyDurationRejection(runner, 'slots', '1441'),
+    ],
+    [
+      'whole-minute duration syntax',
+      ['!/^[0-9]+$/.test(value)', 'false'],
+      (runner) => verifyDurationRejection(runner, 'slots', '1.5'),
+    ],
+    [
+      'duration command restriction',
+      ["!['slots', 'book', 'reschedule'].includes(command)", 'false'],
+      (runner) => verifyDurationRejection(runner, 'cancel', '30'),
+    ],
+    [
+      'conflicting JSON selection guard',
+      [
+        "Object.hasOwn(input, 'durationMinutes') && input.durationMinutes !== args.durationMinutes",
+        'false',
+      ],
+      (runner) => verifyDurationRejection(runner, 'slots', '30', { durationMinutes: 15 }),
+    ],
+  ])('detects removal of %s with a real assertion failure', async (_name, change, verify) => {
+    await expect(verify(sourceCopy(change))).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
   it('runs the actual Node entrypoint without credentials', () => {
     const stdout = execFileSync(
       process.execPath,

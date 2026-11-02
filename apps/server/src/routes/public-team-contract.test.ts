@@ -28,7 +28,11 @@ const now = () => Temporal.Instant.from('2026-11-01T00:00Z')
 const range = 'start=2026-11-02T00:00:00Z&end=2026-11-03T00:00:00Z'
 const plenty = { limit: 100_000, windowSeconds: 60 }
 
-function verifyPublicKeys(page: PublicEventType, schedulingType: SchedulingType) {
+function verifyPublicKeys(
+  page: PublicEventType,
+  schedulingType: SchedulingType,
+  allowedDurationsMinutes: number[] = [30],
+) {
   expect(Object.keys(page).sort()).toEqual(
     [
       'allowGuests',
@@ -41,6 +45,7 @@ function verifyPublicKeys(page: PublicEventType, schedulingType: SchedulingType)
       'slug',
       'team',
       'title',
+      ...(allowedDurationsMinutes.length > 1 ? ['allowedDurationsMinutes'] : []),
       ...(schedulingType === 'collective' ? ['hosts'] : []),
       ...(schedulingType === 'round_robin' ? ['schedulingType'] : []),
     ].sort(),
@@ -50,6 +55,9 @@ function verifyPublicKeys(page: PublicEventType, schedulingType: SchedulingType)
   )
   expect(Object.keys(page.team ?? {}).sort()).toEqual(['name', 'slug'])
   expect(Object.keys(page.location ?? {})).toEqual(['kind'])
+  expect(page.allowedDurationsMinutes).toEqual(
+    allowedDurationsMinutes.length > 1 ? allowedDurationsMinutes : undefined,
+  )
   if (schedulingType === 'collective') {
     expect(page.hosts).toHaveLength(2)
     for (const host of page.hosts ?? []) {
@@ -214,7 +222,11 @@ function projectionCopy(replacement?: [string, string]): Projection {
   }) as Projection
 }
 
-function verifyProjection(copy: Projection, type: SchedulingType) {
+function verifyProjection(
+  copy: Projection,
+  type: SchedulingType,
+  allowedDurationsMinutes: number[] = [30],
+) {
   const page = copy({
     id: 'private-event-id',
     organizationId: 'private-organization-id',
@@ -225,6 +237,7 @@ function verifyProjection(copy: Projection, type: SchedulingType) {
     title: 'Research introduction',
     description: null,
     durationMinutes: 30,
+    allowedDurationsMinutes,
     allowGuests: false,
     schedulingType: type,
     hostName: 'Ada Lovelace',
@@ -237,7 +250,7 @@ function verifyProjection(copy: Projection, type: SchedulingType) {
     ],
     team: { name: 'Research team', slug: 'Research-Team' },
   })
-  verifyPublicKeys(page, type)
+  verifyPublicKeys(page, type, allowedDurationsMinutes)
   expect(page.handle).toBe('Research-Team')
   expect(page.team?.slug).toBe('Research-Team')
 }
@@ -245,6 +258,37 @@ function verifyProjection(copy: Projection, type: SchedulingType) {
 describe('public team DTO source-copy negative controls', () => {
   it.each(schedulingTypes)('verifies the original %s public projection', (type) => {
     verifyProjection(projectionCopy(), type)
+  })
+
+  it.each(schedulingTypes)('preserves offered duration order for a %s event', (type) => {
+    verifyProjection(projectionCopy(), type, [60, 30, 15])
+  })
+
+  it('detects exposing a singleton duration list', () => {
+    const mutant = projectionCopy([
+      'et.allowedDurationsMinutes.length > 1',
+      'et.allowedDurationsMinutes.length > 0',
+    ])
+    expect(() => verifyProjection(mutant, 'individual')).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it('detects dropping multiple offered durations', () => {
+    const mutant = projectionCopy(['et.allowedDurationsMinutes.length > 1', 'false'])
+    expect(() => verifyProjection(mutant, 'individual', [60, 30, 15])).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it('detects reordering offered durations', () => {
+    const mutant = projectionCopy([
+      'allowedDurationsMinutes: [...et.allowedDurationsMinutes]',
+      'allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b)',
+    ])
+    expect(() => verifyProjection(mutant, 'individual', [60, 30, 15])).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 
   it.each(schedulingTypes)('detects spreading private event state into the %s DTO', (type) => {

@@ -354,6 +354,8 @@ export interface PublicEventType {
   title: string
   description: string | null
   durationMinutes: number
+  /** Omitted for a single offered length to retain the original public response. */
+  allowedDurationsMinutes?: number[]
   location: { kind: LocationKind } | null
   questions: Question[]
   allowGuests: boolean
@@ -388,6 +390,9 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     title: et.title,
     description: et.description,
     durationMinutes: et.durationMinutes,
+    ...(et.allowedDurationsMinutes.length > 1 && {
+      allowedDurationsMinutes: [...et.allowedDurationsMinutes],
+    }),
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     allowGuests: et.allowGuests,

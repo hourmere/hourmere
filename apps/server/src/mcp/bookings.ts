@@ -32,6 +32,7 @@ import {
   Instant,
   ListBookingsQuery,
   RescheduleBody,
+  SelectedDurationMinutes,
 } from '../routes/bookings.ts'
 import { CreateBooking, PageParams, PublicEventType, Slot } from '../routes/public.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
@@ -66,6 +67,10 @@ const FindSlotsInput = z
         'Exact-case team organization slug from /team/{teamSlug}/{slug}; give exactly one of handle or teamSlug',
     }),
     slug,
+    durationMinutes: SelectedDurationMinutes.optional().openapi({
+      description:
+        'Selected meeting length in minutes from eventType.allowedDurationsMinutes; omitted uses the default. Keep this selection unchanged while paging and pass it to create_booking.',
+    }),
     timeZone: z.string().min(1).max(64).openapi({
       description:
         'IANA time zone name, e.g. Europe/Berlin or America/New_York (numeric offsets such as +01:00 are refused: they ignore daylight saving time). startDate and endDate are days in this zone, and each slot is also given in it. Use the time zone of the person you are booking for.',
@@ -78,7 +83,7 @@ const FindSlotsInput = z
     }),
     after: Instant.optional().openapi({
       description:
-        'Exclusive start instant from the previous page nextAfter; keep the same handle, slug, dates and timeZone',
+        'Exclusive start instant from the previous page nextAfter; keep the same handle, slug, durationMinutes, dates and timeZone',
     }),
     startDate: z.iso.date().openapi({ description: 'First day to search, YYYY-MM-DD in timeZone' }),
     endDate: z.iso.date().openapi({
@@ -150,6 +155,10 @@ const RescheduleInput = z
       .optional()
       .openapi({ description: 'Move a booking you host, by its id (see list_bookings)' }),
     manageToken: manageToken.optional(),
+    durationMinutes: SelectedDurationMinutes.optional().openapi({
+      description:
+        'Optional new length in minutes from the event type’s current allowedDurationsMinutes. Omitted preserves the booking’s original elapsed length, even if that option was removed.',
+    }),
     start: RescheduleBody.shape.start.openapi({
       description:
         'The new start: the exact `start` of a slot from find_available_slots for the same event type',
@@ -240,7 +249,7 @@ export function bookingTools({
     scopeMode: (args) =>
       typeof args === 'object' && args !== null && 'teamSlug' in args ? 'team' : 'personal',
     title: 'Find available slots',
-    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, duration, location kind, the questions its booking form asks, and the host's time zone when applicable; round-robin metadata omits it). Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
+    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, default and allowed durations, location kind, the questions its booking form asks, and the host's time zone when applicable; round-robin metadata omits it). Choose durationMinutes from allowedDurationsMinutes when a different length is needed; omission uses the default. Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
     input: FindSlotsInput,
     output: FindSlotsOutput,
     annotations: {
@@ -276,7 +285,7 @@ export function bookingTools({
         : getPublicEventType)(pub, pageInput)
       const slots = await (args.teamSlug !== undefined ? listPublicTeamSlots : listPublicSlots)(
         pub,
-        { ...pageInput, start, end },
+        { ...pageInput, start, end, durationMinutes: args.durationMinutes },
       )
       const after = args.after === undefined ? null : Temporal.Instant.from(args.after)
       const remaining =
@@ -305,7 +314,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'teamSlug' in args ? 'team' : 'personal',
     title: 'Create a booking',
     description:
-      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass an idempotencyKey so that a retry after a lost response cannot book twice.",
+      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice.",
     input: CreateBookingInput,
     output: CreateBookingOutput,
     annotations: {
@@ -324,6 +333,7 @@ export function bookingTools({
           handle: (args.teamSlug ?? args.handle) as string,
           slug: args.slug,
           start: Temporal.Instant.from(args.start),
+          durationMinutes: args.durationMinutes,
           invitee: args.invitee,
           guests: args.guests,
           responses: args.responses,
@@ -342,7 +352,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {
@@ -357,14 +367,14 @@ export function bookingTools({
         return rescheduleHostBooking(
           context(call.caller),
           args.bookingId,
-          { start: Temporal.Instant.from(args.start) },
+          { start: Temporal.Instant.from(args.start), durationMinutes: args.durationMinutes },
           origin(call.caller),
         )
       }
       return rescheduleManagedBooking(
         pub,
         args.manageToken,
-        { start: Temporal.Instant.from(args.start) },
+        { start: Temporal.Instant.from(args.start), durationMinutes: args.durationMinutes },
         origin(call.caller),
       )
     },

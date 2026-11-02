@@ -389,6 +389,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
+                    durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
@@ -413,7 +414,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid parameters (`invalid_request`, `invalid_range`, `range_too_long`) */
+                /** @description Invalid parameters (`invalid_request`, `invalid_duration`, `invalid_range`, `range_too_long`) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -603,6 +604,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
+                    durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
@@ -628,7 +630,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`) */
+                /** @description Invalid parameters (`invalid_request`), a length outside the allowed list (`invalid_duration`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1881,6 +1883,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
+                    durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
@@ -1906,7 +1909,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
+                /** @description Invalid parameters (`invalid_request`), a length outside the allowed list (`invalid_duration`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2074,6 +2077,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
+                    durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
@@ -2100,7 +2104,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
+                /** @description Invalid parameters (`invalid_request`), a length outside the allowed list (`invalid_duration`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -3502,6 +3506,8 @@ export interface components {
             updatedAt: string;
         };
         CreateBooking: {
+            /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+            durationMinutes?: number;
             /** @description Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed */
             guests?: {
                 /** Format: email */
@@ -3875,8 +3881,9 @@ export interface components {
             termsUrl?: string;
         };
         ManagedBooking: components["schemas"]["Booking"] & {
-            /** @description The event type as it is now; null once it is deleted */
+            /** @description The event type as it is now; null once it is deleted. The booking start and end retain its actual length even if the default changes. */
             eventType: {
+                allowedDurationsMinutes?: number[];
                 durationMinutes: number;
                 title: string;
             } | null;
@@ -4107,6 +4114,8 @@ export interface components {
             };
         };
         PublicEventType: {
+            /** @description Allowed meeting lengths, in display order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
+            allowedDurationsMinutes?: number[];
             /** @description Whether saved event-type settings permit user-activated continuation in the embedding parent. Omitted means false. No redirect URL or parameters are exposed. */
             allowEmbedParentRedirect?: boolean;
             /** @description Whether invitees may add guest recipients */
@@ -4190,6 +4199,8 @@ export interface components {
             type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
         };
         Reschedule: {
+            /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+            durationMinutes?: number;
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -4874,7 +4885,7 @@ export interface operations {
                     "application/json": components["schemas"]["BookingWithToken"];
                 };
             };
-            /** @description Invalid request (`invalid_request`) */
+            /** @description Invalid request (`invalid_request`) or length outside the allowed list (`invalid_duration`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5036,7 +5047,7 @@ export interface operations {
                     "application/json": components["schemas"]["BookingWithToken"];
                 };
             };
-            /** @description Invalid request */
+            /** @description Invalid request (`invalid_request`) or length outside the allowed list (`invalid_duration`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6876,7 +6887,7 @@ export interface operations {
                     "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
-            /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6970,7 +6981,7 @@ export interface operations {
                     "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
-            /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
             400: {
                 headers: {
                     [name: string]: unknown;

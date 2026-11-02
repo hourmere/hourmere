@@ -12,6 +12,7 @@ import {
   questionField,
   serverErrors,
   slugify,
+  suggestedBookingSlug,
   toInput,
   toPatchInput,
   validateDraft,
@@ -50,6 +51,20 @@ describe('slugify', () => {
     [`${'a'.repeat(63)} b`, 'a'.repeat(63)],
   ])('%j → %j', (title, slug) => {
     expect(slugify(title)).toBe(slug)
+  })
+})
+
+describe('suggestedBookingSlug', () => {
+  it.each([
+    ['30分钟咨询', '30', '30-min'],
+    ['30分钟面谈', '45', '45-min'],
+    ['初次沟通', '60', '60-min'],
+    ['123', '30', '30-min'],
+    ['30 min — Q&A', '30', '30-min-q-a'],
+    ['Intro call', '30', 'intro-call'],
+    ['  ', '30', ''],
+  ])('suggests %j at %s minutes as %j', (title, duration, expected) => {
+    expect(suggestedBookingSlug(title, duration)).toBe(expected)
   })
 })
 
