@@ -558,7 +558,7 @@ describe('event type reminders and follow-ups editor', () => {
         expect(screen.getByText(/仅.*新预约|只.*新预约/)).toBeDefined()
         expect(
           screen.getByText(
-            '仅当提醒的发送时间距预约创建或改期时间超过 1 小时时才会发送；否则会跳过，不会补发。',
+            '仅当提醒的发送时间在预约创建或改期之后，且间隔超过 1 小时时才会发送；否则会跳过，不会补发。',
           ),
         ).toBeDefined()
         expect(screen.getByText(/是否.*出席|是否.*参加/)).toBeDefined()

@@ -399,7 +399,7 @@ describe('notification editor production-source mutation controls', () => {
       const expected =
         language === 'en'
           ? complete
-          : '仅当提醒的发送时间距预约创建或改期时间超过 1 小时时才会发送；否则会跳过，不会补发。'
+          : '仅当提醒的发送时间在预约创建或改期之后，且间隔超过 1 小时时才会发送；否则会跳过，不会补发。'
       const check = async () => {
         expect(screen.queryByText(expected)).not.toBeNull()
       }
