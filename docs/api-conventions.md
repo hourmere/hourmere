@@ -73,22 +73,3 @@ These session webhook compatibility rows mirror the canonical documentation for 
 | Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
 | Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
 | Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |
-
-### Legacy event location updates
-
-Protected event-type `location` remains a read/write compatibility projection of the
-effective default. Echoing the current value preserves every option and its identity.
-A different value can edit a single unlabelled option: the ID survives settings edits,
-while changing the kind or recreating a cleared option allocates a new ID. A changed
-value (including null) for multiple or labelled options returns HTTP 409
-`location_options_conflict`, with guidance to use `locations`. MCP `update_event_type`
-returns the same domain code. Full option-list writes are internal in this slice; clients
-that receive this conflict should omit an unchanged `location` or wait for the choice
-configuration interfaces rather than discard options.
-
-The additive phone compatibility value `{kind:"phone",askInvitee:true}` can be read and
-written back through REST/MCP; it cannot be combined with `number`. `EventType.location`
-keeps its published discriminated `oneOf` shape, extending the existing phone branch.
-The current editor omits unchanged locations. Existing booking flows cannot collect this
-number yet and reject an effective invitee-phone default with `400 invalid_invitee_phone`
-before writing a booking. A future booking flow must collect and resolve a real number.
