@@ -128,6 +128,12 @@ export const SOURCE_COLUMNS = {
   Payment: ['bookingId'],
 } as const
 
+/** Privileges required only for fixed JSON-path/predicate projections, never raw output. */
+export const SOURCE_COLUMN_EXCEPTIONS = {
+  EventType: ['metadata'],
+  Booking: ['uid', 'fromReschedule'],
+} as const
+
 export class SourceRefusal extends Error {
   readonly code: string
   constructor(code: string, message: string) {

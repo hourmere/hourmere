@@ -234,11 +234,12 @@ describe('future local-only booking parsing', () => {
     expect(
       batch.problems.filter((p) => p.code === 'booking_batch_overlap').map((p) => p.source.id),
     ).toEqual([30, 31])
+    expect(batch.bookings).toEqual([])
     const blocked = parse(
       [booking(), { ...second, responses: { email: 'invitee@example.com', removed: 'bad' } }],
       [attendee(), { ...attendee(42), bookingId: 31, email: 'invitee@example.com' }],
     )
-    expect(blocked.bookings).toHaveLength(1)
+    expect(blocked.bookings).toEqual([])
     expect(
       blocked.problems.filter((p) => p.code === 'booking_batch_overlap').map((p) => p.source.id),
     ).toEqual([30, 31])
@@ -250,9 +251,9 @@ describe('future local-only booking parsing', () => {
         { targetUserId: uid, start: '2026-11-02T09:00:00.000Z', end: '2026-11-02T10:00:00.000Z' },
       ],
     }
-    expect(parse(undefined, undefined, { target: existing }).codes).toContain(
-      'booking_target_overlap',
-    )
+    const targetOverlap = parse(undefined, undefined, { target: existing })
+    expect(targetOverlap.codes).toContain('booking_target_overlap')
+    expect(targetOverlap.bookings).toEqual([])
     required(existing.busy[0]).start = '2026-11-02T09:17:00.456Z'
     expect(parse(undefined, undefined, { target: existing }).codes).not.toContain(
       'booking_target_overlap',

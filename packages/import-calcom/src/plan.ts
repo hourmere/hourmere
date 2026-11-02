@@ -53,6 +53,7 @@ export interface ImportPlan {
   schedules: SchedulePlan[]
   events: EventPlan[]
   bookings: BusyBookingPlan[]
+  bookingExclusionCounts: NonNullable<SourceSnapshot['bookingExclusionCounts']>
   problems: PlanProblem[]
   summary: {
     matchedUsers: number
@@ -63,6 +64,7 @@ export interface ImportPlan {
     activationBlockers: number
     importBlockers: number
     excluded: number
+    excludedBookings: number
   }
   /** Pure parsing output. A future authorized preview must reread and validate target state. */
   targetVerification: 'operator_supplied_snapshot'
@@ -146,6 +148,26 @@ export function parseImportPlan(snapshot: SourceSnapshot, options: ParseOptions)
     new Set(snapshot.selectedUserIds).size !== snapshot.selectedUserIds.length
   )
     fail()
+  const exclusionCounts = snapshot.bookingExclusionCounts ?? []
+  if (
+    !Array.isArray(exclusionCounts) ||
+    (snapshot.bookingExclusionCounts !== undefined && snapshot.bookingExclusionCounts === null) ||
+    exclusionCounts.length > snapshot.selectedUserIds.length ||
+    new Set(exclusionCounts.map((entry) => entry?.sourceUserId)).size !== exclusionCounts.length ||
+    exclusionCounts.some(
+      (entry) =>
+        !entry ||
+        !snapshot.selectedUserIds.includes(entry.sourceUserId) ||
+        !Number.isSafeInteger(entry.pastOrStarted) ||
+        entry.pastOrStarted < 0 ||
+        !Number.isSafeInteger(entry.terminal) ||
+        entry.terminal < 0,
+    ) ||
+    !Number.isSafeInteger(
+      exclusionCounts.reduce((sum, entry) => sum + entry.pastOrStarted + entry.terminal, 0),
+    )
+  )
+    fail()
   let rows = 0
   for (const [table, entries] of Object.entries(snapshot.tables)) {
     if (!Array.isArray(entries) || entries.length > LIMITS.perTable) fail()
@@ -193,6 +215,23 @@ export function parseImportPlan(snapshot: SourceSnapshot, options: ParseOptions)
   }
   events = events.filter((e) => !slugConflicts.has(e.sourceId))
   const bookings = parseBookings(snapshot, users, events, options, problems)
+  for (const entry of exclusionCounts) {
+    if (entry.pastOrStarted > 0)
+      problems.push({
+        code: 'booking_past_excluded_count',
+        severity: 'excluded',
+        source: { table: 'Booking', id: `user:${entry.sourceUserId}` },
+        message: 'Already-started and past bookings are excluded; only aggregate counts were read.',
+      })
+    if (entry.terminal > 0)
+      problems.push({
+        code: 'booking_terminal_excluded_count',
+        severity: 'excluded',
+        source: { table: 'Booking', id: `user:${entry.sourceUserId}` },
+        message:
+          'Future cancelled and rejected bookings are excluded; only aggregate counts were read.',
+      })
+  }
   for (const [code, table, message] of outOfScope)
     problems.push({ code, severity: 'excluded', source: { table, id: 'scope' }, message })
   const bookingDecisions: BookingDecision[] = options.bookingDecisions.map((d) => ({
@@ -240,7 +279,10 @@ export function parseImportPlan(snapshot: SourceSnapshot, options: ParseOptions)
     writesPerformed: 0,
     sourceVersion: snapshot.sourceVersion,
     schemaFingerprint: snapshot.schemaFingerprint,
-    sourceFingerprint: fingerprint(snapshot.tables),
+    sourceFingerprint: fingerprint({
+      tables: snapshot.tables,
+      bookingExclusionCounts: exclusionCounts,
+    }),
     targetContextFingerprint: fingerprint(options.target),
     cutoff: snapshot.cutoff,
     extractedAt: snapshot.extractedAt,
@@ -251,6 +293,11 @@ export function parseImportPlan(snapshot: SourceSnapshot, options: ParseOptions)
     schedules,
     events,
     bookings,
+    bookingExclusionCounts: exclusionCounts.map(({ sourceUserId, pastOrStarted, terminal }) => ({
+      sourceUserId,
+      pastOrStarted,
+      terminal,
+    })),
     problems,
     summary: {
       matchedUsers: users.size,
@@ -261,6 +308,19 @@ export function parseImportPlan(snapshot: SourceSnapshot, options: ParseOptions)
       activationBlockers: count('activation_blocker'),
       importBlockers: count('import_blocker'),
       excluded: count('excluded'),
+      excludedBookings:
+        exclusionCounts.reduce((sum, entry) => sum + entry.pastOrStarted + entry.terminal, 0) +
+        problems.filter(
+          (p) =>
+            p.severity === 'excluded' &&
+            p.source.table === 'Booking' &&
+            typeof p.source.id === 'number' &&
+            [
+              'booking_not_future',
+              'booking_terminal_excluded',
+              'booking_nonleaf_excluded',
+            ].includes(p.code),
+        ).length,
     },
     targetVerification: 'operator_supplied_snapshot',
   }

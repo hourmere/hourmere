@@ -8,6 +8,7 @@ vi.mock('./source.ts', () => ({ extractSource: vi.fn() }))
 
 import { operatorMessages, readProtectedFile, runCli } from './cli.ts'
 import { checkSourceMutation, required } from './mutation-testing.ts'
+import { SourceRefusal } from './schema.ts'
 import { extractSource } from './source.ts'
 
 const files: string[] = []
@@ -90,7 +91,7 @@ describe('operator dry run and secret handling', () => {
         (s) => output.push(s),
       ),
     ).toBe(1)
-    expect(output).toEqual([operatorMessages.en.refused])
+    expect(output).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
     expect(output.join()).not.toMatch(/secret|private@example|input.json/)
   })
   it('supports a protected connection file and refuses conflicting inputs', async () => {
@@ -133,7 +134,7 @@ describe('operator dry run and secret handling', () => {
     expect(
       await runCli(['--config', 'missing', '--lang', 'zh-CN'], {}, (s) => output.push(s)),
     ).toBe(1)
-    expect(output[1]).toBe(operatorMessages['zh-CN'].refused)
+    expect(output[1]).toBe(`[IMPORT_REFUSED] ${operatorMessages['zh-CN'].refused}`)
   })
 })
 
@@ -170,7 +171,95 @@ it('kills source-copy private-file permission, symlink and error-output mutation
     async (run) => {
       const output: string[] = []
       expect(await run(['--config', input], {}, (text) => output.push(text))).toBe(1)
-      expect(output).toEqual([operatorMessages.en.refused])
+      expect(output).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
+    },
+  )
+})
+
+const refusalCases = [
+  ['SOURCE_LIMIT_EXCEEDED', 'refused'],
+  ['SOURCE_CONNECTION_INVALID', 'refused'],
+  ['SOURCE_EXTRACTION_FAILED', 'refused'],
+  ['SOURCE_PAYMENT_SHAPE_UNKNOWN', 'refused'],
+  ['SOURCE_SCHEMA_UNKNOWN', 'schema'],
+  ['SOURCE_VERSION_UNKNOWN', 'schema'],
+  ['SOURCE_TIMEZONE_NOT_UTC', 'timezone'],
+  ['SOURCE_UTC_UNCONFIRMED', 'timezone'],
+  ['SOURCE_ROLE_UNSAFE', 'role'],
+  ['SOURCE_ISOLATION_UNSAFE', 'refused'],
+  ['SOURCE_NOT_READ_ONLY', 'refused'],
+  ['SOURCE_SELECTION_INVALID', 'refused'],
+] as const
+
+it.each(refusalCases)(
+  'prints the stable %s refusal code without driver details',
+  async (code, message) => {
+    const path = await protectedFile(JSON.stringify(config()))
+    vi.mocked(extractSource).mockRejectedValue(new SourceRefusal(code, 'driver-private-secret'))
+    for (const lang of ['en', 'zh-CN'] as const) {
+      const output: string[] = []
+      expect(
+        await runCli(
+          ['--config', path, '--lang', lang],
+          { CALCOM_IMPORT_SOURCE_URL: 'private-dsn-secret' },
+          (text) => output.push(text),
+        ),
+      ).toBe(1)
+      expect(output).toEqual([`[${code}] ${operatorMessages[lang][message]}`])
+      expect(output.join()).not.toMatch(/private|secret|input.json/)
+    }
+  },
+)
+
+it('does not print an unrecognized refusal code or its message', async () => {
+  const path = await protectedFile(JSON.stringify(config()))
+  vi.mocked(extractSource).mockRejectedValue(
+    new SourceRefusal('postgres://private:secret@example.com', 'private-driver-secret'),
+  )
+  const output: string[] = []
+  expect(
+    await runCli(['--config', path], { CALCOM_IMPORT_SOURCE_URL: 'private-dsn-secret' }, (text) =>
+      output.push(text),
+    ),
+  ).toBe(1)
+  expect(output).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
+})
+
+it('kills source-copy refusal-code omission and arbitrary-code output mutations', async () => {
+  const source = new URL('./cli.ts', import.meta.url)
+  const path = await protectedFile(JSON.stringify(config()))
+  const check = async (run: typeof runCli) => {
+    const output: string[] = []
+    expect(
+      await run(['--config', path], { CALCOM_IMPORT_SOURCE_URL: 'private-dsn-secret' }, (text) =>
+        output.push(text),
+      ),
+    ).toBe(1)
+    return output
+  }
+  vi.mocked(extractSource).mockRejectedValue(
+    new SourceRefusal('SOURCE_LIMIT_EXCEEDED', 'private-driver-secret'),
+  )
+  await checkSourceMutation(
+    source,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source-copy mutation target
+    '`[${code}] ${',
+    '`${',
+    (m) => m.runCli as typeof runCli,
+    async (run) => {
+      expect(await check(run)).toEqual([`[SOURCE_LIMIT_EXCEEDED] ${operatorMessages.en.refused}`])
+    },
+  )
+  vi.mocked(extractSource).mockRejectedValue(
+    new SourceRefusal('private-secret-code', 'private-driver-secret'),
+  )
+  await checkSourceMutation(
+    source,
+    'error instanceof SourceRefusal && refusalCodes.has(error.code)',
+    'error instanceof SourceRefusal',
+    (m) => m.runCli as typeof runCli,
+    async (run) => {
+      expect(await check(run)).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
     },
   )
 })

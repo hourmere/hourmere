@@ -65,6 +65,19 @@ fixed lineage comparison; neither capability is returned. Payment and seat table
 checked only for association existence. Booking references are extracted only for unresolved
 eligible booking locations and use only the audited minimum columns. No credential,
 password, session, MFA, payment payload, provider event ID or host administration link is read.
+Empty calendar reference URLs are ignored when resolving an existing video meeting; unsafe
+nonempty URLs still block the booking, including after their contents have been redacted.
+
+Booking text, answers and locations are read only for strictly future accepted bookings whose
+current event relationships prove personal, single-host scope. Future pending/awaiting-host
+and out-of-scope bookings retain only the identifiers, status and times needed to report their
+blockers. Attendees and location references are read only for the personal accepted candidates.
+Past/already-started rows and future cancelled/rejected rows are counted in SQL by matched
+owner; their payloads are not transferred. `bookingExclusionCounts` reports `pastOrStarted`
+and `terminal` separately, and `summary.excludedBookings` totals those excluded source rows.
+`summary.excluded` continues to count structured exclusion problem entries. Reschedule
+successor dependencies carry only identifiers, status, times and derived lineage flags;
+they are not separate busy-record candidates. Raw booking capabilities never leave SQL.
 
 The extractor uses one connection (`max=1`), a `REPEATABLE READ READ ONLY` transaction,
 `SET LOCAL timezone='UTC'`, a fixed catalog search path, 15-second statement,
@@ -137,6 +150,8 @@ npm run dry-run --workspace @hourmere/import-calcom -- --config /private/import.
 Exit status: `0` means parsing completed without import blockers, `2` means the plan contains
 import blockers, `1` means extraction/configuration was refused or failed. Every outcome
 means **nothing was imported**. The CLI prints summary counts and safe problems only.
+Refusals include a stable code such as `[SOURCE_LIMIT_EXCEEDED]` or
+`[SOURCE_EXTRACTION_FAILED]`; configuration failures use `[IMPORT_REFUSED]`.
 It never serializes the private in-memory plan, attendee addresses, answers or join links.
 Problem entries have a stable code, severity, source table/id and static English message.
 `activation_blocker` allows an inactive draft proposal; `import_blocker` prevents a future
@@ -145,7 +160,11 @@ source/target bookings are reported as blockers; buffers and daily-limit effects
 later preview review.
 
 Operational caps are 25 selected users, 10,000 rows per table, 50,000 total rows, 1 MB per
-row/JSON input and 32 MiB per snapshot; overflow requires a smaller explicit selection.
+row/JSON input and 32 MiB per snapshot. These caps cover transferred candidates, minimal
+future blocker rows and lineage dependencies, rather than the count of historical/terminal
+exclusions. A single owner's history can exceed 10,000 bookings without consuming candidate
+capacity. An oversized future selection still requires fewer selected users, fewer future
+candidates in the source, or resolution of oversized input; no candidate is silently dropped.
 Target field limits include 20 questions, 50 options, 12 durations, one booker plus ten
 guests, and the normal Hourmere text/timezone bounds. No silent truncation or partial batches.
 Fingerprints and all in-memory data are private migration data; they are not execution

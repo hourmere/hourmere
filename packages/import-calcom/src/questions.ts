@@ -40,7 +40,15 @@ const legacyTypes: Record<string, QuestionType> = {
   bool: 'checkbox',
   radio: 'select',
 }
-const systemFields = new Set(['name', 'email', 'guests', 'location'])
+const systemFields = new Set([
+  'name',
+  'email',
+  'guests',
+  'location',
+  'title',
+  'rescheduleReason',
+  'attendeePhoneNumber',
+])
 const unsupported = [
   'getOptionsAt',
   'optionsInputs',
@@ -53,6 +61,7 @@ const unsupported = [
   'requireEmails',
   'conditions',
   'conditional',
+  'views',
   'variantsConfig',
   'variant',
   'readOnly',
@@ -90,6 +99,10 @@ export function parseQuestions(
       question_limit: 'The event has more than twenty extra questions.',
       question_system:
         'A configured system field is represented by the target booking fields rather than an extra question.',
+      question_system_excluded:
+        'An optional source system field is excluded from the target booking form.',
+      question_notes:
+        'Source notes are preserved through an explicit Notes question on imported bookings.',
     }
     problems.push({
       code,
@@ -133,8 +146,21 @@ export function parseQuestions(
       continue
     }
     seen.add(key)
-    if (modern && systemFields.has(key)) {
-      issue('question_system', 'warning')
+    // Cal.diy persists its default system fields alongside custom questions. Their
+    // defaultLabel values are translation keys, not missing custom question labels.
+    // Older explicit notes questions retain their existing stable answer crosswalk.
+    const systemNotes =
+      key === 'notes' &&
+      (raw.editable === 'system-but-optional' || (raw.defaultLabel != null && raw.label == null))
+    if (modern && (systemFields.has(key) || systemNotes)) {
+      issue(
+        systemNotes
+          ? 'question_notes'
+          : ['title', 'rescheduleReason', 'attendeePhoneNumber'].includes(key)
+            ? 'question_system_excluded'
+            : 'question_system',
+        'warning',
+      )
       if (
         ['hidden', 'disableOnPrefill', 'readOnly', 'readonly'].some((k) => raw[k] === true) ||
         raw.editable === 'user-readonly' ||

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { required } from './mutation-testing.ts'
+import { checkSourceMutation, required } from './mutation-testing.ts'
 import { fingerprint, parseImportPlan } from './plan.ts'
 import { LIMITS, type ParseOptions, type SourceRow, type SourceSnapshot } from './types.ts'
 
@@ -258,5 +258,95 @@ it('kills table-specific identifier and input-limit source-copy mutations', asyn
     'false',
     select,
     (run) => expect(() => run(big, options())).toThrow('limits'),
+  )
+})
+
+it('reports large historical and terminal aggregates without consuming booking row limits', () => {
+  const source = snapshot()
+  source.bookingExclusionCounts = [{ sourceUserId: 1, pastOrStarted: 15000, terminal: 12000 }]
+  const plan = parseImportPlan(source, options())
+  expect(plan.bookings).toHaveLength(1)
+  expect(plan.bookingExclusionCounts).toEqual(source.bookingExclusionCounts)
+  expect(plan.summary.excludedBookings).toBe(27000)
+  expect(plan.problems).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: 'booking_past_excluded_count',
+        severity: 'excluded',
+        source: { table: 'Booking', id: 'user:1' },
+      }),
+      expect.objectContaining({ code: 'booking_terminal_excluded_count', severity: 'excluded' }),
+    ]),
+  )
+  expect(plan.sourceFingerprint).not.toBe(parseImportPlan(snapshot(), options()).sourceFingerprint)
+})
+
+it.each([
+  null,
+  [{ sourceUserId: 2, pastOrStarted: 1, terminal: 0 }],
+  [{ sourceUserId: 1, pastOrStarted: -1, terminal: 0 }],
+  [{ sourceUserId: 1, pastOrStarted: 1.5, terminal: 0 }],
+  [{ sourceUserId: 1, pastOrStarted: 1, terminal: 'secret' }],
+  [{ sourceUserId: 1, pastOrStarted: Number.MAX_SAFE_INTEGER, terminal: 1 }],
+  [
+    { sourceUserId: 1, pastOrStarted: 1, terminal: 0 },
+    { sourceUserId: 1, pastOrStarted: 1, terminal: 0 },
+  ],
+])('refuses malformed aggregate exclusion counts %#', (counts) => {
+  const source = snapshot()
+  source.bookingExclusionCounts = counts as never
+  expect(() => parseImportPlan(source, options())).toThrow('invalid')
+})
+
+it('kills aggregate validation, reporting, total and fingerprint source-copy mutations', async () => {
+  const source = new URL('./plan.ts', import.meta.url)
+  const select = (m: Record<string, unknown>) => m.parseImportPlan as typeof parseImportPlan
+  const invalid = snapshot()
+  invalid.bookingExclusionCounts = [{ sourceUserId: 1, pastOrStarted: -1, terminal: 0 }]
+  await checkSourceMutation(source, 'entry.pastOrStarted < 0', 'false', select, (run) =>
+    expect(() => run(invalid, options())).toThrow('invalid'),
+  )
+  const data = snapshot()
+  data.bookingExclusionCounts = [{ sourceUserId: 1, pastOrStarted: 15000, terminal: 12000 }]
+  await checkSourceMutation(source, 'if (entry.pastOrStarted > 0)', 'if (false)', select, (run) =>
+    expect(run(data, options()).problems.map((p) => p.code)).toContain(
+      'booking_past_excluded_count',
+    ),
+  )
+  await checkSourceMutation(source, 'if (entry.terminal > 0)', 'if (false)', select, (run) =>
+    expect(run(data, options()).problems.map((p) => p.code)).toContain(
+      'booking_terminal_excluded_count',
+    ),
+  )
+  await checkSourceMutation(
+    source,
+    'excludedBookings: exclusionCounts.reduce((sum, entry) => sum + entry.pastOrStarted + entry.terminal, 0)',
+    'excludedBookings: 0',
+    select,
+    (run) => expect(run(data, options()).summary.excludedBookings).toBe(27000),
+  )
+  await checkSourceMutation(source, 'bookingExclusionCounts: exclusionCounts,', '', select, (run) =>
+    expect(run(data, options()).sourceFingerprint).not.toBe(
+      run(snapshot(), options()).sourceFingerprint,
+    ),
+  )
+})
+
+it('does not count a reported optional system answer loss as an excluded booking', async () => {
+  const source = snapshot()
+  required(source.tables.Booking?.[0]).responses = {
+    email: 'invitee@example.com',
+    rescheduleReason: 'private answer',
+  }
+  const plan = parseImportPlan(source, options())
+  expect(plan.bookings).toHaveLength(1)
+  expect(plan.problems.map((p) => p.code)).toContain('booking_system_answer_excluded')
+  expect(plan.summary.excludedBookings).toBe(0)
+  await checkSourceMutation(
+    new URL('./plan.ts', import.meta.url),
+    "['booking_not_future', 'booking_terminal_excluded', 'booking_nonleaf_excluded',].includes(p.code)",
+    'true',
+    (m) => m.parseImportPlan as typeof parseImportPlan,
+    (run) => expect(run(source, options()).summary.excludedBookings).toBe(0),
   )
 })

@@ -275,6 +275,14 @@ export function parseBookingLocation(
       ambiguous = true
       continue
     }
+    if (ref.unsafeMeetingUrl === true) {
+      ambiguous = true
+      continue
+    }
+    // Calendar writes also create references without a conference URL. They are
+    // not candidate meeting links and do not conflict with a video reference.
+    if (['google_calendar', 'office365_calendar'].includes(ref.type) && ref.meetingUrl === null)
+      continue
     const url = safeMeetingUrl(ref.meetingUrl)
     const parsed = url ? new URL(url) : null
     const providerJoin =

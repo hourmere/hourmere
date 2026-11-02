@@ -50,6 +50,7 @@ export interface BusyBookingPlan {
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 const systemAnswers = new Set(['name', 'email', 'guests', 'location', 'notes'])
+const excludedSystemAnswers = new Set(['title', 'rescheduleReason', 'attendeePhoneNumber'])
 
 function mapAnswers(
   booking: SourceRow,
@@ -69,6 +70,15 @@ function mapAnswers(
   let failed = false
   for (const [key, value] of Object.entries(given)) {
     if (modern && systemAnswers.has(key)) continue
+    if (modern && excludedSystemAnswers.has(key)) {
+      problems.push({
+        code: 'booking_system_answer_excluded',
+        severity: 'excluded',
+        source: { table: 'Booking', id },
+        message: 'An optional source system answer has no equivalent and is excluded.',
+      })
+      continue
+    }
     const matches = event.questionCrosswalk.filter((c) =>
       modern ? c.sourceKey === key : c.legacyLabel === key,
     )
@@ -138,6 +148,7 @@ export function parseBookings(
   }[] = []
   const cutoff = snapshot.cutoff
   for (const row of snapshot.tables.Booking ?? []) {
+    if (row.lineageOnly === true) continue
     const id = row.id as number
     const problem = (
       code: string,
@@ -384,6 +395,7 @@ export function parseBookings(
     })
   }
   const batchOverlaps = new Set<number>()
+  const overlapBlocked = new Set<number>()
   const byHost = new Map<string, typeof overlapCandidates>()
   for (const booking of overlapCandidates) {
     const host = byHost.get(booking.targetUserId) ?? []
@@ -396,13 +408,15 @@ export function parseBookings(
       options.target.busy.some(
         (b) => b.targetUserId === booking.targetUserId && overlap(b.start, b.end),
       )
-    )
+    ) {
+      overlapBlocked.add(booking.sourceId)
       problems.push({
         code: 'booking_target_overlap',
         severity: 'import_blocker',
         source: { table: 'Booking', id: booking.sourceId },
         message: 'The booking overlaps an existing target busy interval for this host.',
       })
+    }
   }
   for (const host of byHost.values()) {
     let latest: (typeof overlapCandidates)[number] | undefined
@@ -414,12 +428,14 @@ export function parseBookings(
       if (!latest || booking.end > latest.end) latest = booking
     }
   }
-  for (const sourceId of batchOverlaps)
+  for (const sourceId of batchOverlaps) {
+    overlapBlocked.add(sourceId)
     problems.push({
       code: 'booking_batch_overlap',
       severity: 'import_blocker',
       source: { table: 'Booking', id: sourceId },
       message: 'The booking overlaps another source booking for this host.',
     })
-  return result
+  }
+  return result.filter((booking) => !overlapBlocked.has(booking.sourceId))
 }

@@ -29,6 +29,12 @@ export interface SourceSnapshot {
   cutoff: string
   selectedUserIds: number[]
   tables: Partial<Record<SourceTable, SourceRow[]>>
+  /** SQL aggregate only: omitted historical and terminal rows carry no booking payload. */
+  bookingExclusionCounts?: {
+    sourceUserId: number
+    pastOrStarted: number
+    terminal: number
+  }[]
 }
 export interface TargetUser {
   id: string

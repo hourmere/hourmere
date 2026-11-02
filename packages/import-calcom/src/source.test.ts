@@ -3,6 +3,9 @@ import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { parseBookings } from './bookings.ts'
+import { videoReferences } from './caldiy-reference-fixtures.ts'
+import { checkSourceMutation } from './mutation-testing.ts'
 import { parseImportPlan } from './plan.ts'
 import { type ExtractOptions, extractSource, SourceRefusal } from './source.ts'
 import { createSourceFixture } from './source-fixture.ts'
@@ -273,7 +276,17 @@ dbDescribe('read-only Cal.com source extraction', () => {
     }
     try {
       const snapshot = await extractSource(options())
-      expect(snapshot.tables.Booking).toHaveLength(4)
+      expect(snapshot.tables.Booking?.map((row) => row.id)).toEqual([1000, 1101])
+      expect(snapshot.tables.Booking?.find((row) => row.id === 1101)).toMatchObject({
+        status: 'pending',
+        title: null,
+        responses: null,
+        customInputs: null,
+        description: null,
+      })
+      expect(snapshot.bookingExclusionCounts).toEqual([
+        { sourceUserId: 1, pastOrStarted: 1, terminal: 1 },
+      ])
       expect(snapshot.tables.Attendee?.map((row) => row.id)).toEqual([1])
     } finally {
       await fixture.db.pool.query('DELETE FROM "Attendee" WHERE id=ANY($1::int[])', [
@@ -282,6 +295,396 @@ dbDescribe('read-only Cal.com source extraction', () => {
       await fixture.db.pool.query('DELETE FROM "Booking" WHERE id=ANY($1::int[])', [
         [1100, 1101, 1102],
       ])
+    }
+  })
+  it('counts a long booking history without reading its payload or exhausting candidate limits', async () => {
+    const fixture = fixtures[0] as (typeof fixtures)[number]
+    // Upstream seed.ts creates 30min accepted/pending rows; seed-utils.ts connects
+    // user/event/attendee and sets iCalUID=''. Clone that persisted Prisma shape.
+    await fixture.db.pool.query(`INSERT INTO "Booking"
+      SELECT (pg_catalog.jsonb_populate_record(NULL::"Booking",pg_catalog.to_jsonb(b)||
+        pg_catalog.jsonb_build_object('id',g,'uid','history-'||g,
+          'startTime','2039-01-01T10:00:00Z','endTime','2039-01-01T10:30:00Z',
+          'title','NEVER_READ_HISTORY_TITLE',
+          'responses',pg_catalog.jsonb_build_object('notes','NEVER_READ_HISTORY_ANSWER')))).*
+      FROM "Booking" b CROSS JOIN pg_catalog.generate_series(10000,20000) g WHERE b.id=1000`)
+    await fixture.db.pool.query(
+      `UPDATE "Booking" SET responses=pg_catalog.jsonb_build_object('notes',pg_catalog.repeat('x',1000001)) WHERE id=10000`,
+    )
+    try {
+      const snapshot = await extractSource(options())
+      expect(snapshot.tables.Booking?.map((row) => row.id)).toEqual([1000])
+      expect(snapshot.bookingExclusionCounts).toEqual([
+        { sourceUserId: 1, pastOrStarted: 10001, terminal: 0 },
+      ])
+      expect(JSON.stringify(snapshot).includes('NEVER_READ')).toBe(false)
+      const plan = parseImportPlan(snapshot, {
+        target: { users: [target], occupiedHandles: [], occupiedSlugs: [], busy: [] },
+        bookingDecisions: [
+          { sourceBookingId: 1000, sourceUserId: 1, singleHostAndAttendeeRolesConfirmed: true },
+        ],
+      })
+      expect(plan.summary).toMatchObject({ localBusyBookings: 1, excludedBookings: 10001 })
+      for (const [before, after] of [
+        [
+          "AND t.\"startTime\">$3::timestamp AND t.status NOT IN ('cancelled','rejected')",
+          "AND t.status NOT IN ('cancelled','rejected')",
+        ],
+        [
+          'pg_catalog.count(*) FILTER(WHERE t."startTime"<=$2::timestamp)',
+          'pg_catalog.count(*) FILTER(WHERE false)',
+        ],
+      ]) {
+        await checkSourceMutation(
+          new URL('./source.ts', import.meta.url),
+          before as string,
+          after as string,
+          (module) => module.extractSource as typeof extractSource,
+          async (run) => {
+            await expect(run(options())).resolves.toMatchObject({
+              tables: { Booking: [{ id: 1000 }] },
+              bookingExclusionCounts: [{ sourceUserId: 1, pastOrStarted: 10001, terminal: 0 }],
+            })
+          },
+        )
+      }
+    } finally {
+      await fixture.db.pool.query('DELETE FROM "Booking" WHERE id BETWEEN 10000 AND 20000')
+    }
+  }, 30_000)
+  it('reads only minimal future pending and nonpersonal booking data and counts terminal exclusions', async () => {
+    const fixture = fixtures[0] as (typeof fixtures)[number]
+    await fixture.insert('EventType', {
+      id: 300,
+      userId: 1,
+      title: 'Team-shaped',
+      slug: 'team-shaped',
+      length: 30,
+      schedulingType: 'roundRobin',
+    })
+    for (const [id, status, eventTypeId] of [
+      [1200, 'pending', 100],
+      [1201, 'accepted', 300],
+      [1202, 'cancelled', 100],
+      [1203, 'rejected', 100],
+    ] as const) {
+      await fixture.insert('Booking', {
+        id,
+        userId: 1,
+        eventTypeId,
+        uid: `future-${id}`,
+        status,
+        title: 'NEVER_READ_NONCANDIDATE_TITLE',
+        description: 'NEVER_READ_NONCANDIDATE_DESCRIPTION',
+        responses: { notes: 'NEVER_READ_NONCANDIDATE_ANSWER', oversized: 'x'.repeat(1000001) },
+        startTime: '2041-02-01T10:00:00Z',
+        endTime: '2041-02-01T10:30:00Z',
+      })
+    }
+    await fixture.insert('Attendee', {
+      id: 1201,
+      bookingId: 1201,
+      name: 'NEVER_READ_TEAM_ATTENDEE',
+      email: 'private-team@example.test',
+      timeZone: 'UTC',
+    })
+    await fixture.insert('BookingReference', {
+      id: 1201,
+      bookingId: 1201,
+      type: 'zoom_video',
+      deleted: null,
+      meetingUrl: 'https://zoom.us/j/NEVER_READ_TEAM_MEETING',
+    })
+    await fixture.db.pool.query('UPDATE "Booking" SET "fromReschedule"=$1 WHERE id=2000', [
+      'future-1200',
+    ])
+    try {
+      const snapshot = await extractSource(options())
+      expect(snapshot.tables.Booking?.map((row) => row.id)).toEqual([1000, 1200, 1201])
+      expect(snapshot.tables.Booking?.find((row) => row.id === 1201)).toMatchObject({
+        id: 1201,
+        eventTypeId: 300,
+        title: null,
+        description: null,
+        responses: null,
+      })
+      expect(snapshot.bookingExclusionCounts).toEqual([
+        { sourceUserId: 1, pastOrStarted: 0, terminal: 2 },
+      ])
+      expect(JSON.stringify(snapshot).includes('NEVER_READ')).toBe(false)
+      expect(snapshot.tables.Attendee?.map((row) => row.id)).toEqual([1])
+      expect(snapshot.tables.BookingReference).toEqual([])
+      for (const [before, after] of [
+        ["AND t.status NOT IN ('cancelled','rejected')", ''],
+        ['personalBookingOnly && !BOOKING_MINIMAL_COLUMNS.has(column)', 'false'],
+        ["t.\"startTime\">$2::timestamp AND t.status IN ('cancelled','rejected')", 'false'],
+        ['row.personalScope === true &&', ''],
+        [
+          'bookings.filter((row) => row.personalScope === true).map((row) => row.id)',
+          'bookings.map((row) => row.id)',
+        ],
+      ]) {
+        await checkSourceMutation(
+          new URL('./source.ts', import.meta.url),
+          before as string,
+          after as string,
+          (module) => module.extractSource as typeof extractSource,
+          async (run) => {
+            await expect(run(options())).resolves.toMatchObject({
+              tables: {
+                Booking: [
+                  { id: 1000 },
+                  { id: 1200, title: null, responses: null },
+                  { id: 1201, title: null, responses: null },
+                ],
+                Attendee: [{ id: 1 }],
+                BookingReference: [],
+              },
+              bookingExclusionCounts: [{ sourceUserId: 1, pastOrStarted: 0, terminal: 2 }],
+            })
+          },
+        )
+      }
+    } finally {
+      await fixture.db.pool.query('UPDATE "Booking" SET "fromReschedule"=NULL WHERE id=2000')
+      await fixture.db.pool.query('DELETE FROM "BookingReference" WHERE id=1201')
+      await fixture.db.pool.query('DELETE FROM "Attendee" WHERE id=1201')
+      await fixture.db.pool.query('DELETE FROM "Booking" WHERE id BETWEEN 1200 AND 1203')
+      await fixture.db.pool.query('DELETE FROM "EventType" WHERE id=300')
+    }
+  })
+  it('loads minimal reschedule successors through terminal history without reading their payloads', async () => {
+    const fixture = fixtures[0] as (typeof fixtures)[number]
+    await fixture.insert('Booking', {
+      id: 1300,
+      userId: 1,
+      eventTypeId: 100,
+      uid: 'lineage-middle',
+      fromReschedule: 'NEVER_READ_CANCELLATION_CAPABILITY',
+      title: 'NEVER_READ_LINEAGE_TITLE',
+      responses: { notes: 'x'.repeat(1000001) },
+      status: 'cancelled',
+      rescheduled: true,
+      startTime: '2039-01-01T10:00:00Z',
+      endTime: '2039-01-01T10:30:00Z',
+    })
+    await fixture.insert('Booking', {
+      id: 1301,
+      userId: 1,
+      eventTypeId: 100,
+      uid: 'lineage-leaf',
+      fromReschedule: 'lineage-middle',
+      title: 'Leaf',
+      responses: { email: 'invitee@example.test' },
+      status: 'accepted',
+      startTime: '2041-02-01T10:00:00Z',
+      endTime: '2041-02-01T10:30:00Z',
+    })
+    await fixture.insert('Attendee', {
+      id: 1301,
+      bookingId: 1301,
+      name: 'Invitee',
+      email: 'invitee@example.test',
+      timeZone: 'UTC',
+    })
+    try {
+      const snapshot = await extractSource(options())
+      expect(snapshot.tables.Booking?.find((row) => row.id === 1300)).toEqual({
+        id: 1300,
+        userId: 1,
+        eventTypeId: 100,
+        status: 'cancelled',
+        rescheduled: true,
+        startTime: '2039-01-01T10:00:00.000Z',
+        endTime: '2039-01-01T10:30:00.000Z',
+        hasSuccessor: true,
+        successorIds: [1301],
+        lineageOnly: true,
+      })
+      expect(JSON.stringify(snapshot).includes('NEVER_READ')).toBe(false)
+      const plan = parseImportPlan(snapshot, {
+        target: { users: [target], occupiedHandles: [], occupiedSlugs: [], busy: [] },
+        bookingDecisions: [
+          {
+            sourceBookingId: 1301,
+            sourceUserId: 1,
+            singleHostAndAttendeeRolesConfirmed: true,
+            acceptMissingLocation: true,
+          },
+        ],
+      })
+      expect(plan.bookings.map((row) => row.sourceId)).toEqual([1301])
+      expect(
+        plan.problems.some(
+          (problem) => problem.code === 'booking_nonleaf_excluded' && problem.source.id === 1000,
+        ),
+      ).toBe(true)
+      expect(plan.problems.some((problem) => problem.source.id === 1300)).toBe(false)
+      await checkSourceMutation(
+        new URL('./bookings.ts', import.meta.url),
+        'if (row.lineageOnly === true) continue',
+        '/* dependency rows processed as candidates */',
+        (module) => module.parseBookings as typeof parseBookings,
+        (run) => {
+          const problems: Parameters<typeof parseBookings>[4] = []
+          run(
+            snapshot,
+            new Map(plan.users.map((user) => [user.sourceId, user])),
+            plan.events,
+            {
+              target: { users: [target], occupiedHandles: [], occupiedSlugs: [], busy: [] },
+              bookingDecisions: [],
+            },
+            problems,
+          )
+          expect(problems.some((problem) => problem.source.id === 1300)).toBe(false)
+        },
+      )
+    } finally {
+      await fixture.db.pool.query('DELETE FROM "Attendee" WHERE id=1301')
+      await fixture.db.pool.query('DELETE FROM "Booking" WHERE id BETWEEN 1300 AND 1301')
+    }
+  })
+  it.each([0, 1])(
+    'preserves real calendar/video reference pairs and distinguishes unsafe nonempty calendar URLs for baseline %s',
+    async (index) => {
+      const fixture = fixtures[index] as (typeof fixtures)[number]
+      await fixture.db.pool.query('UPDATE "Booking" SET location=$1 WHERE id=1000', [
+        'integrations:zoom',
+      ])
+      await fixture.insert('BookingReference', {
+        id: 10,
+        bookingId: 1000,
+        type: 'google_calendar',
+        meetingUrl: '',
+        deleted: null,
+      })
+      try {
+        for (const video of videoReferences) {
+          await fixture.insert('BookingReference', {
+            id: 11,
+            bookingId: 1000,
+            type: video.type,
+            meetingUrl: video.meetingUrl,
+            deleted: null,
+          })
+          const snapshot = await extractSource(options(index))
+          expect(
+            snapshot.tables.BookingReference?.find((row) => row.type === 'google_calendar'),
+          ).toMatchObject({ meetingUrl: null, unsafeMeetingUrl: false })
+          const plan = parseImportPlan(snapshot, {
+            target: { users: [target], occupiedHandles: [], occupiedSlugs: [], busy: [] },
+            bookingDecisions: [
+              { sourceBookingId: 1000, sourceUserId: 1, singleHostAndAttendeeRolesConfirmed: true },
+            ],
+          })
+          expect(plan.bookings[0]?.location).toEqual({ kind: 'link', url: video.meetingUrl })
+          await fixture.db.pool.query('DELETE FROM "BookingReference" WHERE id=11')
+        }
+        const video = videoReferences[0]
+        await fixture.insert('BookingReference', {
+          id: 11,
+          bookingId: 1000,
+          type: video.type,
+          meetingUrl: video.meetingUrl,
+          deleted: null,
+        })
+        await fixture.db.pool.query('UPDATE "BookingReference" SET "meetingUrl"=$1 WHERE id=10', [
+          'https://zoom.us/start/123?zak=NEVER_READ_CALENDAR_HOST_SECRET',
+        ])
+        const unsafe = await extractSource(options(index))
+        expect(
+          unsafe.tables.BookingReference?.find((row) => row.type === 'google_calendar'),
+        ).toMatchObject({ meetingUrl: null, unsafeMeetingUrl: true })
+        expect(JSON.stringify(unsafe).includes('NEVER_READ')).toBe(false)
+        const plan = parseImportPlan(unsafe, {
+          target: { users: [target], occupiedHandles: [], occupiedSlugs: [], busy: [] },
+          bookingDecisions: [
+            {
+              sourceBookingId: 1000,
+              sourceUserId: 1,
+              singleHostAndAttendeeRolesConfirmed: true,
+              acceptMissingLocation: true,
+            },
+          ],
+        })
+        expect(plan.bookings).toEqual([])
+        expect(
+          plan.problems.some(
+            (problem) =>
+              problem.code === 'booking_location_reference' &&
+              problem.severity === 'import_blocker',
+          ),
+        ).toBe(true)
+        if (index === 0) {
+          const assertUnsafeCalendar = async (run: typeof extractSource) => {
+            const snapshot = await run(options(index))
+            expect(JSON.stringify(snapshot).includes('NEVER_READ')).toBe(false)
+            const plan = parseImportPlan(snapshot, {
+              target: { users: [target], occupiedHandles: [], occupiedSlugs: [], busy: [] },
+              bookingDecisions: [
+                {
+                  sourceBookingId: 1000,
+                  sourceUserId: 1,
+                  singleHostAndAttendeeRolesConfirmed: true,
+                  acceptMissingLocation: true,
+                },
+              ],
+            })
+            expect(plan.bookings).toEqual([])
+          }
+          await checkSourceMutation(
+            new URL('./source.ts', import.meta.url),
+            't."meetingUrl" IS NOT NULL AND t."meetingUrl"<>\'\'',
+            'false',
+            (module) => module.extractSource as typeof extractSource,
+            assertUnsafeCalendar,
+          )
+          await fixture.db.pool.query('UPDATE "BookingReference" SET "meetingUrl"=$1 WHERE id=10', [
+            'https://zoom.us/st%61rt/NEVER_READ_ENCODED_HOST_PATH',
+          ])
+          await assertUnsafeCalendar(extractSource)
+          await checkSourceMutation(
+            new URL('./source.ts', import.meta.url),
+            'row.unsafeMeetingUrl = true',
+            '/* lost redacted URL safety classification */',
+            (module) => module.extractSource as typeof extractSource,
+            assertUnsafeCalendar,
+          )
+        }
+      } finally {
+        await fixture.db.pool.query('DELETE FROM "BookingReference" WHERE id IN (10,11)')
+        await fixture.db.pool.query('UPDATE "Booking" SET location=$1 WHERE id=1000', [
+          'https://meet.example.test/join',
+        ])
+      }
+    },
+  )
+  it.each(['CREATE', 'TEMPORARY'])(
+    'refuses database %s privilege even in a read-only transaction',
+    async (privilege) => {
+      const fixture = fixtures[0] as (typeof fixtures)[number]
+      const database = new URL(fixture.db.url).pathname.slice(1)
+      await fixture.db.pool.query(`GRANT ${privilege} ON DATABASE "${database}" TO ${fixture.role}`)
+      try {
+        await expect(extractSource(options())).rejects.toMatchObject({ code: 'SOURCE_ROLE_UNSAFE' })
+      } finally {
+        await fixture.db.pool.query(
+          `REVOKE ${privilege} ON DATABASE "${database}" FROM ${fixture.role}`,
+        )
+      }
+    },
+  )
+  it('refuses sequence USAGE privilege even in a read-only transaction', async () => {
+    const fixture = fixtures[0] as (typeof fixtures)[number]
+    await fixture.db.pool.query('CREATE SEQUENCE public.import_privilege_probe')
+    await fixture.db.pool.query(
+      `GRANT USAGE ON SEQUENCE public.import_privilege_probe TO ${fixture.role}`,
+    )
+    try {
+      await expect(extractSource(options())).rejects.toMatchObject({ code: 'SOURCE_ROLE_UNSAFE' })
+    } finally {
+      await fixture.db.pool.query('DROP SEQUENCE public.import_privilege_probe')
     }
   })
   it('refuses source ownership and write grants before reading application data', async () => {
@@ -576,6 +979,34 @@ dbDescribe('read-only Cal.com source extraction', () => {
     } finally {
       await fixture.db.pool.query(`REVOKE SELECT("twoFactorSecret") ON users FROM ${fixture.role}`)
     }
+    const database = new URL(fixture.db.url).pathname.slice(1)
+    for (const privilege of ['CREATE', 'TEMPORARY']) {
+      await fixture.db.pool.query(`GRANT ${privilege} ON DATABASE "${database}" TO ${fixture.role}`)
+      try {
+        await mutation(
+          "OR pg_catalog.has_database_privilege(d.oid,'CREATE') OR pg_catalog.has_database_privilege(d.oid,'TEMP')",
+          '',
+          async (run) => {
+            await expect(run(options())).rejects.toMatchObject({ code: 'SOURCE_ROLE_UNSAFE' })
+          },
+        )
+      } finally {
+        await fixture.db.pool.query(
+          `REVOKE ${privilege} ON DATABASE "${database}" FROM ${fixture.role}`,
+        )
+      }
+    }
+    await fixture.db.pool.query('CREATE SEQUENCE public.import_privilege_mutation_probe')
+    await fixture.db.pool.query(
+      `GRANT USAGE ON SEQUENCE public.import_privilege_mutation_probe TO ${fixture.role}`,
+    )
+    try {
+      await mutation('if (sequences.rows[0]?.unsafe)', 'if (false)', async (run) => {
+        await expect(run(options())).rejects.toMatchObject({ code: 'SOURCE_ROLE_UNSAFE' })
+      })
+    } finally {
+      await fixture.db.pool.query('DROP SEQUENCE public.import_privilege_mutation_probe')
+    }
     await mutation(
       'const EVENT_METADATA = `',
       'const EVENT_METADATA = ` t.metadata AS metadata,',
@@ -727,10 +1158,23 @@ dbDescribe('read-only Cal.com source extraction', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     const secret = 'SOURCE_SECRET_DO_NOT_DISCLOSE'
+    const fixture = fixtures[0] as (typeof fixtures)[number]
+    const wrongPassword = new URL(fixture.connectionString)
+    wrongPassword.password = secret
+    const wrongUser = new URL(fixture.connectionString)
+    wrongUser.username = secret
+    const tls = new URL(fixture.connectionString)
+    tls.searchParams.set('sslmode', 'require')
+    // Dev/CI source fixtures use the real non-TLS PostgreSQL service. Keep valid
+    // credentials so this specifically exercises SSL negotiation, not auth failure.
+    expect((await fixture.db.pool.query('SHOW ssl')).rows[0]?.ssl).toBe('off')
     try {
       for (const connectionString of [
         `postgres://operator:${secret}@127.0.0.1:1/private_source`,
         `postgres://operator:${secret}@localhost/source?options=${secret}`,
+        wrongPassword.toString(),
+        wrongUser.toString(),
+        tls.toString(),
       ]) {
         let caught: unknown
         try {
@@ -739,8 +1183,16 @@ dbDescribe('read-only Cal.com source extraction', () => {
           caught = error
         }
         expect(caught).toBeInstanceOf(SourceRefusal)
-        expect(String(caught).includes(secret)).toBe(false)
-        expect(JSON.stringify(caught).includes(secret)).toBe(false)
+        for (const forbidden of [
+          secret,
+          new URL(fixture.connectionString).password,
+          new URL(fixture.connectionString).username,
+          fixture.connectionString,
+        ]) {
+          expect(String(caught).includes(forbidden)).toBe(false)
+          expect(JSON.stringify(caught).includes(forbidden)).toBe(false)
+          expect((caught as Error).stack?.includes(forbidden)).toBe(false)
+        }
         expect((caught as Error).cause).toBeUndefined()
       }
       expect(log).not.toHaveBeenCalled()

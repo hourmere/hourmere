@@ -1,6 +1,6 @@
 import pg from 'pg'
 import { safeMeetingUrl } from './locations.ts'
-import { detectSchema, SOURCE_COLUMNS, SourceRefusal } from './schema.ts'
+import { detectSchema, SOURCE_COLUMN_EXCEPTIONS, SOURCE_COLUMNS, SourceRefusal } from './schema.ts'
 import {
   LIMITS,
   type SourceRow,
@@ -61,8 +61,8 @@ export async function assertRestrictedRole(client: pg.PoolClient): Promise<void>
       ((SOURCE_COLUMNS[row.table as keyof typeof SOURCE_COLUMNS] as readonly string[]).includes(
         row.column,
       ) ||
-        (row.table === 'EventType' && row.column === 'metadata') ||
-        (row.table === 'Booking' && ['uid', 'fromReschedule'].includes(row.column)))
+        ((row.table === 'EventType' || row.table === 'Booking') &&
+          (SOURCE_COLUMN_EXCEPTIONS[row.table] as readonly string[]).includes(row.column)))
     if (row.writable || row.owner || (row.readable && !allowed)) {
       throw new SourceRefusal(
         'SOURCE_ROLE_UNSAFE',
@@ -93,10 +93,34 @@ const TIMESTAMP = new Set([
   'start',
   'end',
 ])
-function projection(table: SourceTable, alias: string): string {
+const BOOKING_MINIMAL_COLUMNS = new Set([
+  'id',
+  'userId',
+  'eventTypeId',
+  'startTime',
+  'endTime',
+  'status',
+  'rescheduled',
+])
+// Match the parser's structural personal/single-host scope before reading answers or text.
+const PERSONAL_BOOKING = `t.status='accepted' AND EXISTS(
+  SELECT 1 FROM public."EventType" e WHERE e.id=t."eventTypeId" AND e."userId"=t."userId"
+    AND e."teamId" IS NULL AND e."profileId" IS NULL AND e."parentId" IS NULL
+    AND e."schedulingType" IS NULL AND NOT e."assignAllTeamMembers"
+    AND NOT e."assignRRMembersUsingSegment" AND NOT e."rrHostSubsetEnabled"
+    AND EXISTS(SELECT 1 FROM public."Host" h WHERE h."eventTypeId"=e.id AND h."userId"=t."userId"
+      UNION ALL SELECT 1 FROM public._user_eventtype u WHERE u."A"=e.id AND u."B"=t."userId")
+    AND NOT EXISTS(SELECT 1 FROM public."Host" h WHERE h."eventTypeId"=e.id
+      AND (h."userId"<>t."userId" OR h."groupId" IS NOT NULL OR h."memberId" IS NOT NULL))
+    AND NOT EXISTS(SELECT 1 FROM public._user_eventtype u WHERE u."A"=e.id AND u."B"<>t."userId")
+    AND NOT EXISTS(SELECT 1 FROM public."HostGroup" g WHERE g."eventTypeId"=e.id))`
+function projection(table: SourceTable, alias: string, personalBookingOnly = false): string {
   return (SOURCE_COLUMNS[table] as readonly string[])
     .map((column) => {
-      const value = `${alias}."${column}"`
+      const value =
+        personalBookingOnly && !BOOKING_MINIMAL_COLUMNS.has(column)
+          ? `(CASE WHEN ${PERSONAL_BOOKING} THEN ${alias}."${column}" ELSE NULL END)`
+          : `${alias}."${column}"`
       if (table === 'BookingReference' && column === 'meetingUrl')
         return `CASE WHEN ${alias}.deleted IS NULL AND ${alias}.type IN ('zoom_video','google_video','google_calendar','daily_video','office365_video','office365_calendar')
           AND ${value} ~* '^https?://' AND ${value} !~* '(://[^/]*@|/(start|admin|login|oauth)(/|\\?|$)|[?&](zak|access_token|refresh_token|id_token|client_secret|authorization|oauth_token)=)'
@@ -111,7 +135,7 @@ function projection(table: SourceTable, alias: string): string {
         return `pg_catalog.to_char(${value},'YYYY-MM-DD') AS "${column}"`
       if (table === 'Availability' && ['startTime', 'endTime'].includes(column))
         return `${value}::text AS "${column}"`
-      return value
+      return personalBookingOnly ? `${value} AS "${column}"` : value
     })
     .join(', ')
 }
@@ -216,6 +240,7 @@ export async function extractSource(options: ExtractOptions): Promise<SourceSnap
     await assertRestrictedRole(client)
     const schemaFingerprint = await detectSchema(client, options.sourceVersion)
     const tables: SourceSnapshot['tables'] = {}
+    let bookingExclusionCounts: SourceSnapshot['bookingExclusionCounts']
     let totalRows = 0
     let totalBytes = 0
     const read = async (
@@ -292,8 +317,10 @@ export async function extractSource(options: ExtractOptions): Promise<SourceSnap
           table === 'BookingReference' &&
           row.meetingUrl != null &&
           !safeMeetingUrl(row.meetingUrl)
-        )
+        ) {
           row.meetingUrl = null
+          row.unsafeMeetingUrl = true
+        }
       }
       totalRows += rows.length
       const bytes = Buffer.byteLength(JSON.stringify(rows))
@@ -335,16 +362,76 @@ export async function extractSource(options: ExtractOptions): Promise<SourceSnap
       tables.users = identities.map(
         (identity) => users.find((user) => user.id === identity.id) ?? identity,
       )
+      // History/terminal exclusions need counts, not titles, answers, descriptions or attendees.
+      const exclusionCounts = await client.query<{
+        sourceUserId: number
+        pastOrStarted: string
+        terminal: string
+      }>(
+        `SELECT t."userId" AS "sourceUserId",
+        pg_catalog.count(*) FILTER(WHERE t."startTime"<=$2::timestamp)::text AS "pastOrStarted",
+        pg_catalog.count(*) FILTER(WHERE t."startTime">$2::timestamp AND t.status IN ('cancelled','rejected'))::text AS terminal
+        FROM public."Booking" t WHERE t."userId"=ANY($1::int[])
+        GROUP BY t."userId" ORDER BY t."userId"`,
+        [matched, cutoff],
+      )
+      bookingExclusionCounts = exclusionCounts.rows.map((row) => ({
+        sourceUserId: row.sourceUserId,
+        pastOrStarted: Number(row.pastOrStarted),
+        terminal: Number(row.terminal),
+      }))
+      if (
+        bookingExclusionCounts.some(
+          (row) => !Number.isSafeInteger(row.pastOrStarted) || !Number.isSafeInteger(row.terminal),
+        )
+      )
+        throw new SourceRefusal(
+          'SOURCE_LIMIT_EXCEEDED',
+          'The source exclusion counts exceed supported limits.',
+        )
       const bookings = await read(
         'Booking',
-        `SELECT ${projection('Booking', 't')},
+        `SELECT ${projection('Booking', 't', true)}, ${PERSONAL_BOOKING} AS "personalScope",
         EXISTS(SELECT 1 FROM public."Booking" successor WHERE successor."fromReschedule"=t.uid) AS "hasSuccessor",
         ARRAY(SELECT successor.id FROM public."Booking" successor WHERE successor."fromReschedule"=t.uid ORDER BY successor.id LIMIT 2) AS "successorIds",
         EXISTS(SELECT 1 FROM public."Payment" payment WHERE payment."bookingId"=t.id) AS "hasPayment",
         EXISTS(SELECT 1 FROM public."BookingSeat" seat WHERE seat."bookingId"=t.id) AS "hasSeats"
-        FROM public."Booking" t WHERE t."userId"=ANY($1::int[]) ORDER BY t.id LIMIT $2::int`,
-        [matched, LIMITS.perTable + 1],
+        FROM public."Booking" t WHERE t."userId"=ANY($1::int[])
+          AND t."startTime">$3::timestamp AND t.status NOT IN ('cancelled','rejected')
+        ORDER BY t.id LIMIT $2::int`,
+        [matched, LIMITS.perTable + 1, cutoff],
       )
+      // Successor proof needs only lineage/time/ownership, including terminal intermediates.
+      // UNION deduplicates cycles; an outer cap refuses oversized graphs before transfer.
+      const lineage = await read(
+        'Booking',
+        `WITH RECURSIVE chain(id) AS (
+          SELECT t.id FROM public."Booking" t WHERE t.id=ANY($1::int[])
+          UNION
+          SELECT successor.id FROM chain
+            JOIN public."Booking" predecessor ON predecessor.id=chain.id
+            JOIN public."Booking" successor ON successor."fromReschedule"=predecessor.uid
+        )
+        SELECT t.id,t."userId",t."eventTypeId",t.status,t.rescheduled,
+          pg_catalog.to_char(t."startTime",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "startTime",
+          pg_catalog.to_char(t."endTime",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "endTime",
+          EXISTS(SELECT 1 FROM public."Booking" successor WHERE successor."fromReschedule"=t.uid) AS "hasSuccessor",
+          ARRAY(SELECT successor.id FROM public."Booking" successor WHERE successor."fromReschedule"=t.uid ORDER BY successor.id LIMIT 2) AS "successorIds",
+          true AS "lineageOnly"
+        FROM chain JOIN public."Booking" t ON t.id=chain.id WHERE NOT(t.id=ANY($3::int[]))
+        ORDER BY t.id LIMIT $2::int`,
+        [
+          bookings.filter((row) => row.personalScope === true).map((row) => row.id),
+          LIMITS.perTable + 1,
+          bookings.map((row) => row.id),
+        ],
+      )
+      if (bookings.length + lineage.length > LIMITS.perTable)
+        throw new SourceRefusal(
+          'SOURCE_LIMIT_EXCEEDED',
+          'The source booking and lineage selection exceeds extraction limits.',
+        )
+      tables.Booking = [...bookings, ...lineage]
       const bookingEventIds = bookings
         .map((row) => row.eventTypeId)
         .filter((id): id is number => typeof id === 'number')
@@ -454,6 +541,7 @@ export async function extractSource(options: ExtractOptions): Promise<SourceSnap
       const relevantBookings = bookings
         .filter(
           (row) =>
+            row.personalScope === true &&
             row.status === 'accepted' &&
             typeof row.startTime === 'string' &&
             validInstant(row.startTime) &&
@@ -466,7 +554,9 @@ export async function extractSource(options: ExtractOptions): Promise<SourceSnap
       ])
       await read(
         'BookingReference',
-        `SELECT ${projection('BookingReference', 't')}
+        `SELECT ${projection('BookingReference', 't')},
+          (t."meetingUrl" IS NOT NULL AND t."meetingUrl"<>'' AND (
+            t."meetingUrl" !~* '^https?://' OR t."meetingUrl" ~* '(://[^/]*@|/(start|admin|login|oauth)(/|\\?|$)|[?&](zak|access_token|refresh_token|id_token|client_secret|authorization|oauth_token)=)')) AS "unsafeMeetingUrl"
         FROM public."BookingReference" t JOIN public."Booking" b ON b.id=t."bookingId"
         WHERE t."bookingId"=ANY($1::int[]) AND (b.location IS NULL OR b.location !~* '^https?://')
         ORDER BY t."bookingId",t.type,t.deleted,t."meetingUrl" LIMIT $2::int`,
@@ -482,6 +572,7 @@ export async function extractSource(options: ExtractOptions): Promise<SourceSnap
       cutoff,
       selectedUserIds: [...options.selectedUserIds],
       tables,
+      ...(bookingExclusionCounts ? { bookingExclusionCounts } : {}),
     }
   } catch (error) {
     if (client && inTransaction) await client.query('ROLLBACK').catch(() => {})

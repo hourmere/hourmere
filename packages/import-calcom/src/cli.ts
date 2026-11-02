@@ -41,6 +41,21 @@ export interface OperatorConfig {
   target: TargetContext
   bookingDecisions: BookingDecision[]
 }
+// Only importer-owned static codes may cross the operator output boundary.
+const refusalCodes = new Set([
+  'SOURCE_CONNECTION_INVALID',
+  'SOURCE_EXTRACTION_FAILED',
+  'SOURCE_ISOLATION_UNSAFE',
+  'SOURCE_LIMIT_EXCEEDED',
+  'SOURCE_NOT_READ_ONLY',
+  'SOURCE_PAYMENT_SHAPE_UNKNOWN',
+  'SOURCE_ROLE_UNSAFE',
+  'SOURCE_SCHEMA_UNKNOWN',
+  'SOURCE_SELECTION_INVALID',
+  'SOURCE_TIMEZONE_NOT_UTC',
+  'SOURCE_UTC_UNCONFIRMED',
+  'SOURCE_VERSION_UNKNOWN',
+])
 
 /** Owner-only regular files, no symlink race, bounded reads. No path or content in errors. */
 export async function readProtectedFile(path: string, maxBytes: number): Promise<string> {
@@ -137,6 +152,7 @@ export async function runCli(
           cutoff: plan.cutoff,
           extractedAt: plan.extractedAt,
           summary: plan.summary,
+          bookingExclusionCounts: plan.bookingExclusionCounts,
           userBatches: plan.userBatches,
           problems: plan.problems,
         },
@@ -151,15 +167,18 @@ export async function runCli(
     return 0
   } catch (error) {
     // Do not forward driver errors, causes, paths, argv, credentials or source values.
-    const code = error instanceof SourceRefusal ? error.code : ''
+    const code =
+      error instanceof SourceRefusal && refusalCodes.has(error.code) ? error.code : 'IMPORT_REFUSED'
     write(
-      ['SOURCE_SCHEMA_UNKNOWN', 'SOURCE_VERSION_UNKNOWN'].includes(code)
-        ? messages.schema
-        : ['SOURCE_TIMEZONE_NOT_UTC', 'SOURCE_UTC_UNCONFIRMED'].includes(code)
-          ? messages.timezone
-          : code === 'SOURCE_ROLE_UNSAFE'
-            ? messages.role
-            : messages.refused,
+      `[${code}] ${
+        ['SOURCE_SCHEMA_UNKNOWN', 'SOURCE_VERSION_UNKNOWN'].includes(code)
+          ? messages.schema
+          : ['SOURCE_TIMEZONE_NOT_UTC', 'SOURCE_UTC_UNCONFIRMED'].includes(code)
+            ? messages.timezone
+            : code === 'SOURCE_ROLE_UNSAFE'
+              ? messages.role
+              : messages.refused
+      }`,
     )
     return 1
   }

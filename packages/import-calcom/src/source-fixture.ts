@@ -3,7 +3,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createTestDatabase } from '@hourmere/db/testing'
 import pg from 'pg'
-import { SOURCE_COLUMNS } from './schema.ts'
+import { SOURCE_COLUMN_EXCEPTIONS, SOURCE_COLUMNS } from './schema.ts'
 import { BASELINE_COLUMNS, BASELINE_ENUMS, BASELINE_RELATIONS } from './source-baselines.ts'
 import type { SourceRow, SourceTable, SourceVersion } from './types.ts'
 
@@ -79,8 +79,8 @@ export async function createSourceFixture(version: SourceVersion) {
     await db.pool.query(`GRANT USAGE ON SCHEMA public TO ${role}`)
     for (const [table, columns] of Object.entries(SOURCE_COLUMNS)) {
       const allowed = [...columns] as string[]
-      if (table === 'EventType') allowed.push('metadata')
-      if (table === 'Booking') allowed.push('uid', 'fromReschedule')
+      if (table === 'EventType' || table === 'Booking')
+        allowed.push(...SOURCE_COLUMN_EXCEPTIONS[table])
       await db.pool.query(
         `GRANT SELECT (${allowed.map(quote).join(',')}) ON ${quote(table)} TO ${role}`,
       )
@@ -179,7 +179,10 @@ export async function createSourceFixture(version: SourceVersion) {
       id: 1000,
       userId: 1,
       eventTypeId: 100,
-      title: 'Existing booking',
+      // Real seed shape: scripts/seed.ts pro/30min _bookings, materialized by
+      // scripts/seed-utils.ts with organizer/event/attendee relations and empty iCalUID.
+      title: '30min',
+      iCalUID: '',
       uid: 'NEVER_READ_CANCELLATION_CAPABILITY',
       startTime: '2041-01-01T10:00:00.123Z',
       endTime: '2041-01-01T10:45:00.789Z',
