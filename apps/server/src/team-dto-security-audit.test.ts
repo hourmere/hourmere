@@ -1,7 +1,9 @@
+import '@hono/zod-openapi'
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { DEFAULT_NOTIFICATIONS } from '@hourmere/scheduling'
 import {
   createFixtures,
   createTestTeam,
@@ -82,6 +84,7 @@ const eventKeys = [
   'maxBookingsPerDay',
   'location',
   'questions',
+  'notifications',
   'isActive',
   'isHidden',
   'allowGuests',
@@ -448,6 +451,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     for (const question of item.questions)
       keys(question, ['id', 'type', 'label', 'required', 'options'])
     expect(item.conferenceOrganizer).toBeNull()
+    expect(item.notifications).toEqual(DEFAULT_NOTIFICATIONS)
     expect(JSON.stringify(item)).not.toContain(privateMarker)
   }
   function assertSlots(page: Json) {

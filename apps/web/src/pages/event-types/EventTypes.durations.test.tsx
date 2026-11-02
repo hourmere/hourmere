@@ -74,6 +74,17 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
         organization: { ...ME.organization, personal },
       }
       const peer = '00000000-0000-7000-8000-000000000004'
+      const notifications: EventType['notifications'] = {
+        reminders: [],
+        followUps: [
+          {
+            id: 'thanks',
+            offsetMinutes: 60,
+            recipients: { invitee: true, host: false, guests: false },
+            hostNote: 'Thanks for meeting.',
+          },
+        ],
+      }
       let saved = eventType({
         ownerUserId: personal ? ME.user.id : null,
         schedulingType: mode === 'personal' ? 'individual' : mode,
@@ -82,6 +93,7 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
             ? [{ userId: ME.user.id }, { userId: peer }]
             : [{ userId: ME.user.id }],
         allowedDurationsMinutes: [15, 30, 60],
+        notifications,
       })
       const api = fakeApi({
         ...signedInAs(me),
@@ -121,6 +133,10 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
         allowedDurationsMinutes: [15, 45, 60, 75],
         durationMinutes: 45,
       })
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(
+        'notifications',
+      )
+      expect(saved.notifications).toEqual(notifications)
       expect(screen.getByRole('region', { name: copy.share })).toBeDefined()
       view.unmount()
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)

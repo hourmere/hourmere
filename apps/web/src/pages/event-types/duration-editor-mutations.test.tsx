@@ -177,6 +177,17 @@ describe('duration editor production-source mutation controls', () => {
     })
   })
 
+  it('detects replacing saved notification policies during duration edits', () => {
+    detects(
+      'allowedDurationsMinutes: [...draft.allowedDurationsMinutes],',
+      'allowedDurationsMinutes: [...draft.allowedDurationsMinutes], notifications: { reminders: [], followUps: [] },',
+      (source) => {
+        const values = buildForm(source)
+        expect(values.toInput(values.emptyDraft())).not.toHaveProperty('notifications')
+      },
+    )
+  })
+
   it('detects removing the final-duration handler guard', () => {
     const removal = editor.slice(editor.indexOf('  function remove('), editor.indexOf('  return ('))
     function assertion(source: string) {

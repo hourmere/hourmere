@@ -20,7 +20,9 @@ const text = {
     iframe: 'Book a meeting with Hourmere',
     close: 'Close booking',
     title: 'Title',
-    duration: 'Duration (minutes)',
+    duration: 'Duration to add (minutes)',
+    addDuration: 'Add duration',
+    defaultDuration: 'Default duration',
     create: 'Create event type',
     numberError: 'Enter a number.',
     navBookings: 'Bookings',
@@ -41,7 +43,9 @@ const text = {
     iframe: '通过 Hourmere 预约会议',
     close: '关闭预约窗口',
     title: '标题',
-    duration: '时长（分钟）',
+    duration: '要添加的时长（分钟）',
+    addDuration: '添加时长',
+    defaultDuration: '默认时长',
     create: '创建活动类型',
     numberError: '请输入数字。',
     navBookings: '预约',
@@ -409,15 +413,18 @@ for (const selected of ['en', 'zh-CN'] as const) {
   }) => {
     await app.authorizeHost()
     await initialLanguage(page, selected)
+    await page.setViewportSize({ width: 320, height: 760 })
     await page.goto(`${app.url}/app/event-types/new`)
     const title = page.getByLabel(text[selected].title, { exact: true })
     await title.fill('Settings')
     await page.getByLabel(text[selected].duration, { exact: true }).fill('')
-    await page.getByRole('button', { name: text[selected].create, exact: true }).click()
-    await expect(page.getByRole('alert')).toContainText(text[selected].numberError)
+    await page.getByRole('button', { name: text[selected].addDuration, exact: true }).click()
+    await expect(page.locator('#duration-to-add-error')).toContainText(text[selected].numberError)
     const original = await title.elementHandle()
     await language(page, other(selected))
-    await expect(page.getByRole('alert')).toContainText(text[other(selected)].numberError)
+    await expect(page.locator('#duration-to-add-error')).toContainText(
+      text[other(selected)].numberError,
+    )
     const translatedTitle = page.getByLabel(text[other(selected)].title, { exact: true })
     expect(await translatedTitle.evaluate((element, old) => element === old, original)).toBe(true)
     await expect(translatedTitle).toHaveValue('Settings')
@@ -431,6 +438,13 @@ for (const selected of ['en', 'zh-CN'] as const) {
     expect(new URL(page.url()).pathname).toBe('/app/event-types/new')
     await expect(translatedTitle).toHaveValue('Settings')
     await page.getByLabel(text[other(selected)].duration, { exact: true }).fill('25')
+    await page.getByRole('button', { name: text[other(selected)].addDuration, exact: true }).click()
+    await page.getByLabel(text[other(selected)].defaultDuration, { exact: true }).selectOption('25')
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true)
     const saved = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === '/api/v1/event-types' &&
@@ -439,8 +453,14 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await page.getByRole('button', { name: text[other(selected)].create, exact: true }).click()
     const response = await saved
     expect(response.status()).toBe(201)
-    const event = (await response.json()) as { id: string; title: string; durationMinutes: number }
+    const event = (await response.json()) as {
+      id: string
+      title: string
+      durationMinutes: number
+      allowedDurationsMinutes: number[]
+    }
     expect(event.title === 'Settings' && event.durationMinutes === 25).toBe(true)
+    expect(event.allowedDurationsMinutes).toEqual([25, 30])
     await expect.poll(() => new URL(page.url()).pathname).toBe(`/app/event-types/${event.id}`)
     await expect(
       page.getByRole('heading', {

@@ -9,16 +9,19 @@ export function eventTypeTools({
   db,
   automaticMeet,
   automaticZoom,
+  followUpHostNotesEnabled,
 }: {
   db: Db
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  followUpHostNotesEnabled?: boolean | undefined
 }): Tool[] {
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
     automaticMeet,
     automaticZoom,
+    followUpHostNotesEnabled,
     now: () => Temporal.Now.instant(),
   })
   return [

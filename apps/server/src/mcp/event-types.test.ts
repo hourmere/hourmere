@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp } from '../app.ts'
 import * as schemas from '../routes/event-types.ts'
+import { productTools } from '../server.ts'
 import { mcpEndpoint } from './endpoint.ts'
 import { eventTypeTools } from './event-types.ts'
 import { defineTool, type McpCaller, runTool, type Tool } from './tools.ts'
@@ -36,6 +37,29 @@ function sourceCopy(change?: Change): Factory {
   ) as Factory
 }
 
+function productSourceCopy(change?: Change): Factory {
+  const server = readFileSync('apps/server/src/server.ts', 'utf8')
+  let source = server.slice(
+    server.indexOf('export function productTools('),
+    server.indexOf('export interface RunningServer'),
+  )
+  if (change) {
+    expect(source.includes(change[0]), 'product registry mutation must match').toBe(true)
+    source = source.replace(...change)
+  }
+  const bindings = {
+    eventTypeTools,
+    whoamiTool: { name: 'whoami' },
+    bookingTools: () => [],
+    catalogTools: () => [],
+    integrationTools: () => [],
+  }
+  return new Function(
+    ...Object.keys(bindings),
+    `${stripTypeScriptTypes(source).replace(/\bexport /g, '')}; return productTools`,
+  )(...Object.values(bindings)) as Factory
+}
+
 function ok(result: Result): Saved {
   expect(result.isError).toBeFalsy()
   return result.structuredContent as Saved
@@ -57,11 +81,15 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
   afterAll(async () => {
     await owned?.drop()
   })
-  async function setup(factory = eventTypeTools, teamRole?: string) {
+  async function setup(
+    factory = eventTypeTools,
+    teamRole?: string,
+    followUpHostNotesEnabled?: boolean,
+  ) {
     const host = await createTestUser(db)
     const team = teamRole ? await createTestTeam(db, [{ user: host, role: teamRole }]) : null
     const caller = (team ? team.as(host) : host.principal) as McpCaller
-    const tools = factory({ db })
+    const tools = factory({ db, followUpHostNotesEnabled })
     const call = async (name: string, args: Record<string, unknown>) =>
       runTool(
         tools.find((tool) => tool.name === name) as Tool,
@@ -76,7 +104,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: true, principal: caller, setCookie: [] }),
-      routes: [schemas.eventTypeRoutes({ db })],
+      routes: [schemas.eventTypeRoutes({ db, followUpHostNotesEnabled })],
       mcp: mcpEndpoint({ tools }),
     })
     return { app, call, caller }
@@ -87,6 +115,91 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
     durationMinutes: 30,
     allowedDurationsMinutes: [15, 30, 60],
   })
+  const notifications = {
+    reminders: [],
+    followUps: [
+      {
+        id: 'thanks',
+        offsetMinutes: 60,
+        recipients: { invitee: true, guests: false, host: false },
+        hostNote: 'Thank you for meeting',
+      },
+    ],
+  }
+
+  async function verifyHostNotePolicy(factory: Factory, enabled: boolean, update: boolean) {
+    const s = await setup(factory, undefined, enabled)
+    const created = update
+      ? await scheduling.createEventType(
+          { db, principal: s.caller, now: () => Temporal.Now.instant() },
+          createInput(),
+        )
+      : null
+    const result = await s.call(update ? 'update_event_type' : 'create_event_type', {
+      ...(created ? { id: created.id } : createInput()),
+      notifications,
+    })
+    if (enabled) expect(ok(result)).toHaveProperty('notifications', notifications)
+    else {
+      expect(error(result)).toEqual({
+        error: 'invalid_notifications',
+        message: 'notifications.followUps[0].hostNote: host notes are disabled by the operator',
+      })
+    }
+  }
+
+  it.each([false, true])(
+    'honors the operator host-note switch on both writes for update=%s',
+    async (update) => {
+      await verifyHostNotePolicy(productTools, false, update)
+      await verifyHostNotePolicy(productTools, true, update)
+    },
+  )
+
+  it('keeps saved notification settings while changing meeting lengths', async () => {
+    const s = await setup(productTools, undefined, true)
+    const created = ok(await s.call('create_event_type', { ...createInput(), notifications }))
+    const updated = ok(
+      await s.call('update_event_type', {
+        id: created.id,
+        durationMinutes: 60,
+        allowedDurationsMinutes: [30, 60, 90],
+      }),
+    )
+    expect(updated).toHaveProperty('notifications', notifications)
+    expect(updated).toMatchObject({ durationMinutes: 60, allowedDurationsMinutes: [30, 60, 90] })
+  })
+
+  it.each([false, true])(
+    'detects removal of the tool host-note switch for update=%s',
+    async (update) => {
+      await verifyHostNotePolicy(sourceCopy(), false, update)
+      await expect(
+        verifyHostNotePolicy(
+          sourceCopy(['    followUpHostNotesEnabled,\n    now:', '    now:']),
+          false,
+          update,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
+  it.each([false, true])(
+    'detects removal of the product registry host-note switch for update=%s',
+    async (update) => {
+      await verifyHostNotePolicy(productSourceCopy(), false, update)
+      await expect(
+        verifyHostNotePolicy(
+          productSourceCopy([
+            '...eventTypeTools({ db, automaticMeet, automaticZoom, followUpHostNotesEnabled })',
+            '...eventTypeTools({ db, automaticMeet, automaticZoom })',
+          ]),
+          false,
+          update,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
 
   async function verifyCreate(factory: Factory, teamRole?: string) {
     const s = await setup(factory, teamRole)

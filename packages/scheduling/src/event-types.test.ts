@@ -11,6 +11,7 @@ import {
   listEventTypes,
   updateEventType,
 } from './event-types.ts'
+import { DEFAULT_NOTIFICATIONS } from './notification-settings.ts'
 import { createSchedule, deleteSchedule } from './schedules.ts'
 import {
   createTestTeam,
@@ -147,6 +148,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         location: null,
         successRedirect: null,
         questions: [],
+        notifications: DEFAULT_NOTIFICATIONS,
         isActive: true,
         isHidden: false,
         allowGuests: false,

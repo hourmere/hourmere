@@ -273,6 +273,7 @@ describe('CLI transport and arguments', () => {
     ['event', 'get_event_type'],
     ['create-event', 'create_event_type'],
     ['update-event', 'update_event_type'],
+    ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
     ['slots', 'find_available_slots'],

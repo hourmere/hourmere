@@ -26,6 +26,7 @@ const all = [
   'get_profile',
   'list_event_types',
   'get_event_type',
+  'set_event_type_notifications',
   'list_schedules',
   'get_schedule',
   'create_event_type',
@@ -33,7 +34,11 @@ const all = [
   'list_calendar_connections',
   'list_conference_connections',
 ]
-const configurationWrites = new Set(['create_event_type', 'update_event_type'])
+const configurationWrites = new Set([
+  'create_event_type',
+  'update_event_type',
+  'set_event_type_notifications',
+])
 const writes = new Set([
   ...configurationWrites,
   'create_booking',
@@ -41,6 +46,7 @@ const writes = new Set([
   'cancel_booking',
   'retry_conference',
   'retry_calendar_copy',
+  'set_event_type_notifications',
 ])
 const otherReads = new Set([
   'list_schedules',
@@ -352,6 +358,7 @@ describe('CLI scope parity', () => {
     ['event', 'get_event_type'],
     ['create-event', 'create_event_type'],
     ['update-event', 'update_event_type'],
+    ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
     ['slots', 'find_available_slots'],
@@ -363,7 +370,7 @@ describe('CLI scope parity', () => {
     ['retry-calendar-copy', 'retry_calendar_copy'],
   ] as const
   it.each(scopes)(
-    '%s follows all 15 network aliases and never retries a scope denial',
+    '%s follows every network alias and never retries a scope denial',
     async (scope) => {
       const target = appWith(catalog.map(probe))
       for (const [command, name] of commands) {
