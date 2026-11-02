@@ -68,6 +68,9 @@ function rest(
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
+  rest('GET', '/api/v1/book/{token}', 'booking_read', 'optional_key'),
+  rest('GET', '/api/v1/book/{token}/slots', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/bookings', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}/organization', 'session_only', 'session_only'),
@@ -207,6 +210,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'team',
   ),
   mcp('create_booking', 'booking_write', [
+    'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/public/{handle}/{slug}/bookings',
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
   ]),
@@ -222,6 +226,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     ['POST /api/v1/public/teams/{handle}/{slug}/bookings'],
     'team',
   ),
+  mcp('create_booking', 'booking_write', ['POST /api/v1/book/{token}/bookings'], 'oneTimeLink'),
   mcp('reschedule_booking', 'booking_write', [
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/manage/reschedule',

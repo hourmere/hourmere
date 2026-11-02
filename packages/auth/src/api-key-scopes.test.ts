@@ -30,6 +30,8 @@ const restContract = {
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   booking_read: [
+    'GET /api/v1/book/{token}',
+    'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
@@ -46,6 +48,7 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
     'POST /api/v1/bookings/{id}/conference/retry',
@@ -207,6 +210,15 @@ function verifyMinimalBookingReads(allows: Allows) {
   }
 }
 
+function verifyOneTimeWrites(allows: Allows) {
+  for (const id of ['POST /api/v1/book/{token}/bookings', 'mcp:create_booking:oneTimeLink']) {
+    expect(allows({ kind: 'api_key', apiKeyScope: 'read' }, id)).toBe(false)
+    for (const apiKeyScope of ['full', 'bookings'] as const) {
+      expect(allows({ kind: 'api_key', apiKeyScope }, id)).toBe(true)
+    }
+  }
+}
+
 function verifyEventTypeConfigurationScopes(operation: typeof apiKeyOperation) {
   for (const tool of ['create_event_type', 'update_event_type']) {
     expect(operation(`mcp:${tool}`)).toMatchObject({
@@ -323,6 +335,8 @@ describe('shared API-key scope policy', () => {
     }
   })
 
+  it('allows one-time consumption only as a booking write', () => verifyOneTimeWrites(apiKeyAllows))
+
   it('denies unknown operations and never matches actual paths or HTTP/MCP hints', () =>
     verifyUnknownDenied(apiKeyAllows))
   it('excludes raw configuration and integration metadata from bookings', () =>
@@ -376,6 +390,22 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key')",
+      "rest('POST', '/api/v1/book/{token}/bookings', 'booking_read', 'optional_key')",
+    ],
+    [
+      "mcp('create_booking', 'booking_write', ['POST /api/v1/book/{token}/bookings'], 'oneTimeLink')",
+      "mcp('create_booking', 'booking_read', ['POST /api/v1/book/{token}/bookings'], 'oneTimeLink')",
+    ],
+  ] as const)('kills broadened one-time consumption: %s', (before, after) => {
+    verifyOneTimeWrites(sourceCopyPolicy(undefined, sourceCopyRegistry()))
+    const mutant = sourceCopyPolicy(undefined, sourceCopyRegistry([before, after]))
+    expect(() => verifyOneTimeWrites(mutant)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
   it.each(['create_event_type', 'update_event_type'])(
     'kills classifying %s as a booking action',
     (tool) => {

@@ -6,10 +6,12 @@ import type { Database, Db, Json } from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
 import {
   eventTypeNotFound,
+  findOneTimeEventType,
   findPublicEventType,
   findPublicTeamEventType,
   findSlots,
   type Location,
+  type PublicEventTypeRecord,
   parseLocation,
   selectDurationMinutes,
   toInstant,
@@ -35,6 +37,11 @@ import {
   type NotificationSnapshot,
   notificationSnapshot,
 } from './notification-settings.ts'
+import {
+  claimOneTimeBookingLink,
+  oneTimeBookingReplayTarget,
+  resolveOneTimeBookingLink,
+} from './one-time-links.ts'
 import { type Responses, validateResponses } from './questions.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
@@ -397,8 +404,9 @@ interface IdempotencyScope {
 async function findReplay(
   db: Db,
   scope: IdempotencyScope,
+  expectedBookingId?: string | null,
 ): Promise<(BookingWithToken & { successRedirect?: BookingSuccessRedirect }) | undefined> {
-  const row = await db
+  let query = db
     .selectFrom('bookings')
     .select(['id', 'idempotency_fingerprint', 'success_redirect'])
     .where('organization_id', '=', scope.organizationId)
@@ -409,7 +417,11 @@ async function findReplay(
       scope.oauthConsentId ?? null,
     )
     .where('idempotency_key', '=', scope.key)
-    .executeTakeFirst()
+  // A null target is an intentional no-match probe, with the same SQL shape as
+  // a used-link replay. SQL equality against NULL cannot return another booking.
+  if (expectedBookingId !== undefined)
+    query = query.where('id', '=', sql<string>`${expectedBookingId}`)
+  const row = await query.executeTakeFirst()
   if (!row) return undefined
   if (!row.idempotency_fingerprint?.equals(scope.fingerprint)) {
     throw new DomainError(
@@ -925,7 +937,9 @@ export async function createPublicBooking(
   input: CreateBookingInput,
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<CreateBookingResult> {
-  return publicBooking(ctx, input, origin, findPublicEventType)
+  return publicBooking(ctx, input, origin, (db, options) =>
+    findPublicEventType(db, input.handle, input.slug, options),
+  )
 }
 
 /** Books an individual team event through the same locked transaction and idempotency path. */
@@ -934,44 +948,132 @@ export async function createPublicTeamBooking(
   input: CreateBookingInput,
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<CreateBookingResult> {
-  return publicBooking(ctx, input, origin, findPublicTeamEventType)
+  return publicBooking(ctx, input, origin, (db, options) =>
+    findPublicTeamEventType(db, input.handle, input.slug, options),
+  )
 }
 
-async function publicBooking(
-  ctx: PublicContext,
-  input: CreateBookingInput,
-  origin: BookingOrigin,
-  resolve: typeof findPublicEventType,
-): Promise<CreateBookingResult> {
-  const et = await resolve(ctx.db, input.handle, input.slug)
-  if (!et) throw eventTypeNotFound()
+export interface CreateOneTimeBookingInput extends Omit<CreateBookingInput, 'handle' | 'slug'> {
+  token: string
+}
 
-  let scope: IdempotencyScope | undefined
-  if (input.idempotencyKey !== undefined) {
-    if (!IDEMPOTENCY_KEY.test(input.idempotencyKey)) {
-      throw new DomainError(
-        'invalid',
-        'invalid_idempotency_key',
-        'Idempotency-Key must be 1 to 255 printable ASCII characters',
-      )
-    }
-    const fingerprint = sha256(
+/** A consumed link permits only an exact replay of the request that won its claim. */
+export async function createOneTimeBooking(
+  ctx: PublicContext,
+  input: CreateOneTimeBookingInput,
+  origin: BookingOrigin = BOOKING_PAGE,
+): Promise<CreateBookingResult> {
+  if (origin.source === 'embed') throw new DomainError('not_found', 'one_time_link_not_found')
+  const replay = await oneTimeBookingReplay(ctx, input, origin)
+  if (replay) return oneTimeBookingResult(replay)
+  try {
+    const link = await resolveOneTimeBookingLink(ctx, input.token)
+    const result = await publicBooking(
+      ctx,
+      input,
+      origin,
+      async (db, options) => {
+        await resolveOneTimeBookingLink({ db }, input.token)
+        return findOneTimeEventType(db, link.eventTypeId, options)
+      },
+      { id: link.id, token: input.token },
+    )
+    return oneTimeBookingResult(result)
+  } catch (error) {
+    // Consumption may commit between either read above and our locked transaction.
+    if (
+      !(error instanceof DomainError) ||
+      !['one_time_link_not_found', 'event_type_not_found'].includes(error.code)
+    )
+      throw error
+    const replay = await oneTimeBookingReplay(ctx, input, origin)
+    if (replay) return oneTimeBookingResult(replay)
+    throw new DomainError('not_found', 'one_time_link_not_found')
+  }
+}
+
+/** Saved continuations can contain reusable event addresses, including on legacy replays. */
+function oneTimeBookingResult({
+  booking,
+  manageToken,
+  replayed,
+}: CreateBookingResult): CreateBookingResult {
+  return { booking, manageToken, replayed }
+}
+
+async function oneTimeBookingReplay(
+  ctx: PublicContext,
+  input: CreateOneTimeBookingInput,
+  origin: BookingOrigin,
+): Promise<CreateBookingResult | undefined> {
+  const used = await oneTimeBookingReplayTarget(ctx, input.token)
+  const validKey = input.idempotencyKey !== undefined && IDEMPOTENCY_KEY.test(input.idempotencyKey)
+  const scope = used && validKey ? bookingIdempotency(used, input, origin, used.id) : undefined
+  // Always probe: skipping this lookup for unknown, expired or revoked links
+  // otherwise exposes the used state through a cheap query-count difference.
+  const probe = scope ?? {
+    organizationId: '00000000-0000-0000-0000-000000000000',
+    apiKeyId: origin.apiKeyId,
+    oauthConsentId: origin.oauthConsentId ?? null,
+    key: validKey ? (input.idempotencyKey as string) : '',
+    fingerprint: Buffer.alloc(32),
+  }
+  try {
+    const replay = await findReplay(ctx.db, probe, scope && used ? used.bookingId : null)
+    if (used && replay?.booking.id === used.bookingId) return { ...replay, replayed: true }
+  } catch (error) {
+    if (!(error instanceof DomainError) || error.code !== 'idempotency_key_reused') throw error
+  }
+  return undefined
+}
+
+function bookingIdempotency(
+  et: { organizationId: string; eventTypeId: string } | { organizationId: string; id: string },
+  input: Omit<CreateBookingInput, 'handle' | 'slug'>,
+  origin: BookingOrigin,
+  oneTimeLinkId?: string,
+): IdempotencyScope | undefined {
+  if (input.idempotencyKey === undefined) return undefined
+  if (!IDEMPOTENCY_KEY.test(input.idempotencyKey)) {
+    throw new DomainError(
+      'invalid',
+      'invalid_idempotency_key',
+      'Idempotency-Key must be 1 to 255 printable ASCII characters',
+    )
+  }
+  return {
+    organizationId: et.organizationId,
+    apiKeyId: origin.apiKeyId,
+    oauthConsentId: origin.oauthConsentId ?? null,
+    key: input.idempotencyKey,
+    fingerprint: sha256(
       canonicalJson({
-        eventTypeId: et.id,
+        eventTypeId: 'eventTypeId' in et ? et.eventTypeId : et.id,
+        ...(oneTimeLinkId !== undefined && { oneTimeLinkId }),
         start: input.start.toString(),
         durationMinutes: input.durationMinutes,
         invitee: input.invitee,
         guests: input.guests ?? [],
         responses: input.responses ?? {},
       }),
-    )
-    scope = {
-      organizationId: et.organizationId,
-      apiKeyId: origin.apiKeyId,
-      oauthConsentId: origin.oauthConsentId ?? null,
-      key: input.idempotencyKey,
-      fingerprint,
-    }
+    ),
+  }
+}
+
+async function publicBooking(
+  ctx: PublicContext,
+  input: Omit<CreateBookingInput, 'handle' | 'slug'>,
+  origin: BookingOrigin,
+  resolve: (db: Db, options?: { lock?: boolean }) => Promise<PublicEventTypeRecord | undefined>,
+  oneTimeLink?: { id: string; token: string },
+): Promise<CreateBookingResult> {
+  const et = await resolve(ctx.db)
+  const unavailable = () =>
+    oneTimeLink ? new DomainError('not_found', 'one_time_link_not_found') : eventTypeNotFound()
+  if (!et) throw unavailable()
+
+  const scope = bookingIdempotency(et, input, origin, oneTimeLink?.id)
+  if (scope) {
     const replay = await findReplay(ctx.db, scope)
     if (replay) return { ...replay, replayed: true }
   }
@@ -997,14 +1099,14 @@ async function publicBooking(
       }
       // The event type may have changed while we waited (duration, questions, rules), and
       // waiting took time: read both again now that the host is locked.
-      const current = await resolve(trx, input.handle, input.slug, { lock: true })
+      const current = await resolve(trx, { lock: true })
       if (!current || current.id !== et.id || current.schedulingType !== et.schedulingType) {
-        throw eventTypeNotFound()
+        throw unavailable()
       }
       if (current.hostUserIds.join() !== et.hostUserIds.join()) {
         if (current.schedulingType === 'round_robin')
           throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
-        throw eventTypeNotFound()
+        throw unavailable()
       }
       if (guests.length > 0 && !current.allowGuests) {
         throw new DomainError(
@@ -1072,7 +1174,7 @@ async function publicBooking(
           })
       }
       let settings: SuccessRedirect | null = null
-      if (origin.source === 'web' || origin.source === 'embed') {
+      if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
         try {
           settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
         } catch (error) {
@@ -1113,6 +1215,7 @@ async function publicBooking(
         attendees: [invitee, ...guests],
         notificationSnapshot: snapshot,
       })
+      if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)
       // In this transaction, and never on the replay paths: one set of emails per booking,
       // queued only if the booking commits.
       if (ctx.waitlistSecret && input.waitlistToken !== undefined) {

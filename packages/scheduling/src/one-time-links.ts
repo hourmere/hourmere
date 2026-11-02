@@ -125,9 +125,9 @@ export async function resolveOneTimeBookingLink(
   ctx: Pick<PublicContext, 'db'>,
   token: string | undefined,
 ): Promise<ResolvedOneTimeBookingLink> {
-  const row = await lookupToken(ctx.db, token)
-  if (!row || !(await publicEvent(ctx.db, row.event_type_id))) throw linkNotFound()
-  const live = await liveLink(ctx.db, row.id)
+  // Resolve eligibility in the digest lookup itself: unknown, inactive and terminal
+  // links all execute this one query rather than taking state-dependent read paths.
+  const live = await lookupToken(ctx.db, token, true)
   if (!live) throw linkNotFound()
   return {
     id: live.id,
@@ -371,31 +371,55 @@ function hashToken(token: string) {
 }
 
 /** One indexed digest lookup, followed by equal-length constant-time comparison on misses too. */
-async function lookupToken(db: Db, token: string | undefined) {
+async function lookupToken(db: Db, token: string | undefined, activePublic = false) {
   const valid = typeof token === 'string' && TOKEN.test(token)
   const hash = hashToken(valid ? token : '')
-  const row = await db
+  let query = db
     .selectFrom('one_time_booking_links')
-    .selectAll()
+    .selectAll('one_time_booking_links')
     .where('token_hash', '=', hash)
-    .executeTakeFirst()
+  if (activePublic) {
+    query = query
+      .innerJoin('event_types as event', 'event.id', 'one_time_booking_links.event_type_id')
+      .leftJoin('auth.user as owner', 'owner.id', 'event.owner_user_id')
+      .leftJoin(
+        'personal_organizations as personal',
+        'personal.organization_id',
+        'event.organization_id',
+      )
+      .leftJoin('auth.member as member', (join) =>
+        join
+          .onRef('member.organizationId', '=', 'event.organization_id')
+          .onRef('member.userId', '=', 'event.owner_user_id'),
+      )
+      .where('one_time_booking_links.state', '=', 'active')
+      .where((eb) =>
+        eb.or([
+          eb('one_time_booking_links.expires_at', 'is', null),
+          eb('one_time_booking_links.expires_at', '>', sql<Date>`clock_timestamp()`),
+        ]),
+      )
+      .where('event.is_active', '=', true)
+      .where('event.deleted_at', 'is', null)
+      .where((eb) =>
+        eb.or([eb('event.owner_user_id', 'is', null), eb('owner.emailVerified', '=', true)]),
+      )
+      .where((eb) =>
+        eb.or([
+          eb('personal.user_id', 'is', null),
+          eb('event.owner_user_id', '=', eb.ref('personal.user_id')),
+        ]),
+      )
+      .where((eb) =>
+        eb.or([eb('event.owner_user_id', 'is', null), eb('member.id', 'is not', null)]),
+      )
+  }
+  const row = await query.executeTakeFirst()
   const matches = timingSafeEqual(
     Buffer.from(hash, 'hex'),
     row ? Buffer.from(row.token_hash, 'hex') : DUMMY_HASH,
   )
   return valid && matches ? row : undefined
-}
-
-function liveLink(db: Db, id: string) {
-  return db
-    .selectFrom('one_time_booking_links')
-    .selectAll()
-    .where('id', '=', id)
-    .where('state', '=', 'active')
-    .where((eb) =>
-      eb.or([eb('expires_at', 'is', null), eb('expires_at', '>', sql<Date>`clock_timestamp()`)]),
-    )
-    .executeTakeFirst()
 }
 
 function toLink(row: LinkRow, expired: boolean): OneTimeBookingLink {
@@ -412,6 +436,22 @@ function toLink(row: LinkRow, expired: boolean): OneTimeBookingLink {
     revokedAt: row.revoked_at === null ? null : timestamp(row.revoked_at),
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
+  }
+}
+
+/** Internal replay lookup: a used credential may only retrieve its own winning request. */
+export async function oneTimeBookingReplayTarget(
+  ctx: Pick<PublicContext, 'db'>,
+  token: string | undefined,
+): Promise<(ResolvedOneTimeBookingLink & { bookingId: string }) | undefined> {
+  const row = await lookupToken(ctx.db, token)
+  if (row?.state !== 'used' || row.booking_id === null) return undefined
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    eventTypeId: row.event_type_id,
+    prefill: { name: row.prefill_name, email: row.prefill_email },
+    bookingId: row.booking_id,
   }
 }
 

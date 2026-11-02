@@ -13,6 +13,7 @@ export type ManagedBooking = Schemas['ManagedBooking']
 export type BookingWithToken = Schemas['BookingWithToken']
 export type PublicBookingResult = Schemas['PublicBookingResult']
 export type CreateBooking = Schemas['CreateBooking']
+export type OneTimeBookingPage = Schemas['OneTimeBookingPage']
 
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
 export class PublicRequestError extends RequestError {
@@ -42,6 +43,7 @@ function retryAfterOf(response: Response): number | undefined {
 async function call<T>(
   request: () => Promise<{ data?: T; error?: unknown; response: Response }>,
   signal?: AbortSignal,
+  privateResponse = false,
 ): Promise<{ data: T; status: number }> {
   let result: { data?: T; error?: unknown; response: Response }
   try {
@@ -52,7 +54,14 @@ async function call<T>(
   }
   const { data, error, response } = result
   if (!response.ok) {
-    throw new PublicRequestError(requestError(response.status, error), retryAfterOf(response))
+    // Capability requests never reflect server prose, including an accidentally echoed URL.
+    const safeError =
+      privateResponse && error && typeof error === 'object' && 'error' in error
+        ? { error: error.error }
+        : privateResponse
+          ? undefined
+          : error
+    throw new PublicRequestError(requestError(response.status, safeError), retryAfterOf(response))
   }
   return { data: data as T, status: response.status }
 }
@@ -96,6 +105,51 @@ export async function getEventType(
     signal,
   )
   return data
+}
+
+/** Bearer capabilities belong only in the path, never query parameters or request bodies. */
+export async function getOneTimeBookingPage(
+  token: string,
+  signal: AbortSignal,
+): Promise<OneTimeBookingPage> {
+  const { data } = await call(
+    () => api.GET('/api/v1/book/{token}', { params: { path: { token } }, signal }),
+    signal,
+    true,
+  )
+  return data
+}
+
+export function oneTimeLinkSlots(token: string, durationMinutes?: number): SlotLoader {
+  return async (start, end, signal) => {
+    const { data } = await call(
+      () =>
+        api.GET('/api/v1/book/{token}/slots', {
+          params: { path: { token }, query: { start, end, durationMinutes } },
+          signal,
+        }),
+      signal,
+      true,
+    )
+    return data.data
+  }
+}
+
+export async function createOneTimeLinkBooking(
+  token: string,
+  body: CreateBooking,
+  idempotencyKey: string,
+): Promise<{ result: PublicBookingResult; replayed: boolean }> {
+  const { data, status } = await call(
+    () =>
+      api.POST('/api/v1/book/{token}/bookings', {
+        params: { path: { token }, header: { 'idempotency-key': idempotencyKey } },
+        body,
+      }),
+    undefined,
+    true,
+  )
+  return { result: data, replayed: status === 200 }
 }
 
 /** Loads the slots that lie fully inside [start, end] (ISO instants). */

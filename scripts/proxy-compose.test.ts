@@ -201,10 +201,10 @@ it('routes the complete public HTTPS origin with Caddy forwarding defaults', () 
     .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
     .join('\n')
   expect(active).toBe(
-    String.raw`{
+    `{
 	log default {
 		format filter {
-			request>uri regexp "\?.*$" "?REDACTED"
+			request>uri replace "REDACTED"
 			request>headers delete
 		}
 	}
@@ -213,4 +213,55 @@ it('routes the complete public HTTPS origin with Caddy forwarding defaults', () 
 	reverse_proxy app:3000
 }`,
   )
+})
+
+/** Evaluate the URI filter in an isolated configuration copy. */
+function filterUri(source: string, uri: string): string {
+  if (source.includes('request>uri replace "REDACTED"')) return 'REDACTED'
+  const rule = source.match(/request>uri regexp "([^"]*)" "([^"]*)"/)
+  if (!rule) return uri
+  return uri.replace(new RegExp(rule[1] ?? ''), rule[2] ?? '')
+}
+
+function verifyCapabilityLogFilter(source: string) {
+  const token = 'synthetic-path-capability'
+  for (const prefix of [
+    '/book/',
+    '/api/v1/book/',
+    '/embed/book/',
+    '/BOOK/',
+    '/%62ook/',
+    '/api/v1/%62ook/',
+    '/api/v1/b%6fok/',
+    '/book%2f',
+  ]) {
+    for (const suffix of ['', '/slots', '/bookings', '?start=private-query']) {
+      const filtered = filterUri(source, `${prefix}${token}${suffix}`)
+      expect(filtered.includes(token)).toBe(false)
+      expect(filtered.includes('private-query')).toBe(false)
+      expect(filtered).toBe('REDACTED')
+    }
+  }
+  expect(filterUri(source, '/sign-in/confirm?token=private-query')).toBe('REDACTED')
+  expect(filterUri(source, '/api/health')).toBe('REDACTED')
+}
+
+it('redacts path capabilities as well as queries in proxy upstream-error logs', () => {
+  verifyCapabilityLogFilter(caddy)
+})
+
+it('detects restoring the old query-only proxy log filter', () => {
+  const mutant = caddy.replace(
+    /request>uri [^\n]+/,
+    String.raw`request>uri regexp "\?.*$" "?REDACTED"`,
+  )
+  expect(mutant === caddy).toBe(false)
+  let failure: unknown
+  try {
+    verifyCapabilityLogFilter(mutant)
+  } catch (error) {
+    failure = error
+  }
+  expect(failure).toMatchObject({ name: 'AssertionError' })
+  verifyCapabilityLogFilter(caddy)
 })

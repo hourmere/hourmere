@@ -141,8 +141,10 @@ network or another deployment, change all three values (`PROXY_SUBNET`, `PROXY_I
 `PROXY_DYNAMIC_RANGE`) in `.env` before starting. Choose a free private subnet, a dynamic
 range inside it and a free usable proxy address outside that dynamic range. Caddy's
 certificates and state persist in `caddy-data` and `caddy-config` volumes. Caddy's global log
-filter replaces query strings with `?REDACTED` and deletes request headers, including on
-upstream errors; retain this filter when customizing the Caddyfile.
+filter replaces the complete request URI with `REDACTED` and deletes request
+headers, including on upstream errors. This also protects encoded capability paths
+and query strings. Retain this filter when customizing the Caddyfile; configure the
+same URI and header protections on any existing proxy.
 
 If you already operate a proxy, select `plain` during setup. This selects only
 [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml), which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains

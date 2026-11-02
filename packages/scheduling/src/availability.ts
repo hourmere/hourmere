@@ -29,6 +29,7 @@ import {
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
+import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import type { SuccessRedirect } from './success-redirect.ts'
@@ -147,6 +148,14 @@ export async function findPublicEventType(
   const h = servedHandle(handle)
   const s = slug.toLowerCase()
   if (h === undefined || !SLUG.test(s)) return undefined
+  return findPersonalEventType(db, { handle: h, slug: s }, options)
+}
+
+async function findPersonalEventType(
+  db: Db,
+  identity: { handle: string; slug: string } | { id: string },
+  options: { lock?: boolean } = {},
+): Promise<PublicEventTypeRecord | undefined> {
   let query = db
     .selectFrom('profiles as p')
     .innerJoin('auth.user as u', 'u.id', 'p.user_id')
@@ -176,14 +185,23 @@ export async function findPublicEventType(
       'u.name',
       'u.image',
     ])
-    .where('p.handle', '=', h)
-    .where('et.slug', '=', s)
     .where('et.is_active', '=', true)
     .where('et.deleted_at', 'is', null)
+  if ('id' in identity) query = query.where('et.id', '=', identity.id)
+  else query = query.where('p.handle', '=', identity.handle).where('et.slug', '=', identity.slug)
   // Serialize host settings changes with approval of a new booking.
   if (options.lock) query = query.forShare('et')
   const row = await query.executeTakeFirst()
   if (!row) return undefined
+  if ('id' in identity) {
+    if (servedHandle(row.handle) === undefined) return undefined
+    try {
+      await assertHosts(db, row.organization_id, [row.user_id], options.lock)
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'invalid_hosts') return undefined
+      throw error
+    }
+  }
   const image = publicAvatarImage(row.image)
   return {
     id: row.id,
@@ -228,16 +246,22 @@ export async function findPublicTeamEventType(
 ): Promise<PublicEventTypeRecord | undefined> {
   const s = slug.toLowerCase()
   if (!isPublicTeamSlug(teamSlug) || !SLUG.test(s)) return undefined
+  return findTeamEventType(db, { teamSlug, slug: s }, options)
+}
+
+async function findTeamEventType(
+  db: Db,
+  identity: { teamSlug: string; slug: string } | { id: string },
+  options: { lock?: boolean } = {},
+): Promise<PublicEventTypeRecord | undefined> {
   let query = db
     .selectFrom('auth.organization as o')
     .innerJoin('event_types as et', 'et.organization_id', 'o.id')
     .selectAll('et')
     .select(['o.slug as team_slug', 'o.name as team_name'])
-    .where('o.slug', '=', teamSlug)
     .where('o.id', 'not in', (eb) =>
       eb.selectFrom('personal_organizations').select('organization_id'),
     )
-    .where('et.slug', '=', s)
     .where('et.owner_user_id', 'is', null)
     .where('et.is_active', '=', true)
     .where('et.deleted_at', 'is', null)
@@ -256,6 +280,8 @@ export async function findPublicTeamEventType(
         ]),
       ]),
     )
+  if ('id' in identity) query = query.where('et.id', '=', identity.id)
+  else query = query.where('o.slug', '=', identity.teamSlug).where('et.slug', '=', identity.slug)
   if (options.lock) query = query.forShare('et')
   const row = await query.executeTakeFirst()
   if (!row) return undefined
@@ -340,6 +366,64 @@ export async function findPublicTeamEventType(
       row.scheduling_type === 'round_robin' ? row.team_name : views.map((h) => h.name).join(', '),
     hostTimeZone: views[0]?.timeZone ?? 'UTC',
     team: { name: row.team_name, slug: row.team_slug },
+  }
+}
+
+/** Resolve by capability-bound identity, without requiring a public catalog address. */
+export async function findOneTimeEventType(
+  db: Db,
+  eventTypeId: string,
+  options: { lock?: boolean } = {},
+): Promise<PublicEventTypeRecord | undefined> {
+  const event = await db
+    .selectFrom('event_types')
+    .select('owner_user_id')
+    .where('id', '=', eventTypeId)
+    .executeTakeFirst()
+  if (!event) return undefined
+  return event.owner_user_id === null
+    ? findTeamEventType(db, { id: eventTypeId }, options)
+    : findPersonalEventType(db, { id: eventTypeId }, options)
+}
+
+/** Presentation only: no reusable personal or team booking address. */
+export interface OneTimeEventType
+  extends Omit<PublicEventType, 'handle' | 'slug' | 'team' | 'allowEmbedParentRedirect'> {
+  team?: { name: string }
+}
+
+export interface OneTimeBookingPage {
+  eventType: OneTimeEventType
+  prefill: OneTimeBookingLinkPrefill
+}
+
+export async function getOneTimeBookingPage(
+  ctx: PublicContext,
+  token: string | undefined,
+): Promise<OneTimeBookingPage> {
+  const link = await resolveOneTimeBookingLink(ctx, token)
+  const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
+  if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
+  const page = publicEventType(eventType)
+  // Keep this projection explicit: additions to the reusable public page must not
+  // silently expose an address or navigation capability to one-time recipients.
+  return {
+    eventType: {
+      title: page.title,
+      description: page.description,
+      durationMinutes: page.durationMinutes,
+      ...(page.allowedDurationsMinutes && {
+        allowedDurationsMinutes: page.allowedDurationsMinutes,
+      }),
+      location: page.location,
+      questions: page.questions,
+      allowGuests: page.allowGuests,
+      host: page.host,
+      ...(page.hosts && { hosts: page.hosts }),
+      ...(page.schedulingType && { schedulingType: page.schedulingType }),
+      ...(page.team && { team: { name: page.team.name } }),
+    },
+    prefill: link.prefill,
   }
 }
 
@@ -584,6 +668,30 @@ async function publicSlots(
   checkSlotRange(input.start, input.end)
   const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
+  return eventSlots(ctx, input, et)
+}
+
+export async function listOneTimeBookingSlots(
+  ctx: PublicContext,
+  input: {
+    token: string
+    start: Temporal.Instant
+    end: Temporal.Instant
+    durationMinutes?: number
+  },
+): Promise<SlotView[]> {
+  const link = await resolveOneTimeBookingLink(ctx, input.token)
+  const et = await findOneTimeEventType(ctx.db, link.eventTypeId)
+  if (!et) throw new DomainError('not_found', 'one_time_link_not_found')
+  checkSlotRange(input.start, input.end)
+  return eventSlots(ctx, input, et)
+}
+
+async function eventSlots(
+  ctx: PublicContext,
+  input: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
+  et: PublicEventTypeRecord,
+): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
   if (automaticZoom(et.location)) {

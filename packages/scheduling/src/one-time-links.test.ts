@@ -1350,7 +1350,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
 
   it('detects removed terminal-state resolution filtering with a real assertion failure', async () => {
     await mutation(
-      [".where('id', '=', id)\n    .where('state', '=', 'active')", ".where('id', '=', id)"],
+      [".where('one_time_booking_links.state', '=', 'active')", ''],
       async (module) => {
         const s = await setup()
         const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
@@ -1365,8 +1365,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
   it('detects removed resolution expiry filtering with a real assertion failure', async () => {
     await mutation(
       [
-        ".where('id', '=', id)\n    .where('state', '=', 'active')\n    .where((eb) =>\n      eb.or([eb('expires_at', 'is', null), eb('expires_at', '>', sql<Date>`clock_timestamp()`)]),\n    )",
-        ".where('id', '=', id)\n    .where('state', '=', 'active')",
+        ".where((eb) =>\n        eb.or([\n          eb('one_time_booking_links.expires_at', 'is', null),\n          eb('one_time_booking_links.expires_at', '>', sql<Date>`clock_timestamp()`),\n        ]),\n      )",
+        '',
       ],
       async (module) => {
         const s = await setup()
@@ -1425,66 +1425,48 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
   })
 
   it('detects inactive-event resolution with a real assertion failure', async () => {
-    await mutation(
-      [
-        'if (!event?.is_active || event.deleted_at !== null) return false',
-        'if (!event) return false',
-      ],
-      async (module) => {
-        const s = await setup()
-        const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-        await db
-          .updateTable('event_types')
-          .set({ is_active: false })
-          .where('id', '=', s.eventTypeId)
-          .execute()
-        expect(
-          await failure(() => module.resolveOneTimeBookingLink({ db }, link.token)),
-        ).toMatchObject({ code: 'one_time_link_not_found' })
-      },
-    )
+    await mutation([".where('event.is_active', '=', true)", ''], async (module) => {
+      const s = await setup()
+      const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+      await db
+        .updateTable('event_types')
+        .set({ is_active: false })
+        .where('id', '=', s.eventTypeId)
+        .execute()
+      expect(
+        await failure(() => module.resolveOneTimeBookingLink({ db }, link.token)),
+      ).toMatchObject({ code: 'one_time_link_not_found' })
+    })
   })
 
   it('detects departed-owner resolution with a real assertion failure', async () => {
-    await mutation(
-      [
-        'if (!(await memberQuery.executeTakeFirst())) return false',
-        'await memberQuery.executeTakeFirst()',
-      ],
-      async (module) => {
-        const s = await setup()
-        const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-        await db
-          .deleteFrom('auth.member')
-          .where('organizationId', '=', s.organizationId)
-          .where('userId', '=', s.user.id)
-          .execute()
-        expect(
-          await failure(() => module.resolveOneTimeBookingLink({ db }, link.token)),
-        ).toMatchObject({ code: 'one_time_link_not_found' })
-      },
-    )
+    await mutation(["eb('member.id', 'is not', null)", 'eb.val(true)'], async (module) => {
+      const s = await setup()
+      const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+      await db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', s.organizationId)
+        .where('userId', '=', s.user.id)
+        .execute()
+      expect(
+        await failure(() => module.resolveOneTimeBookingLink({ db }, link.token)),
+      ).toMatchObject({ code: 'one_time_link_not_found' })
+    })
   })
 
   it('detects unverified-owner resolution with a real assertion failure', async () => {
-    await mutation(
-      [
-        'if (!(await ownerQuery.executeTakeFirst())?.emailVerified) return false',
-        'await ownerQuery.executeTakeFirst()',
-      ],
-      async (module) => {
-        const s = await setup()
-        const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-        await db
-          .updateTable('auth.user')
-          .set({ emailVerified: false })
-          .where('id', '=', s.user.id)
-          .execute()
-        expect(
-          await failure(() => module.resolveOneTimeBookingLink({ db }, link.token)),
-        ).toMatchObject({ code: 'one_time_link_not_found' })
-      },
-    )
+    await mutation(["eb('owner.emailVerified', '=', true)", 'eb.val(true)'], async (module) => {
+      const s = await setup()
+      const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+      await db
+        .updateTable('auth.user')
+        .set({ emailVerified: false })
+        .where('id', '=', s.user.id)
+        .execute()
+      expect(
+        await failure(() => module.resolveOneTimeBookingLink({ db }, link.token)),
+      ).toMatchObject({ code: 'one_time_link_not_found' })
+    })
   })
 
   it('detects removed current actor verification with a real assertion failure', async () => {

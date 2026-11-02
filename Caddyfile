@@ -1,9 +1,9 @@
-# Upstream failures use Caddy's global logger too: never record email-link query
-# tokens or capability-bearing request headers such as X-Manage-Token.
+# Upstream failures use Caddy's global logger too. Omit the complete URI (including
+# encoded capability paths and queries) and all capability-bearing request headers.
 {
 	log default {
 		format filter {
-			request>uri regexp "\?.*$" "?REDACTED"
+			request>uri replace "REDACTED"
 			request>headers delete
 		}
 	}
