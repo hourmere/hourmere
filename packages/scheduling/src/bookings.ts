@@ -75,7 +75,7 @@ export interface Booking {
   responses: Responses
   /** The invitee first, then guests. */
   attendees: Attendee[]
-  /** Authenticated host reads only: the other booked hosts' names, with no private identity. */
+  /** Authenticated host reads only: verified current co-host names; empty means unavailable. */
   coHosts?: { name: string }[]
   /** The booking this one replaced when it was rescheduled. */
   rescheduledFromId: string | null
@@ -502,7 +502,13 @@ async function toBookings(
   if (host) {
     const otherHosts = await db
       .selectFrom('booking_hosts as h')
+      .innerJoin('bookings as co_booking', 'co_booking.id', 'h.booking_id')
       .innerJoin('auth.user as u', 'u.id', 'h.user_id')
+      .innerJoin('auth.member as co_member', (join) =>
+        join
+          .onRef('co_member.userId', '=', 'h.user_id')
+          .onRef('co_member.organizationId', '=', 'co_booking.organization_id'),
+      )
       .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
       .select(['h.booking_id', 'u.name', 'p.handle'])
       .where(
@@ -511,6 +517,7 @@ async function toBookings(
         rows.map((row) => row.id),
       )
       .where('h.user_id', '!=', host.userId)
+      .where('u.emailVerified', '=', true)
       .orderBy('h.user_id')
       .execute()
     for (const other of otherHosts) {

@@ -10,7 +10,7 @@ const now = Temporal.Instant.from('2026-11-01T12:00Z')
 const languages = [
   ['en', 'Liam LA and Berta Berlin', 'Co-hosts'],
   ['zh-CN', 'Liam LA和Berta Berlin', '共同主持人'],
-  ['de', 'Liam LA und Berta Berlin', 'Weitere Gastgeber'],
+  ['de', 'Liam LA und Berta Berlin', 'Weitere gastgebende Personen'],
   ['fr', 'Liam LA et Berta Berlin', 'Autres hôtes'],
   ['es', 'Liam LA y Berta Berlin', 'Otros anfitriones'],
   ['pt-BR', 'Liam LA e Berta Berlin', 'Outros anfitriões'],
@@ -106,6 +106,8 @@ describe.skipIf(!process.env.DATABASE_URL)('collective booking notification deli
       await sendBookingNotification(deps, moved, 'cancelled')
       expect(sent).toHaveLength(12)
       for (const message of sent) {
+        expect(message.text).not.toContain(first.organizationId)
+        expect(message.html).not.toContain(first.organizationId)
         if (message.to === 'ivy@example.test') {
           expect(message.subject).toContain(names)
           expect(message.text).toContain(names)
@@ -121,7 +123,8 @@ describe.skipIf(!process.env.DATABASE_URL)('collective booking notification deli
           expect(message.text).not.toContain(`liam-${liam}@example.test`)
           expect(message.text).not.toContain(`berta-${berta}@example.test`)
           expect(message.replyTo).toEqual({ name: 'Ivy Invitee', email: 'ivy@example.test' })
-          expect(message.text).toContain(`organizationId=${first.organizationId}`)
+          expect(message.text).not.toContain('organizationId=')
+          expect(message.html).not.toContain('organizationId=')
         }
         if (message.attachments?.length) {
           const component = event(message)

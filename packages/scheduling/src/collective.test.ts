@@ -119,6 +119,61 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
     ).toBe('booking_not_found')
   })
 
+  it('keeps unnamed co-hosts neutral and falls back to a handle without disclosing an email', async () => {
+    const s = await setup(3)
+    const result = await booking(s)
+    const unnamed = required(s.users[1])
+    const handled = required(s.users[2])
+    await db
+      .updateTable('auth.user')
+      .set({ name: '  ' })
+      .where('id', 'in', [unnamed.id, handled.id])
+      .execute()
+    const handle = `co-host-${randomUUID().slice(0, 8)}`
+    await db
+      .insertInto('profiles')
+      .values({ user_id: handled.id, handle, time_zone: 'UTC' })
+      .execute()
+    const expected = [
+      { id: unnamed.id, name: '' },
+      { id: handled.id, name: handle },
+    ]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map(({ name }) => ({ name }))
+    for (const current of [
+      await getHostBooking(s.ctx, result.booking.id),
+      (await listHostBookings(s.ctx)).data[0],
+    ]) {
+      expect(current?.coHosts).toEqual(expected)
+      expect(JSON.stringify(current?.coHosts)).not.toContain(unnamed.email)
+      expect(JSON.stringify(current?.coHosts)).not.toContain(handled.email)
+    }
+  })
+
+  it('omits departed and unverified co-hosts consistently from detail and list reads', async () => {
+    const s = await setup(4)
+    const result = await booking(s)
+    const current = required(s.users[1])
+    const departed = required(s.users[2])
+    const unverified = required(s.users[3])
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', s.team.id)
+      .where('userId', '=', departed.id)
+      .execute()
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', unverified.id)
+      .execute()
+    for (const read of [
+      await getHostBooking(s.ctx, result.booking.id),
+      (await listHostBookings(s.ctx)).data[0],
+    ]) {
+      expect(read?.coHosts).toEqual([{ name: current.name }])
+    }
+  })
+
   it('omits co-host metadata for a single-host booking', async () => {
     const user = await createTestUser(db, 'Solo host')
     const f = createFixtures(db)

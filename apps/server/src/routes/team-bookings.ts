@@ -2,6 +2,7 @@ import { createRoute, z } from '@hono/zod-openapi'
 import {
   type BookingNotifier,
   cancelTeamAdminBooking,
+  getTeamAdminBooking,
   listTeamAdminBookings,
   TeamAdminBookingListItemSchema,
   TeamAdminBookingListPageSchema,
@@ -97,6 +98,38 @@ export function teamBookingRoutes(
         })
         return c.json(page, 200)
       },
+    )
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/team/bookings/{id}',
+        summary: "A booking of the session's current team",
+        description:
+          'Requires a current verified team owner/admin browser session without Authorization. Returns only the team-administration field whitelist, with no private host detail or conference links. Missing bookings and bookings in another space receive the same 404 booking_not_found. Optional X-Expected-Organization-Id binds the read to the team where the page opened, using the same current-team protection as the list.',
+        tags: ['Team bookings'],
+        security: [{ session: [] }],
+        middleware: access.middleware,
+        request: {
+          params: z.object({ id: z.uuid() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional(),
+          }),
+        },
+        responses: {
+          200: { description: 'The team booking', content: json(TeamAdminBooking) },
+          ...errorResponses({
+            400: 'Invalid parameters (invalid_request)',
+            403: 'team_management_access_denied: requires a current team owner/admin session without Authorization',
+            404: 'booking_not_found: booking not found in this team',
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getTeamAdminBooking(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          200,
+        ),
     )
     app.openapi(
       createRoute({

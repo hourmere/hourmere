@@ -56,6 +56,7 @@ const restContract = {
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
   ],
   session_only: [
+    'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
     'POST /api/v1/calendar-connections/microsoft/authorize',
@@ -72,6 +73,7 @@ const restContract = {
     'POST /api/v1/mcp-oauth/select',
     'GET /api/v1/readiness/self',
     'GET /api/v1/team/bookings',
+    'GET /api/v1/team/bookings/{id}',
     'POST /api/v1/team/bookings/{id}/cancel',
     'GET /api/v1/team/invitations',
     'GET /api/v1/team/invitations/{invitationId}',

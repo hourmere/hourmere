@@ -34,7 +34,7 @@ const otherTeam: Me = {
   },
 }
 const detail = `/app/bookings/${BOOKING_ID}`
-const emailLink = `${detail}?organizationId=${team.organization.id}`
+const emailLink = detail
 const coHosts = [{ name: 'Berta Berlin' }, { name: 'Theo Tokyo' }]
 
 function server(initial: Me, extra: Routes = {}, member = true) {
@@ -52,6 +52,10 @@ function server(initial: Me, extra: Routes = {}, member = true) {
       active = target === null ? ME : target === team.organization.id ? team : otherTeam
       return json(200, active.organization.personal ? null : active.organization)
     },
+    [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () =>
+      member
+        ? json(200, { organizationId: team.organization.id, access: 'host' })
+        : json(404, { error: 'booking_not_found' }),
     [`GET /api/v1/bookings/${BOOKING_ID}`]: () =>
       active.organization.id === team.organization.id
         ? json(200, booking({ eventTypeId: null, coHosts }))
@@ -75,10 +79,130 @@ describe('host booking mail links', () => {
     const change = api.to('POST /api/auth/organization/set-active')[0]
     expect(change?.body).toEqual({ organizationId: team.organization.id })
     expect(change?.headers.get('X-Expected-Organization-Id')).toBe(initial.organization.id)
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
+    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(2)
     expect(screen.getByTestId('location').textContent).toBe(detail)
     expect(screen.queryByRole('heading', { name: 'Booking not found' })).toBeNull()
     expect(screen.getByRole('button', { name: /^Switch space Meeting team/ })).toBeDefined()
+  })
+
+  it.each([200, 500])(
+    'opens the limited team detail after a committed admin switch returns %s',
+    async (status) => {
+      const api = server(ME, {
+        'POST /api/auth/organization/set-active': ({ body }) => {
+          const target = (body as { organizationId: string }).organizationId
+          if (target !== team.organization.id) {
+            api.switchServer(otherTeam)
+            return json(200, otherTeam.organization)
+          }
+          api.switchServer(team)
+          return json(status, status === 200 ? team.organization : { error: 'unknown' })
+        },
+        [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(404, { error: 'booking_not_found' }),
+        [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () =>
+          json(200, { organizationId: team.organization.id, access: 'team_admin' }),
+        [`GET /api/v1/team/bookings/${BOOKING_ID}`]: () =>
+          json(200, {
+            id: BOOKING_ID,
+            start: '2026-12-01T09:00:00Z',
+            end: '2026-12-01T09:30:00Z',
+            status: 'confirmed',
+            cancelledAt: null,
+            isRescheduled: false,
+            eventType: { id: BOOKING_ID, title: 'Team intro', publicBookingPath: null },
+            hosts: [
+              { userId: ME.user.id, name: 'Berta Berlin', timeZone: 'UTC', isCurrentMember: true },
+            ],
+            attendees: [
+              { name: 'Ivy', email: 'ivy@example.test', timeZone: 'UTC', isBooker: true },
+            ],
+          }),
+      })
+      renderApp(emailLink)
+      await screen.findByRole('region', { name: 'Team booking details' })
+      expect(api.active().organization.id).toBe(team.organization.id)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+      expect(
+        api
+          .to(`GET /api/v1/team/bookings/${BOOKING_ID}`)[0]
+          ?.headers.get('X-Expected-Organization-Id'),
+      ).toBe(team.organization.id)
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(status === 200 ? 1 : 2)
+      expect(screen.queryByRole('button', { name: 'Reschedule…' })).toBeNull()
+      expect(screen.getByTestId('location').textContent).toBe(detail)
+      await userEvent.click(screen.getByRole('button', { name: /^Switch space Meeting team/ }))
+      await userEvent.click(await screen.findByRole('menuitemradio', { name: /^Other team/ }))
+      await screen.findByRole('heading', { name: 'Booking not found' })
+      expect(api.active().organization.id).toBe(otherTeam.organization.id)
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}/organization`)).toHaveLength(1)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(2)
+    },
+  )
+
+  it.each([ME, team])(
+    'keeps a later deliberate space switch after opening from $organization.name',
+    async (initial) => {
+      const api = server(initial)
+      renderApp(emailLink)
+      await screen.findByRole('region', { name: 'People' })
+      await userEvent.click(screen.getByRole('button', { name: /^Switch space Meeting team/ }))
+      await userEvent.click(await screen.findByRole('menuitemradio', { name: /^Other team/ }))
+      await screen.findByRole('heading', { name: 'Booking not found' })
+      expect(screen.getByRole('button', { name: /^Switch space Other team/ })).toBeDefined()
+      expect(api.active().organization.id).toBe(otherTeam.organization.id)
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}/organization`)).toHaveLength(
+        initial === ME ? 1 : 0,
+      )
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(initial === ME ? 2 : 1)
+    },
+  )
+
+  it('starts a new resolution when navigating to another booking', async () => {
+    const previous = 'b0000000-0000-7000-8000-000000000002'
+    const api = server(ME, {
+      [`GET /api/v1/bookings/${BOOKING_ID}`]: () =>
+        api.active().organization.id === team.organization.id
+          ? json(200, booking({ eventTypeId: null, rescheduledFromId: previous }))
+          : json(404, { error: 'booking_not_found' }),
+      [`GET /api/v1/bookings/${previous}/organization`]: () =>
+        json(200, { organizationId: ME.organization.id, access: 'host' }),
+      [`GET /api/v1/bookings/${previous}`]: () =>
+        api.active().organization.personal
+          ? json(200, booking({ id: previous, eventTypeId: null }))
+          : json(404, { error: 'booking_not_found' }),
+    })
+    renderApp(detail)
+    await userEvent.click(await screen.findByRole('link', { name: 'an earlier booking' }))
+    await screen.findByRole('region', { name: 'People' })
+    expect(api.active().organization.id).toBe(ME.organization.id)
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(2)
+    expect(screen.getByTestId('location').textContent).toBe(`/app/bookings/${previous}`)
+  })
+
+  it('does not navigate back after leaving during same-space administrator resolution', async () => {
+    const pending = later()
+    const api = server(team, {
+      [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(404, { error: 'booking_not_found' }),
+      [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () => pending.response,
+      'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+    })
+    renderApp(detail)
+    await waitFor(() =>
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}/organization`)).toHaveLength(1),
+    )
+    await userEvent.click(screen.getByRole('link', { name: 'Bookings' }))
+    await screen.findByText('No upcoming bookings.')
+    await pending.answer(json(200, { organizationId: team.organization.id, access: 'team_admin' }))
+    expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+  })
+
+  it('ignores a crafted organization query when the caller cannot see the booking', async () => {
+    const api = server(ME, {}, false)
+    renderApp(`${detail}?organizationId=${otherTeam.organization.id}`)
+    await screen.findByRole('heading', { name: 'Booking not found' })
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+    expect(api.active().organization.id).toBe(ME.organization.id)
   })
 
   it('does not repeat the handoff when already in the linked space', async () => {
@@ -91,9 +215,14 @@ describe('host booking mail links', () => {
 
   it('opens a personal booking link from a team through the personal context', async () => {
     const api = server(team, {
-      [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(200, booking({ eventTypeId: null })),
+      [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () =>
+        json(200, { organizationId: ME.personalOrganizationId, access: 'host' }),
+      [`GET /api/v1/bookings/${BOOKING_ID}`]: () =>
+        api.active().organization.personal
+          ? json(200, booking({ eventTypeId: null }))
+          : json(404, { error: 'booking_not_found' }),
     })
-    renderApp(`${detail}?organizationId=${ME.personalOrganizationId}`)
+    renderApp(detail)
     await screen.findByRole('region', { name: 'People' })
     expect(api.to('POST /api/auth/organization/set-active')[0]?.body).toEqual({
       organizationId: null,
@@ -101,7 +230,7 @@ describe('host booking mail links', () => {
     expect(api.active().organization.id).toBe(ME.personalOrganizationId)
   })
 
-  it('keeps the same missing response for a non-member without switching or reading bookings', async () => {
+  it('keeps the same missing response for a non-member without switching', async () => {
     const api = server(otherTeam, {}, false)
     renderApp(emailLink)
     await screen.findByRole('heading', { name: 'Booking not found' })
@@ -109,7 +238,7 @@ describe('host booking mail links', () => {
       screen.getByText('This booking does not exist, or it is not one of yours.'),
     ).toBeDefined()
     expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(0)
+    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
     expect(api.active().organization.id).toBe(otherTeam.organization.id)
     expect(screen.queryByText('Berta Berlin')).toBeNull()
   })
@@ -117,27 +246,32 @@ describe('host booking mail links', () => {
   it('keeps the same missing response for a team member who does not host the booking', async () => {
     const api = server(ME, {
       [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(404, { error: 'booking_not_found' }),
+      [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () =>
+        json(404, { error: 'booking_not_found' }),
     })
     renderApp(emailLink)
     await screen.findByRole('heading', { name: 'Booking not found' })
     expect(
       screen.getByText('This booking does not exist, or it is not one of yours.'),
     ).toBeDefined()
-    expect(api.active().organization.id).toBe(team.organization.id)
+    expect(api.active().organization.id).toBe(ME.organization.id)
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
     expect(screen.queryByRole('region', { name: 'People' })).toBeNull()
   })
 
-  it('does not switch after the link page has been left while memberships load', async () => {
-    const memberships = later()
+  it('does not switch after the link page has been left while access resolves', async () => {
+    const resolution = later()
     const api = server(ME, {
-      'GET /api/auth/organization/list': () => memberships.response,
+      [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () => resolution.response,
       'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
     })
     renderApp(emailLink)
-    await waitFor(() => expect(api.to('GET /api/auth/organization/list').length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}/organization`).length).toBeGreaterThan(0),
+    )
     await userEvent.click(screen.getByRole('link', { name: 'Bookings' }))
     await screen.findByText('No upcoming bookings.')
-    await memberships.answer(json(200, [team.organization]))
+    await resolution.answer(json(200, { organizationId: team.organization.id, access: 'host' }))
     expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
     expect(api.active().organization.id).toBe(ME.organization.id)
   })
@@ -147,10 +281,10 @@ describe('host booking mail links', () => {
     const api = server(ME, { 'POST /api/auth/organization/set-active': () => switched.response })
     renderApp(emailLink)
     await waitFor(() => expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1))
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(0)
+    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
     await switched.answer(json(403, { code: 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' }))
     await screen.findByRole('heading', { name: 'Booking not found' })
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(0)
+    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
   })
 
   it.each([200, 500])(
@@ -190,7 +324,7 @@ describe('host booking mail links', () => {
       await pending.answer(json(status, status === 200 ? team.organization : { error: 'unknown' }))
       await screen.findByRole('button', { name: /^Switch space Meeting team/ })
       expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
-      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(0)
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
       expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
     },
   )
@@ -209,7 +343,7 @@ describe('host booking mail links', () => {
     await confirmation.answer(json(200, team))
     await screen.findByRole('button', { name: /^Switch space Meeting team/ })
     expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(0)
+    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
   })
 
   it('keeps a newer deliberate space switch when a previous link handoff finishes late', async () => {
@@ -242,9 +376,9 @@ describe('host booking mail links', () => {
       'POST /api/auth/organization/set-active': () => json(200, team.organization),
     })
     renderApp(emailLink)
-    await screen.findByRole('alert')
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeNull())
     expect(screen.getByText(/Could not load the booking/)).toBeDefined()
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(0)
+    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
     await waitFor(() => expect(api.to('GET /api/v1/me')).toHaveLength(3))
     expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
     expect(screen.queryByRole('region', { name: 'People' })).toBeNull()

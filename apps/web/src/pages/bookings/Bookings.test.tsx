@@ -762,6 +762,8 @@ describe('a booking', () => {
       ...signedIn,
       ...profile(),
       [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(404, { error: 'booking_not_found' }),
+      [`GET /api/v1/bookings/${BOOKING_ID}/organization`]: () =>
+        json(404, { error: 'booking_not_found' }),
     })
     renderApp(`/app/bookings/${BOOKING_ID}`)
     expect(await screen.findByRole('heading', { name: 'Booking not found' })).toBeDefined()

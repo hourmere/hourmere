@@ -15,6 +15,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   cancelTeamAdminBooking,
+  getTeamAdminBooking,
   listTeamAdminBookings,
   TeamAdminBookingListItemSchema,
   TeamAdminBookingListPageSchema,
@@ -30,6 +31,17 @@ import {
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import {
+  findPublicEventType,
+  findPublicTeamEventType,
+} from '../../../../packages/scheduling/src/availability.ts'
+import {
+  bookingPageQuery,
+  encodeBookingCursor,
+} from '../../../../packages/scheduling/src/booking-page.ts'
+import { cancelTeamBookingInTransaction } from '../../../../packages/scheduling/src/bookings.ts'
+import { isUuid } from '../../../../packages/scheduling/src/internal.ts'
+import { toTeamAdminBooking } from '../../../../packages/scheduling/src/team-admin-booking.ts'
 import { createApp } from '../app.ts'
 import { ErrorBody, errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
@@ -317,6 +329,59 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC', isBooker: true },
       { name: 'Guest', email: 'guest@example.com', timeZone: 'Asia/Shanghai', isBooker: false },
     ])
+  })
+
+  async function verifyDetail(target = app) {
+    for (const cookie of [seeded.ownerSession.cookie, seeded.adminSession.cookie]) {
+      const list = await page(await get(cookie, '', {}, target))
+      for (const expected of list.data) {
+        const response = await get(cookie, `/${expected.id}`, {}, target)
+        expect(response.status).toBe(200)
+        expect(response.headers.get('cache-control')).toBe('no-store')
+        const booking = TeamAdminBookingListItemSchema.parse(await response.json())
+        expect(booking).toEqual(expected)
+        expect(JSON.stringify(booking).includes('private-only')).toBe(false)
+      }
+      for (const id of [seeded.otherBooking, seeded.personalBooking, randomUUID()]) {
+        const response = await get(cookie, `/${id}`, {}, target)
+        expect(response.status).toBe(404)
+        expect(await response.json()).toEqual({ error: 'booking_not_found' })
+      }
+    }
+  }
+
+  it('lets non-host owners/admins open one booking through the same minimal whitelist', () =>
+    verifyDetail())
+
+  it('denies members, non-members and agent credentials access to admin detail', async () => {
+    const outsider = await managerFixture()
+    for (const id of [seeded.ids[0], seeded.otherBooking, randomUUID()]) {
+      await expectDenied(await get(seeded.memberSession.cookie, `/${id}`))
+      const foreign = await get(outsider.cookie, `/${id}`)
+      expect(foreign.status).toBe(404)
+      expect(await foreign.json()).toEqual({ error: 'booking_not_found' })
+      await expectDenied(await get(undefined, `/${id}`))
+      await expectDenied(
+        await get(seeded.adminSession.cookie, `/${id}`, { authorization: 'Bearer invalid' }),
+      )
+    }
+    const key = await auth.api.createApiKey({
+      body: { userId: seeded.admin.id, metadata: { organizationId: seeded.team.id } },
+    })
+    await expectDenied(
+      await get(seeded.adminSession.cookie, `/${seeded.ids[0]}`, {
+        authorization: `Bearer ${key.key}`,
+      }),
+    )
+  })
+
+  it('binds a detail read to the expected team before revealing booking data', async () => {
+    const switched = await session(seeded.owner, seeded.other.id)
+    const response = await get(switched.cookie, `/${seeded.ids[0]}`, {
+      [EXPECTED_ORGANIZATION_HEADER]: seeded.team.id,
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
   })
 
   async function publicContextFixture() {
@@ -725,6 +790,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     replacement?: [string, string],
     managementFactory = teamManagementAccess,
     listService = listTeamAdminBookings,
+    detailService = getTeamAdminBooking,
   ): typeof teamBookingRoutes {
     let source = readFileSync('apps/server/src/routes/team-bookings.ts', 'utf8')
     if (replacement) {
@@ -744,6 +810,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       createRoute,
       z,
       cancelTeamAdminBooking,
+      getTeamAdminBooking: detailService,
       listTeamAdminBookings: listService,
       TeamAdminBookingListPageSchema,
       TeamAdminBookingListItemSchema,
@@ -780,17 +847,115 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       expect(source.includes(replacement[0]), 'mutation matches real source').toBe(true)
       source = source.replaceAll(...replacement)
     }
-    const javascript = stripTypeScriptTypes(source).replace(
-      /from '([^']+)'/g,
-      (_, specifier: string) =>
-        `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
-    )
-    return (await import(
-      `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
-    )) as {
+    const javascript = stripTypeScriptTypes(
+      source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
+    ).replace(/\bexport /g, '')
+    const bindings = {
+      sql,
+      findPublicEventType,
+      findPublicTeamEventType,
+      bookingPageQuery,
+      encodeBookingCursor,
+      cancelTeamBookingInTransaction,
+      DomainError,
+      isUuid,
+      toTeamAdminBooking,
+    }
+    return new Function(
+      ...Object.keys(bindings),
+      `${javascript}; return { listTeamAdminBookings, getTeamAdminBooking }`,
+    )(...Object.values(bindings)) as {
       listTeamAdminBookings: typeof listTeamAdminBookings
+      getTeamAdminBooking: typeof getTeamAdminBooking
     }
   }
+
+  async function detailApplication(replacements: [string, string][] = []) {
+    const service = await listSourceCopy(replacements)
+    return application([
+      sourceCopy(
+        false,
+        () => {},
+        undefined,
+        teamManagementAccess,
+        service.listTeamAdminBookings,
+        service.getTeamAdminBooking,
+      )({ db, now: () => NOW }),
+    ])
+  }
+
+  it('passes detail assertions with an unmodified service source copy', async () => {
+    await verifyDetail(await detailApplication())
+  })
+
+  async function verifyDetailService(service = getTeamAdminBooking) {
+    const resolvePrincipal = async (cookie: string) => {
+      const result = await resolveCaller(new Headers({ cookie }))
+      if (!result.ok) throw new Error('Synthetic session must resolve')
+      return result.principal
+    }
+    const id = seeded.ids[0] as string
+    const admin = await resolvePrincipal(seeded.adminSession.cookie)
+    expect((await service({ db, principal: admin, now: () => NOW }, id)).id).toBe(id)
+    const member = await resolvePrincipal(seeded.memberSession.cookie)
+    await expect(service({ db, principal: member, now: () => NOW }, id)).rejects.toMatchObject({
+      code: 'team_management_access_denied',
+    })
+  }
+
+  it('checks live admin eligibility for direct detail service calls', () => verifyDetailService())
+
+  it('detects bypassed detail service eligibility with a real assertion failure', async () => {
+    const control = await listSourceCopy()
+    await verifyDetailService(control.getTeamAdminBooking)
+    const mutant = await listSourceCopy([
+      [
+        'const teamId = await teamManager(ctx)\n  const page = await readTeamBookingPage',
+        'const teamId = ctx.principal.organization.id\n  const page = await readTeamBookingPage',
+      ],
+    ])
+    await expect(verifyDetailService(mutant.getTeamAdminBooking)).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it.each<[string, [string, string]]>([
+    [
+      'exact detail target',
+      [".$if(bookingId !== undefined, (q) => q.where('b.id', '=', bookingId as string))", ''],
+    ],
+    ['detail team scope', [".where('b.organization_id', '=', teamId)", '']],
+  ])('detects broken %s with a real detail assertion failure', async (_, replacement) => {
+    const target = await detailApplication([replacement])
+    await expect(verifyDetail(target)).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  async function verifyDetailMiddleware(factory: typeof teamBookingRoutes, observed: () => number) {
+    const target = application([factory({ db, now: () => NOW })])
+    expect((await get(seeded.adminSession.cookie, `/${seeded.ids[0]}`, {}, target)).status).toBe(
+      200,
+    )
+    expect(observed()).toBe(1)
+  }
+
+  it('executes shared team access for detail reads in an unmodified route source copy', async () => {
+    let observed = 0
+    const factory = sourceCopy(false, () => observed++)
+    await verifyDetailMiddleware(factory, () => observed)
+  })
+
+  it('detects removal of detail access middleware with a real assertion failure', async () => {
+    let observed = 0
+    const factory = sourceCopy(false, () => observed++, [
+      'middleware: access.middleware,\n        request: {\n          params: z.object({ id: z.uuid() }),\n          headers:',
+      'middleware: caller,\n        request: {\n          params: z.object({ id: z.uuid() }),\n          headers:',
+    ])
+    await expect(verifyDetailMiddleware(factory, () => observed)).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
 
   async function listApplication(replacements: [string, string][] = []) {
     const service = await listSourceCopy(replacements)

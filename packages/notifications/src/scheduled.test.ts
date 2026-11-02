@@ -231,7 +231,9 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
         expect(message?.text).toContain(`Co-hosts: ${other?.name}`)
         expect(message?.replyTo).toEqual({ name: 'Invitee', email: 'invitee@example.com' })
         expect(message?.text).not.toContain(other?.email)
-        expect(message?.text).toContain(`organizationId=${host.organizationId}`)
+        expect(message?.text).not.toContain('organizationId=')
+        expect(message?.html).not.toContain('organizationId=')
+        expect(message?.text).toContain(`/app/bookings/${bookingId}`)
       }
     }
   })

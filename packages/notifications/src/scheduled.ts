@@ -400,11 +400,7 @@ export async function deliverScheduledBookingEmail(
                   },
                   {
                     bookingUrl: recipient.host
-                      ? hostBookingUrl(
-                          deps.publicUrl,
-                          claim.booking_id,
-                          data.booking.organizationId,
-                        )
+                      ? hostBookingUrl(deps.publicUrl, claim.booking_id)
                       : undefined,
                   },
                 ),
@@ -430,7 +426,7 @@ export async function deliverScheduledBookingEmail(
               {
                 hostNote: deps.followUpHostNotesEnabled === false ? undefined : rule.hostNote,
                 bookingUrl: recipient.host
-                  ? hostBookingUrl(deps.publicUrl, claim.booking_id, data.booking.organizationId)
+                  ? hostBookingUrl(deps.publicUrl, claim.booking_id)
                   : undefined,
               },
             )

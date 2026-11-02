@@ -783,7 +783,7 @@ function bookingStatus(booking: Booking): 'Rescheduled' | 'Cancelled' | 'Confirm
     : 'Confirmed'
 }
 
-function BookingDetail({
+export function BookingDetail({
   booking,
   timeZone,
   expectedOrganizationId,

@@ -32,7 +32,7 @@ const host = {
 const locales = [
   ['en', 'Liam LA and Berta Berlin', 'Co-hosts', '5 others'],
   ['zh-CN', 'Liam LA和Berta Berlin', '共同主持人', '其他 5 位主持人'],
-  ['de', 'Liam LA und Berta Berlin', 'Weitere Gastgeber', '5 weitere Personen'],
+  ['de', 'Liam LA und Berta Berlin', 'Weitere gastgebende Personen', '5 weitere Personen'],
   ['fr', 'Liam LA et Berta Berlin', 'Autres hôtes', '5 autres personnes'],
   ['es', 'Liam LA y Berta Berlin', 'Otros anfitriones', '5 personas más'],
   ['pt-BR', 'Liam LA e Berta Berlin', 'Outros anfitriões', 'mais 5 pessoas'],
@@ -64,7 +64,11 @@ describe('collective booking mail', () => {
       expect(message.text).not.toContain('liam@example.test')
       expect(message.text).not.toContain('berta@example.test')
     }
-    expect(followUpEmail(meeting, { ...host, locale }).text).toContain('Berta Berlin')
+    const followUp = followUpEmail(meeting, { ...host, locale })
+    expect(followUp.text).toContain(
+      `${label}${locale === 'zh-CN' ? '：' : locale === 'fr' ? '\u00a0: ' : ': '}Berta Berlin`,
+    )
+    expect(followUp.html).toContain(label)
   })
 
   it.each(locales)(

@@ -197,14 +197,17 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     const f = createFixtures(db)
     const host = await f.host({ name: 'Liam LA' })
     const other = await f.host({ name: 'Berta Berlin' })
+    const team = await f.organization()
+    await f.member(host.userId, team)
+    await f.member(other.userId, team)
     const principal = principals.get('alice') as Principal
     principals.set('collective-host', {
       ...principal,
       user: { ...principal.user, id: host.userId },
-      organization: { ...principal.organization, id: host.organizationId },
+      organization: { ...principal.organization, id: team },
     })
     const id = await f.booking(
-      host.organizationId,
+      team,
       [host.userId, other.userId],
       '2026-11-10T09:00Z',
       '2026-11-10T09:30Z',

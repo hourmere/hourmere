@@ -17,6 +17,7 @@ import {
   ResponsesSchema,
   rescheduleHostBooking,
   rescheduleManagedBooking,
+  resolveBookingOrganization,
   type ServiceContext,
 } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
@@ -672,6 +673,39 @@ export function bookingRoutes({
         })
         return c.json(page, 200)
       },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/{id}/organization',
+        summary: 'Resolve the space of a booking visible to the browser session',
+        description:
+          'Read-only browser handoff. Rechecks the verified live session and membership in the booking space. Only a booked host or a team owner/admin receives its organization and access kind. Everyone else receives uniform booking_not_found. API keys and OAuth grants cannot resolve other spaces. Does not switch the session or grant host authority.',
+        security: [{ session: [] }],
+        middleware: caller,
+        request: { params: z.object({ id: z.uuid() }) },
+        responses: {
+          200: {
+            description: 'Authorized booking space',
+            content: json(
+              z.object({
+                organizationId: z.uuid(),
+                access: z.enum(['host', 'team_admin']),
+              }),
+            ),
+          },
+          400: invalidId,
+          401: unauthorized,
+          404: hostNotFound,
+          429: keyRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await resolveBookingOrganization(context(c.var.principal), c.req.valid('param').id),
+          200,
+        ),
     )
 
     app.openapi(

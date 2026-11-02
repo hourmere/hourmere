@@ -72,7 +72,7 @@
   "followUp.subject": "Geplanter Zeitraum abgelaufen: {event}",
   "followUp.introduction": "Der für Ihren Termin mit {other} vorgesehene Zeitraum ist abgelaufen.",
   "followUp.hostNote": "Nachricht der gastgebenden Person",
-  "Co-hosts": "Weitere Gastgeber",
+  "Co-hosts": "Weitere gastgebende Personen",
   "hosts.more": "{count} weitere Personen",
   "hosts.moreOne": "{count} weitere Person"
 }

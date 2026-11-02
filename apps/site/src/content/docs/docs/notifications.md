@@ -452,8 +452,11 @@ Collective booking emails use a locale-aware list of host names in the subject, 
 and Host field. Subjects with more than three hosts show the first three names and a localized
 remaining count; the body and calendar title/description retain the full list. Host emails
 also show the other required hosts by name, without adding their contact addresses. Host
-links carry the booking organization as a context hint; opening one checks membership and
-automatically switches to that space before loading the booking. A link grants no access.
+links contain only the booking ID. If it is outside the current space, the server first
+checks current membership and booking-host or team owner/admin access. Only an authorized
+reader switches to that space, with the expected current space checked and the new session
+confirmed. Other readers see the same not-found page without a switch. Team administrators
+receive only the team-administration detail fields; a link grants no host authority.
 
 `NEEDS-ACTION` leaves adding/accepting the invitation to the recipient's calendar. The
 booking itself is already confirmed in Hourmere. `RSVP=FALSE` deliberately does not solicit

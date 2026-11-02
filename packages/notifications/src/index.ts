@@ -204,15 +204,9 @@ export function inviteeManageLinks(publicUrl: string, token: string): ManageLink
   return { reschedule: `${base}&action=reschedule`, cancel: `${base}&action=cancel` }
 }
 
-/** Authenticated deep links carry a context hint; the app still checks membership. */
-export function hostBookingUrl(
-  publicUrl: string,
-  bookingId: string,
-  organizationId: string,
-): string {
-  const url = new URL(`/app/bookings/${encodeURIComponent(bookingId)}`, publicUrl)
-  url.searchParams.set('organizationId', organizationId)
-  return url.href
+/** The booking ID alone locates the page; the server resolves authorized space access. */
+export function hostBookingUrl(publicUrl: string, bookingId: string): string {
+  return new URL(`/app/bookings/${encodeURIComponent(bookingId)}`, publicUrl).href
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest()
@@ -961,7 +955,7 @@ async function deliverBookingNotification(
             ),
           },
           {
-            bookingUrl: hostBookingUrl(deps.publicUrl, bookingId, booking.organizationId),
+            bookingUrl: hostBookingUrl(deps.publicUrl, bookingId),
             attachment: invitation(
               invitee.name,
               interfaceLanguage(host.locale) ?? 'en',
