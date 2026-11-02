@@ -381,6 +381,7 @@ export interface Bookings {
   idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;
   location: Json | null;
+  location_option: Json | null;
   manage_token_hash: Buffer | null;
   notification_snapshot: Json | null;
   oauth_consent_id: string | null;
@@ -528,6 +529,7 @@ export interface EventTypes {
   is_active: Generated<boolean>;
   is_hidden: Generated<boolean>;
   location: Json | null;
+  locations: Json | null;
   max_bookings_per_day: number | null;
   minimum_notice_minutes: Generated<number>;
   notifications: Generated<Json>;

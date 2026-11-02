@@ -35,6 +35,14 @@ import {
   timestamp,
 } from './internal.ts'
 import {
+  compatLocation,
+  type EventTypeLocation,
+  type LocationOption,
+  type LocationSettings,
+  locationOptionsFromLegacy,
+  validateLocationOptions,
+} from './location-options.ts'
+import {
   type NotificationSettings,
   parseNotifications,
   validateNotifications,
@@ -48,15 +56,7 @@ import {
 } from './success-redirect.ts'
 import { cleanText } from './text.ts'
 
-/** Where the meeting happens. Meet and Zoom links are generated per booking. */
-export type EventTypeLocation =
-  | { kind: 'google_meet'; autoCreate?: true }
-  | { kind: 'zoom'; autoCreate?: true }
-  /** The host's number, in E.164 (`+14155550123`). */
-  | { kind: 'phone'; number: string }
-  | { kind: 'in_person'; address: string }
-  /** Any other video or meeting link (http or https). */
-  | { kind: 'link'; url: string }
+export type { EventTypeLocation } from './location-options.ts'
 
 /** A question as written by the caller (see questions.ts); `required` defaults to false. */
 export type QuestionInput = Omit<Question, 'required'> & { required?: boolean | undefined }
@@ -90,7 +90,10 @@ export interface EventType {
   hosts: { userId: string }[]
   zoomConnectionId?: string | null | undefined
   conferenceOrganizer: { userId: string } | null
-  location: EventTypeLocation | null
+  /** Read compatibility projection of the default (or first) location option. */
+  location: LocationSettings | null
+  /** Internal configuration; transport writes are introduced with the editor. */
+  locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
   questions: Question[]
   notifications: NotificationSettings
@@ -124,6 +127,8 @@ export interface EventTypeInput {
   bookingWindowDays?: number | null | undefined
   maxBookingsPerDay?: number | null | undefined
   location?: EventTypeLocation | null | undefined
+  /** Replaces the ordered list. Cannot be combined with a legacy location write. */
+  locations?: LocationOption[] | null | undefined
   successRedirect?: SuccessRedirectInput | null | undefined
   questions?: QuestionInput[] | undefined
   notifications?: NotificationSettings | undefined
@@ -171,7 +176,8 @@ interface Fields {
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   maxBookingsPerDay: number | null
-  location: EventTypeLocation | null
+  location: LocationSettings | null
+  locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
   questions: Question[]
   isActive: boolean
@@ -195,6 +201,7 @@ const FIELD_NAMES = [
   'bookingWindowDays',
   'maxBookingsPerDay',
   'location',
+  'locations',
   'successRedirect',
   'questions',
   'isActive',
@@ -212,6 +219,7 @@ const DEFAULTS = {
   bookingWindowDays: null,
   maxBookingsPerDay: null,
   location: null,
+  locations: null,
   successRedirect: null,
   questions: [],
   isActive: true,
@@ -476,12 +484,12 @@ export async function createEventType(
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
       const organizer = validOrganizer(input.conferenceOrganizer) ?? null,
         zoomConnection = validZoomConnection(input.zoomConnectionId) ?? null
-      if (zoomConnection && !automaticZoom(fields.location))
+      if (zoomConnection && !fields.locations?.some(automaticZoom))
         throw new DomainError('invalid', 'invalid_zoom_connection')
       await validateConference(
         trx,
         ctx,
-        fields.location,
+        fields.locations,
         schedulingType,
         hostIds,
         organizer,
@@ -589,11 +597,12 @@ export async function updateEventType(
         if (
           zoomConnection &&
           zoomConnection !== row.zoom_connection_id &&
-          !automaticZoom(fields.location)
+          !fields.locations?.some(automaticZoom)
         )
           throw new DomainError('invalid', 'invalid_zoom_connection')
         if (
           input.location !== undefined ||
+          input.locations !== undefined ||
           changingHosts ||
           scheduleId !== undefined ||
           organizer !== undefined ||
@@ -605,13 +614,13 @@ export async function updateEventType(
           await validateConference(
             trx,
             ctx,
-            fields.location,
+            fields.locations,
             schedulingType,
             configuredHosts,
             organizer === undefined ? row.conference_organizer_user_id : organizer,
             row.id,
             zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
-            !automaticZoom(row.location) ||
+            !fieldsOf(row).locations?.some(automaticZoom) ||
               schedulingType !== row.scheduling_type ||
               [...configuredHosts].sort().join() !==
                 existing
@@ -828,8 +837,15 @@ async function withWriteErrors<T>(write: () => Promise<T>): Promise<T> {
 
 /** The fields of `input` that are set, so they can be laid over defaults or current values. */
 function defined(input: EventTypeUpdate): Partial<Record<keyof Fields, unknown>> {
+  if (input.location !== undefined && input.locations !== undefined) {
+    throw new DomainError('invalid', 'invalid_locations', 'Specify location or locations, not both')
+  }
   const result: Partial<Record<keyof Fields, unknown>> = {}
   for (const name of FIELD_NAMES) if (input[name] !== undefined) result[name] = input[name]
+  // A legacy write replaces the complete list, including clearing it with null.
+  if (input.location !== undefined) {
+    result.locations = locationOptionsFromLegacy(validLocation(input.location))
+  }
   return result
 }
 
@@ -841,6 +857,7 @@ function validFields(
   validateRedirect = true,
 ): Fields {
   const c = candidate
+  const locations = validateLocationOptions(c.locations)
   const allowedDurationsMinutes =
     c.allowedDurationsMinutes === undefined ? [c.durationMinutes] : c.allowedDurationsMinutes
   // The engine's own check, so a stored event type can never make availability fail.
@@ -882,7 +899,8 @@ function validFields(
     minimumNoticeMinutes: c.minimumNoticeMinutes as number,
     bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
-    location: validLocation(c.location),
+    location: compatLocation(locations),
+    locations,
     // A policy change must not block unrelated edits. Only an explicitly supplied
     // redirect needs current-policy validation; otherwise preserve the saved value.
     successRedirect: validateRedirect
@@ -1028,6 +1046,7 @@ function fieldsOf(row: {
   booking_window_days: number | null
   max_bookings_per_day: number | null
   location: Json | null
+  locations: Json | null
   success_redirect: Json | null
   questions: Json
   is_active: boolean
@@ -1035,6 +1054,9 @@ function fieldsOf(row: {
   allow_guests: boolean
   position: number
 }): Fields {
+  const locations =
+    (row.locations as LocationOption[] | null) ??
+    locationOptionsFromLegacy(row.location as EventTypeLocation | null)
   return {
     slug: row.slug,
     title: row.title,
@@ -1047,7 +1069,8 @@ function fieldsOf(row: {
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     maxBookingsPerDay: row.max_bookings_per_day,
-    location: row.location as EventTypeLocation | null,
+    location: compatLocation(locations),
+    locations,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     questions: parseQuestions(row.questions),
     isActive: row.is_active,
@@ -1071,6 +1094,7 @@ function columns(fields: Fields) {
     booking_window_days: fields.bookingWindowDays,
     max_bookings_per_day: fields.maxBookingsPerDay,
     location: fields.location === null ? null : jsonb(fields.location),
+    locations: fields.locations === null ? null : jsonb(fields.locations),
     success_redirect: fields.successRedirect === null ? null : jsonb(fields.successRedirect),
     questions: jsonb(fields.questions),
     is_active: fields.isActive,
@@ -1195,7 +1219,7 @@ function validZoomConnection(value: unknown): string | null | undefined {
 async function validateConference(
   db: Db,
   ctx: ServiceContext,
-  location: unknown,
+  locations: LocationOption[] | null,
   mode: string,
   hosts: string[],
   selected: string | null,
@@ -1209,7 +1233,7 @@ async function validateConference(
       'invalid_conference_organizer',
       'Choose an organizer from the required hosts.',
     )
-  if (automaticZoom(location)) {
+  if (locations?.some(automaticZoom)) {
     if (mode !== 'individual' || hosts.length !== 1)
       throw new DomainError(
         'invalid',
@@ -1243,9 +1267,8 @@ async function validateConference(
         await requireActiveApiKey(db, ctx.principal, () => ctx.now().epochMilliseconds)
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)
     }
-    return
   }
-  if (!automaticMeet(location)) return
+  if (!locations?.some(automaticMeet)) return
   if (mode === 'round_robin') await eligibleMeetHosts(db, hosts, eventTypeId, ctx.automaticMeet)
   else
     await requireMeetDestination(

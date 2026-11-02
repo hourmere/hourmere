@@ -395,6 +395,105 @@ Hosts can configure the list and default in the personal or team event editor, R
 require `full` scope. See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations)
 for host steps, invitee selection and the shared-rule limitations.
 
+## Event location options contract
+
+`event_types.locations` / internal service `locations` is an ordered list of 1–5
+location options, or SQL/service null for no location. An empty list is invalid.
+Each option has a stable `id` (1–64 ASCII letters, digits, `_` or `-`), a `kind`,
+optional public single-line `label` (1–100 characters), optional `isDefault: true`,
+and the settings below. IDs and kinds must each be distinct within a list: this
+version offers at most one option of each kind, rather than several addresses or
+phone numbers. Order is preserved. At most one option may be explicitly default;
+otherwise the first is the effective default. A single option uses the existing
+booking flow without showing a choice.
+
+| Kind | Settings |
+|---|---|
+| `google_meet`, `zoom` | Optional `autoCreate: true`, preserving today's explicit conference opt-in. Without it, retain today's passive kind-only behavior. Generated URLs are never event-type settings. |
+| `phone` | Exactly one of `number` (the host's E.164 number, `+` and 7–15 digits, first digit nonzero) or `askInvitee: true` (collect the invitee's E.164 number at booking). |
+| `in_person` | Required single-line `address`, 1–500 characters. |
+| `link` | Required absolute HTTP(S) `url`, at most 2000 characters before and after normalization. |
+
+Unknown keys, false default/opt-in flags, malformed Unicode and control characters
+in text are rejected. Labels and addresses are trimmed; link URLs are normalized
+using the URL parser. Validation belongs to the shared scheduling service; database
+constraints also enforce the list envelope, identities, kinds and default count.
+Option IDs survive edits and reordering. Removing and recreating an option should
+allocate a new ID so a stale page cannot accidentally select a different option.
+
+`event_types.location` and service `location` remain compatibility fields derived
+from the explicit default, or first/only option, with `id`, `label` and `isDefault`
+removed. Legacy writes supplying `location` replace the list with a singleton whose
+ID is `legacy`; null clears it. Internal writes supply `locations` as a complete
+replacement; specifying both fields in one service write is invalid. Unrelated
+edits preserve the list and its order. Migration 0056 wraps every existing non-null
+event location in `{ id: "legacy", ...location }` without normalizing its settings
+or changing timestamps; existing nulls stay null. A compatibility trigger also
+supports old direct inserts and location-only updates.
+
+The additive transport contract for later work is `locations` beside the existing
+`location`; configuration REST, MCP and CLI must introduce writes together. Future
+booking requests use `locationOptionId` and, only for `askInvitee`, `inviteePhone`.
+Omitting the option chooses the effective default; an unknown/removed ID returns
+`invalid_location_choice`, never silently falls back. Invalid or missing collected
+phone data returns `invalid_invitee_phone`. The pure `resolveLocationChoice` helper
+performs this resolution without database or provider I/O. This migration/model
+slice does not expose `locations` through REST/OpenAPI, MCP or CLI, add booking
+request fields, or enable public choice or per-choice conference creation.
+The existing protected event-type response's `location` schema additionally accepts
+`{ kind: "phone", askInvitee: true }` so reads of internal configuration remain
+well-typed; legacy REST/MCP/CLI location writes still require a host number.
+
+A new booking will store its chosen configuration snapshot in
+`bookings.location_option`, including its ID, kind, label/default marker and settings.
+`bookings.location` remains the resolved values used by current protected booking
+reads, notifications and calendars: host or collected invitee phone, saved address
+or link, or the conference kind/opt-in until its ready join URL is added by existing
+conference reconciliation. The resolver returns both `locationOption` and `location`;
+for invitee phone, the configuration snapshot retains `askInvitee: true` and the
+resolved location contains the supplied number. Neither configuration edits nor
+conference URL updates rewrite the chosen snapshot. Snapshot storage is private,
+just like resolved contact details, and follows the booking's retention policy.
+Migration 0056 backfills each existing non-null resolved booking location as
+`{ id: "legacy", ...location }`, including any historical ready URL; null remains
+null. These historical snapshots cannot recover the original option settings or
+labels. Compatibility inserts that omit a snapshot similarly capture their resolved
+location; the next booking task will explicitly persist the resolver's snapshot.
+Historical resolved booking payloads with custom kinds remain intact in snapshots;
+this storage compatibility does not admit those kinds into new event options.
+
+Rescheduling keeps the original option snapshot and resolved phone/address/link,
+even if the host removes or edits that option. Automatic conferences retain existing
+same-conference reschedule behavior and pinned organizer/destination identities.
+Changing the location on reschedule is outside this contract. The booking follow-up
+must copy `location_option` to successors, including a legacy snapshot, and include
+explicit choice and collected phone in the existing idempotency fingerprint; exact
+replays must return the original snapshot and resolved result without reevaluation.
+
+Public option discovery is a whitelist of `id`, `kind`, optional public `label` and
+default marker, plus `askInvitee: true` when a phone must be collected. It never
+exposes host numbers, addresses, saved link URLs, connection IDs, organizer account
+details, credentials or generated URLs. Existing public catalog projections remain
+kind-only in this slice. Hosts must treat option labels as public text. Protected
+booking results reveal resolved location details under today's access rules; raw
+configuration snapshots are not added to public responses.
+
+All options share the event's hosts, durations and booking rules. Team ownership and
+write permissions stay unchanged. Every automatic option is checked on configuration
+writes, including non-default options. Booking-time readiness must be checked again
+under the existing booking locks: individual Meet uses that host's capable destination;
+collective Meet uses an explicitly selected required host as organizer; round-robin
+Meet uses the actually assigned host and its own capable destination. Do not borrow
+another host's account. Automatic Zoom remains limited to individual scheduling with
+one explicitly authorized host and that host's pinned meeting-mode connection;
+collective and round-robin Zoom are rejected even as non-default choices. The pure
+resolver consumes a trusted readiness snapshot rather than querying accounts. If the
+chosen automatic option cannot be honored for the actual assigned host/organizer,
+return conflict `location_unavailable`, without provider or private account details;
+do not substitute a location or a different host after assignment. Existing service
+configuration errors and conference readiness rules remain in force. No readiness
+failure is presented as proof that the host has not configured an account.
+
 ## JSON columns
 
 Validated by the application (zod), not by the database:
@@ -403,7 +502,10 @@ Validated by the application (zod), not by the database:
   `[{ "start": "09:00", "end": "17:00" }]`; `"end"` may be `"24:00"`. Missing or empty
   day = unavailable. This is `@hourmere/core`'s `WeeklyHours` type.
 - `schedule_overrides.intervals`: `[]` (unavailable) or the same interval list.
-- `event_types.location` / `bookings.location`: `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
+- `event_types.locations`: ordered nullable option list, as specified above;
+  `event_types.location` is its default/only compatibility projection.
+- `bookings.location_option`: chosen option snapshot; `bookings.location` is the
+  resolved `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions`: booking-form fields beyond name and email, at most 20:
   `[{ "id": "company", "label": "Company", "type": "short_text", "required": true }]`.
   `id` is 1–64 letters, digits, `_` or `-`, unique within the event type, and not

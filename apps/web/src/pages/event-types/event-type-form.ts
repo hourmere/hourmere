@@ -158,7 +158,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     zoomConnectionId: e.zoomConnectionId ?? '',
     autoCreateMeet: location?.kind === 'google_meet' && location.autoCreate === true,
     conferenceOrganizerUserId: e.conferenceOrganizer?.userId ?? '',
-    phone: location?.kind === 'phone' ? location.number : '',
+    phone: location?.kind === 'phone' && 'number' in location ? location.number : '',
     address: location?.kind === 'in_person' ? location.address : '',
     url: location?.kind === 'link' ? location.url : '',
     questions: e.questions.map((q) => ({

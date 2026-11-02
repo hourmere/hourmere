@@ -3998,6 +3998,11 @@ export interface components {
                  */
                 number: string;
             } | {
+                /** @enum {boolean} */
+                askInvitee: true;
+                /** @enum {string} */
+                kind: "phone";
+            } | {
                 address: string;
                 /** @enum {string} */
                 kind: "in_person";

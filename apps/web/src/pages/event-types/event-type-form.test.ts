@@ -113,6 +113,15 @@ describe('question identity', () => {
 })
 
 describe('validateDraft', () => {
+  it('keeps an invitee-phone compatibility read from becoming an undefined host number', () => {
+    const draft = draftFromEventType(eventType({ location: { kind: 'phone', askInvitee: true } }))
+    expect(draft.locationKind).toBe('phone')
+    expect(draft.phone).toBe('')
+    expect(
+      draftFromEventType(eventType({ location: { kind: 'phone', number: '+14155550123' } })).phone,
+    ).toBe('+14155550123')
+  })
+
   it('keeps provider labels inert until explicit automatic opt-in, and preserves that opt-in through a round trip', () => {
     const legacy = draftFromEventType(eventType({ location: { kind: 'google_meet' } }))
     expect(legacy.autoCreateMeet).toBe(false)

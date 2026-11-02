@@ -191,6 +191,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         conferenceOrganizer: null,
         hosts: [{ userId: user.id }],
         location: null,
+        locations: null,
         successRedirect: null,
         questions: [],
         notifications: DEFAULT_NOTIFICATIONS,
@@ -421,6 +422,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         bookingWindowDays: null,
         maxBookingsPerDay: null,
         location: null,
+        locations: null,
         updatedAt: expect.any(String),
       })
       expect(await updateEventType(personal(user), created.id, {})).toEqual(updated)

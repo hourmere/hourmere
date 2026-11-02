@@ -46,9 +46,12 @@ import {
 
 const L = EVENT_TYPE_LIMITS
 
-// Redirect configuration is service-only until its REST/MCP/CLI contract is introduced.
-const eventTypeResponse = ({ successRedirect: _successRedirect, ...eventType }: ServiceEventType) =>
-  eventType
+// These settings remain service-only until their REST/MCP/CLI contracts are introduced.
+const eventTypeResponse = ({
+  successRedirect: _successRedirect,
+  locations: _locations,
+  ...eventType
+}: ServiceEventType) => eventType
 
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
@@ -81,10 +84,13 @@ const locationDoc = {
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
 const Location = z
-  .discriminatedUnion('kind', [
+  .union([
     z.object(locationKinds.googleMeet),
     z.object(locationKinds.zoom),
     z.object(locationKinds.phone),
+    // Read compatibility for internally configured invitee-phone options. Legacy
+    // location writes remain host-number-only until all write surfaces ship.
+    z.object({ kind: z.literal('phone'), askInvitee: z.literal(true) }),
     z.object(locationKinds.inPerson),
     z.object(locationKinds.link),
   ])
