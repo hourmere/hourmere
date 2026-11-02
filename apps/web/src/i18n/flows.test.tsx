@@ -297,14 +297,18 @@ describe('changing interface language through booking and account flows', () => 
     renderApp('/app/event-types/new')
     const title = await screen.findByLabelText<HTMLInputElement>('Title')
     await user.type(title, 'Settings')
-    await user.clear(screen.getByLabelText('Duration (minutes)'))
-    await user.click(screen.getByRole('button', { name: 'Create event type' }))
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('Enter a number.')
+    const duration = screen.getByLabelText('Duration to add (minutes)')
+    await user.click(screen.getByRole('button', { name: 'Add duration' }))
+    expect(document.getElementById('duration-to-add-error')?.textContent).toContain(
+      'Enter a number.',
+    )
+    expect(duration.getAttribute('aria-invalid')).toBe('true')
+    expect(duration.getAttribute('aria-describedby')).toContain('duration-to-add-error')
     await setLanguage(user, 'zh-CN')
     expect(screen.getByLabelText('标题')).toBe(title)
     expect(title.value).toBe('Settings')
-    expect(screen.getByRole('alert').textContent).toContain('请输入数字。')
+    expect(screen.getByLabelText('要添加的时长（分钟）')).toBe(duration)
+    expect(document.getElementById('duration-to-add-error')?.textContent).toContain('请输入数字。')
     expect(document.getElementById('minimumNoticeMinutes-hint')?.textContent).toBe(
       '会议至少需要提前多久预约。0–525,600。',
     )
