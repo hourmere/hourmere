@@ -18,6 +18,8 @@ must approve publication through the [release workflow](https://github.com/hourm
   with `WEBHOOK_PRIVATE_TARGETS`, including signed HTTP delivery to same-network n8n/LAN
   receivers. The default remains public HTTPS only; metadata addresses remain forbidden.
   Web and worker must share the setting; Hourmere Cloud must never set it.
+- Hosts can offer 1–12 meeting lengths on one event type in the editor, REST, MCP and CLI,
+  with an explicit default. Invitees choose a length before selecting an available time.
 - Personal booking pages and direct-link unlisted event types, with configurable duration,
   booking questions, locations, buffers, minimum notice, booking windows and daily limits.
   Working-hours schedules, date overrides and IANA time zones account for daylight saving.
@@ -152,6 +154,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 - [Automatic Zoom](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/automatic-zoom.md)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
+- [Multiple meeting lengths](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/multiple-durations.md) share one set of
+  hosts, location and booking rules; per-length overrides are unavailable. Web rescheduling
+  keeps the original length; changing it requires REST, MCP or CLI.
 - [Calendar RSVP replies](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/notifications.md#email-headers-mime-and-replies)
   are not processed; declining in a calendar does not cancel an Hourmere booking.
 - PostgreSQL 18+ is required for `uuidv7()`; PgBouncer is unsupported. See

@@ -217,6 +217,21 @@ function verifyOneTimeWrites(allows: Allows) {
   }
 }
 
+function verifyEventTypeConfigurationScopes(operation: typeof apiKeyOperation) {
+  for (const tool of ['create_event_type', 'update_event_type']) {
+    expect(operation(`mcp:${tool}`)).toMatchObject({
+      operationClass: 'other_write',
+      allowedScopes: ['full'],
+    })
+  }
+  for (const command of ['create-event', 'update-event']) {
+    expect(operation(`cli:${command}`)).toMatchObject({
+      operationClass: 'other_write',
+      allowedScopes: ['full'],
+    })
+  }
+}
+
 function verifyNotificationWrites(allows: Allows) {
   for (const id of [
     'PUT /api/v1/event-types/{id}/notifications',
@@ -270,6 +285,8 @@ describe('shared API-key scope policy', () => {
         'set_event_type_notifications',
         'list_schedules',
         'get_schedule',
+        'create_event_type',
+        'update_event_type',
         'list_calendar_connections',
         'list_conference_connections',
       ],
@@ -324,6 +341,9 @@ describe('shared API-key scope policy', () => {
     verifyMinimalBookingReads(apiKeyAllows))
   it('allows only full keys to configure notifications across REST, MCP and CLI', () =>
     verifyNotificationWrites(apiKeyAllows))
+
+  it('classifies event type writes as full-only account configuration', () =>
+    verifyEventTypeConfigurationScopes(apiKeyOperation))
 
   it('lets full and non-key principals retain their native authorization for unknown operations', () => {
     const principals: ApiKeyScopePrincipal[] = [
@@ -384,6 +404,17 @@ describe('scope policy source-copy mutation checks', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
   })
+  it.each(['create_event_type', 'update_event_type'])(
+    'kills classifying %s as a booking action',
+    (tool) => {
+      verifyEventTypeConfigurationScopes(sourceCopyRegistry())
+      expect(() =>
+        verifyEventTypeConfigurationScopes(
+          sourceCopyRegistry([`mcp('${tool}', 'other_write'`, `mcp('${tool}', 'booking_write'`]),
+        ),
+      ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    },
+  )
   it('verifies the unmodified source copies', () => {
     verifyUnknownDenied(sourceCopyPolicy(undefined, sourceCopyRegistry()))
     verifyMinimalBookingReads(sourceCopyPolicy(undefined, sourceCopyRegistry()))

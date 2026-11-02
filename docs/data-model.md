@@ -351,9 +351,11 @@ introduced here.
 ## Event duration contract
 
 `event_types.duration_minutes` remains the default (`durationMinutes` in service and
-REST configuration). `allowed_durations_minutes` / `allowedDurationsMinutes` is an ordered
-list of 1–12 distinct whole-minute lengths, each from 1 to 1440 inclusive, and must include
-the default. Migration 0047 backfills each existing event type to `[duration_minutes]`
+REST configuration). `allowed_durations_minutes` / `allowedDurationsMinutes` is a list of
+1–12 distinct whole-minute lengths kept in ascending order, each from 1 to 1440 inclusive,
+and must include the default. REST, MCP and CLI writes are sorted before storage by the
+shared service; existing unsorted lists are displayed in ascending order and normalized on
+their next configuration save. Migration 0047 backfills each existing event type to `[duration_minutes]`
 without changing existing configuration, bookings or timestamps. Legacy inserts that omit
 the list and duration-only edits of singleton types retain singleton behavior. Editing a
 multi-duration default requires it to remain in the list, or a replacement list in the
@@ -386,6 +388,12 @@ stored interval rather than the event type's current default.
 Existing request fingerprints and exact idempotent replays remain unchanged. An explicitly
 supplied selection participates in the fingerprint, so a changed selection cannot reuse
 the same key as the same request.
+
+Hosts can configure the list and default in the personal or team event editor, REST
+`POST /api/v1/event-types` / `PATCH /api/v1/event-types/{id}`, MCP `create_event_type` /
+`update_event_type`, or CLI `create-event` / `update-event`. API-key configuration writes
+require `full` scope. See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations)
+for host steps, invitee selection and the shared-rule limitations.
 
 ## JSON columns
 
@@ -954,6 +962,80 @@ than migration 0052's storage envelope; published migration SQL stays unchanged 
 legacy saved snapshots remain readable. `FOLLOW_UP_HOST_NOTES_ENABLED=false` rejects
 explicit note writes and omits even saved snapshot notes when sending, without rewriting
 stored settings or changing default reminders.
+
+## Internal full-booking waitlists
+
+Migration 0051 adds an opt-in `waitlist_enabled` flag, defaulting to false without importing
+historical booking contacts. The internal services support personal and team individual
+event types with exactly one eligible host. Public routes, UI, MCP, CLI and email sending
+are separate work; this layer stores encrypted verification intents and availability
+candidates without dispatching either kind of mail.
+
+`waitlist_entries` keeps fixed UTC preference windows and consent, with pending verification,
+active, notified, booked, expired and removed states. Deadlines never renew: verification
+lasts thirty elapsed minutes, pending enrollment at most twenty-four hours, and enrollment
+at most thirty days or the preference end. Purpose-bound capability digests authorize
+verification or self-management. A valid management capability can attribute a new ordinary
+booking only when event, verified mailbox and complete preferred interval match. The
+existing host locks, availability checks and exclusion constraint decide booking success;
+replays do not attach an entry and losing a booking race leaves it waiting.
+
+Admission checks durable rolling mailbox, IP and event limits under database locks, as
+well as the fifteen-minute resend cooldown and one hundred pending/live entries per event.
+`waitlist_verification_requests` has no cascading foreign keys and retains purpose-separated
+mailbox/IP HMACs for two elapsed days. IPv4-mapped socket addresses normalize to IPv4;
+IPv6 zone identifiers are stripped and other IPv6 addresses share their /64 bucket. The
+service accepts only an IP resolved by a trusted transport and stores no raw address.
+Admission holds the accounting-key fence, then an event share lock compatible with ordinary
+bookings. Availability computation precedes the instance-wide admission fence, which covers
+only expiry, rolling budgets, duplicate/capacity checks and the bounded write. Database time
+is sampled again after waiting for that fence; no host advisory lock is taken.
+
+Transactional triggers append `waitlist_scan_signals` for shared-host changes to bookings,
+event rules, schedules, overrides, profiles and cached calendars. Signals have independent
+UUIDs, no event foreign key and no unique event key. An indexed, non-locking existence
+check limits writes to events with unexpired verified active/notified entries; the
+periodic sweep covers newly verified entries. Availability writers never update
+shared waitlist work rows, so unrelated bookings sharing hosts do not wait on one another
+because of waitlist signaling. Signals commit or roll back with the availability mutation.
+Startup/minute maintenance scans committed ordinary availability only, in bounded seven-day
+pages with persisted cursors and fair event scheduling. A short event share → work lock
+snapshot consumes at most 1,000 committed signals by exact ID and advances the work's exact
+`bigint` generation. It never uses UUID order as a commit watermark: older IDs that commit
+later remain pending. Scans compute availability outside row locks, then publish under a
+short accounting-key → event share → work → entry lock sequence, revalidating the generation,
+page cursor and newly committed signals and rereading live recipients. Each signal stores
+its writer's top-level `xid8`; a PostgreSQL transaction snapshot captured before computation
+distinguishes existing backlog from transactions that commit during computation, including
+older UUIDs and savepoint writes. Existing backlog never prevents an event's computation;
+consumption remains bounded to 1,000 per pass. Publication acquires no host, booking or
+calendar locks. A newly committed signal visible at publication validation discards the
+computed page; signals that commit later remain pending for the next scan. Cleanup removes
+signals for deleted or disabled events and events without live recipients in separate
+1,000-row transactions until caught up or its five-second run budget expires. Each batch's
+statement timeout uses the remaining budget; completed batches remain committed.
+Every eligible verified recipient in a pass enters the same cohort. Each immutable candidate
+contains at most three full matching UTC intervals and expires at the earliest of discovery
+plus twenty-four hours, entry expiry or the first slot's current notice cutoff. There is no
+hold, rank or intentional delay awaiting another invitee. Future senders must recheck current
+lifecycle, exact availability and the shared ordinary-recipient mail budget before sending;
+candidate creation is not evidence of SMTP acceptance or inbox delivery.
+
+Independent `waitlist_slot_tombstones` uniquely identify event, mailbox HMAC and exact UTC
+start/end. They survive removal, rejoining, event deletion and delivery cleanup until slot
+end plus forty-eight elapsed hours, at most about sixty-four days for newly admitted windows.
+Self-removal and event disable/identity changes immediately erase contacts and revoke work;
+hourly bounded cleanup erases booked/expired contact data, expires old entries and removes
+minimal terminal metadata within seven days. Rotating the accounting secret retires and
+erases old entries/ciphertext/capabilities before admission or workers resume. Old secrets
+are not retained; mailbox limits and slot dedupe cannot span that explicit key-rotation
+exception. Existing global send accounting remains unchanged.
+
+The populated 0049 predecessor test verifies historical contacts, management hashes,
+reschedule chains, calendars, conferences, mail ledgers and retained jobs byte-for-byte,
+then compares upgraded/fresh schemas and a no-op rerun. See the
+[0051 rollout note](../packages/db/migrations/0051_waitlist.md) for the coordinated process
+upgrade requirement; additive storage does not make mixed writer/worker versions safe.
 
 ## Booking webhooks
 

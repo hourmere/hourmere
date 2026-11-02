@@ -15,6 +15,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   startup failures.
 - [Compare scheduling options](/docs/comparison): deployment, agent access and the current
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
+- [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
+  default, and learn how invitees choose and reschedule.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
@@ -34,6 +36,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
+- [Multiple meeting lengths](/docs/multiple-durations) share one set of hosts, location
+  and booking rules; per-length overrides are unavailable. Web rescheduling keeps the
+  original length; changing it requires REST, MCP or CLI.
 - [Calendar RSVP replies](/docs/notifications#email-headers-mime-and-replies)
   are not processed; declining in a calendar does not cancel an Hourmere booking. Use
   Hourmere's cancellation action; operators must [handle replies manually](/docs/self-hosting#handle-calendar-replies).

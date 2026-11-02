@@ -151,6 +151,38 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
     }
   })
 
+  it.each(scopes)('%s permits event type configuration only with full scope', async (scope) => {
+    for (const [space, event] of [
+      ['personal', personalEvent],
+      ['team', teamEvent],
+    ] as const) {
+      const key = keys.get(`${scope}:${space}`) as Key
+      for (const [name, args] of [
+        [
+          'create_event_type',
+          {
+            slug: `configured-${scope}`,
+            title: 'Configured lengths',
+            durationMinutes: 30,
+            allowedDurationsMinutes: [15, 30, 60],
+          },
+        ],
+        [
+          'update_event_type',
+          { id: event, durationMinutes: 30, allowedDurationsMinutes: [15, 30, 60] },
+        ],
+      ] as const) {
+        const result = await call(key, name, args)
+        if (scope === 'full') {
+          expect(success(result)).toMatchObject({
+            durationMinutes: 30,
+            allowedDurationsMinutes: [15, 30, 60],
+          })
+        } else expect(failure(result)).toEqual(denied)
+      }
+    }
+  })
+
   it.each(scopes)(
     '%s checks personal/team create and host/manage writes with real bookings',
     async (scope) => {

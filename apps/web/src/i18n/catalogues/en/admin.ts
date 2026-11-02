@@ -1,5 +1,25 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Allowed durations': 'Allowed durations',
+  'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
+    'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.',
+  'Offered lengths': 'Offered lengths',
+  'Keep at least one length. Removing the default selects the first remaining length.':
+    'Keep at least one length. Removing the default selects the first remaining length.',
+  'Quick durations': 'Quick durations',
+  'Add {0}': 'Add {0}',
+  'Duration to add (minutes)': 'Duration to add (minutes)',
+  'Add duration': 'Add duration',
+  'Default duration': 'Default duration',
+  'Selected when an invitee opens the booking page. They can choose another offered length.':
+    'Selected when an invitee opens the booking page. They can choose another offered length.',
+  'This duration is already in the list.': 'This duration is already in the list.',
+  'Offer from 1 to 12 durations.': 'Offer from 1 to 12 durations.',
+  'Offer each duration only once.': 'Offer each duration only once.',
+  'Include the default duration in the allowed durations.':
+    'Include the default duration in the allowed durations.',
+  'Added {0}.': 'Added {0}.',
+  'Removed {0}. Default duration: {1}.': 'Removed {0}. Default duration: {1}.',
   Scope: 'Scope',
   'Bookings (read/write)': 'Bookings (read/write)',
   'Read only': 'Read only',

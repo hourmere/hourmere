@@ -3764,7 +3764,7 @@ export interface components {
          */
         ErrorAlias: "zoom_operation_busy";
         EventType: {
-            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            /** @description Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
             allowedDurationsMinutes: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
@@ -3864,7 +3864,7 @@ export interface components {
             zoomConnectionId?: string | null;
         };
         EventTypeInput: {
-            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            /** @description Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
             allowedDurationsMinutes?: number[];
             /**
              * @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved
@@ -4028,7 +4028,7 @@ export interface components {
         };
         /** @description Omitted fields stay as they are; null clears a nullable field */
         EventTypeUpdate: {
-            /** @description Distinct permitted lengths, including durationMinutes; omitted on creation = [durationMinutes] */
+            /** @description Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
             allowedDurationsMinutes?: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests?: boolean;
@@ -4344,7 +4344,7 @@ export interface components {
             };
         };
         OneTimeEventType: {
-            /** @description Allowed meeting lengths, in display order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
+            /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
             allowedDurationsMinutes?: number[];
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
@@ -4420,7 +4420,7 @@ export interface components {
             };
         };
         PublicEventType: {
-            /** @description Allowed meeting lengths, in display order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
+            /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
             allowedDurationsMinutes?: number[];
             /** @description Whether saved event-type settings permit user-activated continuation in the embedding parent. Omitted means false. No redirect URL or parameters are exposed. */
             allowEmbedParentRedirect?: boolean;

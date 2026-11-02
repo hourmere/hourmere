@@ -7,6 +7,8 @@ export const COMMANDS = {
   profile: 'get_profile',
   catalog: 'list_event_types',
   event: 'get_event_type',
+  'create-event': 'create_event_type',
+  'update-event': 'update_event_type',
   'set-event-notifications': 'set_event_type_notifications',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
@@ -23,9 +25,12 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere --help | --version
 
-Commands: whoami, profile, catalog, event, set-event-notifications, schedules, schedule, slots,
+Commands: whoami, profile, catalog, event, create-event, update-event,
+          set-event-notifications, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
+Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
+                1–12 distinct lengths including the default. Requires full API key scope.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.

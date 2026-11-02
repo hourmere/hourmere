@@ -35,6 +35,7 @@ import { useTeamManagementAccess } from '../../team-management.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
+import { DurationsEditor } from './DurationsEditor.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
 import {
@@ -567,15 +568,17 @@ function EventTypeForm({
                   />
                 )}
               </Field>
+              <DurationsEditor
+                durations={draft.allowedDurationsMinutes}
+                defaultDuration={draft.durationMinutes}
+                errors={errors}
+                onChange={(durations, defaultDuration) => {
+                  set('allowedDurationsMinutes', durations)
+                  set('durationMinutes', defaultDuration)
+                }}
+                onDefaultChange={(value) => set('durationMinutes', value)}
+              />
               <div className="field-grid">
-                <MinutesField
-                  id="durationMinutes"
-                  label={t('Duration')}
-                  value={draft.durationMinutes}
-                  error={errors.durationMinutes}
-                  onChange={(v) => set('durationMinutes', v)}
-                  rule={RULES.durationMinutes}
-                />
                 <Field
                   id="position"
                   label={t('Position')}

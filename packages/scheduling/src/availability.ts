@@ -475,7 +475,7 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     description: et.description,
     durationMinutes: et.durationMinutes,
     ...(et.allowedDurationsMinutes.length > 1 && {
-      allowedDurationsMinutes: [...et.allowedDurationsMinutes],
+      allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b),
     }),
     location: et.location && { kind: et.location.kind },
     questions: et.questions,

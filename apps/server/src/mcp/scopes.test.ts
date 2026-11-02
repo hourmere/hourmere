@@ -29,10 +29,18 @@ const all = [
   'set_event_type_notifications',
   'list_schedules',
   'get_schedule',
+  'create_event_type',
+  'update_event_type',
   'list_calendar_connections',
   'list_conference_connections',
 ]
+const configurationWrites = new Set([
+  'create_event_type',
+  'update_event_type',
+  'set_event_type_notifications',
+])
 const writes = new Set([
+  ...configurationWrites,
   'create_booking',
   'reschedule_booking',
   'cancel_booking',
@@ -52,7 +60,7 @@ const expected = (scope: ApiKeyScope) =>
       ? true
       : scope === 'read'
         ? !writes.has(name)
-        : !otherReads.has(name) && name !== 'set_event_type_notifications',
+        : !otherReads.has(name) && !configurationWrites.has(name),
   )
 const denial = {
   error: 'insufficient_scope',
@@ -348,6 +356,8 @@ describe('CLI scope parity', () => {
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
     ['event', 'get_event_type'],
+    ['create-event', 'create_event_type'],
+    ['update-event', 'update_event_type'],
     ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],

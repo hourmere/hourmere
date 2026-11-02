@@ -55,7 +55,7 @@ export const PublicEventType = z
     durationMinutes: z.number().int(),
     allowedDurationsMinutes: z.array(SelectedDurationMinutes).min(1).max(12).optional().openapi({
       description:
-        'Allowed meeting lengths, in display order. Present when invitees have a choice; omitted means only durationMinutes is offered.',
+        'Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered.',
     }),
     location: z.object({ kind: LocationKind }).nullable().openapi({
       description: 'Only the kind; details such as a phone number come with the booking',

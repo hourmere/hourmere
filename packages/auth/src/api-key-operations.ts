@@ -253,6 +253,8 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   ]),
   mcp('list_schedules', 'other_read', ['GET /api/v1/schedules']),
   mcp('get_schedule', 'other_read', ['GET /api/v1/schedules/{id}']),
+  mcp('create_event_type', 'other_write', ['POST /api/v1/event-types']),
+  mcp('update_event_type', 'other_write', ['PATCH /api/v1/event-types/{id}']),
   mcp('list_calendar_connections', 'other_read', ['GET /api/v1/calendar-connections']),
   mcp('list_conference_connections', 'other_read', ['GET /api/v1/conference-connections']),
 ])
@@ -276,6 +278,8 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('profile', 'get_profile'),
   cli('catalog', 'list_event_types'),
   cli('event', 'get_event_type'),
+  cli('create-event', 'create_event_type'),
+  cli('update-event', 'update_event_type'),
   cli('set-event-notifications', 'set_event_type_notifications'),
   cli('schedules', 'list_schedules'),
   cli('schedule', 'get_schedule'),
