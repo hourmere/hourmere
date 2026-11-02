@@ -86,6 +86,14 @@ existing authorized bookings. Both can expose existing visible attendee details 
 meeting links. `full` does not authorize browser-only operations or API key management.
 MCP OAuth keeps its existing `mcp:tools` grant rather than adopting these API key scopes.
 
+Future one-time booking link creation and revocation are full-account configuration
+writes, for both API key and MCP OAuth access. API keys require `full`; `read` and
+`bookings` cannot mint or withdraw links. For OAuth, transport registration must explicitly
+authorize full configuration access before exposing or calling these new operations;
+the existing `mcp:tools` grant alone does not implicitly opt into them. Any future limited
+OAuth grant must exclude them. These operations are currently internal services only;
+this contract note adds no MCP tools or OAuth scopes.
+
 Scope cannot be edited. Create a replacement at `/app/api-keys`, update the client and
 revoke the old key; reconnect or refresh tool discovery because clients can cache tools.
 Old keys and API creations that omit `metadata.scope` retain `full` compatibility; the

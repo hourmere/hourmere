@@ -240,9 +240,10 @@ Migration 0053 adds `one_time_booking_links`. Each link belongs to exactly one e
 and its organization, with the creating user recorded separately. Personal links belong
 to the event type's owner; team links belong to the team, rather than to whichever admin
 created them. The service returns a cryptographically random 256-bit bearer token exactly
-once, on creation. Only its SHA-256 digest is stored, under a unique index. Reads and
-revocation return metadata without either the raw token or its digest. Callers must keep
-the creation result private; later transports must not log it or place it in analytics.
+once, on creation. Only its SHA-256 digest is stored, under a unique index. Reads return
+metadata without either the raw token or its digest; revocation returns an empty
+acknowledgement. Callers must keep the creation result private; later transports must
+not log it or place it in analytics.
 
 An optional `expires_at` is an absolute instant. Database wall time decides eligibility,
 including after lock waits, independently of the application clock or transaction start.
@@ -264,12 +265,16 @@ An inactive or deleted event type has the same unavailable result. Hidden event 
 remain eligible through their direct one-time links. Links do not bypass event readiness,
 host membership, availability, notice, daily limits or any other booking rule.
 
-`claimOneTimeBookingLink` accepts the caller's booking transaction. The caller must create
-the confirmed booking and claim the link in that same transaction, and propagate a failed
-claim so the booking rolls back. Only a confirmed booking for the exact event type and
-organization can consume a link. A conditional row update serializes competing claims;
-database constraints and a transition trigger also prevent terminal links from returning
-to active or changing their consuming booking. The unique booking reference prevents one
+`claimOneTimeBookingLink` accepts the caller's top-level booking transaction. The caller
+must create the confirmed booking and claim the link in that same transaction, and
+propagate a failed claim so the booking rolls back. Only a confirmed booking inserted in
+that transaction for the exact event type and organization can consume a link; updating
+an older booking does not qualify. The database verifies the insertion transaction as
+well as the service.
+Bookings inserted inside a savepoint are not supported by this claim path.
+A conditional row update serializes competing claims; database constraints and a
+transition trigger also prevent terminal links from returning to active or changing
+their consuming booking. The unique booking reference prevents one
 booking from consuming multiple links. A rolled-back booking leaves the link available.
 Cancelling or rescheduling the consuming booking never reactivates the link; the original
 booking reference remains as evidence of consumption.
@@ -278,21 +283,41 @@ Creation and revocation recheck current verified membership and permissions insi
 write transaction. For team-owned event types, only current team owners and admins may
 create or revoke links. Ordinary members may manage links only for event types they own;
 being a host or the creator of a team link grants no team management permission. The
-current organization scopes every operation. For the next REST/MCP/CLI task, creation and
+current organization scopes every operation. Revoking an unknown, foreign, inaccessible
+or already-revoked ID returns the same empty acknowledgement, without exposing its state
+or existence. For the next REST/MCP/CLI task, creation and
 revocation are account-configuration writes requiring API key scope `full`; neither
 `read` nor `bookings` authorizes minting or withdrawing these capabilities. The internal
-services already enforce this classification. Existing session and MCP OAuth permissions
-still apply. Transport registration and public-page consumption follow separately.
+services already enforce this API key classification. MCP OAuth creation/revocation is
+also full-account configuration access only: the future transport must explicitly
+authorize that access before exposing or calling these operations. The existing
+`mcp:tools` grant alone must not implicitly opt into these new configuration writes;
+any future limited OAuth grants must exclude them. Existing session, membership and
+ownership permissions still apply. No new OAuth scope or transport is registered here;
+transport registration and public-page consumption follow separately.
 
 Each personal owner or team organization may have at most 1000 active, unexpired links
-across all its event types and creators. Creation serializes this check under an owner or
-organization lock. Used, expired and revoked rows do not consume this allowance. They are
-retained without automatic expiry-based deletion, including their digest and prefill,
-for lifecycle history and to prevent accidental reuse. Physical deletion of the creator,
-event type or organization cascades to its link rows; soft-deleting an event type retains
-its links while making them unavailable. A consuming booking cannot be
-deleted on its own while its link evidence remains; deletion of the organization removes
-both together. No retention worker or administrative list is introduced here.
+across all its event types and creators. An ordinary team member additionally has a
+200-link sub-limit across their own event types in that team; owners/admins share the
+team total without that sub-limit. Creation serializes capacity checks with a transaction
+advisory lock keyed by the personal organization or team, without taking an organization
+row write lock. Used, expired and revoked rows do not consume these allowances.
+
+Used links are retained with their consuming booking as evidence, including after
+cancellation or rescheduling; the cleanup job never deletes them. A consuming booking
+cannot be deleted on its own while its link evidence remains; normal organization/event
+deletion removes both together. An hourly job registered in `packages/jobs` deletes at
+most 500 unused links per run once 90 days have passed since expiry or revocation. Revoked
+links use `revoked_at`, even if their expiry was earlier. Expired links include active
+rows whose `expires_at` has elapsed. Retries are idempotent and locked rows are skipped;
+a backlog can take additional runs. Active links without expiry are retained.
+
+The creator ID is immutable, non-null historical attribution without an account foreign
+key, following migration 0041. Deleting a creator therefore preserves team links and
+consumption records. Personal organization deletion still removes personal links, and
+physical event type or organization deletion cascades to its links. Soft-deleting an
+event type retains its links while making them unavailable. No administrative list is
+introduced here.
 
 ## Event duration contract
 

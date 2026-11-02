@@ -10,6 +10,8 @@ import { cleanText } from './text.ts'
 
 /** Active, unexpired links per personal owner or team organization. */
 export const ONE_TIME_BOOKING_LINK_LIMIT = 1000
+/** Ordinary team members share this sub-limit across all of their team event types. */
+export const ONE_TIME_BOOKING_LINK_MEMBER_LIMIT = 200
 
 export type OneTimeBookingLinkState = 'active' | 'used' | 'expired' | 'revoked'
 
@@ -68,6 +70,9 @@ export async function createOneTimeBookingLink(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, input.eventTypeId)
     await lockWriteOwner(trx, ctx)
+    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.one-time-links:${ctx.principal.organization.id}`}, 0))`.execute(
+      trx,
+    )
     const event = await authorizedEvent(trx, ctx, input.eventTypeId)
     if (!event.is_active || event.deleted_at !== null)
       throw new DomainError('invalid', 'event_type_inactive')
@@ -78,9 +83,15 @@ export async function createOneTimeBookingLink(
         .executeTakeFirstOrThrow()
       if (!future) throw invalid()
     }
-    const { count } = await trx
+    const { count, creatorCount } = await trx
       .selectFrom('one_time_booking_links')
-      .select((eb) => eb.fn.countAll<string>().as('count'))
+      .select((eb) => [
+        eb.fn.countAll<string>().as('count'),
+        eb.fn
+          .countAll<string>()
+          .filterWhere('creator_user_id', '=', ctx.principal.user.id)
+          .as('creatorCount'),
+      ])
       .where('organization_id', '=', event.organization_id)
       .where('state', '=', 'active')
       .where((eb) =>
@@ -88,6 +99,8 @@ export async function createOneTimeBookingLink(
       )
       .executeTakeFirstOrThrow()
     if (Number(count) >= ONE_TIME_BOOKING_LINK_LIMIT)
+      throw new DomainError('conflict', 'one_time_link_limit_reached')
+    if (event.memberLimited && Number(creatorCount) >= ONE_TIME_BOOKING_LINK_MEMBER_LIMIT)
       throw new DomainError('conflict', 'one_time_link_limit_reached')
     const token = randomBytes(32).toString('base64url')
     const row = await trx
@@ -124,59 +137,68 @@ export async function resolveOneTimeBookingLink(
   }
 }
 
-/** Owners can retire an active link even after its event type is disabled or deleted. */
-export async function revokeOneTimeBookingLink(
-  ctx: ServiceContext,
-  id: string,
-): Promise<OneTimeBookingLink> {
+/**
+ * Retire an eligible link without exposing its existence or state. Unknown, foreign,
+ * inaccessible and already terminal IDs all receive the same empty acknowledgement.
+ * Current principal, organization and API-key checks still apply to every request.
+ */
+export async function revokeOneTimeBookingLink(ctx: ServiceContext, id: string): Promise<void> {
   requireFullScope(ctx)
-  if (!isUuid(id)) throw linkNotFound()
-  return ctx.db.transaction().execute(async (trx) => {
-    const initial = await trx
-      .selectFrom('one_time_booking_links')
-      .select(['id', 'event_type_id'])
-      .where('id', '=', id)
-      .where('organization_id', '=', ctx.principal.organization.id)
-      .executeTakeFirst()
-    if (!initial) throw linkNotFound()
-    await ctx.authorizeOrganizationWrite?.(
-      trx,
-      ctx.principal.organization.id,
-      initial.event_type_id,
-    )
-    await lockWriteOwner(trx, ctx)
-    await authorizedEvent(trx, ctx, initial.event_type_id)
+  const candidateId = isUuid(id) ? id : '00000000-0000-0000-0000-000000000000'
+  await ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
+    const personal = await lockWriteOwner(trx, ctx)
     if (ctx.principal.kind === 'api_key') await requireActiveApiKey(trx, ctx.principal, Date.now)
-    const row = await trx
-      .selectFrom('one_time_booking_links')
-      .selectAll()
-      .where('id', '=', id)
-      .forUpdate()
+    const membership = await trx
+      .selectFrom('auth.member')
+      .select('role')
+      .where('organizationId', '=', ctx.principal.organization.id)
+      .where('userId', '=', ctx.principal.user.id)
+      .forShare()
       .executeTakeFirst()
-    if (!row) throw linkNotFound()
-    if (row.state === 'active') {
-      const { expired } = await trx
-        .selectNoFrom(
-          sql<boolean>`${row.expires_at}::timestamptz IS NOT NULL AND ${row.expires_at}::timestamptz <= clock_timestamp()`.as(
-            'expired',
-          ),
-        )
-        .executeTakeFirstOrThrow()
-      if (expired) return toLink(row, true)
-      const revoked = await trx
-        .updateTable('one_time_booking_links')
-        .set({ state: 'revoked', revoked_at: sql<Date>`clock_timestamp()` })
-        .where('id', '=', id)
-        .returningAll()
-        .executeTakeFirstOrThrow()
-      return toLink(revoked, false)
-    }
-    return toLink(row, false)
+    const roles = membership?.role.split(',').map((role) => role.trim()) ?? []
+    const teamManager = !personal && (roles.includes('owner') || roles.includes('admin'))
+    // All IDs use the same authorization and conditional-write query. Filter before
+    // locking the event, so absent and terminal links take the same no-op path.
+    await trx
+      .with('manageable_event', (db) =>
+        db
+          .selectFrom('event_types')
+          .innerJoin('one_time_booking_links as link', 'link.event_type_id', 'event_types.id')
+          .select('event_types.id')
+          .where('link.id', '=', candidateId)
+          .where('link.state', '=', 'active')
+          .where((eb) =>
+            eb.or([
+              eb('link.expires_at', 'is', null),
+              eb('link.expires_at', '>', sql<Date>`clock_timestamp()`),
+            ]),
+          )
+          .where('event_types.organization_id', '=', ctx.principal.organization.id)
+          .where(sql<boolean>`${membership !== undefined}`)
+          .where((eb) =>
+            eb.or([
+              eb('event_types.owner_user_id', '=', ctx.principal.user.id),
+              ...(teamManager ? [eb('event_types.owner_user_id', 'is', null)] : []),
+            ]),
+          )
+          .forShare('event_types'),
+      )
+      .updateTable('one_time_booking_links')
+      .set({ state: 'revoked', revoked_at: sql<Date>`clock_timestamp()` })
+      .where('id', '=', candidateId)
+      .where('event_type_id', 'in', (eb) => eb.selectFrom('manageable_event').select('id'))
+      .where('state', '=', 'active')
+      .where((eb) =>
+        eb.or([eb('expires_at', 'is', null), eb('expires_at', '>', sql<Date>`clock_timestamp()`)]),
+      )
+      .execute()
   })
 }
 
 /**
- * Consume only on the booking transaction's connection. A caller must let failures
+ * Consume only for a booking inserted by this top-level transaction (not a savepoint).
+ * A previously committed booking cannot claim a link, even after an update. Let failures
  * abort that transaction; rollback restores both the booking and its link together.
  * Cancellation and rescheduling never transition a used link back to active.
  */
@@ -202,6 +224,8 @@ export async function claimOneTimeBookingLink(
     .where('organization_id', '=', initial.organization_id)
     .where('event_type_id', '=', initial.event_type_id)
     .where('status', '=', 'confirmed')
+    .where(sql<boolean>`xmin = pg_current_xact_id()::xid`)
+    .where('created_at', '=', sql<Date>`transaction_timestamp()`)
     .forShare()
     .executeTakeFirst()
   if (!booking) throw linkNotFound()
@@ -245,7 +269,7 @@ function requireFullScope(ctx: ServiceContext) {
     throw new ApiKeyScopeError()
 }
 
-/** Serialize capacity across event types and recheck the actual personal marker. */
+/** Share locks preserve account/departure ordering without blocking FK inserts. */
 async function lockWriteOwner(db: Db, ctx: ServiceContext) {
   const personal = await db
     .selectFrom('personal_organizations')
@@ -264,9 +288,10 @@ async function lockWriteOwner(db: Db, ctx: ServiceContext) {
     .selectFrom('auth.organization')
     .select('id')
     .where('id', '=', ctx.principal.organization.id)
-    .forUpdate()
+    .forShare()
     .executeTakeFirst()
   if (!organization) throw eventNotFound()
+  return personal
 }
 
 async function authorizedEvent(db: Db, ctx: ServiceContext, eventTypeId: string) {
@@ -296,7 +321,10 @@ async function authorizedEvent(db: Db, ctx: ServiceContext, eventTypeId: string)
   const roles = membership.role.split(',').map((role) => role.trim())
   if (event.owner_user_id === null && !roles.includes('owner') && !roles.includes('admin'))
     throw insufficientRole()
-  return event
+  return {
+    ...event,
+    memberLimited: !personal && !roles.includes('owner') && !roles.includes('admin'),
+  }
 }
 
 /** Hidden types are deliberately eligible; current ownership and membership still apply. */

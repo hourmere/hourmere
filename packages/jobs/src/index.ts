@@ -7,6 +7,7 @@ import pgBossPackage from 'pg-boss/package.json' with { type: 'json' }
 import type { z } from 'zod'
 
 export type { KyselyTransactionLike } from 'pg-boss'
+export { oneTimeBookingLinksRetentionJob } from './one-time-links-retention.ts'
 
 /**
  * How pg-boss treats jobs that share a `singletonKey` (see https://hourmere.com/docs/notifications):

@@ -107,6 +107,7 @@ async function seedPredecessor(directory: string) {
 
 interface Fixture {
   pool: pg.Pool
+  client?: pg.PoolClient
   creator: string
   otherCreator: string
   organization: string
@@ -183,13 +184,40 @@ async function insertLink(f: Fixture, overrides: Record<string, unknown> = {}) {
   }
   const fields = Object.keys(values)
   return (
-    await f.pool.query<{ id: string }>(
+    await (f.client ?? f.pool).query<{ id: string }>(
       `INSERT INTO one_time_booking_links
     (${fields.map(quote).join(',')}) VALUES (${fields.map((_, i) => `$${i + 1}`).join(',')})
     RETURNING id`,
       Object.values(values),
     )
   ).rows[0]?.id as string
+}
+
+async function withFreshBooking<T>(
+  f: Fixture,
+  action: (transaction: Fixture & { client: pg.PoolClient }) => Promise<T>,
+) {
+  const client = await f.pool.connect()
+  try {
+    await client.query('BEGIN')
+    const booking = (
+      await client.query<{ id: string }>(
+        `INSERT INTO bookings
+          (organization_id,event_type_id,start_at,end_at,title,source,status)
+          VALUES ($1,$2,'2030-02-01T09:00Z','2030-02-01T09:30Z','New booking','web','confirmed')
+          RETURNING id`,
+        [f.organization, f.event],
+      )
+    ).rows[0]?.id as string
+    const result = await action({ ...f, client, booking })
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
 }
 
 const used = (f: Fixture) => ({
@@ -222,12 +250,11 @@ const assertions: Record<string, (f: Fixture) => Promise<void>> = {
     await expect(insertLink(f, { state: 'available' })).rejects.toMatchObject(checkViolation)
   },
   'used shape': async (f) => {
-    for (const values of [
-      { booking_id: f.booking },
-      { used_at: new Date() },
-      { ...used(f), used_at: null },
-    ])
+    for (const values of [{ booking_id: f.booking }, { used_at: new Date() }])
       await expect(insertLink(f, values)).rejects.toMatchObject(checkViolation)
+    await expect(
+      withFreshBooking(f, (trx) => insertLink(trx, { ...used(trx), used_at: null })),
+    ).rejects.toMatchObject(checkViolation)
   },
   'revoked shape': async (f) => {
     for (const values of [{ state: 'revoked' }, { revoked_at: new Date() }])
@@ -238,16 +265,45 @@ const assertions: Record<string, (f: Fixture) => Promise<void>> = {
       code: '23503',
     })
   },
-  'creator reference': async (f) => {
-    await expect(
-      insertLink(f, { creator_user_id: '00000000-0000-0000-0000-000000000000' }),
-    ).rejects.toMatchObject({ code: '23503' })
+  'creator required': async (f) => {
+    await expect(insertLink(f, { creator_user_id: null })).rejects.toMatchObject({ code: '23502' })
+  },
+  'creator deletion preservation': async (f) => {
+    const active = await insertLink(f, {
+      prefill_name: 'Prospect',
+      prefill_email: 'p@example.test',
+    })
+    const consumed = await withFreshBooking(f, (trx) =>
+      insertLink(trx, { ...used(trx), token_hash: 'b'.repeat(64) }),
+    )
+    const before = (
+      await f.pool.query('SELECT to_jsonb(l) AS value FROM one_time_booking_links l ORDER BY id')
+    ).rows
+    await f.pool.query('DELETE FROM auth."user" WHERE id=$1', [f.creator])
+    expect(
+      (await f.pool.query('SELECT to_jsonb(l) AS value FROM one_time_booking_links l ORDER BY id'))
+        .rows,
+    ).toEqual(before)
+    expect(before).toHaveLength(2)
+    await withFreshBooking(f, async (trx) => {
+      const claimed = await trx.client.query(
+        `UPDATE one_time_booking_links SET state='used',booking_id=$1,used_at=clock_timestamp()
+          WHERE id=$2 RETURNING creator_user_id,state`,
+        [trx.booking, active],
+      )
+      expect(claimed.rows).toEqual([{ creator_user_id: f.creator, state: 'used' }])
+    })
+    expect(
+      (await f.pool.query('SELECT state FROM one_time_booking_links WHERE id=$1', [consumed])).rows,
+    ).toEqual([{ state: 'used' }])
   },
   'unique booking': async (f) => {
-    await insertLink(f, used(f))
-    await expect(insertLink(f, { ...used(f), token_hash: 'b'.repeat(64) })).rejects.toMatchObject({
-      code: '23505',
-    })
+    await expect(
+      withFreshBooking(f, async (trx) => {
+        await insertLink(trx, used(trx))
+        await insertLink(trx, { ...used(trx), token_hash: 'b'.repeat(64) })
+      }),
+    ).rejects.toMatchObject({ code: '23505' })
   },
   'immutable issuance': async (f) => {
     const id = await insertLink(f)
@@ -269,12 +325,16 @@ const assertions: Record<string, (f: Fixture) => Promise<void>> = {
   },
   'terminal state': async (f) => {
     for (const [i, state] of ['used', 'expired', 'revoked'].entries()) {
-      const id = await insertLink(f, {
-        token_hash: String(i).repeat(64),
-        state,
-        ...(state === 'used' ? used(f) : {}),
-        ...(state === 'revoked' ? { revoked_at: new Date() } : {}),
-      })
+      const id =
+        state === 'used'
+          ? await withFreshBooking(f, (trx) =>
+              insertLink(trx, { ...used(trx), token_hash: String(i).repeat(64) }),
+            )
+          : await insertLink(f, {
+              token_hash: String(i).repeat(64),
+              state,
+              ...(state === 'revoked' ? { revoked_at: new Date() } : {}),
+            })
       await expect(
         f.pool.query(
           `UPDATE one_time_booking_links SET state='active',
@@ -300,54 +360,120 @@ const assertions: Record<string, (f: Fixture) => Promise<void>> = {
   },
   'confirmed same-event booking': async (f) => {
     await expect(
-      insertLink(f, { ...used(f), booking_id: f.cancelledBooking }),
+      withFreshBooking(f, async (trx) => {
+        await trx.client.query(
+          "UPDATE bookings SET status='cancelled',cancelled_at=clock_timestamp() WHERE id=$1",
+          [trx.booking],
+        )
+        return insertLink(trx, used(trx))
+      }),
     ).rejects.toMatchObject(checkViolation)
-    await expect(insertLink(f, { ...used(f), event_type_id: f.otherEvent })).rejects.toMatchObject(
-      checkViolation,
-    )
+    await expect(
+      withFreshBooking(f, (trx) => insertLink(trx, { ...used(trx), event_type_id: f.otherEvent })),
+    ).rejects.toMatchObject(checkViolation)
     await expect(
       insertLink(f, { ...used(f), booking_id: '00000000-0000-0000-0000-000000000000' }),
     ).rejects.toMatchObject(checkViolation)
+  },
+  'same-transaction booking': async (f) => {
+    await expect(
+      withFreshBooking(f, async (trx) => {
+        const started = (
+          await trx.client.query<{ started: string }>(
+            'SELECT transaction_timestamp()::text AS started',
+          )
+        ).rows[0]?.started
+        // Deliberately match a committed booking's timestamp from another connection:
+        // the transaction-id check must independently reject it without an UPDATE here.
+        await f.pool.query('UPDATE bookings SET created_at=$1 WHERE id=$2', [started, f.booking])
+        return insertLink(trx, used(f))
+      }),
+    ).rejects.toMatchObject({
+      ...checkViolation,
+      constraint: 'one_time_booking_links_claim_booking',
+    })
+  },
+  'updated pre-existing booking': async (f) => {
+    await expect(
+      withFreshBooking(f, async (trx) => {
+        await trx.client.query('UPDATE bookings SET title=$1 WHERE id=$2', [
+          'Previously created booking updated in this transaction',
+          f.booking,
+        ])
+        return insertLink(trx, used(f))
+      }),
+    ).rejects.toMatchObject({
+      ...checkViolation,
+      constraint: 'one_time_booking_links_claim_booking',
+    })
+  },
+  'later-committed booking update': async (f) => {
+    await expect(
+      withFreshBooking(f, async (trx) => {
+        const started = (
+          await trx.client.query<{ started: string }>(
+            'SELECT transaction_timestamp()::text AS started',
+          )
+        ).rows[0]?.started
+        const committed = (
+          await f.pool.query<{ id: string; created_later: boolean }>(
+            `INSERT INTO bookings
+              (organization_id,event_type_id,start_at,end_at,title,source,status)
+              VALUES ($1,$2,'2030-04-01T09:00Z','2030-04-01T09:30Z','Other transaction','web','confirmed')
+              RETURNING id,created_at > $3::timestamptz AS created_later`,
+            [f.organization, f.event, started],
+          )
+        ).rows[0]
+        expect(committed?.created_later).toBe(true)
+        await trx.client.query('UPDATE bookings SET title=$1 WHERE id=$2', [
+          'Other transaction booking updated by claim transaction',
+          committed?.id,
+        ])
+        return insertLink(trx, { ...used(trx), booking_id: committed?.id })
+      }),
+    ).rejects.toMatchObject({
+      ...checkViolation,
+      constraint: 'one_time_booking_links_claim_booking',
+    })
   },
   'database-clock expiry': async (f) => {
     const expiry = (
       await f.pool.query<{ expiry: Date }>("SELECT clock_timestamp()-interval '1 second' AS expiry")
     ).rows[0]?.expiry
-    await expect(insertLink(f, { ...used(f), expires_at: expiry })).rejects.toMatchObject(
-      checkViolation,
-    )
+    await expect(
+      withFreshBooking(f, (trx) => insertLink(trx, { ...used(trx), expires_at: expiry })),
+    ).rejects.toMatchObject(checkViolation)
   },
   'database wall clock': async (f) => {
-    const client = await f.pool.connect()
-    try {
-      await client.query('BEGIN')
-      const expiry = (
-        await client.query<{ expiry: Date }>(
-          "SELECT clock_timestamp()+interval '50 milliseconds' AS expiry",
-        )
-      ).rows[0]?.expiry
-      await client.query('SELECT pg_sleep(0.08)')
-      await expect(
-        client.query(
+    await expect(
+      withFreshBooking(f, async (trx) => {
+        const client = trx.client
+        const expiry = (
+          await client.query<{ expiry: Date }>(
+            "SELECT clock_timestamp()+interval '50 milliseconds' AS expiry",
+          )
+        ).rows[0]?.expiry
+        await client.query('SELECT pg_sleep(0.08)')
+        await client.query(
           `INSERT INTO one_time_booking_links
           (organization_id,event_type_id,creator_user_id,token_hash,state,booking_id,used_at,expires_at)
           VALUES ($1,$2,$3,$4,'used',$5,clock_timestamp(),$6)`,
-          [f.organization, f.event, f.creator, 'a'.repeat(64), f.booking, expiry],
-        ),
-      ).rejects.toMatchObject({
-        ...checkViolation,
-        constraint: 'one_time_booking_links_claim_expired',
-      })
-    } finally {
-      await client.query('ROLLBACK')
-      client.release()
-    }
+          [f.organization, f.event, f.creator, 'a'.repeat(64), trx.booking, expiry],
+        )
+      }),
+    ).rejects.toMatchObject({
+      ...checkViolation,
+      constraint: 'one_time_booking_links_claim_expired',
+    })
   },
   'retained booking evidence': async (f) => {
-    await insertLink(f, used(f))
-    await expect(
-      f.pool.query('DELETE FROM bookings WHERE id=$1', [f.booking]),
-    ).rejects.toMatchObject({ code: '23503' })
+    const booking = await withFreshBooking(f, async (trx) => {
+      await insertLink(trx, used(trx))
+      return trx.booking
+    })
+    await expect(f.pool.query('DELETE FROM bookings WHERE id=$1', [booking])).rejects.toMatchObject(
+      { code: '23503' },
+    )
   },
 }
 
@@ -368,8 +494,13 @@ const mutations: Record<string, (source: string) => string> = {
     `${source}\nALTER TABLE one_time_booking_links DROP CONSTRAINT one_time_booking_links_revoked_shape;`,
   'event tenancy': (source) =>
     `${source}\nALTER TABLE one_time_booking_links DROP CONSTRAINT one_time_booking_links_event_type_id_organization_id_fkey;`,
-  'creator reference': (source) =>
-    `${source}\nALTER TABLE one_time_booking_links DROP CONSTRAINT one_time_booking_links_creator_user_id_fkey;`,
+  'creator required': (source) =>
+    source.replace('creator_user_id uuid NOT NULL', 'creator_user_id uuid'),
+  'creator deletion preservation': (source) =>
+    source.replace(
+      'creator_user_id uuid NOT NULL',
+      'creator_user_id uuid NOT NULL REFERENCES auth."user" (id) ON DELETE CASCADE',
+    ),
   'unique booking': (source) =>
     `${source}\nALTER TABLE one_time_booking_links DROP CONSTRAINT one_time_booking_links_booking_id_key;`,
   'immutable issuance': (source) =>
@@ -380,6 +511,15 @@ const mutations: Record<string, (source: string) => string> = {
   'terminal state': (source) =>
     source.replace("IF OLD.state <> 'active' AND", "IF false AND OLD.state <> 'active' AND"),
   'confirmed same-event booking': (source) => source.replace('IF NOT FOUND THEN', 'IF false THEN'),
+  'same-transaction booking': (source) =>
+    source.replace('AND b.xmin = pg_current_xact_id()::xid', ''),
+  'updated pre-existing booking': (source) =>
+    source.replace('AND b.created_at = transaction_timestamp()', ''),
+  'later-committed booking update': (source) =>
+    source.replace(
+      'AND b.created_at = transaction_timestamp()',
+      'AND b.created_at >= transaction_timestamp()',
+    ),
   'database-clock expiry': (source) =>
     source.replace(
       'IF NEW.expires_at IS NOT NULL AND',
@@ -408,6 +548,22 @@ describe.skipIf(!serverUrl)('one-time booking links migration', () => {
       expect(await runMigrations(upgraded.pool, directory)).toEqual([migration])
       expect(await records(upgraded.pool)).toEqual(before)
       expect((await upgraded.pool.query('SELECT * FROM one_time_booking_links')).rows).toEqual([])
+      expect(
+        (
+          await upgraded.pool.query(`SELECT is_nullable FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='one_time_booking_links'
+              AND column_name='creator_user_id'`)
+        ).rows,
+      ).toEqual([{ is_nullable: 'NO' }])
+      expect(
+        (
+          await upgraded.pool.query(`SELECT conname FROM pg_constraint
+            WHERE conrelid='one_time_booking_links'::regclass AND contype='f'
+              AND conkey @> ARRAY[(SELECT attnum FROM pg_attribute
+                WHERE attrelid='one_time_booking_links'::regclass
+                  AND attname='creator_user_id')]::smallint[]`)
+        ).rows,
+      ).toEqual([])
       expect(
         (
           await upgraded.pool.query(
@@ -486,7 +642,7 @@ describe.skipIf(!serverUrl)('one-time booking links migration', () => {
           owned = await createTestDatabase(serverUrl as string, directory)
           try {
             await assertions[protection]?.(await fixture(owned.pool))
-            expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
+            expect(owned.pool.totalCount).toBeLessThanOrEqual(2)
           } finally {
             await owned.drop()
             owned = undefined
@@ -512,10 +668,13 @@ describe.skipIf(!serverUrl)('one-time booking links migration', () => {
     const owned = await createTestDatabase(serverUrl as string)
     try {
       const f = await fixture(owned.pool)
-      const id = await insertLink(f, used(f))
+      const { id, booking } = await withFreshBooking(f, async (trx) => ({
+        id: await insertLink(trx, used(trx)),
+        booking: trx.booking,
+      }))
       await f.pool.query(
         "UPDATE bookings SET status='cancelled',cancelled_at=clock_timestamp() WHERE id=$1",
-        [f.booking],
+        [booking],
       )
       expect(
         (
@@ -524,11 +683,40 @@ describe.skipIf(!serverUrl)('one-time booking links migration', () => {
             [id],
           )
         ).rows,
-      ).toEqual([{ state: 'used', booking_id: f.booking, has_used_at: true }])
+      ).toEqual([{ state: 'used', booking_id: booking, has_used_at: true }])
       await f.pool.query('DELETE FROM auth.organization WHERE id=$1', [f.organization])
       expect(
         (await f.pool.query('SELECT * FROM one_time_booking_links WHERE id=$1', [id])).rows,
       ).toEqual([])
+      expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
+    } finally {
+      await owned.drop()
+    }
+  }, 60_000)
+
+  it('refuses a booking inserted in a savepoint rather than the top-level transaction', async () => {
+    const owned = await createTestDatabase(serverUrl as string)
+    try {
+      const f = await fixture(owned.pool)
+      await expect(
+        withFreshBooking(f, async (trx) => {
+          await trx.client.query('SAVEPOINT nested_booking')
+          const booking = (
+            await trx.client.query<{ id: string }>(
+              `INSERT INTO bookings
+                (organization_id,event_type_id,start_at,end_at,title,source,status)
+                VALUES ($1,$2,'2030-03-01T09:00Z','2030-03-01T09:30Z','Nested booking','web','confirmed')
+                RETURNING id`,
+              [f.organization, f.event],
+            )
+          ).rows[0]?.id as string
+          await trx.client.query('RELEASE SAVEPOINT nested_booking')
+          return insertLink(trx, { ...used(trx), booking_id: booking })
+        }),
+      ).rejects.toMatchObject({
+        ...checkViolation,
+        constraint: 'one_time_booking_links_claim_booking',
+      })
       expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
     } finally {
       await owned.drop()

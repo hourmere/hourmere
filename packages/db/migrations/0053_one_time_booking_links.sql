@@ -3,7 +3,8 @@ CREATE TABLE one_time_booking_links (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   organization_id uuid NOT NULL REFERENCES auth.organization (id) ON DELETE CASCADE,
   event_type_id uuid NOT NULL,
-  creator_user_id uuid NOT NULL REFERENCES auth."user" (id) ON DELETE CASCADE,
+  -- Historical attribution survives account deletion, as in organization_operations.
+  creator_user_id uuid NOT NULL,
   token_hash text NOT NULL UNIQUE
     CHECK (token_hash ~ '^[0-9a-f]{64}$'),
   expires_at timestamptz,
@@ -38,6 +39,10 @@ CREATE INDEX one_time_booking_links_organization_active
   ON one_time_booking_links (organization_id) WHERE state = 'active';
 CREATE INDEX one_time_booking_links_event_type
   ON one_time_booking_links (event_type_id);
+CREATE INDEX one_time_booking_links_expiry_cleanup
+  ON one_time_booking_links (expires_at, id) WHERE state IN ('active', 'expired');
+CREATE INDEX one_time_booking_links_revocation_cleanup
+  ON one_time_booking_links (revoked_at, id) WHERE state = 'revoked';
 
 CREATE FUNCTION guard_one_time_booking_link() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
@@ -65,6 +70,11 @@ BEGIN
     PERFORM 1 FROM public.bookings b
       WHERE b.id = NEW.booking_id AND b.organization_id = NEW.organization_id
         AND b.event_type_id = NEW.event_type_id AND b.status = 'confirmed'
+        -- Require a booking inserted in this top-level transaction. An UPDATE
+        -- changes xmin too, so its original creation time must exactly match the
+        -- transaction's default now(), including when another transaction inserted it later.
+        AND b.xmin = pg_current_xact_id()::xid
+        AND b.created_at = transaction_timestamp()
       FOR SHARE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'one-time booking link requires its confirmed booking'

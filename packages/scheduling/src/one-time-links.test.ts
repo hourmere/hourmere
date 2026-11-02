@@ -33,7 +33,7 @@ async function sourceCopy(replacement?: readonly [string, string]): Promise<Link
 
 /** Keep capability values out of matcher diagnostics, including intentional failures. */
 function noCapability(value: unknown, token: string, hash?: string) {
-  const serialized = JSON.stringify(value)
+  const serialized = JSON.stringify(value) ?? 'null'
   expect(serialized.includes(token)).toBe(false)
   expect(hash ? serialized.includes(hash) : false).toBe(false)
   expect(/token_hash|tokenHash|manage_token|manageToken/.test(serialized)).toBe(false)
@@ -96,21 +96,57 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     )
   }
 
-  async function insertBooking(trx: Transaction<Database>, s: Awaited<ReturnType<typeof setup>>) {
-    return trx
+  async function insertBooking(
+    trx: Transaction<Database>,
+    s: Awaited<ReturnType<typeof setup>>,
+    options: Parameters<typeof fixtures.booking>[4] = {},
+  ) {
+    const start = Temporal.Instant.from('2036-11-02T10:00:00Z').add({ hours: bookingSequence++ })
+    const row = await trx
       .insertInto('bookings')
       .values({
         organization_id: s.organizationId,
-        event_type_id: s.eventTypeId,
-        start_at: '2036-11-02T10:00:00Z',
-        end_at: '2036-11-02T10:30:00Z',
+        event_type_id: options.eventTypeId ?? s.eventTypeId,
+        status: options.status ?? 'confirmed',
+        cancelled_at: options.status === 'cancelled' ? new Date() : null,
+        start_at: start.toString(),
+        end_at: start.add({ minutes: 30 }).toString(),
         title: 'One-time booking',
         manage_token_hash: createHash('sha256').update(randomBytes(32)).digest(),
         source: 'web',
       })
       .returning('id')
       .executeTakeFirstOrThrow()
+    await trx
+      .insertInto('booking_hosts')
+      .values({ booking_id: row.id, user_id: s.user.id })
+      .execute()
+    const attendee = options.attendee ?? { name: 'Invitee', email: 'invitee@example.com' }
+    await trx
+      .insertInto('booking_attendees')
+      .values({ booking_id: row.id, ...attendee, time_zone: 'UTC', is_booker: true })
+      .execute()
+    return row
   }
+
+  async function bookAndClaim(
+    s: Awaited<ReturnType<typeof setup>>,
+    token: string,
+    options: Parameters<typeof fixtures.booking>[4] = {},
+    module = Links,
+  ) {
+    return db.transaction().execute(async (trx) => {
+      const row = await insertBooking(trx, s, options)
+      return module.claimOneTimeBookingLink(trx, token, row.id)
+    })
+  }
+
+  const storedLink = (id: string) =>
+    db
+      .selectFrom('one_time_booking_links')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()
 
   const resolve = (token: string | undefined, module = Links) =>
     module.resolveOneTimeBookingLink({ db }, token)
@@ -176,11 +212,10 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
       eventTypeId: s.eventTypeId,
       prefill: { name: null, email: 'suggestion@example.com' },
     })
-    const bookingId = await booking(s, {
+    const claimed = await bookAndClaim(s, link.token, {
       attendee: { name: 'Different invitee', email: 'different@example.com' },
     })
-    const claimed = await claim(link.token, bookingId)
-    expect(claimed).toMatchObject({ state: 'used', bookingId })
+    expect(claimed.state).toBe('used')
     noCapability(claimed, link.token)
     expect(
       (
@@ -199,7 +234,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     const s = await setup()
     const bookingId = await booking(s)
     const used = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-    await claim(used.token, bookingId)
+    await bookAndClaim(s, used.token)
     const revoked = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
     await Links.revokeOneTimeBookingLink(s.ctx, revoked.id)
     const expiredToken = randomBytes(32).toString('base64url')
@@ -278,7 +313,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
         await failure(() => Links.claimOneTimeBookingLink(trx, link.token, bookingId)),
       ).toMatchObject({ code: 'one_time_link_not_found' })
     })
-    expect((await Links.revokeOneTimeBookingLink(s.ctx, link.id)).state).toBe('expired')
+    expect(await Links.revokeOneTimeBookingLink(s.ctx, link.id)).toBeUndefined()
+    expect((await storedLink(link.id)).state).toBe('active')
   })
 
   it('allows hidden event types and refuses inactive or deleted event types uniformly', async () => {
@@ -314,20 +350,22 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
   it('revokes idempotently, preserves the original timestamps and blocks resolution and consumption', async () => {
     const s = await setup()
     const link = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-    const first = await Links.revokeOneTimeBookingLink(s.ctx, link.id)
+    expect(await Links.revokeOneTimeBookingLink(s.ctx, link.id)).toBeUndefined()
+    const first = await storedLink(link.id)
     expect(first.state).toBe('revoked')
-    expect(first.revokedAt !== null).toBe(true)
-    const again = await Links.revokeOneTimeBookingLink(s.ctx, link.id)
-    expect(again.revokedAt).toBe(first.revokedAt)
-    expect(again.updatedAt).toBe(first.updatedAt)
+    expect(first.revoked_at !== null).toBe(true)
+    expect(await Links.revokeOneTimeBookingLink(s.ctx, link.id)).toBeUndefined()
+    const again = await storedLink(link.id)
+    expect(again.revoked_at).toEqual(first.revoked_at)
+    expect(again.updated_at).toEqual(first.updated_at)
     await unavailable(link.token, await booking(s))
   })
 
   it('commits consumption with the booking transaction and does not reactivate after real cancellation', async () => {
     const s = await setup()
     const link = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-    const bookingId = await booking(s)
-    const claimed = await claim(link.token, bookingId)
+    const claimed = await bookAndClaim(s, link.token)
+    const bookingId = claimed.bookingId as string
     expect(claimed).toMatchObject({ state: 'used', bookingId })
     expect(claimed.usedAt !== null).toBe(true)
     await cancelHostBooking(s.ctx, bookingId)
@@ -339,9 +377,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     expect(stored).toMatchObject({ state: 'used', booking_id: bookingId })
     expect(stored.used_at?.toISOString()).toBe(claimed.usedAt)
     await unavailable(link.token, bookingId)
-    const afterRevoke = await Links.revokeOneTimeBookingLink(s.ctx, link.id)
-    expect(afterRevoke.state).toBe('used')
-    expect(afterRevoke.bookingId).toBe(bookingId)
+    expect(await Links.revokeOneTimeBookingLink(s.ctx, link.id)).toBeUndefined()
+    expect(await storedLink(link.id)).toMatchObject({ state: 'used', booking_id: bookingId })
   })
 
   it('rolls consumption and its new booking back together, allowing one later successful claim', async () => {
@@ -445,12 +482,225 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     const s = await setup()
     const first = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
     const second = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-    const bookingId = await booking(s)
-    await claim(first.token, bookingId)
-    expect(await failure(() => claim(second.token, bookingId))).toMatchObject({
-      code: 'one_time_link_not_found',
+    await db.transaction().execute(async (trx) => {
+      const { id: bookingId } = await insertBooking(trx, s)
+      await Links.claimOneTimeBookingLink(trx, first.token, bookingId)
+      await sql`SAVEPOINT second_claim`.execute(trx)
+      expect(
+        await failure(() => Links.claimOneTimeBookingLink(trx, second.token, bookingId)),
+      ).toMatchObject({
+        code: 'one_time_link_not_found',
+      })
+      await sql`ROLLBACK TO SAVEPOINT second_claim`.execute(trx)
     })
     expect((await resolve(second.token)).id).toBe(second.id)
+  })
+
+  async function verifyNewBooking(
+    module: LinkModule,
+    updateExisting = false,
+    matchCreatedAtFromOtherTransaction = false,
+  ) {
+    const s = await setup()
+    const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+    const bookingId = await booking(s)
+    let attemptedWrite = false
+    await db.transaction().execute(async (trx) => {
+      if (matchCreatedAtFromOtherTransaction) {
+        // Preserve PostgreSQL's full timestamp precision while isolating the xmin guard.
+        const { startedAt } = await trx
+          .selectNoFrom(sql<string>`transaction_timestamp()::text`.as('startedAt'))
+          .executeTakeFirstOrThrow()
+        await db
+          .updateTable('bookings')
+          .set({ created_at: sql<Date>`${startedAt}::timestamptz` })
+          .where('id', '=', bookingId)
+          .execute()
+      }
+      if (updateExisting)
+        await trx
+          .updateTable('bookings')
+          .set({ title: 'Existing booking edited' })
+          .where('id', '=', bookingId)
+          .execute()
+      const observed = trx.withPlugin({
+        transformQuery: ({ node }) => {
+          if (node.kind === 'UpdateQueryNode') attemptedWrite = true
+          return node
+        },
+        transformResult: async ({ result }) => result,
+      })
+      const outcome = await module.claimOneTimeBookingLink(observed, link.token, bookingId).then(
+        () => 'fulfilled',
+        (error: unknown) =>
+          (error as { name?: string; code?: string })?.name === 'DomainError'
+            ? (error as { code: string }).code
+            : 'unexpected',
+      )
+      expect(outcome).toBe('one_time_link_not_found')
+      expect(attemptedWrite).toBe(false)
+    })
+    expect((await resolve(link.token)).id).toBe(link.id)
+  }
+
+  it('rejects a previously committed booking before attempting a claim write', async () => {
+    await verifyNewBooking(Links)
+  })
+
+  it('rejects an existing booking even if it was updated in the claiming transaction', async () => {
+    await verifyNewBooking(Links, true)
+  })
+
+  async function verifyOverlappingBooking(module: LinkModule) {
+    const s = await setup()
+    const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
+    await db.transaction().execute(async (trx) => {
+      // Force this transaction to start before the separate booking transaction.
+      await sql`select transaction_timestamp()`.execute(trx)
+      const { id: bookingId } = await db.transaction().execute((other) => insertBooking(other, s))
+      const timing = await trx
+        .selectFrom('bookings')
+        .select(sql<boolean>`created_at > transaction_timestamp()`.as('later'))
+        .where('id', '=', bookingId)
+        .executeTakeFirstOrThrow()
+      expect(timing.later).toBe(true)
+      await trx
+        .updateTable('bookings')
+        .set({ title: 'Later booking edited by first transaction' })
+        .where('id', '=', bookingId)
+        .execute()
+      let attemptedWrite = false
+      const observed = trx.withPlugin({
+        transformQuery: ({ node }) => {
+          if (node.kind === 'UpdateQueryNode') attemptedWrite = true
+          return node
+        },
+        transformResult: async ({ result }) => result,
+      })
+      const outcome = await module.claimOneTimeBookingLink(observed, link.token, bookingId).then(
+        () => 'fulfilled',
+        (error: unknown) =>
+          (error as { name?: string; code?: string })?.name === 'DomainError'
+            ? (error as { code: string }).code
+            : 'unexpected',
+      )
+      expect(outcome).toBe('one_time_link_not_found')
+      expect(attemptedWrite).toBe(false)
+    })
+    expect((await resolve(link.token)).id).toBe(link.id)
+  }
+
+  it('rejects a booking committed by a later transaction even after updating it in the claiming transaction', async () => {
+    await verifyOverlappingBooking(Links)
+  })
+
+  it('keeps active and used team links after their creating admin deletes their account', async () => {
+    const owner = await createTestUser(db)
+    const admin = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: admin, role: 'admin' },
+    ])
+    const eventTypeId = await fixtures.eventType(team.id, null)
+    const ctx = testContext(db, session(team.as(admin)), NOW)
+    const s = { user: owner, ctx, eventTypeId, organizationId: team.id }
+    const used = await Links.createOneTimeBookingLink(ctx, { eventTypeId })
+    const active = await Links.createOneTimeBookingLink(ctx, { eventTypeId })
+    const previous = await bookAndClaim(s, used.token)
+    await db.deleteFrom('auth.user').where('id', '=', admin.id).execute()
+    expect((await resolve(active.token)).id).toBe(active.id)
+    expect(await storedLink(used.id)).toMatchObject({
+      state: 'used',
+      booking_id: previous.bookingId,
+      creator_user_id: admin.id,
+    })
+    const next = await bookAndClaim(s, active.token)
+    expect(next).toMatchObject({ state: 'used', creatorUserId: admin.id })
+    expect(next.bookingId).not.toBe(previous.bookingId)
+  })
+
+  async function verifyUniformRevoke(module: LinkModule) {
+    const owner = await createTestUser(db)
+    const member = await createTestUser(db)
+    const other = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: member, role: 'member' },
+      { user: other, role: 'member' },
+    ])
+    const ownEvent = await fixtures.eventType(team.id, member.id)
+    const otherEvent = await fixtures.eventType(team.id, other.id)
+    const teamEvent = await fixtures.eventType(team.id, null)
+    const ctx = testContext(db, session(team.as(member)), NOW)
+    const revoked = await module.createOneTimeBookingLink(ctx, { eventTypeId: ownEvent })
+    await module.revokeOneTimeBookingLink(ctx, revoked.id)
+    const used = await module.createOneTimeBookingLink(ctx, { eventTypeId: ownEvent })
+    await bookAndClaim(
+      { user: member, ctx, organizationId: team.id, eventTypeId: ownEvent },
+      used.token,
+      {},
+      module,
+    )
+    const foreign = await setup()
+    const foreignLink = await module.createOneTimeBookingLink(foreign.ctx, {
+      eventTypeId: foreign.eventTypeId,
+    })
+    const unauthorized = await module.createOneTimeBookingLink(
+      testContext(db, session(team.as(other)), NOW),
+      { eventTypeId: otherEvent },
+    )
+    const teamLink = await module.createOneTimeBookingLink(
+      testContext(db, session(team.as(owner)), NOW),
+      { eventTypeId: teamEvent },
+    )
+    const expired = await db
+      .insertInto('one_time_booking_links')
+      .values({
+        organization_id: team.id,
+        event_type_id: ownEvent,
+        creator_user_id: member.id,
+        token_hash: createHash('sha256').update(randomBytes(32)).digest('hex'),
+        expires_at: sql`clock_timestamp() - interval '1 day'`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    let baseline: string[] | undefined
+    for (const id of [
+      revoked.id,
+      randomUUID(),
+      foreignLink.id,
+      unauthorized.id,
+      teamLink.id,
+      used.id,
+      expired.id,
+      'invalid',
+    ]) {
+      const shapes: string[] = []
+      const observed = db.withPlugin({
+        transformQuery: ({ node }) => {
+          shapes.push(
+            JSON.stringify(node, (key, value) => (key === 'value' ? '<parameter>' : value)),
+          )
+          return node
+        },
+        transformResult: async ({ result }) => result,
+      })
+      const result = await module.revokeOneTimeBookingLink({ ...ctx, db: observed }, id).then(
+        (value) => ({ fulfilled: true, empty: value === undefined }),
+        () => ({ fulfilled: false, empty: false }),
+      )
+      expect(result).toEqual({ fulfilled: true, empty: true })
+      if (baseline) expect(shapes).toEqual(baseline)
+      else baseline = shapes
+    }
+    expect((await storedLink(unauthorized.id)).state).toBe('active')
+    expect((await storedLink(teamLink.id)).state).toBe('active')
+    expect((await storedLink(foreignLink.id)).state).toBe('active')
+    expect((await storedLink(used.id)).state).toBe('used')
+  }
+
+  it('acknowledges absent, foreign, inaccessible and terminal revoke IDs through the same query path', async () => {
+    await verifyUniformRevoke(Links)
   })
 
   it('uses the persisted personal owner marker instead of a caller-supplied space flag', async () => {
@@ -487,15 +737,11 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
         Links.createOneTimeBookingLink(other.ctx, { eventTypeId: s.eventTypeId }),
       ),
     ).toMatchObject({ code: 'event_type_not_found' })
-    expect(await failure(() => Links.revokeOneTimeBookingLink(other.ctx, link.id))).toMatchObject({
-      code: 'one_time_link_not_found',
-    })
+    expect(await Links.revokeOneTimeBookingLink(other.ctx, link.id)).toBeUndefined()
     expect(
       await failure(() => Links.createOneTimeBookingLink(s.ctx, { eventTypeId: 'bad-id' })),
     ).toMatchObject({ code: 'event_type_not_found' })
-    expect(await failure(() => Links.revokeOneTimeBookingLink(s.ctx, 'bad-id'))).toMatchObject({
-      code: 'one_time_link_not_found',
-    })
+    expect(await Links.revokeOneTimeBookingLink(s.ctx, 'bad-id')).toBeUndefined()
   })
 
   it('allows team owners/admins for team events and members only for their own events', async () => {
@@ -516,18 +762,19 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     for (const user of [owner, admin]) {
       const link = await Links.createOneTimeBookingLink(ctx(user), { eventTypeId })
       expect(
-        (await Links.revokeOneTimeBookingLink(ctx(user === owner ? admin : owner), link.id)).state,
-      ).toBe('revoked')
+        await Links.revokeOneTimeBookingLink(ctx(user === owner ? admin : owner), link.id),
+      ).toBeUndefined()
+      expect((await storedLink(link.id)).state).toBe('revoked')
     }
     expect(
       await failure(() => Links.createOneTimeBookingLink(ctx(member), { eventTypeId })),
     ).toMatchObject({ kind: 'forbidden', code: 'insufficient_role' })
     const teamLink = await Links.createOneTimeBookingLink(ctx(owner), { eventTypeId })
-    expect(
-      await failure(() => Links.revokeOneTimeBookingLink(ctx(member), teamLink.id)),
-    ).toMatchObject({ code: 'insufficient_role' })
+    expect(await Links.revokeOneTimeBookingLink(ctx(member), teamLink.id)).toBeUndefined()
+    expect((await storedLink(teamLink.id)).state).toBe('active')
     const own = await Links.createOneTimeBookingLink(ctx(member), { eventTypeId: ownEventTypeId })
-    expect((await Links.revokeOneTimeBookingLink(ctx(member), own.id)).state).toBe('revoked')
+    expect(await Links.revokeOneTimeBookingLink(ctx(member), own.id)).toBeUndefined()
+    expect((await storedLink(own.id)).state).toBe('revoked')
     expect(
       await failure(() =>
         Links.createOneTimeBookingLink(ctx(member), { eventTypeId: otherEventTypeId }),
@@ -554,9 +801,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     expect(await failure(() => Links.createOneTimeBookingLink(ctx, { eventTypeId }))).toMatchObject(
       { code: 'insufficient_role' },
     )
-    expect(await failure(() => Links.revokeOneTimeBookingLink(ctx, link.id))).toMatchObject({
-      code: 'insufficient_role',
-    })
+    expect(await Links.revokeOneTimeBookingLink(ctx, link.id)).toBeUndefined()
+    expect((await storedLink(link.id)).state).toBe('active')
     await db
       .deleteFrom('auth.member')
       .where('organizationId', '=', team.id)
@@ -565,9 +811,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     expect(await failure(() => Links.createOneTimeBookingLink(ctx, { eventTypeId }))).toMatchObject(
       { kind: 'forbidden' },
     )
-    expect(await failure(() => Links.revokeOneTimeBookingLink(ctx, link.id))).toMatchObject({
-      kind: 'forbidden',
-    })
+    expect(await Links.revokeOneTimeBookingLink(ctx, link.id)).toBeUndefined()
+    expect((await storedLink(link.id)).state).toBe('active')
     const s = await setup()
     const personalLink = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
     await db
@@ -660,7 +905,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
       NOW,
     )
     const full = await Links.createOneTimeBookingLink(ctx, { eventTypeId: s.eventTypeId })
-    expect((await Links.revokeOneTimeBookingLink(ctx, full.id)).state).toBe('revoked')
+    expect(await Links.revokeOneTimeBookingLink(ctx, full.id)).toBeUndefined()
+    expect((await storedLink(full.id)).state).toBe('revoked')
     await db.updateTable('auth.apikey').set({ enabled: false }).where('id', '=', key.id).execute()
     await expect(
       Links.createOneTimeBookingLink(ctx, { eventTypeId: s.eventTypeId }),
@@ -809,6 +1055,136 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     ).toBe(admin.id)
   })
 
+  async function memberCapacity(module: LinkModule) {
+    const owner = await createTestUser(db)
+    const admin = await createTestUser(db)
+    const member = await createTestUser(db)
+    const other = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: admin, role: 'admin' },
+      { user: member, role: 'member' },
+      { user: other, role: 'member' },
+    ])
+    const ctx = testContext(db, session(team.as(member)), NOW)
+    const eventTypeId = await fixtures.eventType(team.id, member.id)
+    const secondEvent = await fixtures.eventType(team.id, member.id)
+    const s = { user: member, ctx, eventTypeId, organizationId: team.id }
+    await fillCapacity(s, Links.ONE_TIME_BOOKING_LINK_MEMBER_LIMIT - 1)
+    const attempts = await Promise.allSettled([
+      module.createOneTimeBookingLink(ctx, { eventTypeId }),
+      module.createOneTimeBookingLink(ctx, { eventTypeId: secondEvent }),
+    ])
+    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const failed = attempts.find((result) => result.status === 'rejected')
+    expect(
+      failed?.status === 'rejected' &&
+        failed.reason?.name === 'DomainError' &&
+        failed.reason.code === 'one_time_link_limit_reached',
+    ).toBe(true)
+    expect(
+      await failure(() => module.createOneTimeBookingLink(ctx, { eventTypeId: secondEvent })),
+    ).toMatchObject({ code: 'one_time_link_limit_reached' })
+    const anotherEvent = await fixtures.eventType(team.id, other.id)
+    expect(
+      (
+        await module.createOneTimeBookingLink(testContext(db, session(team.as(other)), NOW), {
+          eventTypeId: anotherEvent,
+        })
+      ).state,
+    ).toBe('active')
+    const retained = await db
+      .selectFrom('one_time_booking_links')
+      .select('id')
+      .where('event_type_id', '=', eventTypeId)
+      .executeTakeFirstOrThrow()
+    await module.revokeOneTimeBookingLink(ctx, retained.id)
+    expect((await module.createOneTimeBookingLink(ctx, { eventTypeId: secondEvent })).state).toBe(
+      'active',
+    )
+    // Current persisted roles decide the sub-limit, including a stale member principal.
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', member.id)
+      .execute()
+    expect((await module.createOneTimeBookingLink(ctx, { eventTypeId })).state).toBe('active')
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', member.id)
+      .execute()
+    expect(
+      await failure(() => module.createOneTimeBookingLink(ctx, { eventTypeId })),
+    ).toMatchObject({ code: 'one_time_link_limit_reached' })
+    const teamEvent = await fixtures.eventType(team.id, null)
+    for (const user of [owner, admin]) {
+      await fillCapacity(
+        { user, ctx, eventTypeId: teamEvent, organizationId: team.id },
+        Links.ONE_TIME_BOOKING_LINK_MEMBER_LIMIT,
+      )
+      expect(
+        (
+          await module.createOneTimeBookingLink(testContext(db, session(team.as(user)), NOW), {
+            eventTypeId: teamEvent,
+          })
+        ).state,
+      ).toBe('active')
+    }
+  }
+
+  it('limits ordinary team members to 200 active links across their events while preserving owner/admin capacity', async () => {
+    await memberCapacity(Links)
+  })
+
+  async function verifyCapacityLock(module: LinkModule) {
+    const s = await setup()
+    const counted = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const observed = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      transformResult: async ({ result }) => {
+        if (result.rows.some((row) => 'creatorCount' in row)) {
+          counted.resolve()
+          await release.promise
+        }
+        return result
+      },
+    })
+    const writer = module.createOneTimeBookingLink(
+      { ...s.ctx, db: observed },
+      { eventTypeId: s.eventTypeId },
+    )
+    try {
+      await counted.promise
+      const { available } = await db.transaction().execute(async (trx) => {
+        await sql`set local lock_timeout = '500ms'`.execute(trx)
+        const lock = await sql<{
+          available: boolean
+        }>`select pg_try_advisory_xact_lock(hashtextextended(${`hourmere.one-time-links:${s.organizationId}`}, 0)) as available`.execute(
+          trx,
+        )
+        // A normal organization FK insert must continue while link capacity is locked.
+        const inserted = await insertBooking(trx, s).then(
+          () => true,
+          () => false,
+        )
+        expect(inserted).toBe(true)
+        return lock.rows[0] as { available: boolean }
+      })
+      expect(available).toBe(false)
+    } finally {
+      release.resolve()
+      await writer
+    }
+  }
+
+  it('serializes capacity with a scoped advisory lock while allowing organization FK inserts', async () => {
+    await verifyCapacityLock(Links)
+  })
+
   async function writeAlongsidePublicOwnerLock(module: LinkModule) {
     const s = await setup()
     const hookHoldsOrganization = Promise.withResolvers<void>()
@@ -876,7 +1252,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
   it('does not charge expired or used retained rows against available link capacity', async () => {
     const s = await setup()
     const used = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-    await claim(used.token, await booking(s))
+    await bookAndClaim(s, used.token)
     await sql`insert into one_time_booking_links (organization_id, event_type_id, creator_user_id, token_hash, expires_at)
       select ${s.organizationId}::uuid, ${s.eventTypeId}::uuid, ${s.user.id}::uuid,
       encode(sha256(('synthetic-expired-' || ${randomUUID()} || n::text)::bytea), 'hex'), clock_timestamp() - interval '1 day'
@@ -1238,7 +1614,8 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
       async (module) => {
         const s = await setup()
         const link = await module.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-        expect((await module.revokeOneTimeBookingLink(s.ctx, link.id)).state).toBe('revoked')
+        await module.revokeOneTimeBookingLink(s.ctx, link.id)
+        expect((await storedLink(link.id)).state).toBe('revoked')
       },
     )
   })
@@ -1253,6 +1630,70 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
           module.claimOneTimeBookingLink(db as Transaction<Database>, link.token, await booking(s)),
         ).rejects.toBeInstanceOf(TypeError)
       },
+    )
+  })
+
+  it('detects removed member sub-limits with a real assertion failure', async () => {
+    await mutation(
+      [
+        'if (event.memberLimited && Number(creatorCount) >= ONE_TIME_BOOKING_LINK_MEMBER_LIMIT)',
+        'if (false)',
+      ],
+      memberCapacity,
+    )
+  })
+
+  it('detects removed capacity advisory locking with a real assertion failure', async () => {
+    await mutation(
+      [
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation
+        'await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.one-time-links:${ctx.principal.organization.id}`}, 0))`.execute(\n      trx,\n    )',
+        '',
+      ],
+      verifyCapacityLock,
+    )
+  })
+
+  it('detects heavy organization-row locking with a real assertion failure', async () => {
+    await mutation(
+      [
+        ".where('id', '=', ctx.principal.organization.id)\n    .forShare()",
+        ".where('id', '=', ctx.principal.organization.id)\n    .forUpdate()",
+      ],
+      verifyCapacityLock,
+    )
+  })
+
+  it('detects an existence-dependent revoke failure with a real assertion failure', async () => {
+    await mutation(
+      [
+        'const personal = await lockWriteOwner(trx, ctx)',
+        "const personal = await lockWriteOwner(trx, ctx)\n    if (!(await trx.selectFrom('one_time_booking_links').select('id').where('id', '=', candidateId).executeTakeFirst())) throw linkNotFound()",
+      ],
+      verifyUniformRevoke,
+    )
+  })
+
+  it('detects removed same-transaction booking validation before a claim write', async () => {
+    await mutation(['.where(sql<boolean>`xmin = pg_current_xact_id()::xid`)', ''], (module) =>
+      verifyNewBooking(module, false, true),
+    )
+  })
+
+  it('detects reusing an existing booking updated in the claiming transaction', async () => {
+    await mutation(
+      [".where('created_at', '=', sql<Date>`transaction_timestamp()`)", ''],
+      (module) => verifyNewBooking(module, true),
+    )
+  })
+
+  it('detects accepting another transaction booking with a later creation timestamp', async () => {
+    await mutation(
+      [
+        ".where('created_at', '=', sql<Date>`transaction_timestamp()`)",
+        ".where('created_at', '>=', sql<Date>`transaction_timestamp()`)",
+      ],
+      verifyOverlappingBooking,
     )
   })
 

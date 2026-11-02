@@ -120,6 +120,7 @@ export {
   claimOneTimeBookingLink,
   createOneTimeBookingLink,
   ONE_TIME_BOOKING_LINK_LIMIT,
+  ONE_TIME_BOOKING_LINK_MEMBER_LIMIT,
   type OneTimeBookingLink,
   type OneTimeBookingLinkPrefill,
   type OneTimeBookingLinkState,
