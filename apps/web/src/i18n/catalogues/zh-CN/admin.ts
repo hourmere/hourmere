@@ -1505,4 +1505,51 @@ export const admin = {
   'You have no working hours yet. Use the setup guide to add a default schedule.':
     '你尚未设置工作时间。请通过设置引导添加默认日程。',
   'Set working hours with the setup guide': '通过设置引导添加工作时间',
+  'Pick open times': '挑选可约时间',
+  'Copy open times into an email': '将可约时间复制到邮件',
+  'Choose 1–10 alternatives from the saved event type. Unsaved changes are not included.':
+    '从已保存的活动类型中选择 1–10 个备选时间。未保存的更改不会包含在内。',
+  'Availability is checked again when you copy. Times are not reserved, and each booking requires confirmation.':
+    '复制时会重新检查可约时间。时间不会被预留，每次预约都需要确认。',
+  'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.':
+    '此活动类型未公开列出。任何收到或转发这些链接的人都可以打开链接并预约。',
+  'Email display': '邮件显示',
+  'Meeting length': '会议时长',
+  'Email language': '邮件语言',
+  'Display time zone': '显示时区',
+  'Language and display time zone change labels only. Booking pages use each invitee’s preferences.':
+    '语言和显示时区仅改变时间的显示方式。预约页面会使用各位受邀人的偏好设置。',
+  'Availability date (UTC)': '查看可约日期（UTC）',
+  'Available alternatives': '可选时间',
+  'Loading available times…': '正在加载可约时间…',
+  'We could not load available times. Please try again.': '无法加载可约时间。请重试。',
+  'No times are offered on this date.': '此日期没有可约时间。',
+  'Retry availability': '重新检查可约时间',
+  '{0} of 10 alternatives selected': '已选择 {0} 个备选时间，最多可选 10 个',
+  'Selected alternatives': '已选时间',
+  'No longer offered': '已不可约',
+  'Remove {time}': '移除 {time}',
+  'Remove time': '移除时间',
+  'Preview email': '预览邮件',
+  'The email preview could not be created. Please choose fewer times and try again.':
+    '无法创建邮件预览。请减少所选时间后重试。',
+  'Complete plain-text email preview': '完整的纯文本邮件预览',
+  'Copy plain text': '复制纯文本',
+  'Copy rich text': '复制富文本',
+  'The full plain text above includes every booking link.': '上方的完整纯文本包含每一个预约链接。',
+  'Checking selected times…': '正在检查已选时间…',
+  'This meeting length is no longer offered. Reload the saved event before trying again.':
+    '此会议时长已不可选。请重新加载已保存的活动后重试。',
+  'We could not check the selected times. Nothing was copied. Please try again.':
+    '无法检查已选时间，未复制任何内容。请重试。',
+  'Some selected times are no longer offered. Nothing was copied. Remove those times explicitly before trying again.':
+    '部分已选时间已不可约，未复制任何内容。请手动移除这些时间后重试。',
+  'Plain text copied.': '已复制纯文本。',
+  'Rich text copied with a plain-text fallback.': '已复制富文本，并包含纯文本备用版本。',
+  'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
+    '无法访问剪贴板。请手动选择并复制完整的纯文本预览。',
+  '{0} minutes': '{0} 分钟',
+  'Checking preview access…': '正在检查预览权限…',
+  'We could not prepare the preview. Nothing was copied. Please try again.':
+    '无法准备预览，未复制任何内容。请重试。',
 } as const

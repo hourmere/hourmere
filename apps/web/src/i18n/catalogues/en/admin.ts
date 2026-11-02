@@ -1588,4 +1588,53 @@ export const admin = {
   'You have no working hours yet. Use the setup guide to add a default schedule.':
     'You have no working hours yet. Use the setup guide to add a default schedule.',
   'Set working hours with the setup guide': 'Set working hours with the setup guide',
+  'Pick open times': 'Pick open times',
+  'Copy open times into an email': 'Copy open times into an email',
+  'Choose 1–10 alternatives from the saved event type. Unsaved changes are not included.':
+    'Choose 1–10 alternatives from the saved event type. Unsaved changes are not included.',
+  'Availability is checked again when you copy. Times are not reserved, and each booking requires confirmation.':
+    'Availability is checked again when you copy. Times are not reserved, and each booking requires confirmation.',
+  'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.':
+    'This event type is unlisted. Anyone receiving or forwarding these links may open and book it.',
+  'Email display': 'Email display',
+  'Meeting length': 'Meeting length',
+  'Email language': 'Email language',
+  'Display time zone': 'Display time zone',
+  'Language and display time zone change labels only. Booking pages use each invitee’s preferences.':
+    'Language and display time zone change labels only. Booking pages use each invitee’s preferences.',
+  'Availability date (UTC)': 'Availability date (UTC)',
+  'Available alternatives': 'Available alternatives',
+  'Loading available times…': 'Loading available times…',
+  'We could not load available times. Please try again.':
+    'We could not load available times. Please try again.',
+  'No times are offered on this date.': 'No times are offered on this date.',
+  'Retry availability': 'Retry availability',
+  '{0} of 10 alternatives selected': '{0} of 10 alternatives selected',
+  'Selected alternatives': 'Selected alternatives',
+  'No longer offered': 'No longer offered',
+  'Remove {time}': 'Remove {time}',
+  'Remove time': 'Remove time',
+  'Preview email': 'Preview email',
+  'The email preview could not be created. Please choose fewer times and try again.':
+    'The email preview could not be created. Please choose fewer times and try again.',
+  'Complete plain-text email preview': 'Complete plain-text email preview',
+  'Copy plain text': 'Copy plain text',
+  'Copy rich text': 'Copy rich text',
+  'The full plain text above includes every booking link.':
+    'The full plain text above includes every booking link.',
+  'Checking selected times…': 'Checking selected times…',
+  'This meeting length is no longer offered. Reload the saved event before trying again.':
+    'This meeting length is no longer offered. Reload the saved event before trying again.',
+  'We could not check the selected times. Nothing was copied. Please try again.':
+    'We could not check the selected times. Nothing was copied. Please try again.',
+  'Some selected times are no longer offered. Nothing was copied. Remove those times explicitly before trying again.':
+    'Some selected times are no longer offered. Nothing was copied. Remove those times explicitly before trying again.',
+  'Plain text copied.': 'Plain text copied.',
+  'Rich text copied with a plain-text fallback.': 'Rich text copied with a plain-text fallback.',
+  'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
+    'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.',
+  '{0} minutes': '{0} minutes',
+  'Checking preview access…': 'Checking preview access…',
+  'We could not prepare the preview. Nothing was copied. Please try again.':
+    'We could not prepare the preview. Nothing was copied. Please try again.',
 } as const
