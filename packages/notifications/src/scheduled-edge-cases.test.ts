@@ -329,8 +329,44 @@ describe.skipIf(!process.env.DATABASE_URL)(
     it('renders the immutable follow-up note while retaining budget and idempotency', () =>
       verifyFollowUpNote())
     it('detects dropping the stored host note with a real assertion failure', async () => {
-      const copy = await scheduledCopy([['hostNote: rule.hostNote,', 'hostNote: undefined,']])
+      const copy = await scheduledCopy([
+        [
+          'hostNote: deps.followUpHostNotesEnabled === false ? undefined : rule.hostNote,',
+          'hostNote: undefined,',
+        ],
+      ])
       await expect(verifyFollowUpNote(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+
+    async function verifyDisabledHostNotes(deliver: Deliver = deliverScheduledBookingEmail) {
+      const hostNote = 'Host-written operator-disabled text'
+      const b = await booked({
+        reminders: [],
+        followUps: [
+          {
+            id: 'after',
+            offsetMinutes: 5,
+            recipients: { host: true, invitee: true, guests: false },
+            hostNote,
+          },
+        ],
+      })
+      atDue(b)
+      await deliver({ ...deps(), followUpHostNotesEnabled: false }, b.message.id)
+      expect(sent).toHaveLength(2)
+      for (const message of sent) {
+        expect(message.text).not.toContain(hostNote)
+        expect(message.html).not.toContain(hostNote)
+      }
+      expect(await current(b)).toMatchObject({ state: 'completed', attempts: 1 })
+    }
+    it('omits host notes from existing immutable snapshots when operators disable them', () =>
+      verifyDisabledHostNotes())
+    it('detects removing the send-time operator switch with a real assertion failure', async () => {
+      const copy = await scheduledCopy([
+        ['deps.followUpHostNotesEnabled === false ? undefined : rule.hostNote', 'rule.hostNote'],
+      ])
+      await expect(verifyDisabledHostNotes(copy)).rejects.toMatchObject({ name: 'AssertionError' })
     })
 
     it('uses the host locale and stored booker locale for follow-up copies', async () => {

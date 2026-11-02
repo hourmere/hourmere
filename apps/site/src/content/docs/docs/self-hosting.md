@@ -223,6 +223,23 @@ do not forward arbitrary server variables. If resizing an already deployed `/29`
 network, stop app/worker/proxy, remove only that project's obsolete ingress network, then
 start again; Docker cannot resize an existing network. Keep database volumes intact.
 
+## Follow-up host notes
+
+Self-hosting enables host-written follow-up notes by default. They are sent from your
+instance's mail domain to invitee and guest addresses that Hourmere has not verified.
+To disable note writes and omit even previously saved notes from outgoing follow-ups,
+set `FOLLOW_UP_HOST_NOTES_ENABLED=false` in the deployment's private `.env` or process
+environment. Built-in follow-up mail still sends, and stored notes are retained.
+
+Hourmere Cloud must explicitly use `FOLLOW_UP_HOST_NOTES_ENABLED=false` before exposing
+notification writes to tenants, and keep it disabled until reviewed host eligibility,
+recipient consent and complaint controls are implemented. Existing mail-volume limits do
+not provide those controls. Set the same value on every web and worker process, including
+the combined `all` role, and recreate all affected processes together. The bundled Compose
+worker inherits it from the app; supply it to both roles in a custom deployment. See the
+[configuration reference](/docs/configuration#email-and-registration) and
+[host-note abuse policy](/docs/notifications#host-notes-and-hosted-email-abuse-controls).
+
 ## Run workers separately
 
 The default `HOURMERE_ROLE=all` runs the API, booking email jobs and calendar synchronization
