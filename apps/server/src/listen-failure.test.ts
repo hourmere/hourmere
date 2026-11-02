@@ -87,12 +87,21 @@ describe.skipIf(!serverUrl)('failed listener startup (owned PostgreSQL)', () => 
         })
         expect(result.port).toBeGreaterThan(0)
         expect(result.port).not.toBe(address.port)
-        const clients = await owned.pool.query<{ n: number }>(
-          `SELECT count(*)::int AS n FROM pg_stat_activity
-           WHERE datname=current_database() AND pid<>pg_backend_pid()
-             AND backend_type='client backend'`,
-        )
-        expect(clients.rows[0]?.n).toBe(0)
+        // pool.end() closes sockets before PostgreSQL necessarily removes its backends.
+        // Keep the child alive so a leaked client cannot disappear through process exit.
+        await expect
+          .poll(
+            async () => {
+              const clients = await owned.pool.query<{ n: number }>(
+                `SELECT count(*)::int AS n FROM pg_stat_activity
+                 WHERE datname=current_database() AND pid<>pg_backend_pid()
+                   AND backend_type='client backend'`,
+              )
+              return clients.rows[0]?.n
+            },
+            { timeout: 5_000, interval: 25 },
+          )
+          .toBe(0)
       } finally {
         clearTimeout(timeout)
         if (child.pid && child.exitCode === null && child.signalCode === null) {

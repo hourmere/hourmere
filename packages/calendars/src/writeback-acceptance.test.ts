@@ -34,6 +34,7 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
   let calA: string
   let calB: string
   let connectionA: string
+  let now: number
   beforeAll(async () => {
     database = await createTestDatabase(url as string)
     db = createDb(database.pool)
@@ -94,11 +95,12 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     await db.deleteFrom('bookings').execute()
     await db.deleteFrom('event_types').execute()
     await db.deleteFrom('calendar_connections').execute()
-    provider = fakeGoogle()
+    now = NOW
+    provider = fakeGoogle(() => now)
     deps = {
       db,
       google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY },
-      now: () => NOW,
+      now: () => now,
     }
     calA = '00000000-0000-4000-8000-000000000001'
     calB = '00000000-0000-4000-8000-000000000002'
@@ -391,23 +393,7 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     const id = await booking()
     await notify(id)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
-    const expireConnectionToken = () =>
-      db
-        .updateTable('calendar_connections')
-        .set({
-          credentials: encryptCredential(
-            calendarEncryptionKey(TEST_CALENDAR_KEY),
-            `google:${a.user.id}:account-a`,
-            JSON.stringify({
-              accessToken: 'fake-expired',
-              refreshToken: 'fake-refresh',
-              expiresAt: NOW - 1,
-            }),
-          ),
-        })
-        .where('id', '=', connectionA)
-        .execute()
-    await expireConnectionToken()
+    now += 3_600_000
     const outer = new AbortController().signal
     const refresh = vi.spyOn(provider.client, 'refresh')
     const find = vi.spyOn(provider.client, 'findEvent')
@@ -420,18 +406,17 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     expect(imported.mock.calls[0]?.[3]).toBe(first)
     await db
       .updateTable('bookings')
-      .set({ status: 'cancelled', cancelled_at: new Date(NOW) })
+      .set({ status: 'cancelled', cancelled_at: new Date(now) })
       .where('id', '=', id)
       .execute()
-    // The refreshed token's expiry comes from the real clock; expire it again so the second
-    // write also refreshes, independent of how the wall clock relates to the fixed NOW.
-    await expireConnectionToken()
+    now += 3_600_000
     await writeBookingCalendar(deps, id, outer)
     const second = find.mock.calls[1]?.[3]
     expect(second).not.toBe(outer)
     expect(second).not.toBe(first)
     expect(refresh.mock.calls[1]?.[1]).toBe(second)
     expect(update.mock.calls[0]?.[5]).toBe(second)
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
   it('aggregates retryable failures only after attempting every host', async () => {
     const id = await booking([a.user.id, b.user.id])
