@@ -21,6 +21,7 @@ export async function seedEarly(pool: pg.Pool) {
       api_key uuid := gen_random_uuid();
       stamp timestamptz := '2026-01-02T03:04:05.123456Z';
       changed timestamptz := '2026-02-03T04:05:06.654321Z';
+      expires timestamptz := clock_timestamp() + interval '10 years';
       i integer;
       j integer;
     BEGIN
@@ -36,7 +37,7 @@ export async function seedEarly(pool: pg.Pool) {
             stamp + interval '1 year',stamp + interval '2 years','openid email profile',
             CASE WHEN i = 3 THEN 'synthetic-password-hash' END,stamp,changed);
         INSERT INTO auth.session ("userId",token,"expiresAt","updatedAt","createdAt","ipAddress","userAgent")
-          VALUES (users[i],'synthetic-session-' || i,stamp + interval '10 years',changed,stamp,
+          VALUES (users[i],'synthetic-session-' || i,expires,changed,stamp,
             '192.0.2.' || i,'Synthetic upgrade fixture') RETURNING id INTO session_id;
         IF i < 3 THEN
           INSERT INTO calendar_connections (user_id,provider,external_account_id,account_email,
@@ -56,7 +57,7 @@ export async function seedEarly(pool: pg.Pool) {
           INSERT INTO calendar_oauth_states (state_hash,user_id,session_id,verifier,expires_at,
             created_at,access,provider)
             VALUES (repeat(i::text,64),users[i],session_id,decode(repeat('d4c3b2a1',12),'hex'),
-              stamp + interval '10 years',stamp,'sync',(ARRAY['google','microsoft'])[i]);
+              expires,stamp,'sync',(ARRAY['google','microsoft'])[i]);
           IF i=1 THEN destination := calendar_id; END IF;
         ELSE
           calendar_id := NULL;
@@ -71,7 +72,7 @@ export async function seedEarly(pool: pg.Pool) {
           (schedule_id,'2030-12-24','[{"start":"09:00","end":"12:00"}]');
       END LOOP;
       INSERT INTO auth.verification (identifier,value,"expiresAt","createdAt","updatedAt")
-        VALUES ('synthetic-verification','synthetic-hashed-verification',stamp + interval '10 years',stamp,changed);
+        VALUES ('synthetic-verification','synthetic-hashed-verification',expires,stamp,changed);
       INSERT INTO auth.organization (id,name,slug,metadata,"createdAt") VALUES
         (personal,'Ada personal','upgrade-personal','{"kind":"personal"}',stamp),
         (team,'Upgrade team 東京','upgrade-team','{"department":"engineering"}',stamp);
@@ -80,7 +81,7 @@ export async function seedEarly(pool: pg.Pool) {
         VALUES (personal,users[1],'owner',stamp),(team,users[1],'owner',stamp),
           (team,users[2],'admin',stamp),(team,users[3],'member',stamp);
       INSERT INTO auth.invitation ("organizationId",email,role,status,"expiresAt","createdAt","inviterId")
-        VALUES (team,'upgrade-invitee@example.test','member','pending',stamp + interval '10 years',stamp,users[1]);
+        VALUES (team,'upgrade-invitee@example.test','member','pending',expires,stamp,users[1]);
       INSERT INTO auth.apikey (id,"configId",name,start,"referenceId",prefix,key,enabled,
         "rateLimitEnabled","rateLimitTimeWindow","rateLimitMax","requestCount",remaining,
         "createdAt","updatedAt",permissions,metadata)

@@ -1,10 +1,17 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
+
+const NOW = Temporal.Instant.from('2029-12-31T00:00:00Z')
 
 describe.skipIf(!process.env.DATABASE_URL)('conference protected REST', () => {
   let t: TestApp
+  // Both retry commands and host copy readiness use the routes' application clock.
+  beforeEach(() => {
+    vi.spyOn(Temporal.Now, 'instant').mockReturnValue(NOW)
+  })
+  afterEach(() => vi.restoreAllMocks())
   beforeAll(async () => {
     t = await createTestApp(process.env.DATABASE_URL as string)
   })

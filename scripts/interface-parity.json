@@ -43,6 +43,10 @@
     "exemption": "browser-session-only",
     "reason": "Creating an MCP OAuth consent request requires the user's browser session."
   },
+  "createOneTimeBooking": {
+    "mcp": "create_booking",
+    "cli": "book"
+  },
   "createPublicBooking": {
     "mcp": "create_booking",
     "cli": "book"

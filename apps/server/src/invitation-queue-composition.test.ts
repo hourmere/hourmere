@@ -58,8 +58,8 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
       )
       await owned.pool.query(
         `INSERT INTO auth.session ("expiresAt", token, "updatedAt", "userId", "activeOrganizationId")
-         VALUES (now() + interval '1 hour', $1, now(), $2, $3)`,
-        [token, userId, organizationId],
+         VALUES ($4, $1, now(), $2, $3)`,
+        [token, userId, organizationId, new Date(Date.now() + 3_600_000)],
       )
       const signature = createHmac('sha256', secret).update(token).digest('base64')
       const cookie = `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`

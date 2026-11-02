@@ -146,7 +146,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
       .values({
         userId: user.id,
         token: randomBytes(24).toString('base64url'),
-        expiresAt: new Date(Date.now() + 3_600_000),
+        expiresAt: sql<Date>`clock_timestamp() + interval '1 hour'`,
         updatedAt: new Date(),
         activeOrganizationId: organization.id,
       })

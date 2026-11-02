@@ -17,6 +17,7 @@ import {
 } from '@hourmere/scheduling'
 import { prepareBookingConference } from '@hourmere/scheduling/conferences'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { writeBookingCalendar } from '../../calendars/src/booking-events.ts'
 import { retryBookingConference, writeBookingConference } from '../../calendars/src/conferences.ts'
@@ -611,7 +612,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       .values({
         user_id: owner.user.id,
         operation_id: operation,
-        expires_at: new Date(Date.now() + 60000),
+        expires_at: sql<Date>`clock_timestamp() + interval '1 minute'`,
       })
       .execute()
     try {

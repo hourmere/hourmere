@@ -9,6 +9,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -278,7 +279,7 @@ describe.skipIf(!bootstrap)('organization-bound host booking writes', () => {
         else if (reason === 'expired')
           await db
             .updateTable('auth.session')
-            .set({ expiresAt: new Date(Date.now() - 1000) })
+            .set({ expiresAt: sql`clock_timestamp() - interval '1 second'` })
             .where('id', '=', f.sessionId)
             .execute()
         else

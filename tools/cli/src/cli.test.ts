@@ -79,6 +79,87 @@ function sourceCopy(change?: readonly [string, string]): typeof runCli {
 }
 
 describe('CLI transport and arguments', () => {
+  const oneTimeToken = 'synthetic_one_time_capability_sentinel_1234'
+  async function verifyOneTimePrivacy(runner = runCli, privateFile = false) {
+    const outputPath = privateFile ? join(await dir(), 'one-time-result.json') : undefined
+    const args = ['book', '--input', '-', ...(outputPath ? ['--output', outputPath] : [])]
+    const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+      const sent = JSON.parse(String(init?.body)).params.arguments
+      expect(sent.oneTimeToken === oneTimeToken).toBe(true)
+      return response({ replayed: true, nested: { note: `echo ${oneTimeToken}` } })
+    })
+    const result = await run(
+      args,
+      { oneTimeToken, idempotencyKey: 'one-time-test-key' },
+      { runner, fetch: fetcher },
+    )
+    expect(result.code).toBe(0)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const printable = outputPath ? await readFile(outputPath, 'utf8') : result.stdout
+    expect(printable.includes(oneTimeToken)).toBe(false)
+    expect(JSON.parse(printable).nested.note).toBe('echo [redacted]')
+  }
+  async function verifyOneTimeRejection(runner = runCli, mixed = false) {
+    for (const extra of mixed
+      ? [{ handle: 'host' }, { teamSlug: 'team' }, { slug: 'event' }]
+      : [{ oneTimeToken: 'bad' }, { oneTimeToken: 42 }]) {
+      const result = await run(
+        ['book', '--input', '-'],
+        { oneTimeToken, idempotencyKey: 'one-time-test-key', ...extra },
+        { runner },
+      )
+      expect(result.code).toBe(1)
+      expect(result.fetcher).not.toHaveBeenCalled()
+      expect(result.stderr.includes(oneTimeToken)).toBe(false)
+    }
+  }
+  it('consumes one-time links through JSON input and redacts echoed capabilities', () =>
+    verifyOneTimePrivacy())
+  it('redacts a supplied one-time capability even from private output files', () =>
+    verifyOneTimePrivacy(runCli, true))
+  it('rejects malformed one-time capabilities before any request', () => verifyOneTimeRejection())
+  it('rejects mixed one-time and public namespaces before any request', () =>
+    verifyOneTimeRejection(runCli, true))
+  it('rejects one-time capability command-line flags without echo', async () => {
+    const result = await run(['book', '--one-time-token', oneTimeToken])
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+    expect(result.stderr.includes(oneTimeToken)).toBe(false)
+  })
+  async function verifyOneTimeCommand(runner = runCli) {
+    const result = await run(['slots', '--input', '-'], { oneTimeToken }, { runner })
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+  }
+  it('restricts one-time capabilities to booking commands', () => verifyOneTimeCommand())
+  it('exercises unchanged one-time CLI source copies', async () => {
+    await verifyOneTimePrivacy(sourceCopy())
+    await verifyOneTimePrivacy(sourceCopy(), true)
+    await verifyOneTimeRejection(sourceCopy())
+    await verifyOneTimeRejection(sourceCopy(), true)
+  })
+  it.each<[string, readonly [string, string], (runner: typeof runCli) => Promise<void>]>([
+    ['booking command restriction', ["args.command !== 'book' ||", ''], verifyOneTimeCommand],
+    ['stdout capability redaction', ['secrets.push(input.oneTimeToken)', ''], verifyOneTimePrivacy],
+    [
+      'private file capability redaction',
+      ['[key, oneTimeToken]', '[key]'],
+      (runner) => verifyOneTimePrivacy(runner, true),
+    ],
+    [
+      'capability shape validation',
+      ['!/^[A-Za-z0-9_-]{43}$/.test(input.oneTimeToken)', 'false'],
+      (runner) => verifyOneTimeRejection(runner),
+    ],
+    [
+      'exclusive namespace validation',
+      ["['handle', 'teamSlug', 'slug'].some((field) => Object.hasOwn(input, field))", 'false'],
+      (runner) => verifyOneTimeRejection(runner, true),
+    ],
+  ])('kills removed one-time %s with a real assertion failure', async (_name, change, verify) => {
+    await expect(verify(sourceCopy(change))).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
   async function verifyEventTypeWrite(runner: typeof runCli, update: boolean) {
     const command = update ? 'update-event' : 'create-event'
     const input = {

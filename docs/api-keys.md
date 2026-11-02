@@ -123,8 +123,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
-| Browser session operations | — | — | — |
 | Booking actions and repairs | Allowed | — | Allowed |
+| Browser session operations | — | — | — |
 | Account settings and configuration writes | Allowed | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
@@ -133,6 +133,9 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
+| `GET /api/v1/book/{token}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/{id}/organization` | Browser session only | — |
@@ -227,6 +230,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `create_booking` | — | `book` | `full, bookings` |
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
+| `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |

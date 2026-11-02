@@ -22,6 +22,7 @@ import {
   signInEmailJobs,
 } from '../../../packages/notifications/src/sign-in.ts'
 import { createApp } from './app.ts'
+import { withDatabaseClock } from './database-clock-testing.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -397,11 +398,15 @@ describe.skipIf(!serverUrl)(
         .execute()
     }
     const read = (i: Instance, f: Fixture, session = '') =>
-      i.app.request(`/api/auth/organization/get-invitation?id=${f.id}`, {
-        headers: session ? { cookie: session } : {},
-      })
+      withDatabaseClock(db, () =>
+        i.app.request(`/api/auth/organization/get-invitation?id=${f.id}`, {
+          headers: session ? { cookie: session } : {},
+        }),
+      )
     const join = (i: Instance, f: Fixture, session: string) =>
-      post(i, 'organization/accept-invitation', { invitationId: f.id }, session)
+      withDatabaseClock(db, () =>
+        post(i, 'organization/accept-invitation', { invitationId: f.id }, session),
+      )
     async function invalidate(i: Instance, f: Fixture, state: State) {
       if (state === 'canceled') {
         expect(

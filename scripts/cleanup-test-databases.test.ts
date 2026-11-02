@@ -276,7 +276,10 @@ describe.skipIf(!process.env.DATABASE_URL)('sweeper integration', () => {
       ])
       const inventory = () =>
         listTestDatabases(admin).then((rows) => rows.filter((row) => ownNames.has(row.name)))
-      const future = Date.now() + 25 * 3_600_000
+      // PG_VERSION modification times belong to the server's clock, not the Node clock.
+      const clock = await admin.query<{ now: Date }>('SELECT clock_timestamp() AS now')
+      const current = (clock.rows[0] as { now: Date }).now.getTime()
+      const future = current + 25 * 3_600_000
       const busyUrl = new URL(owners[1]?.url as string)
       busyUrl.pathname = `/${renamed[1]}`
       busy = new pg.Pool({ connectionString: busyUrl.toString(), max: 1 })
@@ -289,7 +292,9 @@ describe.skipIf(!process.env.DATABASE_URL)('sweeper integration', () => {
       const log = vi.fn()
       const fresh = await inventory()
       expect(fresh).toHaveLength(3)
-      expect(fresh.every((row) => selectionReason(row) === 'too young')).toBe(true)
+      expect(fresh.every((row) => selectionReason(row, { now: current }) === 'too young')).toBe(
+        true,
+      )
       expect(await sweepTestDatabases(admin, fresh, { now: future, log })).toBe(0)
       expect(await inventory()).toHaveLength(3)
       expect(

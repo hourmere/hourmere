@@ -11,6 +11,7 @@ import {
   type TestUser,
 } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
 import { bookingTools } from './mcp/bookings.ts'
@@ -1188,7 +1189,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       }
       await db
         .updateTable('auth.invitation')
-        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
         .where('id', '=', fixture.invitationId)
         .execute()
       for (const actor of fixture.actors.slice(0, 2)) {

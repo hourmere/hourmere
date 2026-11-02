@@ -42,6 +42,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
   let teamEvent: string
   let team: string
   let app: ReturnType<typeof createApp>
+  let bookingDate: string
   const keys = new Map<string, Key>()
   beforeAll(async () => {
     database = await createTestDatabase(process.env.DATABASE_URL as string)
@@ -60,6 +61,11 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
       },
       signup,
     })
+    // The production registry uses the real Temporal clock: choose a complete workday
+    // safely ahead of it instead of allowing the November 2026 fixture to become past.
+    let day = Temporal.Now.plainDateISO('Europe/Berlin').add({ days: 7 })
+    while (day.dayOfWeek > 5) day = day.add({ days: 1 })
+    bookingDate = day.toString()
     fixtures = createFixtures(db)
     host = await fixtures.host({ handle: 'mcp-scoped-host' })
     schedule = await fixtures.schedule(host.userId)
@@ -193,8 +199,8 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
         const args = {
           ...target,
           slug: 'intro',
-          startDate: '2026-11-02',
-          endDate: '2026-11-02',
+          startDate: bookingDate,
+          endDate: bookingDate,
           timeZone: 'Europe/Berlin',
         }
         const slots = success(await call(key, 'find_available_slots', args)).slots

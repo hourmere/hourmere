@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingDetailPage } from '../pages/bookings/BookingDetail.tsx'
 import { RequireSession, SessionProvider } from '../session.tsx'
 import { fakeApi, json, profile, signedIn } from '../test/fake-api.tsx'
@@ -41,11 +41,12 @@ async function openManage() {
     )
   })
 }
+// Conference polling and retry actions run before the fixed booking starts.
+beforeEach(() => vi.useFakeTimers({ now: Date.parse('2030-11-01T00:00:00Z') }))
 afterEach(() => vi.useRealTimers())
 
 describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLabel) => {
   it('rechecks an initially replaced booking once, without a meeting notice, actions or polling', async () => {
-    vi.useFakeTimers()
     const api = fakeApi({
       'GET /api/v1/bookings/manage': () => json(200, replaced(provider)),
     })
@@ -62,7 +63,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   })
 
   it('replaces pending conference state when a poll finds the old booking replaced', async () => {
-    vi.useFakeTimers()
     let reads = 0
     const api = fakeApi({
       'GET /api/v1/bookings/manage': () =>
@@ -85,7 +85,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   it.each(['initial read', 'conference poll'] as const)(
     'follows a cancelled predecessor immediately after an %s with only one extra read',
     async (transition) => {
-      vi.useFakeTimers()
       const next = {
         ...replaced(provider),
         id: '01900000-0000-7000-8000-0000000000b2',
@@ -128,7 +127,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   )
 
   it('does not follow another cancelled successor recursively', async () => {
-    vi.useFakeTimers()
     const next = {
       ...replaced(provider),
       id: '01900000-0000-7000-8000-0000000000b2',
@@ -147,7 +145,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   })
 
   it('keeps the cancelled snapshot when the one successor read fails', async () => {
-    vi.useFakeTimers()
     let reads = 0
     const api = fakeApi({
       'GET /api/v1/bookings/manage': () => {
@@ -163,7 +160,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   })
 
   it('does not replace a newer cancellation with a slow successor read', async () => {
-    vi.useFakeTimers()
     const next = {
       ...pending(provider),
       id: '01900000-0000-7000-8000-0000000000b2',
@@ -205,7 +201,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   it.each(['confirmed', 'cancelled'] as const)(
     'adopts a successor resolved by the same capability, including a %s successor',
     async (status) => {
-      vi.useFakeTimers()
       const next = {
         ...pending(provider),
         id: '01900000-0000-7000-8000-0000000000b2',
@@ -262,7 +257,6 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
   )
 
   it('shows the host an initially replaced booking without conference polling or writes', async () => {
-    vi.useFakeTimers()
     const old = replaced(provider)
     const route = `GET /api/v1/bookings/${old.id}`
     const api = fakeApi({

@@ -68,8 +68,8 @@ describe.skipIf(!serverUrl)('team organization HTTP contract (Better Auth 1.7.10
     const token = randomBytes(24).toString('base64url')
     await testDb.pool.query(
       `INSERT INTO auth.session ("expiresAt", token, "updatedAt", "userId")
-       VALUES (now() + interval '1 hour', $1, now(), $2)`,
-      [token, id],
+       VALUES ($3, $1, now(), $2)`,
+      [token, id, new Date(Date.now() + 3_600_000)],
     )
     const signature = createHmac('sha256', secret).update(token).digest('base64')
     return {

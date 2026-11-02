@@ -10,6 +10,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { leaveTeamMember } from '@hourmere/scheduling'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -133,7 +134,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
           email: `${randomUUID()}@example.com`,
           role: 'member',
           status: 'pending',
-          createdAt: new Date(Date.now() - 3_600_000),
+          createdAt: sql`clock_timestamp() - interval '1 hour'`,
           expiresAt: new Date(Date.now() + 86_400_000),
         })
         .returning(['id', 'email'])

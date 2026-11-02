@@ -28,6 +28,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'HostPage',
     'ManageBookingPage',
     'McpAuthorizePage',
+    'OneTimeBookingPage',
     'RequireSession',
     'ScheduleEditorPage',
     'SessionLayout',
@@ -54,13 +55,16 @@ describe('before route chunks are available', () => {
     },
   )
 
-  it('keeps public loading independent of the admin shell', () => {
-    render(
-      <MemoryRouter initialEntries={['/ada']}>
-        <App />
-      </MemoryRouter>,
-    )
-    expect(screen.queryByRole('banner')).toBeNull()
-    expect(screen.getByRole('status').className).toBe('page-status')
-  })
+  it.each(['/ada', '/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB'])(
+    'keeps public loading independent of the admin shell at %s',
+    (path) => {
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>,
+      )
+      expect(screen.queryByRole('banner')).toBeNull()
+      expect(screen.getByRole('status').className).toBe('page-status')
+    },
+  )
 })

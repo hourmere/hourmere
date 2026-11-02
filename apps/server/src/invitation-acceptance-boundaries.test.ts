@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -288,7 +289,7 @@ describe.skipIf(!serverUrl)('invitation acceptance transaction and recipient bou
         .updateTable('auth.invitation')
         .set(
           state === 'expired'
-            ? { expiresAt: new Date(Date.now() - 60_000) }
+            ? { expiresAt: sql`clock_timestamp() - interval '1 minute'` }
             : { status: 'canceled' },
         )
         .where('id', '=', invitationId)

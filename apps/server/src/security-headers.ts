@@ -5,6 +5,7 @@ import { isIP } from 'node:net'
 import { embedParent } from '@hourmere/core/embed'
 import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
+import { isOneTimeLinkPath } from './one-time-link-privacy.ts'
 
 /**
  * The web app's Content-Security-Policy, for HTML pages that bring no policy of their own.
@@ -94,6 +95,10 @@ export function securityHeaders({
       if (!headers.get(name)?.trim()) headers.set(name, value)
     }
     if (hsts) headers.set('Strict-Transport-Security', hsts)
+    if (isOneTimeLinkPath(c.req.path)) {
+      headers.set('Referrer-Policy', 'no-referrer')
+      headers.set('Cache-Control', 'no-store')
+    }
     setDefault('X-Frame-Options', 'DENY')
     if (HTML.test(headers.get('content-type') ?? '')) {
       const parent = embedParent(new URL(c.req.url), embedOrigins)
