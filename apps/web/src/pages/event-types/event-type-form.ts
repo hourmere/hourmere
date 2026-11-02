@@ -600,6 +600,13 @@ export function serverErrors(
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
+    case 'location_options_conflict':
+      return {
+        fields: {},
+        message: msg(
+          'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+        ),
+      }
     case 'automatic_zoom_disabled':
       return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
     case 'automatic_zoom_unavailable':

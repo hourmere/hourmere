@@ -42,7 +42,7 @@ function buildForm(source: string): typeof formFunctions {
   }
   return new Function(
     ...Object.keys(dependencies),
-    `${compiled}; return {emptyDraft, draftFromEventType, validateDraft, toInput, toPatchInput}`,
+    `${compiled}; return {emptyDraft, draftFromEventType, validateDraft, toInput, toPatchInput, serverErrors}`,
   )(...Object.values(dependencies)) as typeof formFunctions
 }
 
@@ -56,6 +56,19 @@ function detects(before: string, after: string, assertion: (values: typeof formF
 }
 
 describe('location editor production-source mutation controls', () => {
+  it('detects displaying a location conflict as untranslated server prose', () => {
+    detects("case 'location_options_conflict':", "case 'unused_location_conflict':", (values) => {
+      const result = values.serverErrors(
+        new RequestError(409, 'location_options_conflict', 'Raw server detail.'),
+        values.emptyDraft(),
+      )
+      expect(result.message).toEqual(
+        msg(
+          'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+        ),
+      )
+    })
+  })
   it('detects forgetting that the saved phone is supplied by the invitee', () => {
     detects(
       "phoneAskInvitee: location?.kind === 'phone' && location.askInvitee === true,",

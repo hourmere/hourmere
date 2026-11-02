@@ -1,4 +1,6 @@
 export const common = {
+  'This location is unavailable. Contact the host to book.':
+    'Dieser Treffpunkt ist nicht verfügbar. Wenden Sie sich für die Buchung an die gastgebende Person.',
   'These suggestions have expired. Check the currently available times.':
     'Diese Terminvorschläge sind abgelaufen. Prüfen Sie die aktuell verfügbaren Zeiten.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

@@ -1,5 +1,7 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    '无法在此处更改已保存的地点选项。请保留原地点后重试。',
   'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
     '请在会议开始前于 Hourmere 中取消预约。会议开始后，受邀人无法停止会后消息。',
   'Reminders and follow-ups': '提醒与会后消息',

@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    'The saved location options cannot be changed here. Keep the location unchanged and try again.',
   'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.':
     'Cancel in Hourmere before the meeting starts. Invitees cannot stop follow-ups after the start.',
   'Reminders and follow-ups': 'Reminders and follow-ups',

@@ -839,7 +839,10 @@ describe('editing an event type', () => {
       await user.click(screen.getByRole('button', { name: 'Save changes' }))
       const error = await screen.findByRole('alert')
       expect(within(error).getByRole('heading').textContent).toBe('Could not save')
-      expect(error.textContent).toContain(message)
+      expect(error.textContent).toContain(
+        'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+      )
+      expect(error.textContent).not.toContain(message)
       expect(field('Title').value).toBe('Unsaved rename')
       expect(field('Meeting link').value).toBe('https://example.com/new-room')
       expect(screen.getByText('Unsaved changes')).toBeDefined()
