@@ -1525,10 +1525,10 @@ export const admin = {
   'We could not load available times. Please try again.': '无法加载可约时间。请重试。',
   'No times are offered on this date.': '此日期没有可约时间。',
   'Retry availability': '重新检查可约时间',
-  '{0} of 10 alternatives selected': '已选择 {0} 个备选时间，最多可选 10 个',
+  '{0} of 10 alternatives selected': '已选择{0}个备选时间，最多可选 10 个',
   'Selected alternatives': '已选时间',
   'No longer offered': '已不可约',
-  'Remove {time}': '移除 {time}',
+  'Remove {time}': '移除{time}',
   'Remove time': '移除时间',
   'Preview email': '预览邮件',
   'The email preview could not be created. Please choose fewer times and try again.':
@@ -1548,7 +1548,7 @@ export const admin = {
   'Rich text copied with a plain-text fallback.': '已复制富文本，并包含纯文本备用版本。',
   'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
     '无法访问剪贴板。请手动选择并复制完整的纯文本预览。',
-  '{0} minutes': '{0} 分钟',
+  '{0} minutes': '{0}分钟',
   'Checking preview access…': '正在检查预览权限…',
   'We could not prepare the preview. Nothing was copied. Please try again.':
     '无法准备预览，未复制任何内容。请重试。',
