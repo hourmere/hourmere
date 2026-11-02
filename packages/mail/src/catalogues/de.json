@@ -81,7 +81,7 @@
   "waitlist.verify.action": "Öffnen Sie den Link und bestätigen Sie anschließend auf der Seite:",
   "waitlist.verify.expiry": "Dieser Bestätigungslink läuft am {expiry} ab, spätestens 30 Minuten nach der Anfrage.",
   "waitlist.verify.footer": "Falls Sie diese Anfrage nicht gestellt haben, können Sie diese E-Mail ignorieren oder die Anfrage über den obigen Link entfernen.",
-  "waitlist.broadcast": "Die Vorschläge werden allen berechtigten Personen auf der Warteliste mitgeteilt. Es wird nichts reserviert; die erste erfolgreich abgeschlossene Buchung erhält den Termin. E-Mails können nur teilweise oder verspätet zugestellt werden.",
+  "waitlist.broadcast": "Die Vorschläge werden allen berechtigten Personen auf der Warteliste mitgeteilt. Es wird nichts reserviert; den Termin erhält, wer zuerst erfolgreich bucht. Die E-Mails erreichen möglicherweise nicht alle Personen oder kommen verspätet an.",
   "waitlist.remove": "Um die Warteliste zu verlassen, öffnen Sie diesen Link und bestätigen Sie die Entfernung:",
   "waitlist.notice.subject": "Terminvorschläge für {event}",
   "waitlist.notice.introduction": "Für „{event}“ wurden Zeiten gefunden. Diese können inzwischen bereits gebucht sein. Wählen Sie einen Vorschlag, um die aktuelle Verfügbarkeit zu prüfen und zu buchen.",

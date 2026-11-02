@@ -146,6 +146,14 @@ headers, including on upstream errors. This also protects encoded capability pat
 and query strings. Retain this filter when customizing the Caddyfile; configure the
 same URI and header protections on any existing proxy.
 
+For your own proxy or CDN, redact capabilities in both access and error logs, including
+upstream failures: the segment after `/waitlist/` on personal and team booking suggestions
+(`/{handle}/{slug}/waitlist/{entryId}.{token}/...` and
+`/team/{teamSlug}/{slug}/waitlist/{entryId}.{token}/...`), and the token after `/book/`
+on `/book/{token}`, `/embed/book/{token}` and `/api/v1/book/{token}/...`. Cover encoded
+path segments as well as query strings and capability-bearing headers. Omitting the entire
+request URI, as the bundled proxy does, avoids missing an encoded variant.
+
 If you already operate a proxy, select `plain` during setup. This selects only
 [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml), which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
 unpublished. Supply the exact public HTTPS origin and SMTP settings, then configure your

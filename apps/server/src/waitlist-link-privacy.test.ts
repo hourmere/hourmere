@@ -11,6 +11,7 @@ import { createMiddleware } from 'hono/factory'
 import { logger } from 'hono/logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { isOneTimeLinkPath } from './one-time-link-privacy.ts'
 import { securityHeaders } from './security-headers.ts'
 
 const token = `00000000-0000-4000-8000-000000000091.${'w'.repeat(43)}`
@@ -95,7 +96,7 @@ describe('waitlist path capability privacy', () => {
     try {
       const a = app()
       expect((await a.request(`/fail/${token}`)).status).toBe(500)
-      await a.request(`/api/v1/unknown/waitlist/${token}/${suggested}`)
+      await a.request(`/api/v1/waitlist/${token}/${suggested}`)
       expect(output.length).toBeGreaterThan(0)
       expect(JSON.stringify(output).includes(token)).toBe(false)
       expect(JSON.stringify(output).includes('w'.repeat(42))).toBe(false)
@@ -113,6 +114,20 @@ describe('waitlist path capability privacy', () => {
       }
     } finally {
       for (const spy of spies) spy.mockRestore()
+    }
+  })
+
+  it('retains ordinary booking UUIDs in request lines while stripping queries', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const id = '00000000-0000-4000-8000-000000000092'
+      await app().request(`/api/v1/bookings/${id}?private-query`)
+      expect(log.mock.calls.length).toBeGreaterThan(0)
+      const output = JSON.stringify(log.mock.calls)
+      expect(output.includes(`/api/v1/bookings/${id}`)).toBe(true)
+      expect(output.includes('private-query')).toBe(false)
+    } finally {
+      log.mockRestore()
     }
   })
 })
@@ -136,7 +151,7 @@ describe('waitlist capability privacy source-copy controls', () => {
   })
   it('detects bypassing capability redaction in the request logger', async () => {
     const source = readFileSync('apps/server/src/app.ts', 'utf8')
-    const start = source.indexOf('const requestLogger =')
+    const start = source.indexOf('function isWaitlistLinkPath(')
     const code = source.slice(start, source.indexOf('export function createApp', start))
     const assertion = async (value: string) => {
       const output: unknown[][] = []
@@ -145,27 +160,93 @@ describe('waitlist capability privacy source-copy controls', () => {
         'console',
         'escapeControlCharacters',
         'redactLogDetails',
+        'createMiddleware',
+        'isOneTimeLinkPath',
         'COLORS',
-        `${value}; return requestLogger`,
+        `${stripTypeScriptTypes(value)}; return requestLogger`,
       )(
         logger,
         { log: (...values: unknown[]) => output.push(values) },
         (line: string) => line,
         redactLogDetails,
+        createMiddleware,
+        isOneTimeLinkPath,
         /x^/,
       )
       const app = new Hono()
       app.use('*', middleware)
       app.get('*', (c) => c.text('ok'))
-      await app.request(`/api/waitlist/${token}/${suggested}`)
+      for (const segment of ['waitlist', '%77aitlist']) {
+        await app.request(`/ada/intro/${segment}/${token}/${suggested}`)
+      }
+      await app.request(`/team/alpha/intro/waitlist/${token}/${suggested}`)
+      await app.request(`/ada%2Fintro%2Fwaitlist%2F${token}`)
       expect(JSON.stringify(output).includes('w'.repeat(43))).toBe(false)
     }
     await assertion(code)
-    const before = "redactLogDetails(line.replace(COLORS, ''))"
+    const before = 'isWaitlistLinkPath(c.req.path)'
     expect(code.includes(before)).toBe(true)
-    await expect(assertion(code.replace(before, "line.replace(COLORS, '')"))).rejects.toThrow(
+    await expect(assertion(code.replace(before, 'false'))).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+
+  it('detects blanket UUID redaction in ordinary request lines', async () => {
+    const source = readFileSync('apps/server/src/app.ts', 'utf8')
+    const start = source.indexOf('function isWaitlistLinkPath(')
+    const code = source.slice(start, source.indexOf('export function createApp', start))
+    const assertion = async (value: string) => {
+      const output: unknown[][] = []
+      const middleware = new Function(
+        'logger',
+        'console',
+        'escapeControlCharacters',
+        'redactLogDetails',
+        'createMiddleware',
+        'isOneTimeLinkPath',
+        'COLORS',
+        `${stripTypeScriptTypes(value)}; return requestLogger`,
+      )(
+        logger,
+        { log: (...values: unknown[]) => output.push(values) },
+        (line: string) => line,
+        redactLogDetails,
+        createMiddleware,
+        isOneTimeLinkPath,
+        /x^/,
+      )
+      const app = new Hono()
+      app.use('*', middleware)
+      app.get('*', (c) => c.text('ok'))
+      const id = '00000000-0000-4000-8000-000000000092'
+      await app.request(`/api/v1/bookings/${id}?private-query`)
+      const logged = JSON.stringify(output)
+      expect(logged.includes(`/api/v1/bookings/${id}`)).toBe(true)
+      expect(logged.includes('private-query')).toBe(false)
+      for (const path of [
+        '/waitlist/intro',
+        '/team/waitlist/intro',
+        '/api/v1/public/waitlist/intro',
+        '/api/v1/public/team/waitlist/intro',
+        '/booking/waitlist/verify',
+        '/booking/waitlist/remove',
+      ]) {
+        const count = output.length
+        await app.request(path)
+        expect(output.length).toBeGreaterThan(count)
+        expect(JSON.stringify(output.slice(count)).includes(path)).toBe(true)
+      }
+    }
+    await assertion(code)
+    const before = "line.replace(/\\?\\S*/, '').replace(COLORS, '')"
+    expect(code.includes(before)).toBe(true)
+    await expect(assertion(code.replace(before, `redactLogDetails(${before})`))).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    const route = 'isWaitlistLinkPath(c.req.path)'
+    await expect(
+      assertion(code.replace(route, '/\\/waitlist\\//i.test(c.req.path)')),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
 })
 

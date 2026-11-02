@@ -126,7 +126,9 @@ describe('ordinary booking from a waitlist email', () => {
           json(201, { booking: booking(), manageToken: TOKEN }),
       })
       renderApp(`/ada/intro/waitlist/${capability}/${encodeURIComponent(suggested)}/${expired}`)
-      await screen.findByText('These suggestions have expired. Check the current available times.')
+      await screen.findByText(
+        'These suggestions have expired. Check the currently available times.',
+      )
       expect(screen.queryByLabelText('Your name')).toBeNull()
       await user.click(await screen.findByRole('button', { name: /November 2, available/ }))
       await user.click(screen.getByRole('button', { name: '2:00 PM' }))
@@ -154,7 +156,7 @@ describe('ordinary booking from a waitlist email', () => {
     await waitFor(() => expect(queried).toBe(true))
     clock.now = deadline
     await pending.answer(json(200, { data: [slot(suggested)] }))
-    await screen.findByText('These suggestions have expired. Check the current available times.')
+    await screen.findByText('These suggestions have expired. Check the currently available times.')
     expect(screen.queryByLabelText('Your name')).toBeNull()
   })
 })

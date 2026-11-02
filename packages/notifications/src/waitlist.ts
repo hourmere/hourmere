@@ -364,6 +364,7 @@ export async function deliverWaitlistEmail(
         removalToken: management,
         eventTitle: prepared.event.title,
         expiresAt: new Date(deadline),
+        timeZone: prepared.entry.time_zone as string,
         language: prepared.entry.locale,
         defaultLanguage: deps.defaultLanguage,
       }
@@ -376,7 +377,6 @@ export async function deliverWaitlistEmail(
               bookingPath: prepared.event.team
                 ? `/team/${prepared.event.team.slug}/${prepared.event.slug}`
                 : `/${prepared.event.handle}/${prepared.event.slug}`,
-              timeZone: prepared.entry.time_zone as string,
               slots: row.slots as { start: string; end: string }[],
             })
       const timeout = AbortSignal.timeout(

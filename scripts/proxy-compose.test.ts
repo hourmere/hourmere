@@ -223,20 +223,31 @@ function filterUri(source: string, uri: string): string {
   return uri.replace(new RegExp(rule[1] ?? ''), rule[2] ?? '')
 }
 
-function verifyCapabilityLogFilter(source: string) {
+function verifyCapabilityLogFilter(source: string, family: 'one-time' | 'waitlist') {
   const token = 'synthetic-path-capability'
-  for (const prefix of [
-    '/book/',
-    '/api/v1/book/',
-    '/embed/book/',
-    '/BOOK/',
-    '/%62ook/',
-    '/api/v1/%62ook/',
-    '/api/v1/b%6fok/',
-    '/book%2f',
-  ]) {
+  const prefixes =
+    family === 'waitlist'
+      ? [
+          '/ada/intro/waitlist/',
+          '/team/alpha/intro/waitlist/',
+          '/ada/intro/%77aitlist/',
+          '/team/alpha/intro/waitlist%2f',
+        ]
+      : [
+          '/book/',
+          '/api/v1/book/',
+          '/embed/book/',
+          '/BOOK/',
+          '/%62ook/',
+          '/api/v1/%62ook/',
+          '/api/v1/b%6fok/',
+          '/book%2f',
+        ]
+  for (const prefix of prefixes) {
     for (const suffix of ['', '/slots', '/bookings', '?start=private-query']) {
-      const filtered = filterUri(source, `${prefix}${token}${suffix}`)
+      const capability =
+        family === 'waitlist' ? `00000000-0000-4000-8000-000000000091.${token}` : token
+      const filtered = filterUri(source, `${prefix}${capability}${suffix}`)
       expect(filtered.includes(token)).toBe(false)
       expect(filtered.includes('private-query')).toBe(false)
       expect(filtered).toBe('REDACTED')
@@ -246,22 +257,22 @@ function verifyCapabilityLogFilter(source: string) {
   expect(filterUri(source, '/api/health')).toBe('REDACTED')
 }
 
-it('redacts path capabilities as well as queries in proxy upstream-error logs', () => {
-  verifyCapabilityLogFilter(caddy)
-})
+it.each(['one-time', 'waitlist'] as const)(
+  'redacts %s path capabilities as well as queries in proxy upstream-error logs',
+  (family) => verifyCapabilityLogFilter(caddy, family),
+)
 
-it('detects restoring the old query-only proxy log filter', () => {
-  const mutant = caddy.replace(
-    /request>uri [^\n]+/,
-    String.raw`request>uri regexp "\?.*$" "?REDACTED"`,
-  )
-  expect(mutant === caddy).toBe(false)
-  let failure: unknown
-  try {
-    verifyCapabilityLogFilter(mutant)
-  } catch (error) {
-    failure = error
-  }
-  expect(failure).toMatchObject({ name: 'AssertionError' })
-  verifyCapabilityLogFilter(caddy)
-})
+it.each(['one-time', 'waitlist'] as const)(
+  'detects restoring the old query-only proxy log filter for %s capabilities',
+  (family) => {
+    const mutant = caddy.replace(
+      /request>uri [^\n]+/,
+      String.raw`request>uri regexp "\?.*$" "?REDACTED"`,
+    )
+    expect(mutant === caddy).toBe(false)
+    expect(() => verifyCapabilityLogFilter(mutant, family)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyCapabilityLogFilter(caddy, family)
+  },
+)

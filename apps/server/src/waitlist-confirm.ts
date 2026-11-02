@@ -13,8 +13,9 @@ import { clientIp } from './client-ip.ts'
 import { waitlistConfirmationCatalogues } from './i18n/waitlist-confirmation.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, rateLimit } from './rate-limit.ts'
 
-export const WAITLIST_VERIFY_PATH = '/waitlist/verify'
-export const WAITLIST_REMOVE_PATH = '/waitlist/remove'
+// Use an existing reserved namespace so legacy handles and event slugs stay routable.
+export const WAITLIST_VERIFY_PATH = '/booking/waitlist/verify'
+export const WAITLIST_REMOVE_PATH = '/booking/waitlist/remove'
 const TOKEN = /^[a-f\d-]{36}\.[A-Za-z0-9_-]{43}$/
 const MAX_BODY_BYTES = 1024
 const publicLocales = registeredLocales.filter(({ code }) =>

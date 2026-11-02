@@ -60,6 +60,35 @@ async function sourceCopy(
 }
 
 describe('waitlist confirmation transports', () => {
+  async function assertHandleRoutes(register = registerWaitlistConfirmation) {
+    const { app, verify, remove } = fixture(register)
+    app.get('/:handle/:slug', (c) =>
+      c.json({ handle: c.req.param('handle'), slug: c.req.param('slug') }),
+    )
+    for (const slug of ['verify', 'remove']) {
+      const response = await app.request(`/waitlist/${slug}`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toContain('application/json')
+      expect(await response.json()).toEqual({ handle: 'waitlist', slug })
+    }
+    expect(verify).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+  }
+
+  it('keeps existing waitlist handle event pages routable', async () => {
+    await assertHandleRoutes()
+  })
+
+  it.each(['verify', 'remove'])(
+    'detects confirmation routing that shadows the existing waitlist/%s event',
+    async (mode) => {
+      const copied = await sourceCopy(`'/booking/waitlist/${mode}'`, `'/waitlist/${mode}'`)
+      await expect(assertHandleRoutes(copied)).rejects.toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    },
+  )
+
   it.each([WAITLIST_VERIFY_PATH, WAITLIST_REMOVE_PATH])(
     'keeps GET/HEAD scanner visits read-only and private at %s',
     async (path) => {

@@ -1,5 +1,6 @@
 # Upstream failures use Caddy's global logger too. Omit the complete URI (including
-# encoded capability paths and queries) and all capability-bearing request headers.
+# encoded waitlist/one-time booking capability paths and queries) and all
+# capability-bearing request headers.
 {
 	log default {
 		format filter {

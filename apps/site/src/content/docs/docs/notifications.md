@@ -945,6 +945,12 @@ The ordinary booking transaction decides the winner. Losing a race refreshes rem
 available times and keeps the original waiting deadline. Self-removal revokes outstanding
 capabilities and stops unsent work; opening a link alone does not remove or book anything.
 
+Operators using their own proxy or CDN must also redact waitlist capability path segments
+in access and error logs, including upstream failures and encoded paths. Apply the same rule
+to one-time booking tokens under `/book/`, `/embed/book/` and `/api/v1/book/`, as well as
+secret query strings and headers. The bundled Caddy configuration omits the complete URI;
+see [proxy behavior](/docs/self-hosting#proxy-behavior-and-an-existing-proxy).
+
 Public join UI, administration summaries and general REST/MCP/CLI waitlist operations are
 separate work. The minimal mail-link confirmations and optional public-booking attribution
 are available in this delivery layer.

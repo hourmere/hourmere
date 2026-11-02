@@ -266,8 +266,23 @@ const COLORS = /\u001b\[[0-9;]*m/g
  * Logs requests without query strings (sign-in links and OAuth callbacks carry secrets
  * there) and without colors.
  */
-const ordinaryRequestLogger = logger((line, ...rest) =>
-  console.log(escapeControlCharacters(redactLogDetails(line.replace(COLORS, ''))), ...rest),
+function isWaitlistLinkPath(path: string): boolean {
+  // Detect encoded segments/slashes too without changing request routing.
+  let decoded = path
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {}
+  return /^\/(?:team\/[^/]+\/[^/]+|[^/]+\/[^/]+)\/waitlist\/[^/]+(?:\/|$)/i.test(decoded)
+}
+
+const requestLineLogger = logger((line, ...rest) =>
+  console.log(escapeControlCharacters(line.replace(/\?\S*/, '').replace(COLORS, '')), ...rest),
+)
+
+// Use the decoded path to catch encoded route segments too. Confirmation transports
+// carry their capabilities in fragments/bodies; booking suggestions carry them here.
+const ordinaryRequestLogger = createMiddleware((c, next) =>
+  isWaitlistLinkPath(c.req.path) ? next() : requestLineLogger(c, next),
 )
 
 // A one-time capability is carried by the path. Do not hand that request to a

@@ -16,6 +16,7 @@ const options = {
   token,
   removalToken,
   expiresAt: '2026-10-31T16:30:00.000Z',
+  timeZone: 'America/Los_Angeles',
 }
 const notification = {
   ...options,
@@ -27,8 +28,8 @@ const notification = {
     { start: '2026-11-01T09:30:00.000Z', end: '2026-11-01T09:45:00.000Z' },
   ],
 }
-const removeUrl = `${options.publicUrl}/waitlist/remove#${removalToken}`
-const verifyUrl = `${options.publicUrl}/waitlist/verify#token=${token}&management=${removalToken}`
+const removeUrl = `${options.publicUrl}/booking/waitlist/remove#${removalToken}`
+const verifyUrl = `${options.publicUrl}/booking/waitlist/verify#token=${token}&management=${removalToken}`
 
 function visibleText(html: string): string {
   return html
@@ -55,41 +56,43 @@ const expected = {
   en: {
     verify: 'Confirm your waitlist request: Intro call',
     notice: 'Suggested times for Intro call',
-    broadcast: 'Nothing is reserved; the first successful booking wins.',
+    broadcast:
+      'Suggestions are shared with everyone eligible on the waitlist. Nothing is reserved; the first successful booking wins. Some emails may not be delivered or may arrive late.',
     waiting: 'you stay on the waitlist until your original deadline',
   },
   'zh-CN': {
     verify: '确认候补申请：Intro call',
     notice: '候补时段建议：Intro call',
-    broadcast: '不会为任何人保留；以最先成功完成的预约为准。',
+    broadcast:
+      '建议时段会提供给所有符合条件的候补者。不会为任何人预留时段；以最先成功完成的预约为准。部分邮件可能无法送达或延迟送达。',
     waiting: '你仍会留在候补名单中，直到最初的到期时间',
   },
   de: {
     verify: 'Wartelistenanfrage bestätigen: Intro call',
     notice: 'Terminvorschläge für Intro call',
     broadcast:
-      'Es wird nichts reserviert; die erste erfolgreich abgeschlossene Buchung erhält den Termin.',
+      'Die Vorschläge werden allen berechtigten Personen auf der Warteliste mitgeteilt. Es wird nichts reserviert; den Termin erhält, wer zuerst erfolgreich bucht. Die E-Mails erreichen möglicherweise nicht alle Personen oder kommen verspätet an.',
     waiting: 'bleiben Sie bis zum ursprünglichen Ablaufdatum auf der Warteliste',
   },
   fr: {
-    verify: 'Confirmez votre demande de liste d’attente\u00a0: Intro call',
+    verify: 'Confirmez votre demande d’inscription sur la liste d’attente\u00a0: Intro call',
     notice: 'Créneaux proposés pour Intro call',
     broadcast:
-      'Aucun créneau n’est réservé\u00a0; la première réservation réussie obtient le créneau.',
+      'Les propositions sont communiquées à toutes les personnes éligibles de la liste d’attente. Aucun créneau n’est réservé\u00a0; le créneau revient à la première personne qui finalise sa réservation avec succès. Il se peut que certains e-mails n’arrivent pas ou arrivent en retard.',
     waiting: 'vous restez sur la liste d’attente jusqu’à l’échéance initiale',
   },
   es: {
-    verify: 'Confirme su solicitud de lista de espera: Intro call',
+    verify: 'Confirme su solicitud para unirse a la lista de espera: Intro call',
     notice: 'Horarios sugeridos para Intro call',
     broadcast:
-      'No se reserva ningún horario; lo obtiene la primera reserva completada correctamente.',
+      'Las sugerencias se comparten con todas las personas de la lista de espera que cumplen los requisitos. No se reserva ningún horario; lo obtiene quien primero complete una reserva con éxito. Es posible que algunos correos no se entreguen o lleguen con retraso.',
     waiting: 'seguirá en la lista de espera hasta la fecha de vencimiento original',
   },
   'pt-BR': {
-    verify: 'Confirme sua solicitação de lista de espera: Intro call',
+    verify: 'Confirme sua solicitação para entrar na lista de espera: Intro call',
     notice: 'Horários sugeridos para Intro call',
     broadcast:
-      'Nenhum horário fica reservado; a primeira reserva concluída com sucesso fica com o horário.',
+      'As sugestões são compartilhadas com todas as pessoas elegíveis na lista de espera. Nenhum horário fica reservado; quem primeiro concluir uma reserva com sucesso fica com o horário. Alguns e-mails podem não ser entregues ou chegar com atraso.',
     waiting: 'você continuará na lista de espera até o prazo original',
   },
 }
@@ -283,6 +286,37 @@ function verifyDst(render = production) {
   }
 }
 
+function verifyVerificationDeadline(render = production) {
+  for (const fixture of [
+    {
+      language: 'en',
+      timeZone: 'America/Los_Angeles',
+      label: 'Saturday, October 31, 2026 at 9:30 AM (America/Los Angeles, GMT-07:00)',
+    },
+    {
+      language: 'de',
+      timeZone: 'Europe/Berlin',
+      label: 'Samstag, 31. Oktober 2026 um 17:30 (Europe/Berlin, GMT+01:00)',
+    },
+    {
+      language: 'zh-CN',
+      timeZone: 'Asia/Shanghai',
+      label: '2026年11月1日星期日 00:30（Asia/Shanghai，GMT+08:00）',
+    },
+  ]) {
+    const message = render.verify({
+      ...options,
+      ...fixture,
+      expiresAt: '2026-10-31T16:30:12.345Z',
+    })
+    for (const body of [message.text, visibleText(message.html ?? '')]) {
+      expect(normalize(body)).toContain(fixture.label)
+      expect(body).not.toMatch(/\d{1,2}:\d{2}:12|\.345/)
+    }
+    equivalent(message)
+  }
+}
+
 async function verifyLogRedaction(render = production) {
   const lines: string[] = []
   const mailer = createLogMailer((line) => lines.push(line))
@@ -319,7 +353,8 @@ describe('waitlist email templates', () => {
         }
       }
       expect(notice.text).toContain(copy.waiting)
-      expect(verification.text).toContain('2026-10-31 16:30:00 UTC')
+      expect(verification.text).toContain('America/Los Angeles')
+      expect(verification.text).toContain('GMT-07:00')
       expect(verification.text).toContain('30')
     },
   )
@@ -367,6 +402,8 @@ describe('waitlist email templates', () => {
   })
   it('renders both offsets of repeated LA/Berlin local times without changing UTC links', () =>
     verifyDst())
+  it('renders verification deadlines in the recipient zone and language at minute precision', () =>
+    verifyVerificationDeadline())
   it.each([
     {
       timeZone: 'America/Los_Angeles',
@@ -448,6 +485,7 @@ describe('waitlist email templates', () => {
     verifySuggestionBound(render)
     verifyIntervals(render)
     verifyDst(render)
+    verifyVerificationDeadline(render)
     verifySafeErrors(render)
     await verifyLogRedaction(render)
   })
@@ -463,7 +501,7 @@ describe('waitlist email templates', () => {
     ],
     [
       'fragment-only verification capability',
-      ['/waitlist/verify#token=', '/waitlist/verify?token='],
+      ['/booking/waitlist/verify#token=', '/booking/waitlist/verify?token='],
       verifyLinks,
     ],
     [
@@ -521,6 +559,35 @@ describe('waitlist email templates', () => {
       verifyIntervals,
     ],
     ['duplicate suggestion rejection', ['identities.has(identity)', 'false'], verifyIntervals],
+    [
+      'localized verification deadline',
+      [
+        'expiry: displayTime(expiry, options.timeZone, language)',
+        "expiry: expiry.toString().replace('T', ' ').replace(/Z$/, ' UTC')",
+      ],
+      verifyVerificationDeadline,
+    ],
+    [
+      'recipient verification time zone',
+      [
+        'expiry: displayTime(expiry, options.timeZone, language)',
+        "expiry: displayTime(expiry, 'UTC', language)",
+      ],
+      verifyVerificationDeadline,
+    ],
+    [
+      'recipient verification language',
+      [
+        'expiry: displayTime(expiry, options.timeZone, language)',
+        "expiry: displayTime(expiry, options.timeZone, 'en')",
+      ],
+      verifyVerificationDeadline,
+    ],
+    [
+      'minute-precision verification deadline',
+      ["timeStyle: 'short'", "timeStyle: 'medium'"],
+      verifyVerificationDeadline,
+    ],
     [
       'date-specific display zones',
       [

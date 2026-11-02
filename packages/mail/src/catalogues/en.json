@@ -81,7 +81,7 @@
   "waitlist.verify.action": "Open the link, then confirm on the page:",
   "waitlist.verify.expiry": "This verification link expires at {expiry}, no later than 30 minutes after the request.",
   "waitlist.verify.footer": "If you did not request this, ignore this email or remove the request using the link above.",
-  "waitlist.broadcast": "Suggestions are shared with everyone eligible on the waitlist. Nothing is reserved; the first successful booking wins. Email delivery may be partial or delayed.",
+  "waitlist.broadcast": "Suggestions are shared with everyone eligible on the waitlist. Nothing is reserved; the first successful booking wins. Some emails may not be delivered or may arrive late.",
   "waitlist.remove": "To leave the waitlist, open this link and confirm removal:",
   "waitlist.notice.subject": "Suggested times for {event}",
   "waitlist.notice.introduction": "Times were found for “{event}”. They may already have been booked. Choose a suggestion to check its current availability and make a booking.",

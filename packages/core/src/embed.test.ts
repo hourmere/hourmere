@@ -32,6 +32,9 @@ describe('embed origin and route boundaries', () => {
     ['/ada/intro', '/ada/intro'],
     ['/Ada/Intro/', '/ada/intro'],
     ['/team/Alpha/Intro', '/team/Alpha/intro'],
+    ['/waitlist/verify', '/waitlist/verify'],
+    ['/waitlist/remove', '/waitlist/remove'],
+    ['/team/waitlist/intro', '/team/waitlist/intro'],
   ])('accepts only a public booking path %s', (path, result) =>
     expect(publicBookingPath(path)).toBe(result),
   )

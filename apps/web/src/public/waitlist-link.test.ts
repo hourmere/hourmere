@@ -135,7 +135,7 @@ describe('late waitlist preview response source-copy control', () => {
     handler({ start, end })
     expect(setSlot).not.toHaveBeenCalled()
     expect(setNotice).toHaveBeenCalledWith(
-      'These suggestions have expired. Check the current available times.',
+      'These suggestions have expired. Check the currently available times.',
     )
   }
   it('checks expiry again after the asynchronous availability read', () => {

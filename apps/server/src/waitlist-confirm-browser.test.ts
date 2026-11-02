@@ -36,7 +36,7 @@ const verification = `00000000-0000-4000-8000-000000000001.${'v'.repeat(43)}`
 const management = `00000000-0000-4000-8000-000000000001.${'m'.repeat(43)}`
 
 async function browser(
-  path = '/waitlist/verify',
+  path = '/booking/waitlist/verify',
   fragment = `token=${verification}&management=${management}`,
   language = 'en',
   mutation?: { before: string; after: string },
@@ -77,7 +77,7 @@ describe('waitlist mail-link confirmation in the browser', () => {
   it.each(interfaceLanguages('public'))(
     'renders natural %s copy and changes language without posting or persisting a capability',
     async (language) => {
-      const ui = await browser('/waitlist/verify', undefined, language)
+      const ui = await browser('/booking/waitlist/verify', undefined, language)
       const words = waitlistConfirmationCatalogues[language]
       expect(document.getElementById('title')?.textContent).toBe(words.verifyTitle)
       expect(ui.action.textContent).toBe(words.verifyAction)
@@ -121,21 +121,21 @@ describe('waitlist mail-link confirmation in the browser', () => {
         referrerPolicy: 'no-referrer',
       })
     }
-    expect(ui.fetch.mock.calls[0]?.[0]).toBe('/waitlist/verify')
+    expect(ui.fetch.mock.calls[0]?.[0]).toBe('/booking/waitlist/verify')
     expect(JSON.parse(String(ui.fetch.mock.calls[0]?.[1].body)).token === verification).toBe(true)
-    expect(ui.fetch.mock.calls[1]?.[0]).toBe('/waitlist/remove')
+    expect(ui.fetch.mock.calls[1]?.[0]).toBe('/booking/waitlist/remove')
     expect(JSON.parse(String(ui.fetch.mock.calls[1]?.[1].body)).token === management).toBe(true)
     expect(ui.localStorage).not.toHaveBeenCalled()
   })
 
   it('removes from a raw management fragment with a single explicit click and no automatic request', async () => {
-    const ui = await browser('/waitlist/remove', management)
+    const ui = await browser('/booking/waitlist/remove', management)
     expect(ui.fetch).not.toHaveBeenCalled()
     expect(location.hash).toBe('')
     ui.action.click()
     await vi.waitFor(() => expect(ui.action.hidden).toBe(true))
     expect(ui.fetch).toHaveBeenCalledTimes(1)
-    expect(ui.fetch.mock.calls[0]?.[0]).toBe('/waitlist/remove')
+    expect(ui.fetch.mock.calls[0]?.[0]).toBe('/booking/waitlist/remove')
     expect(JSON.parse(String(ui.fetch.mock.calls[0]?.[1].body)).token === management).toBe(true)
     expect(document.getElementById('status')?.textContent).toBe(
       waitlistConfirmationCatalogues.en.removed,
@@ -143,7 +143,7 @@ describe('waitlist mail-link confirmation in the browser', () => {
   })
 
   it('rejects incomplete fragments locally and never leaves the fragment in history', async () => {
-    const ui = await browser('/waitlist/verify', 'not-a-capability')
+    const ui = await browser('/booking/waitlist/verify', 'not-a-capability')
     expect(ui.action.hidden).toBe(true)
     expect(ui.leave.hidden).toBe(true)
     expect(location.hash).toBe('')
@@ -175,8 +175,9 @@ describe('waitlist mail-link confirmation in the browser', () => {
 
   it('detects putting a capability into a query string in an isolated inline-source copy', async () => {
     const ui = await browser(undefined, undefined, undefined, {
-      before: "removing ? '/waitlist/remove' : '/waitlist/verify'",
-      after: "(removing ? '/waitlist/remove' : '/waitlist/verify') + '?token=' + capability",
+      before: "removing ? '/booking/waitlist/remove' : '/booking/waitlist/verify'",
+      after:
+        "(removing ? '/booking/waitlist/remove' : '/booking/waitlist/verify') + '?token=' + capability",
     })
     ui.action.click()
     await vi.waitFor(() => expect(ui.action.hidden).toBe(true))

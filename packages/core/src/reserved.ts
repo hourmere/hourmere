@@ -14,7 +14,6 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   // manage page, and today's top-level app routes.
   'app',
   'booking',
-  'waitlist',
   'book',
   'manage',
   'me',

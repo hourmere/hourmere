@@ -348,7 +348,7 @@ function BookingFlow({
   useEffect(() => {
     if (!waitlist) return
     if (!waitlistPreviewActive(waitlist, currentTime())) {
-      setNotice('These suggestions have expired. Check the current available times.')
+      setNotice('These suggestions have expired. Check the currently available times.')
       setSuggestion('done')
       return
     }
@@ -363,7 +363,7 @@ function BookingFlow({
       (offered) => {
         if (controller.signal.aborted) return
         if (!waitlistPreviewActive(waitlist, currentTime())) {
-          setNotice('These suggestions have expired. Check the current available times.')
+          setNotice('These suggestions have expired. Check the currently available times.')
           setSuggestion('done')
           return
         }
@@ -575,7 +575,7 @@ function BookingFlow({
           {waitlist && (
             <p className="muted">
               {t(
-                'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.',
+                'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.',
               )}
             </p>
           )}

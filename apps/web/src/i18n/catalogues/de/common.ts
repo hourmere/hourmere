@@ -1,8 +1,8 @@
 export const common = {
-  'These suggestions have expired. Check the current available times.':
+  'These suggestions have expired. Check the currently available times.':
     'Diese Terminvorschläge sind abgelaufen. Prüfen Sie die aktuell verfügbaren Zeiten.',
-  'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.':
-    'Wenn Sie noch auf der Warteliste stehen, können Sie bis zum ursprünglichen Ablauf weiter warten. Es wird kein Termin reserviert.',
+  'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':
+    'Wenn Sie noch auf der Warteliste stehen, können Sie dort bis zum ursprünglichen Ablaufdatum bleiben. Es wird kein Termin reserviert.',
   'This booking link is unavailable': 'Dieser Buchungslink ist nicht verfügbar',
   'Contact the host for a new booking link.':
     'Bitten Sie die gastgebende Person um einen neuen Buchungslink.',

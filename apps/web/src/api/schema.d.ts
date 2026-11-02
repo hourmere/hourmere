@@ -5162,6 +5162,8 @@ export interface operations {
                      * @example 2026-11-02T09:00:00.000Z
                      */
                     start: string;
+                    /** @description Optional waitlist attribution capability; grants no booking priority or permission */
+                    waitlistToken?: string;
                 };
             };
         };

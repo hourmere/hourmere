@@ -107,10 +107,11 @@ HTML messages in every shipped public mail language. Both are sensitive messages
 development mailer never prints their addresses, private content or capabilities.
 
 The renderer constructs all links from the trusted canonical `publicUrl` origin. Verification
-opens `/waitlist/verify#token=<verification>&management=<management>`; removal opens
-`/waitlist/remove#<management>`. Opening either page is read-only; the invitee explicitly
+opens `/booking/waitlist/verify#token=<verification>&management=<management>`; removal opens
+`/booking/waitlist/remove#<management>`. Opening either page is read-only; the invitee explicitly
 confirms the action. These are separate purpose-bound capabilities, and the verification
-message states the actual expiry and the maximum 30-minute verification lifetime.
+message states the actual expiry in the recipient's time zone and language at minute
+precision, and the maximum 30-minute verification lifetime.
 
 Notifications accept the current ordinary personal or team `bookingPath`, one to three exact
 UTC slot intervals, the invitee's IANA `timeZone`, and a management capability. Each suggestion

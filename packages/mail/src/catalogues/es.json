@@ -76,18 +76,18 @@
   "hosts.more": "{count} personas más",
   "hosts.moreOne": "{count} persona más",
   "waitlist.event": "Su reunión",
-  "waitlist.verify.subject": "Confirme su solicitud de lista de espera: {event}",
+  "waitlist.verify.subject": "Confirme su solicitud para unirse a la lista de espera: {event}",
   "waitlist.verify.introduction": "Confirme esta dirección de correo para unirse a la lista de espera de «{event}». Abrir el enlace no confirma por sí solo su solicitud.",
   "waitlist.verify.action": "Abra el enlace y confirme en la página:",
   "waitlist.verify.expiry": "Este enlace de verificación caduca el {expiry}, como máximo 30 minutos después de la solicitud.",
   "waitlist.verify.footer": "Si no ha hecho esta solicitud, ignore este correo o elimine la solicitud mediante el enlace anterior.",
-  "waitlist.broadcast": "Las sugerencias se comparten con todas las personas que cumplen los requisitos en la lista de espera. No se reserva ningún horario; lo obtiene la primera reserva completada correctamente. Los correos pueden enviarse solo a una parte de las personas o llegar con retraso.",
+  "waitlist.broadcast": "Las sugerencias se comparten con todas las personas de la lista de espera que cumplen los requisitos. No se reserva ningún horario; lo obtiene quien primero complete una reserva con éxito. Es posible que algunos correos no se entreguen o lleguen con retraso.",
   "waitlist.remove": "Para salir de la lista de espera, abra este enlace y confirme la eliminación:",
   "waitlist.notice.subject": "Horarios sugeridos para {event}",
   "waitlist.notice.introduction": "Se han encontrado horarios para «{event}». Es posible que ya se hayan reservado. Elija una sugerencia para comprobar la disponibilidad actual y reservar.",
   "waitlist.slot": "{start} – {end}",
   "waitlist.notice.expiry": "Estas sugerencias caducan el {expiry}. Este plazo no reserva ningún horario.",
-  "waitlist.notice.page": "Consulte todos los horarios actuales en la página de reservas:",
+  "waitlist.notice.page": "Consulte todos los horarios disponibles actualmente en la página de reservas:",
   "waitlist.notice.waiting": "Si un horario ya no está disponible, seguirá en la lista de espera hasta la fecha de vencimiento original. Si ha reservado por otra vía, utilice el siguiente enlace para salir.",
-  "waitlist.notice.footer": "Ha recibido este correo porque verificó una solicitud de lista de espera para esta reunión."
+  "waitlist.notice.footer": "Ha recibido este correo porque ha confirmado una solicitud para unirse a la lista de espera de esta reunión."
 }

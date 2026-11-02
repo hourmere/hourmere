@@ -178,9 +178,11 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
       const verification = s.messages[0] as MailMessage
       expect(verification.sensitive).toBe(true)
       expect(verification.text).toContain(
-        `/waitlist/verify#token=${entry.verificationToken}&management=`,
+        `/booking/waitlist/verify#token=${entry.verificationToken}&management=`,
       )
       expect(verification.html).toContain(entry.verificationToken)
+      expect(verification.text).toContain('Europe/Berlin')
+      expect(verification.text).toContain('GMT+01:00')
       const verifyRow = await db
         .selectFrom('waitlist_verification_outbox')
         .selectAll()
@@ -197,8 +199,8 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
         mail.waitlistNotificationEmail({
           to: notice.to,
           publicUrl: s.deps.publicUrl,
-          removalToken: notice.text.match(/\/waitlist\/remove#(\S+)/)?.[1] as string,
-          token: notice.text.match(/\/waitlist\/remove#(\S+)/)?.[1] as string,
+          removalToken: notice.text.match(/\/booking\/waitlist\/remove#(\S+)/)?.[1] as string,
+          token: notice.text.match(/\/booking\/waitlist\/remove#(\S+)/)?.[1] as string,
           eventTitle: (await scheduling.resolveWaitlistEventById(db, s.eventTypeId))
             ?.title as string,
           expiresAt: candidates[0]?.expires_at as Date,
@@ -228,6 +230,24 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
       expect(s.logs.join('\n')).not.toMatch(/[a-f\d-]{36}\.[A-Za-z0-9_-]{43}/)
     },
   )
+
+  async function verificationTimeZoneScenario(send: Sender) {
+    const s = await setup('de')
+    const entry = await s.join()
+    await send(s.deps, { kind: 'verification', id: entry.outboxId })
+    expect(s.messages).toHaveLength(1)
+    expect(s.messages[0]?.text).toContain('Europe/Berlin')
+    expect(s.messages[0]?.text).toContain('GMT+01:00')
+  }
+  it('passes the stored recipient time zone to verification mail', async () =>
+    verificationTimeZoneScenario(deliverWaitlistEmail))
+  it('detects source-copy replacement of the stored verification time zone', async () => {
+    await expect(
+      verificationTimeZoneScenario(
+        sourceCopy('timeZone: prepared.entry.time_zone as string', "timeZone: 'UTC'"),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
   async function budgetScenario(send: Sender) {
     const s = await setup()

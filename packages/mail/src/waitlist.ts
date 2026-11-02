@@ -13,6 +13,8 @@ interface WaitlistEmailOptions {
   /** A separate, purpose-bound management capability, valid through the entry deadline. */
   removalToken: string
   expiresAt: Date | string
+  /** Recipient's IANA time zone, used for every displayed deadline and suggested time. */
+  timeZone: string
   language?: unknown
   defaultLanguage?: unknown
 }
@@ -27,7 +29,6 @@ export interface WaitlistNotificationEmailOptions extends WaitlistEmailOptions {
   bookingPath: string
   /** Management capability also used for optional ordinary-booking attribution. */
   token: string
-  timeZone: string
   slots: readonly { start: string; end: string }[]
 }
 
@@ -74,7 +75,7 @@ function context(options: WaitlistEmailOptions) {
   if (!to || singleLine(to.toWellFormed()) !== to) throw new Error('Invalid waitlist recipient')
   const event =
     singleLine(options.eventTitle.toWellFormed()) || mailMessage(language, 'waitlist.event')
-  const removeUrl = `${publicOrigin}/waitlist/remove#${capability(options.removalToken)}`
+  const removeUrl = `${publicOrigin}/booking/waitlist/remove#${capability(options.removalToken)}`
   const expiry = instant(options.expiresAt)
   const t = (key: MessageKey, values: Record<string, string> = {}) =>
     mailMessage(language, key, { event, ...values })
@@ -104,13 +105,13 @@ function render(to: string, language: Language, title: string, parts: Part[]): M
 /** Opening the link only previews confirmation; activation requires an explicit POST. */
 export function waitlistVerificationEmail(options: WaitlistVerificationEmailOptions): MailMessage {
   const { language, publicOrigin, to, removeUrl, expiry, t } = context(options)
-  const verifyUrl = `${publicOrigin}/waitlist/verify#token=${capability(options.token)}&management=${capability(options.removalToken)}`
+  const verifyUrl = `${publicOrigin}/booking/waitlist/verify#token=${capability(options.token)}&management=${capability(options.removalToken)}`
   return render(to, language, t('waitlist.verify.subject'), [
     { text: t('waitlist.verify.introduction') },
     { text: t('waitlist.verify.action'), url: verifyUrl },
     {
       text: t('waitlist.verify.expiry', {
-        expiry: expiry.toString().replace('T', ' ').replace(/Z$/, ' UTC'),
+        expiry: displayTime(expiry, options.timeZone, language),
       }),
     },
     { text: t('waitlist.broadcast') },
