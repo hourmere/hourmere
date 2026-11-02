@@ -127,7 +127,7 @@ describe('team list readiness and saved sharing', () => {
       server(teamEvent(type, event), item)
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
       const share = await screen.findByRole('region', { name: 'View and share' })
-      await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+      await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
         'Configuration checks passed',
       )
       expect(within(share).getByRole('link', { name: repair })).toBeDefined()
@@ -231,7 +231,7 @@ describe('team list readiness and saved sharing', () => {
       )
     await user.click(within(row()).getByRole('link', { name: 'Edit Intro call' }))
     const share = await screen.findByRole('region', { name: 'View and share' })
-    await screen.findByRole('heading', { name: 'Saved version readiness' })
+    await screen.findByRole('heading', { name: 'Saved event checks' })
     expect(within(share).queryByRole('link', { name: /View booking page/ })).toBeNull()
     expect(within(share).queryByRole('button', { name: 'Copy booking link' })).toBeNull()
     expect(share.querySelector('a[href^="#"]')).not.toBeNull()

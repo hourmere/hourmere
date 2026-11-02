@@ -40,9 +40,9 @@ const TEAM = {
 const SELF_ROUTE = 'GET /api/v1/readiness/self'
 const TEAM_ROUTE = `GET /api/v1/teams/${TEAM.organization.id}/readiness`
 const PATCH_ROUTE = `PATCH /api/v1/event-types/${EVENT_TYPE_ID}`
-const DIRTY = 'These unsaved changes have not been checked yet. Save to check the saved version.'
+const DIRTY = 'Save your changes to check the updated event type.'
 const title = () => screen.getByLabelText<HTMLInputElement>('Title', { exact: true })
-const readiness = () => screen.getByRole('region', { name: 'Saved version readiness' })
+const readiness = () => screen.getByRole('region', { name: 'Saved event checks' })
 
 function signal(overrides: Partial<Signal> = {}): Signal {
   return {
@@ -216,7 +216,7 @@ describe('saved event type readiness in the editor', () => {
     expect(readiness().querySelector('.badge-success')).toBeNull()
     expect(
       within(readiness()).getByText(
-        'These checks describe the saved version. Availability is confirmed when someone books.',
+        'These checks describe your saved event type. Available times are confirmed when someone books.',
       ),
     ).toBeDefined()
     expect(api.to(PATCH_ROUTE)[0]?.body).toHaveProperty('title', 'Submitted title')
@@ -233,15 +233,15 @@ describe('saved event type readiness in the editor', () => {
         name: language === 'en' ? 'Edit “Intro call”' : '编辑“Intro call”',
       })
       const region = screen.getByRole('region', {
-        name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+        name: language === 'en' ? 'Saved event checks' : '保存后的配置检查',
       })
       const passed = language === 'en' ? 'Configuration checks passed' : '配置检查通过'
       await within(region).findByText(passed)
       expect(
         within(region).getByText(
           language === 'en'
-            ? 'These checks describe the saved version. Availability is confirmed when someone books.'
-            : '这些检查对应已保存的版本。实际可用时间将在预约时确认。',
+            ? 'These checks describe your saved event type. Available times are confirmed when someone books.'
+            : '这些检查对应你已保存的活动类型。实际可约时间将在预约时确认。',
         ),
       ).toBeDefined()
       const input = screen.getByLabelText<HTMLInputElement>(language === 'en' ? 'Title' : '标题', {
@@ -255,7 +255,7 @@ describe('saved event type readiness in the editor', () => {
       await user.type(input, ' draft')
       expect(
         within(region).getByText(
-          language === 'en' ? DIRTY : '尚未检查这些未保存的更改。保存后可检查已保存版本。',
+          language === 'en' ? DIRTY : '保存更改后，即可检查更新后的活动类型。',
         ),
       ).toBeDefined()
       expect(within(region).queryByText(passed)).toBeNull()
@@ -657,7 +657,7 @@ describe('saved event type readiness in the editor', () => {
       )
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
       const checks = await screen.findByRole('region', {
-        name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+        name: language === 'en' ? 'Saved event checks' : '保存后的配置检查',
       })
       await within(checks).findByText(
         language === 'en'
@@ -821,7 +821,7 @@ describe('saved event type readiness in the editor', () => {
       })
       await within(
         screen.getByRole('region', {
-          name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+          name: language === 'en' ? 'Saved event checks' : '保存后的配置检查',
         }),
       ).findByText(language === 'en' ? 'Configuration checks passed' : '配置检查通过')
       const checkbox = screen.queryByRole<HTMLInputElement>('checkbox', {
@@ -957,7 +957,7 @@ describe('saved event type readiness in the editor', () => {
       )
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
       const checks = await screen.findByRole('region', {
-        name: language === 'en' ? 'Saved version readiness' : '已保存版本的就绪检查',
+        name: language === 'en' ? 'Saved event checks' : '保存后的配置检查',
       })
       const message =
         state === 'loading'
@@ -980,8 +980,8 @@ describe('saved event type readiness in the editor', () => {
       const hint = document.getElementById('slug-hint') as HTMLElement
       expect(hint.textContent).toBe(
         language === 'en'
-          ? 'Lowercase letters, digits and hyphens.'
-          : '使用小写字母、数字和连字符。',
+          ? 'Lowercase letters, digits and hyphens. You can change this link.'
+          : '使用小写字母、数字和连字符。你可以修改此链接。',
       )
       expect(hint.contains(preview)).toBe(false)
       expect(

@@ -61,15 +61,21 @@ export const admin = {
   'No longer valid': 'No longer valid',
   'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.':
     'The inviter is no longer a team member. Cancel this invitation and send a fresh invitation in your own name.',
+  'Your booking page is ready': 'Your booking page is ready',
+  'No active event type': 'No active event type',
+  'You have no active event type. Activate one when you are ready to accept bookings.':
+    'You have no active event type. Activate one when you are ready to accept bookings.',
+  'Review event type': 'Review event type',
+  'Could not refresh setup status.': 'Could not refresh setup status.',
   'Set up your booking page': 'Set up your booking page',
   'Complete these steps at your own pace. You can keep using the app as you go.':
     'Complete these steps at your own pace. You can keep using the app as you go.',
   'Your display name and booking address are set.':
     'Your display name and booking address are set.',
-  'Choose your display name, booking username and time zone in Settings.':
-    'Choose your display name, booking username and time zone in Settings.',
-  'Without a display name, your booking page, emails and calendar invitations show your username instead.':
-    'Without a display name, your booking page, emails and calendar invitations show your username instead.',
+  'Choose your display name, handle and time zone in Settings.':
+    'Choose your display name, handle and time zone in Settings.',
+  'Without a display name, your booking page, emails and calendar invitations show your handle instead.':
+    'Without a display name, your booking page, emails and calendar invitations show your handle instead.',
   'Complete your profile': 'Complete your profile',
   'Default availability': 'Default availability',
   'Your default schedule has weekly hours ready for bookings.':
@@ -643,8 +649,8 @@ export const admin = {
   ', through {0}': ', through {0}',
   ', until': ', until',
   ', your personal organization': ', your personal organization',
-  '. Lowercase letters, digits and hyphens, up to':
-    '. Lowercase letters, digits and hyphens, up to',
+  'Use only lowercase letters, digits and hyphens, up to {count} characters.':
+    'Use only lowercase letters, digits and hyphens, up to {count} characters.',
   '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.':
     '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.',
   '. They are saved right away.': '. They are saved right away.',
@@ -925,7 +931,7 @@ export const admin = {
   Inactive: 'Inactive',
   Invitee: 'Invitee',
   'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.':
-    'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.',
+    'Invitees always give their name and email. You can add up to {count} extra questions.',
   'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.':
     'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.',
   'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.':
@@ -1228,7 +1234,7 @@ export const admin = {
     "You're no longer a member of {0}, so no key was created. Keys you create now act in {1}.",
   'Your account could not be created. Please try again.':
     'Your account could not be created. Please try again.',
-  'Your booking links start with': 'Your booking links start with',
+  'Your booking links start with {path}.': 'Your booking links start with {path}.',
   'Your default schedule': 'Your default schedule',
   'Your email comes from how you sign in.': 'Your email comes from how you sign in.',
   'Your first schedule is your default schedule.': 'Your first schedule is your default schedule.',
@@ -1463,11 +1469,11 @@ export const admin = {
   'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.':
     'Individual and collective event types are deactivated. Round-robin event types are deactivated when no other current verified team host remains.',
   'Bookings needing handling': 'Bookings needing handling',
-  'Saved version readiness': 'Saved version readiness',
-  'These unsaved changes have not been checked yet. Save to check the saved version.':
-    'These unsaved changes have not been checked yet. Save to check the saved version.',
-  'These checks describe the saved version. Availability is confirmed when someone books.':
-    'These checks describe the saved version. Availability is confirmed when someone books.',
+  'Saved event checks': 'Saved event checks',
+  'Save your changes to check the updated event type.':
+    'Save your changes to check the updated event type.',
+  'These checks describe your saved event type. Available times are confirmed when someone books.':
+    'These checks describe your saved event type. Available times are confirmed when someone books.',
   'Readiness checks are unavailable for this account.':
     'Readiness checks are unavailable for this account.',
   'Review enablement': 'Review enablement',
@@ -1484,11 +1490,16 @@ export const admin = {
   'Review visibility': 'Review visibility',
   'This round-robin event type is saved, but it is not activated. Activate it separately before sharing.':
     'This round-robin event type is saved, but it is not activated. Activate it separately before sharing.',
-  'Set a booking username in Settings before sharing this event type.':
-    'Set a booking username in Settings before sharing this event type.',
+  'Set a handle in Settings before sharing this event type.':
+    'Set a handle in Settings before sharing this event type.',
   'Host availability needs attention before you share this event type.':
     'Host availability needs attention before you share this event type.',
   'This event type has no public booking link in the current space.':
     'This event type has no public booking link in the current space.',
-  'Review saved version readiness': 'Review saved version readiness',
+  'Review saved event checks': 'Review saved event checks',
+  'Lowercase letters, digits and hyphens. You can change this link.':
+    'Lowercase letters, digits and hyphens. You can change this link.',
+  'You have no working hours yet. Use the setup guide to add a default schedule.':
+    'You have no working hours yet. Use the setup guide to add a default schedule.',
+  'Set working hours with the setup guide': 'Set working hours with the setup guide',
 } as const

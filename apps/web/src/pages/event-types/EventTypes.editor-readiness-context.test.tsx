@@ -61,7 +61,7 @@ describe('saved event readiness access and context', () => {
       const route = me.organization.personal ? SELF_ROUTE : TEAM_ROUTE
       const api = server({ [route]: () => json(status, { error: code }) }, me)
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-      const panel = await screen.findByRole('region', { name: 'Saved version readiness' })
+      const panel = await screen.findByRole('region', { name: 'Saved event checks' })
       const copy = within(panel)
       await copy.findByText(
         unavailable
@@ -83,7 +83,7 @@ describe('saved event readiness access and context', () => {
     {
       locale: 'en',
       title: 'Title',
-      heading: 'Saved version readiness',
+      heading: 'Saved event checks',
       guidance: 'Your team context changed. Reload before making changes.',
       unavailable: 'Readiness checks are unavailable for this account.',
       save: 'Save changes',
@@ -93,7 +93,7 @@ describe('saved event readiness access and context', () => {
     {
       locale: 'zh-CN',
       title: '标题',
-      heading: '已保存版本的就绪检查',
+      heading: '保存后的配置检查',
       guidance: '你的团队上下文已改变。请重新加载后再进行修改。',
       unavailable: '此账号无法使用就绪检查。',
       save: '保存更改',

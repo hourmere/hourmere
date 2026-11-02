@@ -238,7 +238,7 @@ describe('viewing and sharing the saved event type', () => {
   )
 
   it.each([
-    ['no schedules', [], '/app/availability/new'],
+    ['no schedules', [], '/app/event-types#personal-setup-heading'],
     ['no default schedule', [schedule({ isDefault: false })], '/app/availability'],
     ['invalid default time zone', [schedule({ timeZone: 'Invalid/Zone' })], '/app/availability'],
     ['default with no hours', [schedule({ weeklyHours: {} })], '/app/availability'],
@@ -382,7 +382,7 @@ describe('viewing and sharing the saved event type', () => {
     await user.selectOptions(screen.getByLabelText('Scheduling'), 'round_robin')
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
     await screen.findByRole('heading', { name: 'Edit “Team call”', level: 1 })
-    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
       'Configuration checks passed',
     )
 
@@ -420,7 +420,7 @@ describe('viewing and sharing the saved event type', () => {
       TEAM,
     )
     await openExisting()
-    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
       'Configuration checks passed',
     )
     await user.selectOptions(screen.getByLabelText('Scheduling'), 'collective')
@@ -527,8 +527,8 @@ describe('viewing and sharing the saved event type', () => {
   it.each([
     [503, 'View and share'],
     [403, 'View and share'],
-    [503, 'Saved version readiness'],
-    [403, 'Saved version readiness'],
+    [503, 'Saved event checks'],
+    [403, 'Saved event checks'],
   ] as const)(
     'recovers team sharing after readiness HTTP %i by retrying from %s',
     async (status, retryRegion) => {
@@ -556,7 +556,7 @@ describe('viewing and sharing the saved event type', () => {
           : 'Configuration check failed'
       await waitFor(() => expect(share().textContent).toContain(message))
       expect(
-        within(screen.getByRole('region', { name: 'Saved version readiness' })).getByText(message),
+        within(screen.getByRole('region', { name: 'Saved event checks' })).getByText(message),
       ).toBeDefined()
       expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
       expect(within(share()).queryByText('Configuration needs attention')).toBeNull()
@@ -587,7 +587,7 @@ describe('viewing and sharing the saved event type', () => {
       TEAM,
     )
     await openExisting()
-    await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
       'Configuration not checked',
     )
     expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
@@ -695,7 +695,7 @@ describe('viewing and sharing the saved event type', () => {
         { ...TEAM, organization: { ...TEAM.organization, slug } },
       )
       await openExisting()
-      await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+      await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
         'Configuration checks passed',
       )
       expectNoShareActions()
@@ -737,7 +737,7 @@ describe('viewing and sharing the saved event type', () => {
       )
       await openExisting()
       if (role === 'owner') {
-        await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
+        await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
           'Configuration checks passed',
         )
       } else {
