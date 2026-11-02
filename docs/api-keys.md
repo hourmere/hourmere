@@ -238,6 +238,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `get_event_type` | — | `event` | `full, read, bookings` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `create_event_type` | — | `create-event` | `full` |
+| `update_event_type` | — | `update-event` | `full` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 

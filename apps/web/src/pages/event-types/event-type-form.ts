@@ -57,6 +57,7 @@ export interface EventTypeDraft {
   slug: string
   description: string
   durationMinutes: string
+  allowedDurationsMinutes: number[]
   slotStepMinutes: string
   locationKind: LocationKind | ''
   autoCreateZoom: boolean
@@ -103,6 +104,7 @@ export function emptyDraft(): EventTypeDraft {
     slug: '',
     description: '',
     durationMinutes: '30',
+    allowedDurationsMinutes: [30],
     slotStepMinutes: '',
     locationKind: '',
     autoCreateZoom: false,
@@ -137,6 +139,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     slug: e.slug,
     description: e.description ?? '',
     durationMinutes: String(e.durationMinutes),
+    allowedDurationsMinutes: [...e.allowedDurationsMinutes],
     slotStepMinutes: text(e.slotStepMinutes),
     locationKind: location?.kind ?? '',
     autoCreateZoom: location?.kind === 'zoom' && location.autoCreate === true,
@@ -196,6 +199,37 @@ export function suggestedBookingSlug(title: string, durationMinutes: string): st
   const slug = slugify(title)
   const duration = parseWhole(durationMinutes)
   return /[a-z]/.test(slug) ? slug : `${duration !== null && duration > 0 ? duration : 30}-min`
+}
+
+/** The same distinct-count and length bounds as the scheduling service. */
+export function durationToAddProblem(value: string, durations: number[]): UiText | null {
+  const problem = wholeNumberProblem(value, RULES.durationMinutes, true)
+  if (problem) return problem
+  if (durations.includes(parseWhole(value) as number))
+    return 'This duration is already in the list.'
+  if (durations.length >= EVENT_TYPE.maxAllowedDurations) return 'Offer from 1 to 12 durations.'
+  return null
+}
+
+export function allowedDurationsProblem(
+  durations: number[],
+  defaultDuration: string,
+): UiText | null {
+  if (durations.length < 1 || durations.length > EVENT_TYPE.maxAllowedDurations)
+    return 'Offer from 1 to 12 durations.'
+  if (
+    durations.some(
+      (value) =>
+        !Number.isInteger(value) ||
+        value < RULES.durationMinutes.min ||
+        value > RULES.durationMinutes.max,
+    )
+  )
+    return msg('Enter a number from {0} to {1}.', { '0': '1', '1': '1,440' })
+  if (new Set(durations).size !== durations.length) return 'Offer each duration only once.'
+  if (!durations.includes(parseWhole(defaultDuration) as number))
+    return 'Include the default duration in the allowed durations.'
+  return null
 }
 
 // Field ids, which are also the keys of FieldErrors.
@@ -274,6 +308,10 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
   for (const [name, required] of NUMBER_FIELDS) {
     add(name, wholeNumberProblem(draft[name], RULES[name], required))
   }
+  add(
+    'allowedDurationsMinutes',
+    allowedDurationsProblem(draft.allowedDurationsMinutes, draft.durationMinutes),
+  )
   add(
     'position',
     wholeNumberProblem(
@@ -387,6 +425,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     slug: draft.slug.trim(),
     description: draft.description.trim() || null,
     durationMinutes: whole(draft.durationMinutes) as number,
+    allowedDurationsMinutes: [...draft.allowedDurationsMinutes],
     slotStepMinutes: whole(draft.slotStepMinutes),
     bufferBeforeMinutes: whole(draft.bufferBeforeMinutes) as number,
     bufferAfterMinutes: whole(draft.bufferAfterMinutes) as number,
@@ -448,7 +487,8 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     title: 'Title',
     slug: 'Booking link',
     description: 'Description',
-    durationMinutes: 'Duration',
+    durationMinutes: 'Default duration',
+    allowedDurationsMinutes: 'Allowed durations',
     slotStepMinutes: 'Start times every',
     'location-kind': 'Location',
     'location-phone': 'Phone number',
@@ -549,6 +589,14 @@ export function serverErrors(
     case 'invalid_event_type': {
       // The message names the field first: "durationMinutes must be …".
       const name = /^([A-Za-z]+)\b/.exec(detail)?.[1] ?? ''
+      if (name === 'allowedDurationsMinutes') {
+        const problem = detail.includes('distinct')
+          ? 'Offer each duration only once.'
+          : detail.includes('include durationMinutes')
+            ? 'Include the default duration in the allowed durations.'
+            : 'Offer from 1 to 12 durations.'
+        return field('allowedDurationsMinutes', problem)
+      }
       if (Object.hasOwn(RULE_MESSAGES, name)) return field(name, RULE_MESSAGES[name] as UiText)
       if (name === 'title') {
         return field('title', 'Use one line of up to 200 characters without control characters.')

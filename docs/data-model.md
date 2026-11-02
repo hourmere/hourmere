@@ -272,6 +272,12 @@ Existing request fingerprints and exact idempotent replays remain unchanged. An 
 supplied selection participates in the fingerprint, so a changed selection cannot reuse
 the same key as the same request.
 
+Hosts can configure the list and default in the personal or team event editor, REST
+`POST /api/v1/event-types` / `PATCH /api/v1/event-types/{id}`, MCP `create_event_type` /
+`update_event_type`, or CLI `create-event` / `update-event`. API-key configuration writes
+require `full` scope. See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations)
+for host steps, invitee selection and the shared-rule limitations.
+
 ## JSON columns
 
 Validated by the application (zod), not by the database:

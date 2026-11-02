@@ -189,6 +189,7 @@ describe('self-hosting documentation links', () => {
     'automatic-google-meet',
     'automatic-zoom',
     'collective-scheduling',
+    'multiple-durations',
     'round-robin-scheduling',
     'notifications',
   ])('makes the %s guide discoverable from the docs overview', (guide) => {
@@ -224,6 +225,13 @@ describe('launch documentation disclosures', () => {
       claims: [
         /Automatic Zoom supports personal event types and individual team event types with one actual host/,
         /collective and round-robin event types are unsupported/,
+      ],
+    },
+    {
+      topic: 'multiple meeting length limits',
+      claims: [
+        /per-length overrides are unavailable/,
+        /Web rescheduling keeps the original length; changing it requires REST, MCP or CLI/,
       ],
     },
     {
@@ -466,6 +474,7 @@ const publishedGuides = [
   'automatic-zoom',
   'round-robin-scheduling',
   'collective-scheduling',
+  'multiple-durations',
   'notifications',
   'analytics',
   'interface-languages',
@@ -570,6 +579,11 @@ describe('complete public documentation', () => {
           ...webhookRows,
           '',
         ].join('\n'),
+      )
+    } else if (guide === 'multiple-durations') {
+      const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').trim()
+      expect(read(original)).toBe(
+        `# Multiple meeting lengths\n\n${body.replaceAll('](/docs/', '](https://hourmere.com/docs/')}\n`,
       )
     } else if (guide === 'mcp') {
       // Retain the requested client setup excerpt; the complete guide stays canonical.

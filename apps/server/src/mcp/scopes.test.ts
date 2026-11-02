@@ -28,10 +28,14 @@ const all = [
   'get_event_type',
   'list_schedules',
   'get_schedule',
+  'create_event_type',
+  'update_event_type',
   'list_calendar_connections',
   'list_conference_connections',
 ]
+const configurationWrites = new Set(['create_event_type', 'update_event_type'])
 const writes = new Set([
+  ...configurationWrites,
   'create_booking',
   'reschedule_booking',
   'cancel_booking',
@@ -46,7 +50,11 @@ const otherReads = new Set([
 ])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
-    scope === 'full' ? true : scope === 'read' ? !writes.has(name) : !otherReads.has(name),
+    scope === 'full'
+      ? true
+      : scope === 'read'
+        ? !writes.has(name)
+        : !otherReads.has(name) && !configurationWrites.has(name),
   )
 const denial = {
   error: 'insufficient_scope',
@@ -342,6 +350,8 @@ describe('CLI scope parity', () => {
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
     ['event', 'get_event_type'],
+    ['create-event', 'create_event_type'],
+    ['update-event', 'update_event_type'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
     ['slots', 'find_available_slots'],
@@ -353,7 +363,7 @@ describe('CLI scope parity', () => {
     ['retry-calendar-copy', 'retry_calendar_copy'],
   ] as const
   it.each(scopes)(
-    '%s follows all 13 network aliases and never retries a scope denial',
+    '%s follows all 15 network aliases and never retries a scope denial',
     async (scope) => {
       const target = appWith(catalog.map(probe))
       for (const [command, name] of commands) {

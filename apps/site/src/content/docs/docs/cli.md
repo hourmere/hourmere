@@ -29,7 +29,7 @@ The CLI cannot create or revoke API keys. Sign in to the web app, open `/app/api
 choose the intended organization and a scope, then create and privately copy the key.
 **Bookings** (`bookings`, the web default) is recommended for AI booking agents;
 **Read** (`read`) suits analytics/reporting and cannot book, move, cancel or retry bookings.
-**Full account access** (`full`) also permits account configuration changes through REST;
+**Full account access** (`full`) also permits event-type configuration changes;
 choose it only for trusted software. Legacy keys retain `full`. Scope cannot be edited:
 use **Create replacement**, update the client and revoke the old key. `whoami` returns
 `apiKeyScope`; [API keys](/docs/api-keys#operation-reference) lists each command's allowed
@@ -57,6 +57,8 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
 | `event` | `get_event_type` | `id` from `catalog` |
+| `create-event` | `create_event_type` | `slug`, `title`, `durationMinutes`; optional `allowedDurationsMinutes` and other event-type fields |
+| `update-event` | `update_event_type` | `id` beside the changed event-type fields, including optional `durationMinutes`, `allowedDurationsMinutes` |
 | `schedules` | `list_schedules` | optional `limit`, `after` |
 | `schedule` | `get_schedule` | `id` from `schedules` |
 | `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `durationMinutes`, `maxSlots`, `after` |
@@ -116,6 +118,22 @@ in the same organization that the caller also hosts, or null when none is availa
 returned even when the successor falls outside the current page or filters. Public/manage
 responses omit it. The predecessor's `status` remains `cancelled`; `rescheduledToId`
 distinguishes a reschedule, while `rescheduledFromId` points back to the predecessor.
+
+## Configure meeting lengths
+
+`create-event` and `update-event` require a `full` API key and keep the same organization,
+role and ownership checks as REST. Their JSON fields are `durationMinutes` for the default
+and `allowedDurationsMinutes` for the complete ordered list. Offer 1–12 distinct lengths,
+each 1–1440 whole minutes, and include the default. The `--duration-minutes` option is for
+slot, booking and reschedule selection; use JSON for event-type configuration.
+
+For example, save `{ "slug": "intro", "title": "Introduction", "durationMinutes": 30,
+"allowedDurationsMinutes": [15, 30, 60] }` to a request file, then run
+`hourmere create-event --input event-request.json`. Updates use a flat object such as
+`{ "id": "<event-type-uuid>", "durationMinutes": 60, "allowedDurationsMinutes": [30, 60] }`
+and `hourmere update-event --input event-update.json`. Omitting the list on creation
+makes a single-length type. See [multiple meeting lengths](/docs/multiple-durations) for
+update compatibility, rescheduling and shared-rule limits.
 
 ## Booking and private results
 

@@ -340,8 +340,8 @@ describe('creating an event type', () => {
     expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
     expect(screen.getByText('Save your changes before sharing this address.')).toBeDefined()
     await user.type(field(/Description/), 'Let us talk.{Enter}Bring questions.')
-    await user.clear(field('Duration (minutes)'))
-    await user.type(field('Duration (minutes)'), '45')
+    await user.click(screen.getByRole('button', { name: 'Add 45 min' }))
+    await user.selectOptions(screen.getByLabelText('Default duration'), '45')
     await user.clear(field('Position'))
     await user.type(field('Position'), '2')
     await user.click(screen.getByRole('checkbox', { name: 'Active: invitees can book it' }))
@@ -371,6 +371,7 @@ describe('creating an event type', () => {
         slug: 'intro-call',
         description: 'Let us talk.\nBring questions.',
         durationMinutes: 45,
+        allowedDurationsMinutes: [30, 45],
         slotStepMinutes: 15,
         bufferBeforeMinutes: 5,
         bufferAfterMinutes: 10,
@@ -418,8 +419,6 @@ describe('creating an event type', () => {
     const api = eventTypeServer([])
     await openNew()
     await user.type(field('Booking link'), 'Not A Slug')
-    await user.clear(field('Duration (minutes)'))
-    await user.type(field('Duration (minutes)'), '0')
     await user.type(field(/Daily limit/), '1.5')
     await user.type(field(/Booking window/), '4000')
     await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'phone')
@@ -435,7 +434,6 @@ describe('creating an event type', () => {
     expect(problems).toEqual([
       'Title: Enter a title.',
       'Booking link: Use lowercase letters, digits and hyphens, starting and ending with a letter or digit.',
-      'Duration: Enter a number from 1 to 1,440.',
       'Daily limit: Enter a whole number.',
       'Booking window: Enter a number from 1 to 3,650.',
       'Phone number: Enter the number in international format, e.g. +14155550123.',
@@ -444,8 +442,8 @@ describe('creating an event type', () => {
     expect(field('Title').getAttribute('aria-describedby')).toContain('title-error')
     expect(document.getElementById('title-error')?.textContent).toBe('Error: Enter a title.')
 
-    await user.click(within(summary).getByRole('link', { name: /Duration/ }))
-    expect(document.activeElement).toBe(field('Duration (minutes)'))
+    await user.click(within(summary).getByRole('link', { name: /Daily limit/ }))
+    expect(document.activeElement).toBe(field(/Daily limit/))
     expect(api.to('POST /api/v1/event-types')).toHaveLength(0)
   })
 
@@ -471,7 +469,7 @@ describe('creating an event type', () => {
         error: 'invalid_event_type',
         message: 'durationMinutes must be a whole number from 1 to 1440, got 30',
       }),
-      'Duration (minutes)',
+      'Default duration',
       'Enter a number from 1 to 1,440.',
     ],
     [
@@ -735,6 +733,7 @@ describe('editing an event type', () => {
         slug: 'intro-call',
         description: 'A first call.',
         durationMinutes: 45,
+        allowedDurationsMinutes: [45],
         slotStepMinutes: null,
         bufferBeforeMinutes: 0,
         bufferAfterMinutes: 0,

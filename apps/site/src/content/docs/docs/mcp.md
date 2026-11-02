@@ -91,6 +91,8 @@ notifications and trigger configured integrations.
 | `get_event_type` | — | `event` | `full, read, bookings` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `create_event_type` | — | `create-event` | `full` |
+| `update_event_type` | — | `update-event` | `full` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 
@@ -127,8 +129,9 @@ Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by d
 most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until
 `nextAfter` is null. Cursors exclude the previous row, even if that row was deleted. Pages
 are recalculated, so configuration changes may affect later pages. The list omits large
-detail fields; use the corresponding detail tool when needed. Configuration writes and date
-overrides remain available through REST and the web app. Always check public availability
+detail fields; use the corresponding detail tool when needed. Event-type writes also use
+`create_event_type` and `update_event_type`; schedule edits and date overrides remain
+available through REST and the web app. Always check public availability
 with `find_available_slots` before booking an event found in the catalog.
 
 Connection discovery accepts `read`/`full` API keys and enabled MCP OAuth grants and reads only
@@ -137,8 +140,28 @@ conflict selection, the writeback destination, refresh the calendar list and syn
 REST, and select their own meeting-mode Zoom connection on event types they actually host.
 The same organization and ownership checks apply as for browser sessions.
 OAuth authorization, code exchange and disconnect require a live browser session;
-explicit Zoom credential refresh remains session-only. Settings mutations use REST with a
-`full` API key; MCP OAuth grants do not authenticate REST requests.
+explicit Zoom credential refresh remains session-only. Calendar settings mutations use REST
+with a `full` API key; MCP OAuth grants do not authenticate REST requests.
+
+## Configure meeting lengths
+
+Use `create_event_type` with `slug`, `title` and `durationMinutes`; optionally supply
+`allowedDurationsMinutes`, the ordered list of 1–12 distinct whole-minute lengths from
+1 to 1440 inclusive. The list must include `durationMinutes`, the default. Omitting the
+list creates `[durationMinutes]`. For example:
+
+```json
+{"slug":"intro","title":"Introduction","durationMinutes":30,"allowedDurationsMinutes":[15,30,60]}
+```
+
+`update_event_type` takes a flat object with `id` beside the changed fields. To replace
+both the list and default, use
+`{ "id": "<event-type-uuid>", "durationMinutes": 45, "allowedDurationsMinutes": [15, 45, 60] }`.
+Configuration writes require a `full` API key; `bookings` and `read` keys cannot call these
+tools. MCP OAuth retains its organization and role checks. Validation and permissions
+are shared with REST: invalid values return `invalid_event_type`, while malformed request
+shapes return `invalid_request`. See [multiple meeting lengths](/docs/multiple-durations)
+for update compatibility, editor steps, invitee selection and shared-rule limits.
 
 ## Book and manage time
 
@@ -421,6 +444,8 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `get_profile` | Your booking-page handle, time zone and language | read-only |
 | `list_event_types` | Compact, paginated summaries of visible event types in the key's organization | read-only |
 | `get_event_type` | One visible event type's full configuration | read-only |
+| `create_event_type` | Creates an event type, including the default and allowed meeting lengths | — |
+| `update_event_type` | Changes an event type by `id`, including the default and allowed meeting lengths | destructive, idempotent |
 | `list_schedules` | Compact, paginated summaries of your working-hours schedules | read-only |
 | `get_schedule` | One of your schedules, including weekly hours in its time zone | read-only |
 | `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
@@ -437,7 +462,8 @@ configurations; deleted types and another member's personal types are excluded. 
 is not proof of public availability: use `find_available_slots` before booking.
 `list_schedules` includes only your schedules, which follow your user across organizations.
 Use the corresponding `get_` tool for full details; `get_schedule` returns weekly hours,
-not date overrides. Configuration changes and date overrides use the REST API or web app.
+not date overrides. Use `create_event_type` and `update_event_type` for event-type changes;
+schedule edits and date overrides use the REST API or web app.
 
 The two connection tools take `{}` and call the same services as
 `GET /api/v1/calendar-connections` and `GET /api/v1/conference-connections`. They read only
@@ -447,8 +473,8 @@ conflict selection, the writeback destination, refresh the calendar list and syn
 REST. They can also select their own meeting-mode Zoom connection on event types they
 actually host, subject to the same organization permissions as browser sessions.
 OAuth authorization, code exchange and disconnect require a live browser session;
-explicit Zoom credential refresh remains session-only. No MCP settings mutation tools are
-provided. MCP OAuth grants do not authenticate REST requests.
+explicit Zoom credential refresh remains session-only. Calendar settings mutations use
+REST. MCP OAuth grants do not authenticate REST requests.
 
 `find_available_slots` and `create_booking` accept exactly one public namespace:
 `handle` for `/{handle}/{slug}`, or `teamSlug` for `/team/{teamSlug}/{slug}`. Personal

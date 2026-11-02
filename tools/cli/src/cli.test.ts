@@ -79,6 +79,44 @@ function sourceCopy(change?: readonly [string, string]): typeof runCli {
 }
 
 describe('CLI transport and arguments', () => {
+  async function verifyEventTypeWrite(runner: typeof runCli, update: boolean) {
+    const command = update ? 'update-event' : 'create-event'
+    const input = {
+      ...(update
+        ? { id: '12345678-1234-4123-8123-123456789abc' }
+        : { slug: 'intro', title: 'Intro' }),
+      durationMinutes: 30,
+      allowedDurationsMinutes: [15, 30, 60],
+    }
+    const result = await run([command, '--input', '-'], input, { runner })
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params).toMatchObject({
+      name: update ? 'update_event_type' : 'create_event_type',
+      arguments: input,
+    })
+  }
+  it.each([false, true])(
+    'forwards all event type duration settings for update=%s',
+    async (update) => {
+      await verifyEventTypeWrite(runCli, update)
+      await verifyEventTypeWrite(sourceCopy(), update)
+    },
+  )
+  it.each([false, true])(
+    'detects a retargeted event type write alias for update=%s',
+    async (update) => {
+      const command = update ? 'update-event' : 'create-event'
+      const tool = update ? 'update_event_type' : 'create_event_type'
+      await expect(
+        verifyEventTypeWrite(
+          sourceCopy([`'${command}': '${tool}'`, `'${command}': 'get_event_type'`]),
+          update,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+
   async function verifyDurationForwarding(runner = runCli) {
     for (const command of ['slots', 'book', 'reschedule']) {
       const input = { idempotencyKey: 'duration-test-key' }
@@ -233,6 +271,8 @@ describe('CLI transport and arguments', () => {
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
     ['event', 'get_event_type'],
+    ['create-event', 'create_event_type'],
+    ['update-event', 'update_event_type'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
     ['slots', 'find_available_slots'],

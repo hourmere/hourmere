@@ -209,7 +209,7 @@ const questions = z
   .array(QuestionInput)
   .openapi({ description: 'Extra booking-form fields', maxItems: MAX_QUESTIONS })
 
-const EventTypeInput = z
+export const EventTypeInput = z
   .strictObject({
     slug: fields.slug,
     title: fields.title,
@@ -239,7 +239,7 @@ const EventTypeInput = z
   })
   .openapi('EventTypeInput')
 
-const EventTypeUpdate = z
+export const EventTypeUpdate = z
   .strictObject({
     slug: fields.slug.optional(),
     title: fields.title.optional(),

@@ -57,6 +57,7 @@ import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import type { Tool } from './mcp/tools.ts'
@@ -208,6 +209,7 @@ export function productTools({
     whoamiTool,
     ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     ...catalogTools({ db }),
+    ...eventTypeTools({ db, automaticMeet, automaticZoom }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },

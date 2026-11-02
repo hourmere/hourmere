@@ -35,6 +35,10 @@
     "exemption": "browser-session-only",
     "reason": "Team invitation management requires a verified owner/admin browser session."
   },
+  "createEventType": {
+    "mcp": "create_event_type",
+    "cli": "create-event"
+  },
   "createMcpOAuthRequest": {
     "exemption": "browser-session-only",
     "reason": "Creating an MCP OAuth consent request requires the user's browser session."
@@ -98,5 +102,9 @@
   "submitMcpOAuthConsent": {
     "exemption": "browser-session-only",
     "reason": "Approving or denying MCP OAuth access requires the user's browser consent flow."
+  },
+  "updateEventType": {
+    "mcp": "update_event_type",
+    "cli": "update-event"
   }
 }
