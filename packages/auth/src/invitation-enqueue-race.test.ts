@@ -4,6 +4,7 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
 import type { EnqueueInvitationEmail } from './invitations.ts'
@@ -198,7 +199,11 @@ describe.skipIf(!serverUrl)('invitation eligibility after a post-commit queue fa
       } else {
         await db
           .updateTable('auth.invitation')
-          .set(status === 'expired' ? { expiresAt: new Date(Date.now() - 1000) } : { status })
+          .set(
+            status === 'expired'
+              ? { expiresAt: sql`clock_timestamp() - INTERVAL '1 second'` }
+              : { status },
+          )
           .where('id', '=', payload.invitationId)
           .execute()
       }

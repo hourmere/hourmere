@@ -80,7 +80,7 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
           activeOrganizationId: team,
           token,
           updatedAt: new Date(),
-          expiresAt: new Date('2035-01-01Z'),
+          expiresAt: new Date(Math.max(Date.now(), NOW.epochMilliseconds) + 3_600_000),
         })
         .execute()
       return `better-auth.session_token=${encodeURIComponent(`${token}.${createHmac('sha256', secret).update(token).digest('base64')}`)}`

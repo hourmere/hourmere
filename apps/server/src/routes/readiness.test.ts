@@ -694,7 +694,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
       else if (change === 'expired')
         await t.db
           .updateTable('auth.session')
-          .set({ expiresAt: new Date(Date.now() - 60_000) })
+          .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
           .where('id', '=', principal.sessionId)
           .execute()
       else

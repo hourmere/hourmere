@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { reserveInvitationEmailBudget } from '../../../packages/notifications/src/invitation-mail-limits.ts'
@@ -246,8 +247,8 @@ describe.skipIf(!serverUrl)('team invitation concurrency across distinct admin s
       await db
         .updateTable('invitation_deliveries')
         .set({
-          generation_started_at: new Date(Date.now() - 61_000),
-          updated_at: new Date(Date.now() - 61_000),
+          generation_started_at: sql`clock_timestamp() - interval '61 seconds'`,
+          updated_at: sql`clock_timestamp() - interval '61 seconds'`,
         })
         .where('invitation_id', '=', invitation.id)
         .execute()

@@ -552,7 +552,7 @@ describe.skipIf(!serverUrl)(
         if (change === 'expired')
           await db
             .updateTable('auth.session')
-            .set({ expiresAt: new Date(Date.now() - 60_000) })
+            .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
             .where('id', '=', seeded.adminSession.sessionId)
             .execute()
         await expectDenied(await get(seeded.adminSession.cookie))
@@ -667,6 +667,9 @@ describe.skipIf(!serverUrl)(
       ])
       const result = await page(await get(seeded.ownerSession.cookie))
       expect(result.data).toHaveLength(rows.length)
+      const databaseNow = (
+        await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow()
+      ).now
       for (const stored of rows) {
         const summary = result.data.find((row) => row.id === stored.id)
         const delivery = await db
@@ -678,7 +681,7 @@ describe.skipIf(!serverUrl)(
           id: stored.id,
           email: stored.email,
           status:
-            stored.expiresAt <= new Date() && stored.status === 'pending'
+            stored.expiresAt <= databaseNow && stored.status === 'pending'
               ? 'expired'
               : stored.status,
           createdAt: stored.createdAt.toISOString(),

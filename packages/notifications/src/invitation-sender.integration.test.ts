@@ -588,7 +588,10 @@ describe.skipIf(!serverUrl)('invitation sender with PostgreSQL and polling pg-bo
       .selectAll()
       .where('id', '=', payload.invitationId)
       .executeTakeFirstOrThrow()
-    expect(invitationResendDenial(original, result, new Date())).toBe('INVITATION_RESEND_COOLDOWN')
+    const checkedAt = (
+      await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow()
+    ).now
+    expect(invitationResendDenial(original, result, checkedAt)).toBe('INVITATION_RESEND_COOLDOWN')
   })
 
   it('refuses SMTP when the registered attempt cannot commit', async () => {

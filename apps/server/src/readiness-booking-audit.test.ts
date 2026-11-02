@@ -10,6 +10,7 @@ import {
   type SelfReadinessPage,
   type TeamReadinessPage,
 } from '@hourmere/scheduling'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createFixtures,
@@ -55,7 +56,7 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
         token,
         activeOrganizationId: organization.id,
         updatedAt: new Date(),
-        expiresAt: new Date('2030-11-01T12:00:00Z'),
+        expiresAt: sql`clock_timestamp() + interval '1 hour'`,
       })
       .returning('id')
       .executeTakeFirstOrThrow()

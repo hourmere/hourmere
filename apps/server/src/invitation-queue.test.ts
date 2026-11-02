@@ -13,6 +13,7 @@ import {
   invitationEmailRepairJob,
   reserveInvitationEmailBudget,
 } from '@hourmere/notifications'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -272,8 +273,8 @@ describe.skipIf(!serverUrl)(
       await db
         .updateTable('invitation_deliveries')
         .set({
-          generation_started_at: new Date(Date.now() - 61_000),
-          updated_at: new Date(Date.now() - 61_000),
+          generation_started_at: sql`clock_timestamp() - interval '61 seconds'`,
+          updated_at: sql`clock_timestamp() - interval '61 seconds'`,
         })
         .where('invitation_id', '=', invitationId)
         .execute()
@@ -671,7 +672,11 @@ describe.skipIf(!serverUrl)(
         const invitation = await create(instance(), await actor())
         await db
           .updateTable('auth.invitation')
-          .set(status === 'expired' ? { expiresAt: new Date(Date.now() - 1000) } : { status })
+          .set(
+            status === 'expired'
+              ? { expiresAt: sql`clock_timestamp() - interval '1 second'` }
+              : { status },
+          )
           .where('id', '=', invitation.id)
           .execute()
         const before = await queued()

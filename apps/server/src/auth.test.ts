@@ -992,8 +992,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       it('refuses accepting an invitation that exists anyway', async () => {
         const invitation = await testDb.pool.query<{ id: string }>(
           `INSERT INTO auth.invitation ("organizationId", email, role, status, "expiresAt", "inviterId")
-           VALUES ($1, 'bob@example.com', 'owner', 'pending', now() + interval '1 day', $2) RETURNING id`,
-          [personal.id, await userId('alice@example.com')],
+           VALUES ($1, 'bob@example.com', 'owner', 'pending', $3, $2) RETURNING id`,
+          [personal.id, await userId('alice@example.com'), new Date(Date.now() + 86_400_000)],
         )
         await refused(
           await post('/api/auth/organization/accept-invitation', bob, {

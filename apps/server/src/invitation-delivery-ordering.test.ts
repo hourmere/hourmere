@@ -138,8 +138,8 @@ describe.skipIf(!serverUrl)('invitation creation and delivery enqueue ordering',
     )
     await testDb.pool.query(
       `INSERT INTO auth.session ("expiresAt", token, "updatedAt", "userId", "activeOrganizationId")
-       VALUES (now() + interval '1 hour', $1, now(), $2, $3)`,
-      [token, userId, organizationId],
+       VALUES ($4, $1, now(), $2, $3)`,
+      [token, userId, organizationId, new Date(Date.now() + 3_600_000)],
     )
     const signature = createHmac('sha256', i.secret).update(token).digest('base64')
     const cookie = `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
@@ -373,10 +373,10 @@ describe.skipIf(!serverUrl)('invitation creation and delivery enqueue ordering',
     expect(calls).toEqual(['before', 'enqueue', 'after'])
     await testDb.pool.query('DELETE FROM invitation_delivery_probe')
     await testDb.pool.query('DELETE FROM pgboss.job WHERE name = $1', [queueName])
-    await testDb.pool.query(
-      `UPDATE auth.invitation SET "expiresAt" = now() + interval '1 hour' WHERE id = $1`,
-      [created.id],
-    )
+    await testDb.pool.query(`UPDATE auth.invitation SET "expiresAt" = $2 WHERE id = $1`, [
+      created.id,
+      new Date(Date.now() + 3_600_000),
+    ])
     await failQueueInsert()
     const resent = await invite(i, actor, true)
     expect(resent.status).toBe(200)

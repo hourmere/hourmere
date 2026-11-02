@@ -211,7 +211,31 @@ describe.skipIf(!serverUrl)('database upgrade path', () => {
         }
         upgraded = await createTestDatabase(serverUrl as string, predecessor)
         const pool = upgraded.pool
+        const seedStartedAt = (await pool.query('SELECT clock_timestamp() AS now')).rows[0].now
         await seedEarly(pool)
+        // Keep historical creation/update timestamps, but live fixture credentials must
+        // expire relative to the database clock, including after the old 2036 cutoff.
+        expect(
+          (
+            await pool.query(
+              `SELECT kind,count(*)::integer AS count,
+                bool_and(expires BETWEEN $1::timestamptz + interval '10 years'
+                  AND clock_timestamp() + interval '10 years') AS valid
+              FROM (
+                SELECT 'session' AS kind,"expiresAt" AS expires FROM auth.session
+                UNION ALL SELECT 'calendar_oauth',expires_at FROM calendar_oauth_states
+                UNION ALL SELECT 'verification',"expiresAt" FROM auth.verification
+                UNION ALL SELECT 'invitation',"expiresAt" FROM auth.invitation
+              ) fixture GROUP BY kind ORDER BY kind`,
+              [seedStartedAt],
+            )
+          ).rows,
+        ).toEqual([
+          { kind: 'calendar_oauth', count: 2, valid: true },
+          { kind: 'invitation', count: 1, valid: true },
+          { kind: 'session', count: 3, valid: true },
+          { kind: 'verification', count: 1, valid: true },
+        ])
         // Reuse real early installation history at later checkpoints, including the
         // required-host backfill, before inserting features native to those schemas.
         for (const file of initial.filter((file) => !early.includes(file))) {

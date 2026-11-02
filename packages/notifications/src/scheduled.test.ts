@@ -9,7 +9,7 @@ import {
   type NotificationSettings,
 } from '@hourmere/scheduling/notification-settings'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   bookingNotificationJob,
   conferenceNotificationAllowed,
@@ -24,6 +24,7 @@ import {
   type ScheduledEmailQueue,
   scheduledBookingEmailJob,
 } from './scheduled.ts'
+import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 const START = NOW.add({ hours: 72 })
@@ -91,12 +92,14 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     await fixture?.drop()
   })
   beforeEach(async () => {
+    await alignSmtpDateNowWithDatabase(db)
     sent = []
     now = NOW
     during = undefined
     refuse = undefined
     await db.deleteFrom('notification_email_sends').execute()
   })
+  afterEach(() => vi.restoreAllMocks())
   async function setup(
     settings = policy(),
     start = START,
