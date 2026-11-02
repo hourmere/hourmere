@@ -56,7 +56,7 @@ export function EventEmbedAction({
       <button
         ref={trigger}
         type="button"
-        className="button button-small"
+        className={`button button-small${inMenu ? ' event-more-trigger' : ''}`}
         disabled={disabled}
         aria-label={inMenu ? t('More actions for {0}', { '0': event.title }) : undefined}
         aria-haspopup={inMenu ? 'menu' : 'dialog'}
@@ -70,7 +70,7 @@ export function EventEmbedAction({
           }
         }}
       >
-        {t(inMenu ? 'More actions' : 'Embed')}
+        {inMenu ? <span aria-hidden="true">…</span> : t('Embed')}
       </button>
       {menu && (
         <span

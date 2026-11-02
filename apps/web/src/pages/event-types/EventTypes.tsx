@@ -328,24 +328,26 @@ function EventTypeTable({
                   </td>
                 )}
                 <td className="actions">
-                  <Link
-                    to={eventTypePath(e.id)}
-                    className="button button-small"
-                    aria-label={t('Edit {0}', { '0': e.title })}
-                  >
-                    {t('Edit')}
-                  </Link>
-                  <EventEmbedAction
-                    inMenu
-                    event={{ ...e, isActive }}
-                    bookingPath={
-                      e.schedulingType === 'round_robin' && !roundRobinActive
-                        ? null
-                        : url
-                          ? new URL(url).pathname
-                          : null
-                    }
-                  />
+                  <span className="event-row-actions">
+                    <Link
+                      to={eventTypePath(e.id)}
+                      className="button button-small"
+                      aria-label={t('Edit {0}', { '0': e.title })}
+                    >
+                      {t('Edit')}
+                    </Link>
+                    <EventEmbedAction
+                      inMenu
+                      event={{ ...e, isActive }}
+                      bookingPath={
+                        e.schedulingType === 'round_robin' && !roundRobinActive
+                          ? null
+                          : url
+                            ? new URL(url).pathname
+                            : null
+                      }
+                    />
+                  </span>
                 </td>
               </tr>
             )

@@ -3,6 +3,17 @@
   display: inline-flex;
 }
 
+.event-row-actions {
+  display: inline-grid;
+  justify-items: end;
+  gap: var(--space-1);
+}
+
+.button.event-more-trigger {
+  min-width: 44px;
+  min-height: 44px;
+}
+
 .event-actions-menu {
   position: absolute;
   right: 0;
