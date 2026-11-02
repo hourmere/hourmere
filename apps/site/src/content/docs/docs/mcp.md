@@ -3,6 +3,12 @@ title: MCP quickstart
 description: Connect an AI client to Hourmere's remote MCP server using an API key or OAuth.
 ---
 
+For `create_one_time_link`, `list_one_time_links` and `revoke_one_time_link`, see
+[one-time booking links](/docs/one-time-links). Creation returns a private URL once;
+list results never contain its token or hash. Create/revoke require a `bookings` or `full` API key;
+listing requires `read` or `full`. Existing OAuth `mcp:tools` grants can use all three tools
+within the account’s organization and event-type permissions.
+
 ## Connect a client
 
 Create an API key at `/app/api-keys` on your [instance](/docs/self-hosting). Choose
@@ -95,6 +101,9 @@ notifications and trigger configured integrations.
 | `get_schedule` | — | `schedule` | `full, read` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
+| `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
+| `list_one_time_links` | — | `one-time-links list` | `full, read` |
+| `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 

@@ -5,6 +5,7 @@ import {
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -61,8 +62,10 @@ describe.skipIf(!serverUrl)('booking space resolution', () => {
         userId: user.id,
         token: crypto.randomUUID(),
         activeOrganizationId: organizationId,
-        expiresAt: new Date(Date.now() + (expired ? -60_000 : 3_600_000)),
-        updatedAt: new Date(),
+        expiresAt: expired
+          ? sql<Date>`clock_timestamp() - interval '1 minute'`
+          : sql<Date>`clock_timestamp() + interval '1 hour'`,
+        updatedAt: sql<Date>`clock_timestamp()`,
       })
       .returning('id')
       .executeTakeFirstOrThrow()

@@ -106,6 +106,7 @@ const errorResponse = z.object({
 export function createGoogleCalendarClient(
   config: GoogleCalendarConfig,
   request: typeof fetch = fetch,
+  now: () => number = Date.now,
 ) {
   const redirectUri = new URL(GOOGLE_CALENDAR_CALLBACK, config.publicUrl).href
 
@@ -168,7 +169,7 @@ export function createGoogleCalendarClient(
     return {
       accessToken: t.access_token,
       refreshToken: t.refresh_token,
-      expiresAt: Date.now() + t.expires_in * 1000,
+      expiresAt: now() + t.expires_in * 1000,
       scopes: t.scope
         ?.split(/\s+/)
         .filter(Boolean)

@@ -12,12 +12,12 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0056_event_type_locations.sql'
-const predecessor = '0053_one_time_booking_links.sql'
+const predecessor = '0058_one_time_link_idempotency.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
 
 async function copyPredecessor(directory: string, through = predecessor) {
   const files = (await readdir(migrationsDir))
-    .filter((file) => file.endsWith('.sql') && file <= through)
+    .filter((file) => file.endsWith('.sql') && file <= through && file !== migration)
     .sort()
   for (const file of files) await copyFile(join(migrationsDir, file), join(directory, file))
   return files
@@ -311,7 +311,7 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
     }
   }, 30_000)
 
-  it('upgrades populated 0053 data, preserving historical fields and matching a fresh install and no-op rerun', async () => {
+  it('upgrades populated 0058 data with late 0056, preserving historical fields and matching a fresh install and no-op rerun', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-locations-upgrade-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -319,10 +319,34 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
       await copyPredecessor(directory, '0012_zz.sql')
       upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'locations_old' })
       await seedEarly(upgraded.pool)
-      expect((await copyPredecessor(directory)).at(-1)).toBe(predecessor)
+      const predecessors = await copyPredecessor(directory)
+      expect(predecessors.at(-1)).toBe(predecessor)
+      expect(predecessors).not.toContain(migration)
       await runMigrations(upgraded.pool, directory)
+      expect(
+        (
+          await upgraded.pool.query(
+            'SELECT name FROM schema_migrations WHERE name=ANY($1) ORDER BY name',
+            [[migration, predecessor]],
+          )
+        ).rows,
+      ).toEqual([{ name: predecessor }])
       await seedLater(upgraded.pool)
       const { organization, events, bookings } = await seedLocations(upgraded.pool)
+      // A deployment may already have 0058 before this reserved migration arrives.
+      // Preserve its historical create-retry attribution as well as location data.
+      await upgraded.pool.query(
+        `INSERT INTO one_time_booking_links
+          (organization_id,event_type_id,creator_user_id,token_hash,idempotency_key,
+           idempotency_actor_kind,idempotency_actor_id,expires_at,prefill_name,prefill_email,
+           created_at,updated_at)
+          SELECT $1,$2,(SELECT id FROM auth."user" ORDER BY id LIMIT 1),
+            repeat(md5('location-predecessor-' || actor),2),'location-preservation-' || actor,
+            actor,gen_random_uuid(),'2031-01-02T03:04:05.123456Z','Historical invitee',
+            'historical-invitee@example.test','2025-01-02T03:04:05.123456Z','2025-02-03T04:05:06.654321Z'
+          FROM unnest(ARRAY['session','api_key','oauth']) actor`,
+        [organization, events[0]],
+      )
       // Historical resolved booking payloads were never constrained to the
       // service's supported event-location kinds.
       await upgraded.pool.query(
@@ -335,6 +359,7 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
       const before = await records(upgraded.pool, tables)
       expect(before['public.bookings']?.length).toBeGreaterThan(7)
       expect(before['public.booking_conferences']?.length).toBeGreaterThan(0)
+      expect(before['public.one_time_booking_links']).toHaveLength(3)
       const oldEvents = (
         await upgraded.pool.query<{ id: string; location: Record<string, unknown> | null }>(
           'SELECT id,location FROM event_types ORDER BY id',

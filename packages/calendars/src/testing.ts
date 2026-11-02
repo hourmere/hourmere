@@ -30,7 +30,7 @@ export async function calendarTestSession(
 }
 
 /** Fake credentials only. Exercises the real provider adapter, HTTP parsing and pagination. */
-export function fakeGoogle() {
+export function fakeGoogle(now?: () => number) {
   const controls = {
     token: {
       access_token: 'fake-access-token',
@@ -209,12 +209,13 @@ export function fakeGoogle() {
         publicUrl: TEST_PUBLIC_URL,
       },
       request,
+      now,
     ),
   }
 }
 
 /** Fake Microsoft responses through the actual OAuth/Graph adapter. */
-export function fakeMicrosoft() {
+export function fakeMicrosoft(now?: () => number) {
   const controls = {
     token: {
       access_token: 'fake-microsoft-access',
@@ -271,6 +272,7 @@ export function fakeMicrosoft() {
         publicUrl: TEST_PUBLIC_URL,
       },
       request,
+      now,
     ),
   }
 }

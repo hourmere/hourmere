@@ -71,6 +71,7 @@ import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
+import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import type { Tool } from './mcp/tools.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
@@ -85,6 +86,7 @@ import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { oneTimeBookingRoutes } from './routes/one-time-bookings.ts'
+import { oneTimeLinkRoutes } from './routes/one-time-links.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
@@ -202,6 +204,7 @@ export function productRoutes({
       automaticZoom,
       successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
     }),
+    oneTimeLinkRoutes({ db, publicUrl }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
@@ -216,6 +219,7 @@ export function productRoutes({
 /** The same tool registry is used by the running server and capability contract tests. */
 export function productTools({
   db,
+  publicUrl,
   followUpHostNotesEnabled,
   notify,
   automaticMeet,
@@ -225,6 +229,7 @@ export function productTools({
   zoomConference,
 }: {
   db: Db
+  publicUrl?: string
   followUpHostNotesEnabled?: boolean | undefined
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
@@ -238,6 +243,7 @@ export function productTools({
     ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
     ...eventTypeTools({ db, automaticMeet, automaticZoom, followUpHostNotesEnabled }),
+    ...oneTimeLinkTools({ db, publicUrl }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
@@ -639,6 +645,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           : {}),
         tools: productTools({
           db,
+          publicUrl: config.PUBLIC_URL,
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
           notify,
           automaticMeet: config.GOOGLE_MEET_ENABLED,

@@ -24,20 +24,22 @@ all roles with matching code before configuring multiple options. Legacy writers
 cannot preserve an invitee choice. Roll back using the supported database backup and
 restore procedure rather than running an older application against this schema.
 
-The migration test populates the latest available predecessor (0053), preserves
-all historical columns, compares the
-upgraded schema with a fresh install, and verifies migration reruns make no writes.
+The migration test populates the latest available predecessor (0058), explicitly
+excluding 0056, and then applies 0056 after 0058. It preserves all historical columns,
+including retained one-time-link create-retry attribution, compares the upgraded
+schema with a fresh install, and verifies migration reruns make no writes.
 
 Keep number 0056. Gaps 0054/0055 are expected and harmless: the runner records files by
 name/checksum and applies any unapplied file, rather than requiring contiguous numbers.
-At the round-2 check, origin/main ends at 0053, PR #214 uses 0057 and PR #212 uses 0058;
-no open PR supplies 0054/0055. A database that already ran 0056 may therefore apply a
+At the latest round-2 check, origin/main includes 0058 from merged PR #212,
+PR #214 uses 0057, and no open PR supplies 0054/0055. A database that already ran
+0058 may apply 0056 later; a database that already ran 0056 may likewise apply a
 later-arriving lower-numbered file after it. The trigger preserves location echoes and
 same-kind edits of a single unlabelled option, so ordinary compatibility normalization
 can still run. A migration changing several options or a labelled option must replace
 `locations` explicitly; it must not guess through the compatibility field. The regression
 test exercises gap arrival, later legacy-column writes, fresh install and no-op reruns.
-The currently open 0057/0058 migrations do not write `event_types.location`.
+The open 0057 migration and published 0058 migration do not write `event_types.location`.
 
 This SQL is still unpublished on main; round 2 corrects its trigger in place before
 release. Never replace an applied migration checksum in a deployed database.
