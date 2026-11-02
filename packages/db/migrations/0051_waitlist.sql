@@ -123,6 +123,14 @@ CREATE TABLE waitlist_scan_work (
 );
 CREATE INDEX waitlist_scan_work_due ON waitlist_scan_work(next_due_at,event_type_id);
 
+-- Append-only invalidations never lock another writer's event/work row. No FK:
+-- even an event deletion or a scanner holding work cannot stall a booking writer.
+CREATE TABLE waitlist_scan_signals (
+  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  event_type_id uuid NOT NULL
+);
+CREATE INDEX waitlist_scan_signals_event ON waitlist_scan_signals(event_type_id,id);
+
 CREATE TABLE waitlist_slots (
   event_type_id uuid NOT NULL REFERENCES event_types(id) ON DELETE CASCADE,
   start_at timestamptz NOT NULL,
@@ -276,11 +284,8 @@ CREATE TRIGGER waitlist_entries_retire_work AFTER UPDATE OF status ON waitlist_e
 
 CREATE FUNCTION dirty_waitlist_event(target uuid) RETURNS void
 LANGUAGE sql SET search_path = public, pg_temp AS $$
-  INSERT INTO waitlist_scan_work(event_type_id)
-    SELECT id FROM event_types WHERE id=target AND waitlist_enabled
-  ON CONFLICT (event_type_id) DO UPDATE SET
-    dirty_generation=waitlist_scan_work.dirty_generation+1,
-    next_due_at=least(waitlist_scan_work.next_due_at,now()),updated_at=now();
+  INSERT INTO waitlist_scan_signals(event_type_id)
+    SELECT id FROM event_types WHERE id=target AND waitlist_enabled;
 $$;
 CREATE FUNCTION dirty_waitlist_host(target uuid) RETURNS void
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$

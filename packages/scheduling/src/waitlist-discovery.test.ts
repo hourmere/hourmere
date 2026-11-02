@@ -370,26 +370,22 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     },
   )
 
-  it.each(['work', 'entries'] as const)(
-    'detects source-copy %s locks held throughout availability computation',
+  it(
+    'detects source-copy entry locks held throughout availability computation',
     SERIALIZED,
-    async (kind) => {
+    async () => {
       const copy = sourceCopy('waitlist-discovery', [
         [
           'const page = await (async () => {',
           `const page = await ctx.db.transaction().execute(async (trx) => {
-          ${
-            kind === 'work'
-              ? `await sql\`SELECT event_type_id FROM waitlist_scan_work WHERE event_type_id=\${eventTypeId} FOR UPDATE\`.execute(trx)`
-              : 'await readEntries(trx,eventTypeId,snapshot.at,true)'
-          }
+          await readEntries(trx,eventTypeId,snapshot.at,true)
         `,
         ],
         ['{ ...ctx, now: () => now },', '{ ...ctx, db: trx, now: () => now },'],
         ['  })()\n\n  return ctx.db.transaction()', '  })\n\n  return ctx.db.transaction()'],
       ])
       await expect(
-        verifyUnlockedComputation(kind === 'work' ? 'booking' : 'removal', copy.scanWaitlistEvent),
+        verifyUnlockedComputation('removal', copy.scanWaitlistEvent),
       ).rejects.toMatchObject({ name: 'AssertionError' })
     },
   )
@@ -399,7 +395,8 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await entry(s)
     if (large)
       await testDb.pool.query(
-        'UPDATE waitlist_scan_work SET dirty_generation=9007199254740992 WHERE event_type_id=$1',
+        `INSERT INTO waitlist_scan_work(event_type_id,dirty_generation) VALUES($1,9007199254740991)
+          ON CONFLICT(event_type_id) DO UPDATE SET dirty_generation=excluded.dirty_generation`,
         [s.eventTypeId],
       )
     const pause = pausedAvailability()
@@ -407,12 +404,12 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     pending.catch(() => {})
     await pause.started
     try {
-      if (large) await testDb.pool.query('SELECT dirty_waitlist_event($1)', [s.eventTypeId])
-      else
-        await testDb.pool.query('UPDATE schedules SET weekly_hours=$1 WHERE id=$2', [
-          '{}',
-          s.scheduleId,
-        ])
+      // Another scanner can consume signals while this one computes. Its work
+      // revision must invalidate this snapshot even after the signals are gone.
+      await testDb.pool.query(
+        'UPDATE waitlist_scan_work SET dirty_generation=dirty_generation+1 WHERE event_type_id=$1',
+        [s.eventTypeId],
+      )
     } finally {
       pause.release()
     }
@@ -435,7 +432,7 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     expect(BigInt(work?.dirty ?? '0') > BigInt(work?.scanned ?? '0')).toBe(true)
   }
 
-  it('discards stale availability after a concurrent working-hours edit', SERIALIZED, async () => {
+  it('discards a snapshot invalidated by another scanner', SERIALIZED, async () => {
     await verifyGenerationRevalidation()
   })
 
@@ -462,6 +459,236 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       ).rejects.toMatchObject({ name: 'AssertionError' })
     },
   )
+
+  async function verifySignalRevalidation(scan = scanWaitlistEvent) {
+    const s = await setup()
+    await entry(s)
+    const pause = pausedAvailability()
+    const pending = scan({ ...s.ctx, db: pause.db }, s.eventTypeId)
+    pending.catch(() => {})
+    await pause.started
+    try {
+      await testDb.pool.query('UPDATE schedules SET weekly_hours=$1 WHERE id=$2', [
+        '{}',
+        s.scheduleId,
+      ])
+    } finally {
+      pause.release()
+    }
+    expect(await pending, 'a committed signal must invalidate computed availability').toBe(0)
+    expect(await candidates(s.eventTypeId)).toHaveLength(0)
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows.length,
+    ).toBeGreaterThan(0)
+    expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(0)
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows,
+    ).toHaveLength(0)
+  }
+
+  it(
+    'discards stale availability after a concurrent working-hours signal',
+    SERIALIZED,
+    async () => {
+      await verifySignalRevalidation()
+    },
+  )
+
+  it(
+    'detects source-copy removal of the pending signal publication check',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        ['||\n      (await hasSignals(trx, eventTypeId))', '||\n      false'],
+      ])
+      await expect(verifySignalRevalidation(copy.scanWaitlistEvent)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
+  async function verifyBoundedConsumption(scan = scanWaitlistEvent) {
+    const s = await setup()
+    await entry(s)
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals WHERE event_type_id=$1', [
+      s.eventTypeId,
+    ])
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,1001)',
+      [s.eventTypeId],
+    )
+    expect(await scan(s.ctx, s.eventTypeId), 'a backlog must drain in bounded passes').toBe(0)
+    expect(await candidates(s.eventTypeId)).toHaveLength(0)
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows,
+    ).toHaveLength(1)
+    expect(await scan(s.ctx, s.eventTypeId)).toBe(1)
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows,
+    ).toHaveLength(0)
+  }
+
+  it('consumes at most 1000 signals per event pass before publishing', SERIALIZED, async () => {
+    await verifyBoundedConsumption()
+  })
+
+  it('detects source-copy removal of the signal consumption bound', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      [
+        `ORDER BY id LIMIT \${SIGNAL_LIMIT} FOR UPDATE SKIP LOCKED`,
+        'ORDER BY id FOR UPDATE SKIP LOCKED',
+      ],
+    ])
+    await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  async function verifyLateSignal(scan = scanWaitlists) {
+    const s = await setup()
+    await entry(s)
+    const late = await testDb.pool.connect()
+    const signalId = '00000000-0000-7000-8000-000000000001'
+    try {
+      await late.query('BEGIN')
+      await late.query('INSERT INTO waitlist_scan_signals(id,event_type_id) VALUES($1,$2)', [
+        signalId,
+        s.eventTypeId,
+      ])
+      // The scanner consumes newer visible IDs, with this older ID still uncommitted.
+      expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(1)
+      await late.query('COMMIT')
+    } finally {
+      await late.query('ROLLBACK')
+      late.release()
+    }
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows,
+    ).toEqual([{ id: signalId }])
+    // Isolate this event's early wakeup from the other fixtures' minute recovery.
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals WHERE event_type_id<>$1', [
+      s.eventTypeId,
+    ])
+    await testDb.pool.query(
+      'UPDATE waitlist_scan_work SET next_due_at=$1 WHERE event_type_id<>$2',
+      [new Date(NOW.add({ hours: 1 }).epochMilliseconds), s.eventTypeId],
+    )
+    expect(
+      await scan(ctx, { limit: 1 }),
+      'a late commit must wake a work row before its next due time',
+    ).toEqual({
+      events: 1,
+      candidates: 0,
+      errors: 0,
+    })
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          s.eventTypeId,
+        ])
+      ).rows,
+    ).toHaveLength(0)
+  }
+
+  it(
+    'retains older IDs committed after a scan and wakes work before its next due time',
+    SERIALIZED,
+    async () => {
+      await verifyLateSignal()
+    },
+  )
+
+  it('detects source-copy removal of signal-driven scheduling', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      [
+        'OR EXISTS(SELECT FROM waitlist_scan_signals s WHERE s.event_type_id=w.event_type_id)',
+        'OR false',
+      ],
+    ])
+    await expect(verifyLateSignal(copy.scanWaitlists)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  async function verifyIrrelevantCleanup(scan = scanWaitlists) {
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    const orphan = randomUUID()
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,1001)',
+      [orphan],
+    )
+    await scan(ctx, { limit: 1 })
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          orphan,
+        ])
+      ).rows,
+    ).toHaveLength(1)
+    await scan(ctx, { limit: 1 })
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          orphan,
+        ])
+      ).rows,
+    ).toHaveLength(0)
+    const empty = await setup()
+    const disabled = await setup()
+    await entry(disabled)
+    await testDb.pool.query('UPDATE event_types SET waitlist_enabled=false WHERE id=$1', [
+      disabled.eventTypeId,
+    ])
+    await scan(ctx, { limit: 1 })
+    expect(
+      (
+        await testDb.pool.query(
+          'SELECT id FROM waitlist_scan_signals WHERE event_type_id=ANY($1::uuid[])',
+          [[empty.eventTypeId, disabled.eventTypeId]],
+        )
+      ).rows,
+    ).toHaveLength(0)
+  }
+
+  it(
+    'clears orphaned, disabled and empty-event signals in bounded minute batches',
+    SERIALIZED,
+    async () => {
+      await verifyIrrelevantCleanup()
+    },
+  )
+
+  it('detects source-copy removal of irrelevant-signal cleanup bounds', SERIALIZED, async () => {
+    const copy = sourceCopy('waitlist-discovery', [
+      [
+        `ORDER BY s.id LIMIT \${SIGNAL_LIMIT} FOR UPDATE OF s SKIP LOCKED`,
+        'ORDER BY s.id FOR UPDATE OF s SKIP LOCKED',
+      ],
+    ])
+    await expect(verifyIrrelevantCleanup(copy.scanWaitlists)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
 
   it(
     'detects source-copy reuse of entries removed during availability computation',
@@ -569,15 +796,13 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     const booking = await book(s, 'ordinary@example.test')
     expect(await scanWaitlistEvent(s.ctx, targetId)).toBe(0)
     await cancelManagedBooking(s.publicCtx, booking.manageToken ?? undefined)
-    const work = (
-      await testDb.pool.query<{ dirty_generation: string; scanned_generation: string }>(
-        'SELECT dirty_generation,scanned_generation FROM waitlist_scan_work WHERE event_type_id=$1',
-        [targetId],
-      )
-    ).rows[0]
-    expect(BigInt(work?.dirty_generation ?? '0') > BigInt(work?.scanned_generation ?? '0')).toBe(
-      true,
-    )
+    expect(
+      (
+        await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+          targetId,
+        ])
+      ).rows.length,
+    ).toBeGreaterThan(0)
     expect(await scanWaitlistEvent(s.ctx, targetId)).toBe(1)
     expect(await scanWaitlistEvent(s.ctx, targetId)).toBe(0)
     await expect(
@@ -618,14 +843,14 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await entry(s)
     const booking = await book(s, 'rollback@example.test')
     expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(0)
-    const generation = async () =>
+    const signals = async () =>
       (
-        await testDb.pool.query<{ dirty_generation: string }>(
-          'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
+        await testDb.pool.query<{ id: string }>(
+          'SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1 ORDER BY id',
           [s.eventTypeId],
         )
-      ).rows[0]?.dirty_generation
-    const before = await generation()
+      ).rows
+    const before = await signals()
     await expect(
       db.transaction().execute(async (trx) => {
         await trx
@@ -636,7 +861,7 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         throw new Error('simulated writer rollback')
       }),
     ).rejects.toThrow('simulated writer rollback')
-    expect(await generation()).toBe(before)
+    expect(await signals()).toEqual(before)
     expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(0)
   })
 
@@ -653,6 +878,10 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await testDb.pool.query(
       'UPDATE waitlist_scan_work SET next_due_at=$1 WHERE event_type_id<>ALL($2::uuid[])',
       [new Date(NOW.add({ hours: 1 }).epochMilliseconds), [first.eventTypeId, second.eventTypeId]],
+    )
+    await testDb.pool.query(
+      'DELETE FROM waitlist_scan_signals WHERE event_type_id<>ALL($1::uuid[])',
+      [[first.eventTypeId, second.eventTypeId]],
     )
     const a = await scanWaitlists(ctx, { limit: 1 })
     const b = await scanWaitlists(ctx, { limit: 1 })

@@ -57,26 +57,54 @@ async function readEntries(db: Db, eventTypeId: string, at: Date, lock = false) 
 }
 
 const PAGE_MS = 7 * 24 * 60 * 60 * 1000
+const SIGNAL_LIMIT = 1000
+
+/** Only scanners update work rows. Writers append independent, rollback-safe signals. */
+async function consumeSignals(db: Db, eventTypeId: string, at: Date) {
+  // Delete exactly the visible selected IDs, never an ID/time high-water mark: a
+  // transaction can commit an older UUID after this batch has already finished.
+  await sql`WITH consumed AS (
+    DELETE FROM waitlist_scan_signals WHERE id IN (
+      SELECT id FROM waitlist_scan_signals WHERE event_type_id=${eventTypeId}
+      ORDER BY id LIMIT ${SIGNAL_LIMIT} FOR UPDATE SKIP LOCKED
+    ) RETURNING id
+  ) UPDATE waitlist_scan_work SET dirty_generation=dirty_generation+1,
+      next_due_at=least(next_due_at,${at}),updated_at=${at}
+    WHERE event_type_id=${eventTypeId} AND EXISTS(SELECT FROM consumed)`.execute(db)
+}
+
+async function hasSignals(db: Db, eventTypeId: string) {
+  return (
+    await sql<{ pending: boolean }>`SELECT EXISTS(
+      SELECT FROM waitlist_scan_signals WHERE event_type_id=${eventTypeId}
+    ) AS pending`.execute(db)
+  ).rows[0]?.pending
+}
 
 /** One bounded range page, selecting every matching verified entry without ordering people. */
 export async function scanWaitlistEvent(
   ctx: WaitlistContext,
   eventTypeId: string,
 ): Promise<number> {
-  // Only the short snapshot transaction holds the accounting fence. In particular,
-  // availability computation must hold no work, entry, host or event row locks.
+  // Snapshot and consume a bounded signal batch under short event/work locks.
+  // Availability computation holds no work, entry, host or event row locks.
   const snapshot = await ctx.db.transaction().execute(async (trx) => {
     await ensureWaitlistKey(trx, ctx.secret)
-    const event = await resolveById(trx, eventTypeId)
+    const event = await resolveById(trx, eventTypeId, true)
     if (!event) return undefined
     await sql`INSERT INTO waitlist_scan_work(event_type_id) VALUES (${eventTypeId})
       ON CONFLICT (event_type_id) DO NOTHING`.execute(trx)
+    await sql`SELECT event_type_id FROM waitlist_scan_work
+      WHERE event_type_id=${eventTypeId} FOR UPDATE`.execute(trx)
+    const at = await waitlistNow(trx, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
+    await consumeSignals(trx, eventTypeId, at)
+    // A large backlog is consumed in bounded passes before computing availability.
+    if (await hasSignals(trx, eventTypeId)) return undefined
     const work = (
       await sql<Work>`SELECT dirty_generation,cursor_start_at FROM waitlist_scan_work
         WHERE event_type_id=${eventTypeId}`.execute(trx)
     ).rows[0]
     if (!work) return undefined
-    const at = await waitlistNow(trx, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
     return { event, work, at, entries: await readEntries(trx, eventTypeId, at) }
   })
   if (!snapshot) return 0
@@ -132,7 +160,7 @@ export async function scanWaitlistEvent(
   return ctx.db.transaction().execute(async (trx) => {
     await ensureWaitlistKey(trx, ctx.secret)
     // Publication never takes host or booking locks. Its event -> work -> entry order
-    // matches configuration writers and booking dirty signals before attribution.
+    // matches configuration writers. Dirty signals never acquire these row locks.
     // Nothing after these locks waits for or computes ordinary availability.
     const event = await resolveById(trx, eventTypeId, true)
     if (!event) return 0
@@ -143,7 +171,8 @@ export async function scanWaitlistEvent(
     if (
       !work ||
       String(work.dirty_generation) !== String(observedWork.dirty_generation) ||
-      work.cursor_start_at?.getTime() !== observedWork.cursor_start_at?.getTime()
+      work.cursor_start_at?.getTime() !== observedWork.cursor_start_at?.getTime() ||
+      (await hasSignals(trx, eventTypeId))
     )
       return 0
     const beforeEntries = await waitlistNow(
@@ -270,6 +299,17 @@ export async function scanWaitlists(ctx: WaitlistContext, options: { limit?: num
       trx,
       ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
     )
+    // Signals have no event FK and can outlive deletion or a last recipient. Drain
+    // irrelevant records too, so disabled/empty events need no scan to clear them.
+    await sql`DELETE FROM waitlist_scan_signals WHERE id IN (
+      SELECT s.id FROM waitlist_scan_signals s
+      WHERE NOT EXISTS(SELECT FROM event_types et
+        WHERE et.id=s.event_type_id AND et.waitlist_enabled AND et.is_active
+          AND et.deleted_at IS NULL AND EXISTS(SELECT FROM waitlist_entries e
+            WHERE e.event_type_id=et.id AND e.status IN ('active','notified')
+              AND e.expires_at>${recoveredAt}))
+      ORDER BY s.id LIMIT ${SIGNAL_LIMIT} FOR UPDATE OF s SKIP LOCKED
+    )`.execute(trx)
     await sql`INSERT INTO waitlist_scan_work(event_type_id,next_due_at)
       SELECT DISTINCT e.event_type_id,${recoveredAt}::timestamptz FROM waitlist_entries e
       JOIN event_types et ON et.id=e.event_type_id
@@ -282,7 +322,8 @@ export async function scanWaitlists(ctx: WaitlistContext, options: { limit?: num
     await sql<{ event_type_id: string }>`SELECT w.event_type_id FROM waitlist_scan_work w
       JOIN event_types et ON et.id=w.event_type_id
       WHERE et.waitlist_enabled AND et.is_active AND et.deleted_at IS NULL
-      AND w.next_due_at<=${new Date(now.epochMilliseconds)}
+      AND (w.next_due_at<=${new Date(now.epochMilliseconds)}
+        OR EXISTS(SELECT FROM waitlist_scan_signals s WHERE s.event_type_id=w.event_type_id))
       AND EXISTS(SELECT FROM waitlist_entries e WHERE e.event_type_id=w.event_type_id
         AND e.status IN ('active','notified') AND e.expires_at>${new Date(now.epochMilliseconds)})
       ORDER BY w.next_due_at,w.event_type_id LIMIT ${limit}`.execute(ctx.db)

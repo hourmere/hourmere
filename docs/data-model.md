@@ -850,15 +850,22 @@ bookings. Availability computation precedes the instance-wide admission fence, w
 only expiry, rolling budgets, duplicate/capacity checks and the bounded write. Database time
 is sampled again after waiting for that fence; no host advisory lock is taken.
 
-Transactional triggers record shared-host invalidations for bookings, event rules, schedules,
-overrides, profiles and cached calendars. Startup/minute maintenance scans committed ordinary
-availability only, in bounded seven-day pages with persisted cursors and fair event scheduling.
-Wakeups and checkpoints use exact `bigint` generations. Scans compute availability outside
-row locks, then publish under a short accounting-key → event share → work → entry lock
-sequence, revalidating the generation and page cursor and rereading live recipients. Booking
-host inserts signal work before waitlist attribution locks an entry; publication acquires no
-host, booking or calendar locks. A concurrent availability change discards the computed page
-and leaves the newer wakeup pending.
+Transactional triggers append `waitlist_scan_signals` for shared-host changes to bookings,
+event rules, schedules, overrides, profiles and cached calendars. Signals have independent
+UUIDs, no event foreign key and no unique event key. Availability writers never update
+shared waitlist work rows, so unrelated bookings sharing hosts do not wait on one another
+because of waitlist signaling. Signals commit or roll back with the availability mutation.
+Startup/minute maintenance scans committed ordinary availability only, in bounded seven-day
+pages with persisted cursors and fair event scheduling. A short event share → work lock
+snapshot consumes at most 1,000 committed signals by exact ID and advances the work's exact
+`bigint` generation. It never uses UUID order as a commit watermark: older IDs that commit
+later remain pending. Scans compute availability outside row locks, then publish under a
+short accounting-key → event share → work → entry lock sequence, revalidating the generation,
+page cursor and absence of pending signals and rereading live recipients. Publication
+acquires no host, booking or calendar locks. A committed signal visible at publication
+validation discards the computed page; signals that commit later remain pending for the
+next scan. Bounded cleanup removes signals for deleted or disabled events and events
+without live recipients.
 Every eligible verified recipient in a pass enters the same cohort. Each immutable candidate
 contains at most three full matching UTC intervals and expires at the earliest of discovery
 plus twenty-four hours, entry expiry or the first slot's current notice cutoff. There is no

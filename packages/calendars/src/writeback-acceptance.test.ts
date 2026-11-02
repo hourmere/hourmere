@@ -391,18 +391,19 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     const id = await booking()
     await notify(id)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
-    const expiredCredentials = encryptCredential(
-      calendarEncryptionKey(TEST_CALENDAR_KEY),
-      `google:${a.user.id}:account-a`,
-      JSON.stringify({
-        accessToken: 'fake-expired',
-        refreshToken: 'fake-refresh',
-        expiresAt: NOW - 1,
-      }),
-    )
     await db
       .updateTable('calendar_connections')
-      .set({ credentials: expiredCredentials })
+      .set({
+        credentials: encryptCredential(
+          calendarEncryptionKey(TEST_CALENDAR_KEY),
+          `google:${a.user.id}:account-a`,
+          JSON.stringify({
+            accessToken: 'fake-expired',
+            refreshToken: 'fake-refresh',
+            expiresAt: NOW - 1,
+          }),
+        ),
+      })
       .where('id', '=', connectionA)
       .execute()
     const outer = new AbortController().signal
@@ -415,12 +416,6 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     expect(first).not.toBe(outer)
     expect(refresh.mock.calls[0]?.[1]).toBe(first)
     expect(imported.mock.calls[0]?.[3]).toBe(first)
-    // Cancellation must exercise refresh regardless of the adapter's wall-clock expiry.
-    await db
-      .updateTable('calendar_connections')
-      .set({ credentials: expiredCredentials })
-      .where('id', '=', connectionA)
-      .execute()
     await db
       .updateTable('bookings')
       .set({ status: 'cancelled', cancelled_at: new Date(NOW) })

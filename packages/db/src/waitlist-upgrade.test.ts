@@ -21,6 +21,7 @@ const newTables = [
   'waitlist_verification_requests',
   'waitlist_key_state',
   'waitlist_scan_work',
+  'waitlist_scan_signals',
   'waitlist_slots',
   'waitlist_cohorts',
   'waitlist_candidates',
@@ -150,6 +151,15 @@ async function createWork(pool: pg.Pool, entryId: string) {
       now(),now()+interval '1 hour' FROM cohort`,
     [entryId],
   )
+}
+
+async function scanSignals(pool: pg.Pool, eventTypeId: string) {
+  return (
+    await pool.query<{ id: string }>(
+      'SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1 ORDER BY id',
+      [eventTypeId],
+    )
+  ).rows
 }
 
 async function verifyGuard(pool: pg.Pool, guard: string) {
@@ -334,7 +344,11 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
         values,
       ),
     ).resolves.toMatchObject({ rowCount: 1 })
-  } else if (guard === 'independent admission ledger' || guard === 'independent slot ledger') {
+  } else if (
+    guard === 'independent admission ledger' ||
+    guard === 'independent slot ledger' ||
+    guard === 'independent signal records'
+  ) {
     await pool.query(
       `INSERT INTO waitlist_verification_requests(event_type_id,email_hash,ip_hash,generation_id)
       VALUES($1,decode(repeat('33',32),'hex'),decode(repeat('44',32),'hex'),gen_random_uuid())`,
@@ -345,11 +359,16 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
       VALUES($1,decode(repeat('11',32),'hex'),'2027-01-01T09:00Z','2027-01-01T09:30Z','2027-01-03T09:30Z')`,
       [entry.event_type_id],
     )
+    await pool.query('INSERT INTO waitlist_scan_signals(event_type_id) VALUES($1)', [
+      entry.event_type_id,
+    ])
     await pool.query('DELETE FROM event_types WHERE id=$1', [entry.event_type_id])
     const table =
       guard === 'independent admission ledger'
         ? 'waitlist_verification_requests'
-        : 'waitlist_slot_tombstones'
+        : guard === 'independent slot ledger'
+          ? 'waitlist_slot_tombstones'
+          : 'waitlist_scan_signals'
     expect(
       (
         await pool.query(`SELECT event_type_id FROM ${table} WHERE event_type_id=$1`, [
@@ -357,6 +376,12 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
         ])
       ).rows,
     ).toEqual([{ event_type_id: entry.event_type_id }])
+    if (guard === 'independent signal records')
+      await expect(
+        pool.query('INSERT INTO waitlist_scan_signals(event_type_id) VALUES($1)', [
+          entry.event_type_id,
+        ]),
+      ).resolves.toMatchObject({ rowCount: 1 })
   } else if (guard === 'disable cleanup') {
     await pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [
       entry.event_type_id,
@@ -392,11 +417,11 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
       (await pool.query('SELECT waitlist_enabled FROM event_types WHERE id=$1', [teamEvent])).rows,
     ).toEqual([{ waitlist_enabled: true }])
   } else if (guard === 'wakeup generation boundary' || guard === 'scan checkpoint boundary') {
-    await pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [
+    await pool.query('INSERT INTO waitlist_scan_work(event_type_id) VALUES($1)', [
       entry.event_type_id,
     ])
-    // One schedule update signals both its old and new host, so it crosses the
-    // int4 boundary and later produces a value beyond Number's exact range.
+    // Only the scanner updates generations. Exercise its arithmetic past both
+    // int4 and Number's exact range without relying on a mutation trigger.
     for (const before of [2147483646n, 9007199254740991n]) {
       await expect(
         pool.query('UPDATE waitlist_scan_work SET dirty_generation=$2 WHERE event_type_id=$1', [
@@ -406,10 +431,7 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
       ).resolves.toMatchObject({ rowCount: 1 })
       await expect(
         pool.query(
-          `UPDATE schedules SET weekly_hours=weekly_hours WHERE id=(
-            SELECT id FROM schedules
-            WHERE user_id=(SELECT owner_user_id FROM event_types WHERE id=$1)
-            ORDER BY id LIMIT 1)`,
+          'UPDATE waitlist_scan_work SET dirty_generation=dirty_generation+2 WHERE event_type_id=$1',
           [entry.event_type_id],
         ),
       ).resolves.toMatchObject({ rowCount: 1 })
@@ -441,28 +463,21 @@ async function verifyGuard(pool: pg.Pool, guard: string) {
     await pool.query('UPDATE event_types SET waitlist_enabled=true WHERE id=$1', [
       entry.event_type_id,
     ])
-    const work = (
-      await pool.query<{ dirty_generation: string }>(
-        'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
-        [entry.event_type_id],
-      )
-    ).rows
-    expect(work).toHaveLength(1)
-    const before = BigInt(work[0]?.dirty_generation as string)
+    const before = await scanSignals(pool, entry.event_type_id)
     await pool.query(
       `UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=(SELECT owner_user_id FROM event_types WHERE id=$1)`,
       [entry.event_type_id],
     )
-    expect(
-      BigInt(
-        (
-          await pool.query<{ dirty_generation: string }>(
-            'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
-            [entry.event_type_id],
-          )
-        ).rows[0]?.dirty_generation as string,
-      ),
-    ).toBeGreaterThan(before)
+    expect((await scanSignals(pool, entry.event_type_id)).length).toBeGreaterThan(before.length)
+  } else if (guard === 'append-only signal records') {
+    await expect(
+      pool.query('INSERT INTO waitlist_scan_signals(event_type_id) VALUES($1),($1)', [
+        entry.event_type_id,
+      ]),
+    ).resolves.toMatchObject({ rowCount: 2 })
+    const signals = await scanSignals(pool, entry.event_type_id)
+    expect(signals).toHaveLength(2)
+    expect(new Set(signals.map((signal) => signal.id)).size).toBe(2)
   }
 }
 
@@ -564,6 +579,16 @@ const guardMutations = [
   ],
   ['host wakeups', 'PERFORM dirty_waitlist_event(event_id);', 'NULL;'],
   [
+    'append-only signal records',
+    'CREATE TABLE waitlist_scan_signals (\n  id uuid PRIMARY KEY DEFAULT uuidv7(),\n  event_type_id uuid NOT NULL',
+    'CREATE TABLE waitlist_scan_signals (\n  id uuid PRIMARY KEY DEFAULT uuidv7(),\n  event_type_id uuid NOT NULL UNIQUE',
+  ],
+  [
+    'independent signal records',
+    'CREATE TABLE waitlist_scan_signals (\n  id uuid PRIMARY KEY DEFAULT uuidv7(),\n  event_type_id uuid NOT NULL',
+    'CREATE TABLE waitlist_scan_signals (\n  id uuid PRIMARY KEY DEFAULT uuidv7(),\n  event_type_id uuid NOT NULL REFERENCES event_types(id) ON DELETE CASCADE',
+  ],
+  [
     'wakeup generation boundary',
     'dirty_generation bigint NOT NULL DEFAULT 1',
     'dirty_generation integer NOT NULL DEFAULT 1',
@@ -643,15 +668,19 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
           [entry.event_type_id],
         )
       ).rows[0]?.owner_user_id as string
-      const generation = async () =>
-        BigInt(
-          (
-            await pool.query<{ dirty_generation: string }>(
-              'SELECT dirty_generation FROM waitlist_scan_work WHERE event_type_id=$1',
-              [entry.event_type_id],
-            )
-          ).rows[0]?.dirty_generation as string,
-        )
+      // Existing work must remain untouched by mutation writers: they only
+      // append signals for the scanner to consume after commit.
+      await pool.query('INSERT INTO waitlist_scan_work(event_type_id) VALUES($1)', [
+        entry.event_type_id,
+      ])
+      const workTables = [
+        {
+          schema: 'public',
+          name: 'waitlist_scan_work',
+          columns: ['event_type_id', 'dirty_generation', 'scanned_generation'],
+        },
+      ]
+      const workBefore = await records(pool, workTables)
       const sources = [
         `UPDATE profiles SET time_zone=time_zone WHERE user_id=$1`,
         `UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=$1`,
@@ -663,25 +692,35 @@ describe.skipIf(!serverUrl)('waitlist migration', () => {
         `UPDATE event_type_hosts SET schedule_id=schedule_id WHERE user_id=$1`,
       ]
       for (const sql of sources) {
-        const before = await generation()
+        const before = await scanSignals(pool, entry.event_type_id)
         await pool.query(sql, [host])
-        expect(await generation(), sql).toBeGreaterThan(before)
+        const after = await scanSignals(pool, entry.event_type_id)
+        expect(after.length, sql).toBeGreaterThan(before.length)
+        expect(after, sql).toEqual(expect.arrayContaining(before))
       }
+      expect(await records(pool, workTables)).toEqual(workBefore)
       expect(
         (await pool.query('SELECT status FROM waitlist_entries WHERE id=$1', [entry.id])).rows,
       ).toEqual([{ status: 'pending_verification' }])
-      const before = await generation()
+      const before = await scanSignals(pool, entry.event_type_id)
       const transaction = await pool.connect()
       try {
         await transaction.query('BEGIN')
         await transaction.query('UPDATE schedules SET weekly_hours=weekly_hours WHERE user_id=$1', [
           host,
         ])
+        expect(
+          (
+            await transaction.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
+              entry.event_type_id,
+            ])
+          ).rows.length,
+        ).toBeGreaterThan(before.length)
         await transaction.query('ROLLBACK')
       } finally {
         transaction.release()
       }
-      expect(await generation()).toBe(before)
+      expect(await scanSignals(pool, entry.event_type_id)).toEqual(before)
       await pool.query('UPDATE event_types SET waitlist_enabled=false WHERE id=$1', [
         entry.event_type_id,
       ])

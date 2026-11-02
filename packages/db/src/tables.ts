@@ -731,6 +731,11 @@ export interface WaitlistKeyState {
   updated_at: Generated<Timestamp>;
 }
 
+export interface WaitlistScanSignals {
+  event_type_id: string;
+  id: Generated<string>;
+}
+
 export interface WaitlistScanWork {
   cursor_entry_id: string | null;
   cursor_start_at: Timestamp | null;
@@ -870,6 +875,7 @@ export interface DB {
   waitlist_cohorts: WaitlistCohorts;
   waitlist_entries: WaitlistEntries;
   waitlist_key_state: WaitlistKeyState;
+  waitlist_scan_signals: WaitlistScanSignals;
   waitlist_scan_work: WaitlistScanWork;
   waitlist_slot_tombstones: WaitlistSlotTombstones;
   waitlist_slots: WaitlistSlots;
