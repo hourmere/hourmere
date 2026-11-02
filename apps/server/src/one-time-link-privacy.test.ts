@@ -148,6 +148,85 @@ async function verifyHeaders(module: AppCopy) {
   expect(response.headers.get('Cache-Control')).toBe('no-store')
 }
 
+async function verifyAdminPrivacy(module: AppCopy) {
+  const base = '/api/v1/event-types/00000000-0000-4000-8000-000000000000/one-time-links'
+  const spies = [
+    vi.spyOn(console, 'log').mockImplementation(() => {}),
+    vi.spyOn(console, 'warn').mockImplementation(() => {}),
+    vi.spyOn(console, 'error').mockImplementation(() => {}),
+  ]
+  try {
+    const app = module.createApp({
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      publicUrl: 'http://localhost',
+      routes: [
+        ({ app }) => {
+          app.get(`${base}/unexpected`, () => {
+            throw new Error(`Unexpected storage failure ${token}`)
+          })
+          app.get(`${base}/domain`, () => {
+            throw new module.DomainError('invalid', 'invalid_one_time_link', token, {
+              cause: new Error(`Driver failed ${token}`),
+            })
+          })
+          app.get(`${base}/http`, () => {
+            throw new module.HTTPException(400, { message: token })
+          })
+          app.get(`${base}/replay`, () => {
+            throw new module.DomainError('conflict', 'one_time_link_already_created', token)
+          })
+          app.openapi(
+            createRoute({
+              method: 'post',
+              path: `${base}/validate`,
+              request: {
+                body: {
+                  required: true,
+                  content: {
+                    'application/json': { schema: z.strictObject({ value: z.string() }) },
+                  },
+                },
+              },
+              responses: { 200: { description: 'Accepted' } },
+            }),
+            (c) => c.json({ ok: true }),
+          )
+        },
+      ],
+    })
+    for (const [route, status] of [
+      ['unexpected', 500],
+      ['domain', 400],
+      ['http', 400],
+      ['replay', 409],
+      ['validate', 400],
+    ] as const) {
+      const response = await app.request(
+        `${base}/${route}`,
+        route === 'validate'
+          ? {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ value: 'valid', [token]: true }),
+            }
+          : undefined,
+      )
+      expect(response.status).toBe(status)
+      expect(response.headers.get('Cache-Control')).toBe('no-store')
+      expect(response.headers.get('Referrer-Policy')).toBe('no-referrer')
+      const body = await response.text()
+      expect(body.includes(token)).toBe(false)
+      if (route === 'replay') expect(body).toContain('cannot be retrieved')
+    }
+    expect(spies[2]?.mock.calls.length).toBe(2)
+    expect(JSON.stringify(spies.flatMap((spy) => spy.mock.calls)).includes(token)).toBe(false)
+  } finally {
+    for (const spy of spies) spy.mockRestore()
+  }
+}
+
 describe('one-time capability privacy source-copy controls', () => {
   it('runs real log, response and header assertions against the unmodified source', async () => {
     const module = await copy()
@@ -156,6 +235,14 @@ describe('one-time capability privacy source-copy controls', () => {
     await verifyLogs(module, 'unexpected')
     for (const route of ['domain', 'http', 'validate']) await verifyResponse(module, route)
     await verifyHeaders(module)
+    await verifyAdminPrivacy(module)
+  })
+  it('detects missing administration privacy coverage with real captured diagnostics and responses', async () => {
+    const module = await copy(undefined, undefined, [
+      ' || /(?:^|\\/)one-time-links(?:\\/|$)/i.test(path)',
+      '',
+    ])
+    await expect(verifyAdminPrivacy(module)).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects passing capability requests to the URL logger', async () => {
     const module = await copy([

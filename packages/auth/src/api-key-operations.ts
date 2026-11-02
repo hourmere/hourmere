@@ -115,6 +115,10 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('DELETE', '/api/v1/event-types/{id}', 'other_write', 'key'),
   rest('PATCH', '/api/v1/event-types/{id}', 'other_write', 'key'),
   rest('PUT', '/api/v1/event-types/{id}/notifications', 'other_write', 'key'),
+  rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links', 'other_read', 'key'),
+  rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_write', 'key'),
+  rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'other_read', 'key'),
+  rest('DELETE', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'booking_write', 'key'),
   rest('POST', '/api/v1/event-types/{id}/round-robin/activate', 'other_write', 'key'),
   rest('GET', '/api/v1/instance', 'public_metadata', 'public_metadata'),
   rest('GET', '/api/v1/mcp-oauth/connections', 'session_only', 'session_only'),
@@ -257,6 +261,15 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('get_schedule', 'other_read', ['GET /api/v1/schedules/{id}']),
   mcp('create_event_type', 'other_write', ['POST /api/v1/event-types']),
   mcp('update_event_type', 'other_write', ['PATCH /api/v1/event-types/{id}']),
+  mcp('create_one_time_link', 'booking_write', [
+    'POST /api/v1/event-types/{eventTypeId}/one-time-links',
+  ]),
+  mcp('list_one_time_links', 'other_read', [
+    'GET /api/v1/event-types/{eventTypeId}/one-time-links',
+  ]),
+  mcp('revoke_one_time_link', 'booking_write', [
+    'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
+  ]),
   mcp('list_calendar_connections', 'other_read', ['GET /api/v1/calendar-connections']),
   mcp('list_conference_connections', 'other_read', ['GET /api/v1/conference-connections']),
 ])
@@ -292,6 +305,9 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('cancel', 'cancel_booking'),
   cli('retry-meeting', 'retry_conference'),
   cli('retry-calendar-copy', 'retry_calendar_copy'),
+  cli('one-time-links create', 'create_one_time_link'),
+  cli('one-time-links list', 'list_one_time_links'),
+  cli('one-time-links revoke', 'revoke_one_time_link'),
 ])
 
 export type ClassifiedApiKeyOperation =

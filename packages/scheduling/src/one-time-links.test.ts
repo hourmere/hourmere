@@ -856,10 +856,10 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     await unavailable(link.token, bookingId)
   })
 
-  it('requires full API-key scope and revalidates the persisted full key before configuration writes', async () => {
+  it('requires booking-write API-key scope and revalidates the persisted key before writes', async () => {
     const s = await setup()
     const link = await Links.createOneTimeBookingLink(s.ctx, { eventTypeId: s.eventTypeId })
-    for (const apiKeyScope of ['read', 'bookings'] as const) {
+    for (const apiKeyScope of ['read'] as const) {
       const ctx = testContext(
         db,
         { ...s.user.principal, kind: 'api_key', apiKeyId: randomUUID(), apiKeyScope },
@@ -1535,15 +1535,15 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
     )
   })
 
-  it('detects weakened API-key configuration scope with a real assertion failure', async () => {
+  it('detects weakened API-key booking-write scope with a real assertion failure', async () => {
     await mutation(
       [
-        "if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full')",
+        "if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope === 'read')",
         'if (false)',
       ],
       async (module) => {
         const s = await setup()
-        const { ctx } = await apiKey(s, 'bookings')
+        const { ctx } = await apiKey(s, 'read')
         await expect(
           module.createOneTimeBookingLink(ctx, { eventTypeId: s.eventTypeId }),
         ).rejects.toMatchObject({ name: 'ApiKeyScopeError', error: 'insufficient_scope' })

@@ -54,6 +54,7 @@ import {
   validateDraft,
 } from './event-type-form.ts'
 import { HostAssignment } from './HostAssignment.tsx'
+import { OneTimeLinks } from './OneTimeLinks.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -964,6 +965,8 @@ function EventTypeForm({
           </p>
         </StickyFormActions>
       </form>
+
+      {saved && <OneTimeLinks event={saved} disabled={contextChanged} />}
 
       {saved && (
         <section className="panel panel-danger" aria-labelledby="delete-heading">

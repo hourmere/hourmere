@@ -1,5 +1,66 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  Revoked: 'Revoked',
+  'Event type': 'Event type',
+  'Created by': 'Created by',
+  'Load more': 'Load more',
+  'This request already created a link, but its URL cannot be retrieved. Review the list and revoke it if needed, then start a new request.':
+    'This request already created a link, but its URL cannot be retrieved. Review the list and revoke it if needed, then start a new request.',
+  'Start a new request': 'Start a new request',
+  'This link is no longer active.': 'This link is no longer active.',
+  'One-time links': 'One-time links',
+  'Create a private link that can be used for one booking. Each new URL is shown only once.':
+    'Create a private link that can be used for one booking. Each new URL is shown only once.',
+  'These links belong to the team and remain with it when their creator leaves.':
+    'These links belong to the team and remain with it when their creator leaves.',
+  'Close one-time links': 'Close one-time links',
+  'Manage one-time links': 'Manage one-time links',
+  'Your space has reached its active one-time link limit. Revoke an unused link and try again.':
+    'Your space has reached its active one-time link limit. Revoke an unused link and try again.',
+  'Enable and save this event type before creating a one-time link.':
+    'Enable and save this event type before creating a one-time link.',
+  'Check the expiry and invitee details, then try again.':
+    'Check the expiry and invitee details, then try again.',
+  'One-time links are unavailable with your current permissions.':
+    'One-time links are unavailable with your current permissions.',
+  'Could not update one-time links. Try again.': 'Could not update one-time links. Try again.',
+  'In 1 hour': 'In 1 hour',
+  'In 1 day': 'In 1 day',
+  'In 7 days': 'In 7 days',
+  Used: 'Used',
+  'Create a one-time link': 'Create a one-time link',
+  'Link expiry': 'Link expiry',
+  'A day is exactly 24 hours, including daylight-saving changes.':
+    'A day is exactly 24 hours, including daylight-saving changes.',
+  'Prefilled invitee name': 'Prefilled invitee name',
+  'Prefilled invitee email': 'Prefilled invitee email',
+  'Invitees can edit these details. Prefill does not restrict who can book.':
+    'Invitees can edit these details. Prefill does not restrict who can book.',
+  'Create one-time link': 'Create one-time link',
+  'Existing one-time links': 'Existing one-time links',
+  'URLs cannot be retrieved from this list. Revoke an unused link if you no longer need it.':
+    'URLs cannot be retrieved from this list. Revoke an unused link if you no longer need it.',
+  'Could not load one-time links. Your access may have changed.':
+    'Could not load one-time links. Your access may have changed.',
+  'No one-time links yet. Create one above to share this event privately.':
+    'No one-time links yet. Create one above to share this event privately.',
+  'One-time link': 'One-time link',
+  'Link ID': 'Link ID',
+  'Used at': 'Used at',
+  'Booking reference': 'Booking reference',
+  'Revoke link': 'Revoke link',
+  'Revoke one-time link {0}': 'Revoke one-time link {0}',
+  'Revoke this one-time link? It will stop accepting new bookings.':
+    'Revoke this one-time link? It will stop accepting new bookings.',
+  'Copy your one-time link': 'Copy your one-time link',
+  'Link created. Copy and save it privately now. After you close this dialog, the URL cannot be shown again.':
+    'Link created. Copy and save it privately now. After you close this dialog, the URL cannot be shown again.',
+  'One-time booking URL': 'One-time booking URL',
+  'Copy one-time link': 'Copy one-time link',
+  'Close and forget URL': 'Close and forget URL',
+  'This link was already used. Its booking is unchanged.':
+    'This link was already used. Its booking is unchanged.',
+  'Link revoked.': 'Link revoked.',
   'Allowed durations': 'Allowed durations',
   'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
     'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.',

@@ -100,6 +100,10 @@ function identifier(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z_]/.test(value) && !/[^A-Za-z0-9_.-]/.test(value)
 }
 
+function cliCommand(value: unknown): value is string {
+  return typeof value === 'string' && value.split(' ').every(identifier)
+}
+
 function oneLineReason(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && !/[\r\n\u2028\u2029]/.test(value)
 }
@@ -240,7 +244,7 @@ export function interfaceParityErrors(
       !Object.hasOwn(entry, 'mcp') ||
       !Object.hasOwn(entry, 'cli') ||
       !identifier(entry.mcp) ||
-      !identifier(entry.cli)
+      !cliCommand(entry.cli)
     ) {
       errors.push(
         `${operationId}: expected exactly {mcp, cli} or {exemption: "browser-session-only", reason}.`,

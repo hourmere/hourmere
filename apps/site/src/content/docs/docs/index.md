@@ -17,6 +17,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [One-time booking links](/docs/one-time-links): create, list and revoke private links
+  through the editor, REST, MCP or CLI, with the booking URL shown once.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and

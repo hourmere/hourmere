@@ -12,7 +12,11 @@ import {
   redactLogDetails,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
-import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
+import {
+  DomainError,
+  type DomainErrorKind,
+  ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+} from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
 import { etag } from 'hono/etag'
 import { createMiddleware } from 'hono/factory'
@@ -337,6 +341,10 @@ export function createApp({
         error: err.code,
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail && !isOneTimeLinkPath(c.req.path) && { message: err.detail }),
+        ...(err.code === 'one_time_link_already_created' &&
+          /\/one-time-links(?:\/|$)/i.test(c.req.path) && {
+            message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+          }),
       }
       return c.json(body, domainStatus[err.kind])
     }
