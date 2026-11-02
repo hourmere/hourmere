@@ -592,7 +592,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
   it('detects a removed replay fallback after racing consumption with a real assertion failure', async () => {
     await mutation(
       [
-        "const replay = await oneTimeBookingReplay(ctx, input, origin)\n    if (replay) return replay\n    throw new DomainError('not_found', 'one_time_link_not_found')",
+        "const replay = await oneTimeBookingReplay(ctx, input, origin)\n    if (replay) return oneTimeBookingResult(replay)\n    throw new DomainError('not_found', 'one_time_link_not_found')",
         "throw new DomainError('not_found', 'one_time_link_not_found')",
       ],
       verifyReplayDuringResolution,
@@ -624,6 +624,52 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
     ])
     await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
+
+  it.each(['personal address', 'team address'] as const)(
+    'detects a leaked %s with exact page keys',
+    async (mode) => {
+      const s = await setup()
+      if (mode === 'team address') {
+        const organizationId = await f.organization()
+        await f.member(s.userId, organizationId, 'owner')
+        const eventTypeId = await f.eventType(organizationId, null, {
+          hosts: [{ userId: s.userId }],
+        })
+        const principal = {
+          ...s.service.principal,
+          organization: { id: organizationId, name: 'Team', slug: '', personal: false },
+        }
+        const link = await createOneTimeBookingLink({ ...s.service, principal }, { eventTypeId })
+        s.link = link
+      }
+      const verify = async (module: typeof Availability) => {
+        const page = await module.getOneTimeBookingPage(ctx, s.link.token)
+        expect(Object.keys(page.eventType).sort()).toEqual(
+          [
+            'allowGuests',
+            'description',
+            'durationMinutes',
+            'host',
+            'location',
+            'questions',
+            ...(mode === 'team address' ? ['team'] : []),
+            'title',
+          ].sort(),
+        )
+        if (mode === 'team address')
+          expect(Object.keys(page.eventType.team ?? {})).toEqual(['name'])
+      }
+      await verify(Availability)
+      const copy = await sourceCopy<typeof Availability>(
+        './availability.ts',
+        mode === 'personal address'
+          ? ['title: page.title,', '...page, title: page.title,']
+          : ['team: { name: page.team.name }', 'team: page.team'],
+      )
+      await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+      await verify(Availability)
+    },
+  )
 
   it('detects a bypassed personal handle readiness check with a real page assertion failure', async () => {
     const verify = async (module: typeof Availability) => {

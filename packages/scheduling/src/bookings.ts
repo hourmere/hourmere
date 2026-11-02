@@ -400,8 +400,9 @@ interface IdempotencyScope {
 async function findReplay(
   db: Db,
   scope: IdempotencyScope,
+  expectedBookingId?: string | null,
 ): Promise<(BookingWithToken & { successRedirect?: BookingSuccessRedirect }) | undefined> {
-  const row = await db
+  let query = db
     .selectFrom('bookings')
     .select(['id', 'idempotency_fingerprint', 'success_redirect'])
     .where('organization_id', '=', scope.organizationId)
@@ -412,7 +413,11 @@ async function findReplay(
       scope.oauthConsentId ?? null,
     )
     .where('idempotency_key', '=', scope.key)
-    .executeTakeFirst()
+  // A null target is an intentional no-match probe, with the same SQL shape as
+  // a used-link replay. SQL equality against NULL cannot return another booking.
+  if (expectedBookingId !== undefined)
+    query = query.where('id', '=', sql<string>`${expectedBookingId}`)
+  const row = await query.executeTakeFirst()
   if (!row) return undefined
   if (!row.idempotency_fingerprint?.equals(scope.fingerprint)) {
     throw new DomainError(
@@ -927,10 +932,10 @@ export async function createOneTimeBooking(
 ): Promise<CreateBookingResult> {
   if (origin.source === 'embed') throw new DomainError('not_found', 'one_time_link_not_found')
   const replay = await oneTimeBookingReplay(ctx, input, origin)
-  if (replay) return replay
+  if (replay) return oneTimeBookingResult(replay)
   try {
     const link = await resolveOneTimeBookingLink(ctx, input.token)
-    return await publicBooking(
+    const result = await publicBooking(
       ctx,
       input,
       origin,
@@ -940,6 +945,7 @@ export async function createOneTimeBooking(
       },
       { id: link.id, token: input.token },
     )
+    return oneTimeBookingResult(result)
   } catch (error) {
     // Consumption may commit between either read above and our locked transaction.
     if (
@@ -948,9 +954,18 @@ export async function createOneTimeBooking(
     )
       throw error
     const replay = await oneTimeBookingReplay(ctx, input, origin)
-    if (replay) return replay
+    if (replay) return oneTimeBookingResult(replay)
     throw new DomainError('not_found', 'one_time_link_not_found')
   }
+}
+
+/** Saved continuations can contain reusable event addresses, including on legacy replays. */
+function oneTimeBookingResult({
+  booking,
+  manageToken,
+  replayed,
+}: CreateBookingResult): CreateBookingResult {
+  return { booking, manageToken, replayed }
 }
 
 async function oneTimeBookingReplay(
@@ -959,13 +974,20 @@ async function oneTimeBookingReplay(
   origin: BookingOrigin,
 ): Promise<CreateBookingResult | undefined> {
   const used = await oneTimeBookingReplayTarget(ctx, input.token)
-  if (!used || input.idempotencyKey === undefined || !IDEMPOTENCY_KEY.test(input.idempotencyKey))
-    return undefined
-  const scope = bookingIdempotency(used, input, origin, used.id)
-  if (!scope) return undefined
+  const validKey = input.idempotencyKey !== undefined && IDEMPOTENCY_KEY.test(input.idempotencyKey)
+  const scope = used && validKey ? bookingIdempotency(used, input, origin, used.id) : undefined
+  // Always probe: skipping this lookup for unknown, expired or revoked links
+  // otherwise exposes the used state through a cheap query-count difference.
+  const probe = scope ?? {
+    organizationId: '00000000-0000-0000-0000-000000000000',
+    apiKeyId: origin.apiKeyId,
+    oauthConsentId: origin.oauthConsentId ?? null,
+    key: validKey ? (input.idempotencyKey as string) : '',
+    fingerprint: Buffer.alloc(32),
+  }
   try {
-    const replay = await findReplay(ctx.db, scope)
-    if (replay?.booking.id === used.bookingId) return { ...replay, replayed: true }
+    const replay = await findReplay(ctx.db, probe, scope && used ? used.bookingId : null)
+    if (used && replay?.booking.id === used.bookingId) return { ...replay, replayed: true }
   } catch (error) {
     if (!(error instanceof DomainError) || error.code !== 'idempotency_key_reused') throw error
   }
@@ -1114,7 +1136,7 @@ async function publicBooking(
           })
       }
       let settings: SuccessRedirect | null = null
-      if (origin.source === 'web' || origin.source === 'embed') {
+      if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
         try {
           settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
         } catch (error) {

@@ -28,7 +28,14 @@ const invalid = { description: 'Invalid booking parameters', content: json(Error
 const rateLimited = { description: 'Too many requests; see Retry-After', content: json(ErrorBody) }
 export const OneTimeBookingPage = z
   .object({
-    eventType: PublicEventType,
+    eventType: PublicEventType.omit({
+      handle: true,
+      slug: true,
+      team: true,
+      allowEmbedParentRedirect: true,
+    })
+      .extend({ team: z.object({ name: z.string() }).optional() })
+      .openapi('OneTimeEventType'),
     prefill: z.object({ name: z.string().nullable(), email: z.string().nullable() }),
   })
   .openapi('OneTimeBookingPage')

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../i18n/store.ts'
 import { type Call, fakeApi, json, type Routes, renderApp } from '../test/fake-api.tsx'
 import { booking, EVENT, slot, slotsAnswer, TOKEN } from '../test/public-fixtures.ts'
+import type { OneTimeBookingPage } from './api.ts'
 
 vi.mock('./env.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./env.ts')>()),
@@ -20,6 +21,16 @@ const HINT = 'These details were filled in for convenience. You can change them.
 const START = '2026-11-02T14:00:00Z'
 const PREFILL = { name: 'Prefilled Visitor', email: 'prefilled@example.invalid' }
 const QUESTION = { id: 'topic', label: 'Topic', type: 'short_text', required: true } as const
+const ONE_TIME_EVENT: OneTimeBookingPage['eventType'] = {
+  title: EVENT.title,
+  description: EVENT.description,
+  durationMinutes: EVENT.durationMinutes,
+  location: EVENT.location,
+  allowGuests: EVENT.allowGuests,
+  host: EVENT.host,
+  allowedDurationsMinutes: [30, 60],
+  questions: [QUESTION],
+}
 
 beforeEach(() => window.history.replaceState(null, '', '/'))
 
@@ -27,7 +38,7 @@ function routes(overrides: Routes = {}): Routes {
   return {
     [`GET ${BASE}`]: () =>
       json(200, {
-        eventType: { ...EVENT, allowedDurationsMinutes: [30, 60], questions: [QUESTION] },
+        eventType: ONE_TIME_EVENT,
         prefill: PREFILL,
       }),
     [`GET ${BASE}/slots`]: (call: Call) =>
@@ -54,6 +65,8 @@ describe('one-time public booking', () => {
     const api = fakeApi(routes())
     renderApp(`${PAGE}?token=ignored-query-value&utm_source=ignored`)
     await user.click(await screen.findByRole('radio', { name: '1 h' }))
+    expect(document.head.innerHTML.includes('undefined')).toBe(false)
+    expect(document.querySelector('link[rel="canonical"], meta[property="og:url"]')).toBeNull()
     await pick(user)
     const name = screen.getByLabelText<HTMLInputElement>('Your name')
     const email = screen.getByLabelText<HTMLInputElement>('Email')
@@ -80,6 +93,12 @@ describe('one-time public booking', () => {
       /^\/booking#token=/,
     )
     expect(screen.getByRole('link', { name: 'Download .ics file' })).toBeDefined()
+    for (const element of document.querySelectorAll('a[href]')) {
+      const href = decodeURIComponent(element.getAttribute('href') ?? '')
+      expect(href.includes(`/${EVENT.handle}/${EVENT.slug}`)).toBe(false)
+      expect(href.includes('undefined')).toBe(false)
+    }
+    expect(api.calls.some((call) => call.path.includes('/api/v1/public/'))).toBe(false)
     for (const call of api.calls) {
       const url = new URL(call.path, 'http://x')
       expect(url.search.includes(LINK_TOKEN)).toBe(false)
@@ -194,7 +213,7 @@ describe('one-time public booking', () => {
         [`GET ${BASE}`]: () =>
           ++reads === 1
             ? json(400, { error: 'unknown_error', message: `Bad path ${LINK_TOKEN}` })
-            : json(200, { eventType: { ...EVENT, questions: [] }, prefill: PREFILL }),
+            : json(200, { eventType: { ...ONE_TIME_EVENT, questions: [] }, prefill: PREFILL }),
         [`POST ${BASE}/bookings`]: () =>
           json(400, { error: 'unknown_error', message: `Bad path ${LINK_TOKEN}` }),
       }),
@@ -217,7 +236,7 @@ describe('one-time public booking', () => {
     [
       'de',
       'Dieser Buchungslink ist nicht verfügbar',
-      'Bitte den Gastgeber um einen neuen Buchungslink.',
+      'Bitten Sie die gastgebende Person um einen neuen Buchungslink.',
     ],
     [
       'fr',
@@ -227,7 +246,7 @@ describe('one-time public booking', () => {
     [
       'es',
       'Este enlace de reserva no está disponible',
-      'Pide al anfitrión un nuevo enlace de reserva.',
+      'Pida al anfitrión un nuevo enlace de reserva.',
     ],
     [
       'pt-BR',
@@ -248,12 +267,15 @@ describe('one-time public booking', () => {
   it.each([
     ['en', HINT],
     ['zh-CN', '这些信息已预先填写，方便你预约。你可以自行修改。'],
-    ['de', 'Diese Angaben wurden vorausgefüllt. Du kannst sie ändern.'],
+    [
+      'de',
+      'Diese Angaben wurden vorausgefüllt, um Ihnen die Buchung zu erleichtern. Sie können sie ändern.',
+    ],
     [
       'fr',
       'Ces informations ont été préremplies pour vous faciliter la tâche. Vous pouvez les modifier.',
     ],
-    ['es', 'Estos datos se han rellenado para facilitarte la reserva. Puedes cambiarlos.'],
+    ['es', 'Estos datos se han rellenado para facilitarle la reserva. Puede cambiarlos.'],
     ['pt-BR', 'Estes dados foram preenchidos para facilitar o agendamento. Você pode alterá-los.'],
   ] as const)('explains editable prefill naturally in %s', async (language, hint) => {
     chooseLanguage(language)

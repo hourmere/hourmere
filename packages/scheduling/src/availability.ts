@@ -386,8 +386,14 @@ export async function findOneTimeEventType(
     : findPersonalEventType(db, { id: eventTypeId }, options)
 }
 
+/** Presentation only: no reusable personal or team booking address. */
+export interface OneTimeEventType
+  extends Omit<PublicEventType, 'handle' | 'slug' | 'team' | 'allowEmbedParentRedirect'> {
+  team?: { name: string }
+}
+
 export interface OneTimeBookingPage {
-  eventType: PublicEventType
+  eventType: OneTimeEventType
   prefill: OneTimeBookingLinkPrefill
 }
 
@@ -398,7 +404,27 @@ export async function getOneTimeBookingPage(
   const link = await resolveOneTimeBookingLink(ctx, token)
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
-  return { eventType: publicEventType(eventType), prefill: link.prefill }
+  const page = publicEventType(eventType)
+  // Keep this projection explicit: additions to the reusable public page must not
+  // silently expose an address or navigation capability to one-time recipients.
+  return {
+    eventType: {
+      title: page.title,
+      description: page.description,
+      durationMinutes: page.durationMinutes,
+      ...(page.allowedDurationsMinutes && {
+        allowedDurationsMinutes: page.allowedDurationsMinutes,
+      }),
+      location: page.location,
+      questions: page.questions,
+      allowGuests: page.allowGuests,
+      host: page.host,
+      ...(page.hosts && { hosts: page.hosts }),
+      ...(page.schedulingType && { schedulingType: page.schedulingType }),
+      ...(page.team && { team: { name: page.team.name } }),
+    },
+    prefill: link.prefill,
+  }
 }
 
 export function eventTypeNotFound(): DomainError {

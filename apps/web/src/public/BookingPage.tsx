@@ -20,6 +20,7 @@ import {
   failureMessage,
   getEventType,
   getOneTimeBookingPage,
+  type OneTimeBookingPage as OneTimeBookingPageData,
   oneTimeLinkSlots,
   type PublicBookingResult,
   type PublicEventType,
@@ -125,16 +126,7 @@ function OneTimeBookingPageContent({ token }: { token: string }) {
     )
   }
   const { eventType, prefill } = state.data
-  return (
-    <BookingFlow
-      event={eventType}
-      handle={eventType.handle}
-      slug={eventType.slug}
-      team={!!eventType.team}
-      oneTimeToken={token}
-      prefill={prefill}
-    />
-  )
+  return <BookingFlow event={eventType} oneTimeToken={token} prefill={prefill} />
 }
 
 export function BookingPage({ team = false }: { team?: boolean } = {}) {
@@ -215,21 +207,22 @@ interface Confirmed extends PublicBookingResult {
   timeZone: string
 }
 
+type BookingEvent = PublicEventType | OneTimeBookingPageData['eventType']
+type BookingAddress =
+  | { oneTimeToken: string; handle?: never; slug?: never; team?: never }
+  | { oneTimeToken?: never; handle: string; slug: string; team: boolean }
+
 function BookingFlow({
   event: initialEvent,
-  handle,
-  slug,
-  team,
+  handle = '',
+  slug = '',
+  team = !!initialEvent.team,
   oneTimeToken,
   prefill,
 }: {
-  event: PublicEventType
-  handle: string
-  slug: string
-  team: boolean
-  oneTimeToken?: string
+  event: BookingEvent
   prefill?: { name: string | null; email: string | null }
-}) {
+} & BookingAddress) {
   const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
 
   const embedded = useEmbedded()
@@ -617,7 +610,7 @@ function Confirmation({
   locale,
   team,
 }: {
-  event: PublicEventType
+  event: BookingEvent
   confirmed: Confirmed
   locale: string
   team: boolean

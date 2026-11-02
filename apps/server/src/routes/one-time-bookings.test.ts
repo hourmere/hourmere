@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import type { CreateBookingResult } from '@hourmere/scheduling'
+import type {
+  CreateBookingResult,
+  ManagedBooking,
+  OneTimeBookingPage,
+  SlotView,
+} from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
@@ -57,12 +62,23 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
     if (dist) await rm(dist, { recursive: true, force: true })
   })
 
-  async function setup(expiresAt?: string) {
+  async function setup(expiresAt?: string, team = false) {
     const host = await f.host()
     await f.schedule(host.userId)
-    const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+    const teamSlug = `private-team-${randomUUID()}`
+    const organizationId = team ? await f.organization(teamSlug) : host.organizationId
+    if (team) {
+      await f.member(host.userId, organizationId, 'owner')
+      await db
+        .updateTable('auth.organization')
+        .set({ name: 'Private team' })
+        .where('id', '=', organizationId)
+        .execute()
+    }
+    const eventTypeId = await f.eventType(organizationId, team ? null : host.userId, {
       slug: 'private-call',
       questions: [{ id: 'topic', label: 'Topic', type: 'short_text', required: true }],
+      ...(team && { hosts: [{ userId: host.userId }] }),
     })
     await db
       .updateTable('event_types')
@@ -73,7 +89,7 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
     const link = await db
       .insertInto('one_time_booking_links')
       .values({
-        organization_id: host.organizationId,
+        organization_id: organizationId,
         event_type_id: eventTypeId,
         creator_user_id: host.userId,
         token_hash: createHash('sha256').update(token).digest('hex'),
@@ -83,7 +99,7 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    return { host, eventTypeId, token, linkId: link.id }
+    return { host, eventTypeId, token, linkId: link.id, teamSlug }
   }
   const path = (token: string) => `/api/v1/book/${token}`
   const body = (start = '2026-11-02T09:00:00Z') => ({
@@ -99,43 +115,108 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
       body: JSON.stringify(payload),
     })
 
-  it('uses only path capabilities, never query tokens; serves editable prefill for hidden types', async () => {
-    const s = await setup()
-    const response = await app.request(path(s.token))
-    expect(response.status).toBe(200)
-    const page = await response.json()
-    expect(page).toMatchObject({
-      prefill: { name: 'Suggested name', email: 'suggested@example.test' },
-      eventType: { allowedDurationsMinutes: [30, 60], questions: [{ id: 'topic' }] },
-    })
-    expect(JSON.stringify(page).includes(s.token)).toBe(false)
-    for (const url of [
-      `/api/v1/book?token=${s.token}`,
-      `/api/v1/book/not-a-token?token=${s.token}`,
-    ]) {
-      const refused = await app.request(url)
-      expect(refused.status).toBe(404)
-      expect((await refused.text()).includes(s.token)).toBe(false)
-    }
-    const slots = await app.request(
-      `${path(s.token)}/slots?${new URLSearchParams({
-        start: '2026-11-02T08:00:00Z',
-        end: '2026-11-02T16:00:00Z',
-        durationMinutes: '60',
-      })}`,
-    )
-    expect(slots.status).toBe(200)
-    expect(((await slots.json()) as { data: unknown[] }).data.length).toBeGreaterThan(0)
-    const booked = await book(s.token, randomUUID())
-    expect(booked.status).toBe(201)
-    const result = (await booked.json()) as CreateBookingResult
-    expect(result.booking.attendees).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'Edited invitee', email: 'edited@example.test' }),
-      ]),
-    )
-    expect(result.booking.end).toBe('2026-11-02T10:00:00.000Z')
-  })
+  it.each([false, true])(
+    'serves only presentation keys for hidden types (team=%s)',
+    async (team) => {
+      const s = await setup(undefined, team)
+      const response = await app.request(path(s.token))
+      expect(response.status).toBe(200)
+      const page = (await response.json()) as OneTimeBookingPage
+      expect(page).toMatchObject({
+        prefill: { name: 'Suggested name', email: 'suggested@example.test' },
+        eventType: { allowedDurationsMinutes: [30, 60], questions: [{ id: 'topic' }] },
+      })
+      expect(Object.keys(page).sort()).toEqual(['eventType', 'prefill'])
+      expect(Object.keys(page.prefill).sort()).toEqual(['email', 'name'])
+      expect(Object.keys(page.eventType).sort()).toEqual(
+        [
+          'allowGuests',
+          'allowedDurationsMinutes',
+          'description',
+          'durationMinutes',
+          'host',
+          'location',
+          'questions',
+          ...(team ? ['team'] : []),
+          'title',
+        ].sort(),
+      )
+      expect(Object.keys(page.eventType.host).sort()).toEqual(['name', 'timeZone'])
+      if (team) expect(page.eventType.team).toEqual({ name: 'Private team' })
+      const privateAddressesAbsent = (value: unknown) => {
+        for (const identifier of [s.host.handle, 'private-call', s.teamSlug])
+          expect(JSON.stringify(value).includes(identifier)).toBe(false)
+      }
+      privateAddressesAbsent(page)
+      const html = await app.request(`/book/${s.token}`)
+      expect(html.status).toBe(200)
+      privateAddressesAbsent(await html.text())
+      expect(JSON.stringify(page).includes(s.token)).toBe(false)
+      for (const url of [
+        `/api/v1/book?token=${s.token}`,
+        `/api/v1/book/not-a-token?token=${s.token}`,
+      ]) {
+        const refused = await app.request(url)
+        expect(refused.status).toBe(404)
+        expect((await refused.text()).includes(s.token)).toBe(false)
+      }
+      const slots = await app.request(
+        `${path(s.token)}/slots?${new URLSearchParams({
+          start: '2026-11-02T08:00:00Z',
+          end: '2026-11-02T16:00:00Z',
+          durationMinutes: '60',
+        })}`,
+      )
+      expect(slots.status).toBe(200)
+      const available = (await slots.json()) as { data: SlotView[] }
+      expect(Object.keys(available)).toEqual(['data'])
+      expect(available.data.length).toBeGreaterThan(0)
+      for (const slot of available.data) expect(Object.keys(slot).sort()).toEqual(['end', 'start'])
+      privateAddressesAbsent(available)
+      const booked = await book(s.token, randomUUID())
+      expect(booked.status).toBe(201)
+      const result = (await booked.json()) as CreateBookingResult
+      expect(Object.keys(result).sort()).toEqual(['booking', 'manageToken'])
+      expect(Object.keys(result.booking).sort()).toEqual([
+        'attendees',
+        'cancelReason',
+        'cancelledAt',
+        'createdAt',
+        'end',
+        'eventTypeId',
+        'id',
+        'location',
+        'rescheduledFromId',
+        'responses',
+        'source',
+        'start',
+        'status',
+        'title',
+      ])
+      privateAddressesAbsent(result)
+      expect(result.booking.attendees).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'Edited invitee', email: 'edited@example.test' }),
+        ]),
+      )
+      expect(result.booking.end).toBe('2026-11-02T10:00:00.000Z')
+      const managed = await app.request('/api/v1/bookings/manage', {
+        headers: { 'x-manage-token': result.manageToken as string },
+      })
+      expect(managed.status).toBe(200)
+      const details = (await managed.json()) as ManagedBooking
+      expect(Object.keys(details).sort()).toEqual(
+        [...Object.keys(result.booking), 'eventType', 'hosts'].sort(),
+      )
+      expect(Object.keys(details.eventType ?? {}).sort()).toEqual([
+        'allowedDurationsMinutes',
+        'durationMinutes',
+        'title',
+      ])
+      expect(details.hosts.every((host: object) => Object.keys(host).join() === 'name')).toBe(true)
+      privateAddressesAbsent(details)
+    },
+  )
 
   it('uses no-referrer and no-store for page, API, errors, and refused embeds', async () => {
     const s = await setup()

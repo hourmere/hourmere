@@ -1,6 +1,7 @@
 // The MCP tool framework: each tool declares its schemas, annotations and a handler that
 // calls the service layer; runTool turns the outcome into an MCP tool result with the same
 // error codes and messages as the REST API.
+import { inspect } from 'node:util'
 import { getOpenApiMetadata } from '@asteasolutions/zod-to-openapi'
 import { z } from '@hono/zod-openapi'
 import {
@@ -18,6 +19,7 @@ import {
   type StandardSchemaWithJSON,
 } from '@modelcontextprotocol/server'
 import { hasUnsafeJsonText } from '../app.ts'
+import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import type { RateLimiter } from '../rate-limit.ts'
 
 /**
@@ -71,7 +73,7 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   scopeModes?: readonly string[]
   /** Identifies a dispatch branch only; permission decisions belong to the shared policy. */
   scopeMode?(args: unknown): string
-  /** Capability-bearing requests must not repeat validation input or error causes. */
+  /** Capability-bearing requests must not repeat validation input or unsanitized errors. */
   privateInput?(args: unknown): boolean
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
@@ -152,6 +154,10 @@ export async function runTool(
   logError: ToolErrorLog,
 ): Promise<CallToolResult> {
   const privateInput = tool.privateInput?.(args) === true
+  const diagnostic = (detail: unknown) =>
+    privateInput
+      ? redactOneTimeLogDetails(inspect(detail, { breakLength: Number.POSITIVE_INFINITY }))
+      : detail
   try {
     requireApiKeyOperation(call.caller, `mcp:${tool.name}`)
     if (tool.scopeMode)
@@ -169,7 +175,7 @@ export async function runTool(
     if (!result.success) {
       logError(
         `${tool.name} returned a result outside its output schema: `,
-        privateInput ? 'Private booking result rejected' : result.error,
+        diagnostic(result.error),
       )
       return errorResult({ error: 'internal_error' })
     }
@@ -191,15 +197,15 @@ export async function runTool(
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
-      if (err.cause !== undefined && !privateInput)
-        logError(`${tool.name}: ${err.code} caused by `, err.cause)
+      if (err.cause !== undefined)
+        logError(`${tool.name}: ${err.code} caused by `, diagnostic(err.cause))
       return errorResult(
         err.detail && !privateInput
           ? { error: err.code, message: err.detail }
           : { error: err.code },
       )
     }
-    logError(`${tool.name}: `, privateInput ? 'Private booking call failed' : err)
+    logError(`${tool.name}: `, diagnostic(err))
     return errorResult({ error: 'internal_error' })
   }
 }

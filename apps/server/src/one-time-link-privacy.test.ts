@@ -37,10 +37,16 @@ function moduleUrl(file: string, replacement?: Replacement, imports: Record<stri
 async function copy(
   replacement?: Replacement,
   securityReplacement?: Replacement,
+  privacyReplacement?: Replacement,
 ): Promise<AppCopy> {
-  const imports: Record<string, string> = securityReplacement
-    ? { './security-headers.ts': moduleUrl('./security-headers.ts', securityReplacement) }
-    : {}
+  const imports: Record<string, string> = {}
+  if (securityReplacement)
+    imports['./security-headers.ts'] = moduleUrl('./security-headers.ts', securityReplacement)
+  if (privacyReplacement)
+    imports['./one-time-link-privacy.ts'] = moduleUrl(
+      './one-time-link-privacy.ts',
+      privacyReplacement,
+    )
   const url = moduleUrl('./app.ts', replacement, imports)
   const source =
     Buffer.from(url.slice(url.indexOf(',') + 1), 'base64').toString() +
@@ -60,7 +66,12 @@ function application(module: AppCopy) {
         app.get('/api/v1/book/:token/ok', (c) => c.json({ ok: true }))
         app.get('/api/v1/book/:token/error', () => {
           throw new module.DomainError('invalid', 'booking_failed', undefined, {
-            cause: { capability: token },
+            cause: new TypeError(`Storage unavailable ${token}\nretry later`),
+          })
+        })
+        app.get('/api/v1/book/:token/unexpected', () => {
+          throw new Error(`Booking failed ${token}\nretry later`, {
+            cause: new TypeError('Underlying driver failed'),
           })
         })
         app.get('/api/v1/book/:token/domain', () => {
@@ -97,7 +108,18 @@ async function verifyLogs(module: AppCopy, route: string) {
   try {
     const app = application(module)
     await app.request(`/api/v1/book/${token}/${route}`)
-    if (route === 'error') expect(spies[2]?.mock.calls.length).toBe(1)
+    if (route === 'error' || route === 'unexpected') {
+      expect(spies[2]?.mock.calls.length).toBe(1)
+      const line = spies[2]?.mock.calls[0]?.map(String).join(' ') ?? ''
+      expect(line).toContain('/book/[redacted]: ')
+      expect(line).toContain(
+        route === 'error' ? 'TypeError: Storage unavailable' : 'Booking failed',
+      )
+      if (route === 'unexpected') expect(line).toContain('TypeError: Underlying driver failed')
+      expect(line).toContain('at ')
+      expect(line).toContain('\\n')
+      expect(line.includes('\n')).toBe(false)
+    }
     const diagnostics = spies.flatMap((spy) => spy.mock.calls)
     expect(JSON.stringify(diagnostics).includes(token)).toBe(false)
   } finally {
@@ -131,6 +153,7 @@ describe('one-time capability privacy source-copy controls', () => {
     const module = await copy()
     await verifyLogs(module, 'ok')
     await verifyLogs(module, 'error')
+    await verifyLogs(module, 'unexpected')
     for (const route of ['domain', 'http', 'validate']) await verifyResponse(module, route)
     await verifyHeaders(module)
   })
@@ -142,8 +165,28 @@ describe('one-time capability privacy source-copy controls', () => {
     await expect(verifyLogs(module, 'ok')).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects raw unexpected-error details entering the log', async () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: mutating literal source text
-    const module = await copy(['? `${c.req.method} /book/[redacted]: request failed`', '? text'])
+    const module = await copy([
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: mutating literal source text
+      'redactOneTimeLogDetails(`${c.req.method} /book/[redacted]: ${text}`)',
+      'text',
+    ])
+    await expect(verifyLogs(module, 'error')).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  it('detects dropping private error diagnostics', async () => {
+    const module = await copy([
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: mutating literal source text
+      'redactOneTimeLogDetails(`${c.req.method} /book/[redacted]: ${text}`)',
+      "'request failed'",
+    ])
+    await expect(verifyLogs(module, 'unexpected')).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+  it('detects removing capability redaction from diagnostics', async () => {
+    const module = await copy(undefined, undefined, [
+      ".replace(/[A-Za-z0-9_-]{43,}/g, '[redacted capability]')",
+      '',
+    ])
     await expect(verifyLogs(module, 'error')).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects reflected domain-error details', async () => {

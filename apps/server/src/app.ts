@@ -24,7 +24,7 @@ import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
-import { isOneTimeLinkPath } from './one-time-link-privacy.ts'
+import { isOneTimeLinkPath, redactOneTimeLogDetails } from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
@@ -290,7 +290,7 @@ export function createApp({
     (level === 'ERROR' ? console.error : console.warn)(
       `${new Date().toISOString()} ${level} ${
         isOneTimeLinkPath(c.req.path)
-          ? `${c.req.method} /book/[redacted]: request failed`
+          ? redactOneTimeLogDetails(`${c.req.method} /book/[redacted]: ${text}`)
           : escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))
       }`,
     )

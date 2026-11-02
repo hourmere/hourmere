@@ -4337,11 +4337,43 @@ export interface components {
             removedAt: string;
         };
         OneTimeBookingPage: {
-            eventType: components["schemas"]["PublicEventType"];
+            eventType: components["schemas"]["OneTimeEventType"];
             prefill: {
                 email: string | null;
                 name: string | null;
             };
+        };
+        OneTimeEventType: {
+            /** @description Allowed meeting lengths, in display order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
+            allowedDurationsMinutes?: number[];
+            /** @description Whether invitees may add guest recipients */
+            allowGuests: boolean;
+            description: string | null;
+            durationMinutes: number;
+            host: {
+                /** @description An existing first-party raster image path; external profile pictures are omitted */
+                image?: string;
+                name: string;
+                /** @description The host's IANA time zone; omitted for round-robin pools */
+                timeZone?: string;
+            };
+            hosts?: {
+                name: string;
+                timeZone: string;
+            }[];
+            /** @description Only the kind; details such as a phone number come with the booking */
+            location: {
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            } | null;
+            /** @description Booking-form fields beyond name and email */
+            questions: components["schemas"]["Question"][];
+            /** @enum {string} */
+            schedulingType?: "round_robin";
+            team?: {
+                name: string;
+            };
+            title: string;
         };
         Profile: {
             /** Format: date-time */

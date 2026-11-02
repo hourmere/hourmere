@@ -26,6 +26,7 @@ export {
   MAX_SLOT_CANDIDATES,
   MAX_SLOT_RANGE_DAYS,
   type OneTimeBookingPage,
+  type OneTimeEventType,
   type PublicEventType,
   type PublicEventTypeSummary,
   type PublicHost,

@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { inspect } from 'node:util'
 import { z } from '@hono/zod-openapi'
 import * as auth from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
@@ -10,6 +11,7 @@ import type { Db } from '@hourmere/db'
 import * as scheduling from '@hourmere/scheduling'
 import { describe, expect, it, vi } from 'vitest'
 import { hasUnsafeJsonText } from '../app.ts'
+import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as limits from '../rate-limit.ts'
 import * as bookingSchemas from '../routes/bookings.ts'
 import * as publicSchemas from '../routes/public.ts'
@@ -99,7 +101,14 @@ function runner(change?: Change) {
   return compile<typeof runTool>(
     'apps/server/src/mcp/tools.ts',
     'runTool',
-    { z, ...auth, DomainError: scheduling.DomainError, hasUnsafeJsonText },
+    {
+      z,
+      ...auth,
+      DomainError: scheduling.DomainError,
+      hasUnsafeJsonText,
+      inspect,
+      redactOneTimeLogDetails,
+    },
     change,
   )
 }
@@ -159,12 +168,15 @@ async function verifyValidationPrivacy(run = runTool) {
 }
 async function verifyErrorPrivacy(run = runTool) {
   const { tool } = factory()
-  for (const thrown of [
-    new Error(`Driver leaked ${TOKEN}`),
-    new scheduling.DomainError('invalid', 'invalid_answers', `Question ${TOKEN}`, {
-      cause: new Error(`Wrapped ${TOKEN}`),
-    }),
-  ]) {
+  for (const [thrown, message] of [
+    [new Error(`Driver unavailable ${TOKEN}\nretry later`), 'Error: Driver unavailable'],
+    [
+      new scheduling.DomainError('invalid', 'invalid_answers', `Question ${TOKEN}`, {
+        cause: new Error(`Wrapped driver unavailable ${TOKEN}\nretry later`),
+      }),
+      'Error: Wrapped driver unavailable',
+    ],
+  ] as const) {
     const logs = vi.fn()
     const failing: Tool = {
       ...tool,
@@ -175,12 +187,13 @@ async function verifyErrorPrivacy(run = runTool) {
     const result = await run(failing, input, { caller, rateLimit: () => {} }, logs)
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result).includes(TOKEN)).toBe(false)
-    expect(
-      logs.mock.calls
-        .map((args) => args.map(String).join(' '))
-        .join(' ')
-        .includes(TOKEN),
-    ).toBe(false)
+    expect(logs).toHaveBeenCalledTimes(1)
+    const line = logs.mock.calls.map((args) => args.map(String).join(' ')).join(' ')
+    expect(line).toContain(message)
+    expect(line).toContain('at ')
+    expect(line).toContain('\\n')
+    expect(line.includes('\n')).toBe(false)
+    expect(line.includes(TOKEN)).toBe(false)
   }
 }
 async function verifyResultPrivacy(run = runTool) {
@@ -195,6 +208,8 @@ async function verifyResultPrivacy(run = runTool) {
   }
   const result = await run(failing, input, { caller, rateLimit: () => {} }, logs)
   expect(errorCode(result)).toBe('internal_error')
+  expect(logs).toHaveBeenCalledTimes(1)
+  expect(logs.mock.calls.map((args) => args.map(String).join(' ')).join(' ')).toContain('ZodError')
   expect(
     logs.mock.calls
       .map((args) => args.map(String).join(' '))
@@ -271,23 +286,16 @@ describe('one-time booking MCP adapter', () => {
       'describeIssues(parsed.error.issues)',
       verifyValidationPrivacy,
     ],
-    [
-      'error logging privacy',
-      "privateInput ? 'Private booking call failed' : err",
-      'err',
-      verifyErrorPrivacy,
-    ],
+    ['error logging privacy', 'diagnostic(err)', 'err', verifyErrorPrivacy],
     ['domain error privacy', 'err.detail && !privateInput', 'err.detail', verifyErrorPrivacy],
+    ['domain cause privacy', 'diagnostic(err.cause)', 'err.cause', verifyErrorPrivacy],
+    ['error diagnostics', 'diagnostic(err)', "'Private booking call failed'", verifyErrorPrivacy],
+    ['domain cause diagnostics', 'if (err.cause !== undefined)', 'if (false)', verifyErrorPrivacy],
+    ['result logging privacy', 'diagnostic(result.error)', 'result.error', verifyResultPrivacy],
     [
-      'domain cause privacy',
-      'err.cause !== undefined && !privateInput',
-      'err.cause !== undefined',
-      verifyErrorPrivacy,
-    ],
-    [
-      'result logging privacy',
-      "privateInput ? 'Private booking result rejected' : result.error",
-      'result.error',
+      'result diagnostics',
+      'diagnostic(result.error)',
+      "'Private booking result rejected'",
       verifyResultPrivacy,
     ],
   ] as const)(
