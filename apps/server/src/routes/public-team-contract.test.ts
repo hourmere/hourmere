@@ -56,7 +56,9 @@ function verifyPublicKeys(
   expect(Object.keys(page.team ?? {}).sort()).toEqual(['name', 'slug'])
   expect(Object.keys(page.location ?? {})).toEqual(['kind'])
   expect(page.allowedDurationsMinutes).toEqual(
-    allowedDurationsMinutes.length > 1 ? allowedDurationsMinutes : undefined,
+    allowedDurationsMinutes.length > 1
+      ? [...allowedDurationsMinutes].sort((a, b) => a - b)
+      : undefined,
   )
   if (schedulingType === 'collective') {
     expect(page.hosts).toHaveLength(2)
@@ -260,7 +262,7 @@ describe('public team DTO source-copy negative controls', () => {
     verifyProjection(projectionCopy(), type)
   })
 
-  it.each(schedulingTypes)('preserves offered duration order for a %s event', (type) => {
+  it.each(schedulingTypes)('keeps offered durations in ascending order for a %s event', (type) => {
     verifyProjection(projectionCopy(), type, [60, 30, 15])
   })
 
@@ -281,10 +283,10 @@ describe('public team DTO source-copy negative controls', () => {
     )
   })
 
-  it('detects reordering offered durations', () => {
+  it('detects leaving offered durations unsorted', () => {
     const mutant = projectionCopy([
-      'allowedDurationsMinutes: [...et.allowedDurationsMinutes]',
       'allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b)',
+      'allowedDurationsMinutes: [...et.allowedDurationsMinutes]',
     ])
     expect(() => verifyProjection(mutant, 'individual', [60, 30, 15])).toThrowError(
       expect.objectContaining({ name: 'AssertionError' }),

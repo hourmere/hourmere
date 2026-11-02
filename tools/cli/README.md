@@ -91,10 +91,26 @@ invitee authority. These commands act immediately and can send notifications. Ca
 never automatically retried. After a lost booking response, inspect the instance and reuse
 the retained request and idempotency key; **rescheduling is not idempotent**.
 
+## Configure meeting lengths
+
+Use `create-event` or `update-event` with a `full` API key to configure event types.
+`durationMinutes` is the default; `allowedDurationsMinutes` is the complete list
+of 1–12 distinct whole-minute lengths from 1 to 1440, kept in ascending order and including
+that default. Supplied lengths are sorted before storage.
+For example, save `{ "slug": "intro", "title": "Introduction", "durationMinutes": 30,
+"allowedDurationsMinutes": [15, 30, 60] }` to a request file and run
+`hourmere create-event --input event-request.json`. Updates use a flat object with `id`
+beside the changed fields: `hourmere update-event --input event-update.json`.
+Omitting the list on creation makes a single-length type. Use JSON fields for configuration;
+`--duration-minutes` selects a length only on `slots`, `book` and `reschedule`.
+See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for editor
+steps, update rules and rescheduling behavior.
+
 ## Commands
 
-`whoami`, `profile`, `catalog`, `event`, `set-event-notifications`, `schedules`, `schedule`, `slots`, `book`, `list`,
-`reschedule`, `cancel`, `retry-meeting`, `retry-calendar-copy`.
+`whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,
+`set-event-notifications`, `schedules`, `schedule`, `slots`, `book`, `list`, `reschedule`,
+`cancel`, `retry-meeting`, `retry-calendar-copy`.
 
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.

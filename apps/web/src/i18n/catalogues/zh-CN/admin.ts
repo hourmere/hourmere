@@ -1,5 +1,24 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Allowed durations': '可选时长',
+  'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
+    '提供 1–12 种不同时长，每种为 1–1440 分钟。受邀人先选择时长，再选择时间。',
+  'Offered lengths': '已提供的时长',
+  'Keep at least one length. Removing the default selects the first remaining length.':
+    '请保留至少一种时长。移除默认时长后，将使用剩余的第一种时长作为默认值。',
+  'Quick durations': '常用时长',
+  'Add {0}': '添加{0}',
+  'Duration to add (minutes)': '要添加的时长（分钟）',
+  'Add duration': '添加时长',
+  'Default duration': '默认时长',
+  'Selected when an invitee opens the booking page. They can choose another offered length.':
+    '受邀人打开预约页面时，将预选此时长。他们可以选择你提供的其他时长。',
+  'This duration is already in the list.': '此时长已在列表中。',
+  'Offer from 1 to 12 durations.': '请提供 1–12 种时长。',
+  'Offer each duration only once.': '每种时长只能提供一次。',
+  'Include the default duration in the allowed durations.': '请在可选时长中包含默认时长。',
+  'Added {0}.': '已添加{0}。',
+  'Removed {0}. Default duration: {1}.': '已移除{0}。默认时长：{1}。',
   Scope: '权限范围',
   'Bookings (read/write)': '预约读写',
   'Read only': '只读',
@@ -329,6 +348,7 @@ export const admin = {
     '请尝试其他时间范围或清除筛选。新的团队预约会显示在这里。',
   'Deleted event type': '已删除的活动类型',
   ' + {0} guests': ' + {0}位来宾',
+  'Co-hosts': '共同主持人',
   'Team booking details': '团队预约详情',
   'Close details': '关闭详情',
   'Booking ID': '预约ID',

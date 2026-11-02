@@ -2452,3 +2452,45 @@ h3:lang(zh) {
 .invitation-row .confirm {
   min-width: 0;
 }
+
+/* Length controls wrap within the editor, including a 320px viewport. */
+.durations-editor {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.durations-editor legend {
+  margin-bottom: var(--space-2);
+  font-weight: 600;
+}
+
+.duration-list,
+.duration-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 0;
+}
+
+.duration-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.durations-editor > button {
+  justify-self: start;
+}

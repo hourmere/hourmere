@@ -25,8 +25,8 @@ export interface MailMessage {
   sensitive?: boolean | undefined
   /** One address. It is never parsed as a list, so a comma in it cannot add recipients. */
   to: string
-  /** The person a human email reply should reach; never overrides the configured From. */
-  replyTo?: { name: string; email: string } | undefined
+  /** People a human email reply should reach; never overrides the configured From. */
+  replyTo?: { name: string; email: string } | readonly { name: string; email: string }[] | undefined
   subject: string
   text: string
   html?: string
@@ -239,7 +239,13 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
       signal?.throwIfAborted()
       // Reply-To is optional user input. A booking may accept an address SMTP cannot
       // represent here; omit it rather than preventing every recipient's notification.
-      const safeReplyTo = replyTo && isMailbox(replyTo.email) ? replyTo : undefined
+      const safeReplyTo = (Array.isArray(replyTo) ? replyTo : replyTo ? [replyTo] : [])
+        .filter((person) => isMailbox(person.email))
+        .filter(
+          (person, index, people) =>
+            people.findIndex((p) => p.email.toLowerCase() === person.email.toLowerCase()) === index,
+        )
+        .map((person) => ({ name: singleLine(person.name), address: person.email }))
       const calendar = attachments?.find((a) =>
         /^text\/calendar; method=(REQUEST|CANCEL); charset=UTF-8$/.test(a.contentType),
       )
@@ -248,9 +254,7 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
       const sending = transport.sendMail({
         // An address object is taken as one address; a string would be parsed as a list.
         to: { name: '', address: to },
-        ...(safeReplyTo && {
-          replyTo: { name: singleLine(safeReplyTo.name), address: safeReplyTo.email },
-        }),
+        ...(safeReplyTo.length && { replyTo: safeReplyTo }),
         // nodemailer folds long headers but would keep a line break; a subject is one line.
         subject: subject.replace(/[\r\n]+/g, ' '),
         text,

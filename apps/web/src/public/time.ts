@@ -86,10 +86,15 @@ export function instantOf(
   timeZone: string,
 ): number {
   const wall = Date.UTC(date.year, date.month - 1, date.day, hour, minute)
-  const before = offsetAt(wall, timeZone)
-  const guess = wall - before
-  const after = offsetAt(guess, timeZone)
-  return after === before ? guess : wall - after
+  // Sample both sides of a nearby change rather than letting the initial UTC guess
+  // choose which offset wins. The offsets give the same candidate on ordinary days.
+  const before = offsetAt(wall - 86_400_000, timeZone)
+  const after = offsetAt(wall + 86_400_000, timeZone)
+  const earlier = wall - Math.max(before, after)
+  const later = wall - Math.min(before, after)
+  // In a repeated hour, the earlier candidate is valid. In a gap it does not show
+  // the requested wall time, so use the later candidate, which moves forward by the gap.
+  return offsetAt(earlier, timeZone) === wall - earlier ? earlier : later
 }
 
 /** `9:30 AM` or `09:30`, as the locale writes times (12 or 24 hours). */

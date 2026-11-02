@@ -168,6 +168,26 @@ describe('the time zone picker', () => {
     expect(screen.queryAllByRole('option')).toHaveLength(0)
   })
 
+  it.each([
+    ['America/New_York', '2026-03-08', 'GMT-04:00'],
+    ['America/New_York', '2026-11-01', 'GMT-05:00'],
+    ['Europe/Berlin', '2026-03-29', 'GMT+02:00'],
+    ['Europe/Berlin', '2026-10-25', 'GMT+01:00'],
+  ] as const)(
+    'keeps the local-noon offset on a transition date in %s: %s',
+    (zone, date, offset) => {
+      render(
+        <TimeZonePicker
+          value={zone}
+          onChange={vi.fn()}
+          referenceDate={date}
+          now={Date.parse('2026-01-01T12:00:00Z')}
+        />,
+      )
+      expect(screen.getByRole('button', { name: /Time zone/ }).textContent).toContain(offset)
+    },
+  )
+
   it('reuses zone offsets while typing a search', async () => {
     const offsets = vi.spyOn(time, 'offsetLabel')
     const user = userEvent.setup()

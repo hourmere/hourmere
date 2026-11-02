@@ -382,8 +382,8 @@ describe('follow-up email templates', () => {
     [
       'location omission',
       [
-        "field(t('Host'), host),\n    ],",
-        "field(t('Host'), host),\n      field(t('Where'), meeting.location ? meetingLocationText(meeting.location) : ''),\n    ],",
+        "field(t('Host'), host),\n",
+        "field(t('Host'), host),\n      field(t('Where'), meeting.location ? meetingLocationText(meeting.location) : ''),\n",
       ],
       verifyPrivacy,
     ],

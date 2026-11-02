@@ -123,8 +123,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
-| Booking actions and repairs | Allowed | — | Allowed |
 | Browser session operations | — | — | — |
+| Booking actions and repairs | Allowed | — | Allowed |
 | Account settings and configuration writes | Allowed | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
@@ -135,6 +135,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/bookings/{id}/organization` | Browser session only | — |
 | `POST /api/v1/bookings/{id}/calendar-copy/retry` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full, bookings` |
@@ -195,6 +196,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `DELETE /api/v1/schedules/{id}/overrides/{date}` | Session or API key | `full` |
 | `POST /api/v1/schedules/default` | Session or API key | `full` |
 | `GET /api/v1/team/bookings` | Browser session only | — |
+| `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |
@@ -240,6 +242,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `create_event_type` | — | `create-event` | `full` |
+| `update_event_type` | — | `update-event` | `full` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 

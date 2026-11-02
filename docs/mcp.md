@@ -76,6 +76,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `create_event_type` | — | `create-event` | `full` |
+| `update_event_type` | — | `update-event` | `full` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
 
@@ -105,3 +107,15 @@ Before upgrading, stop every old web/all/worker and other old key-authenticating
 apply migrations and restart every role with the new code before allowing scoped keys.
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
+
+## Configure meeting lengths
+
+MCP `create_event_type` and `update_event_type` configure event types with the same
+validation and permissions as REST. API keys need `full` scope, not `bookings` or `read`.
+`durationMinutes` is the default; `allowedDurationsMinutes` is a list of 1–12
+distinct whole-minute lengths from 1 to 1440 inclusive, kept in ascending order, and must
+include the default. Supplied lengths are sorted before storage.
+Creation requires `slug`, `title` and `durationMinutes`; omitting the list creates
+`[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
+See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
+update compatibility, invitee selection, rescheduling and shared-rule limits.

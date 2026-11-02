@@ -6,6 +6,9 @@ import { getPublicTeamEventType, listPublicTeamSlots } from './availability.ts'
 import {
   cancelManagedBooking,
   createPublicTeamBooking,
+  getHostBooking,
+  getManagedBooking,
+  listHostBookings,
   rescheduleManagedBooking,
 } from './bookings.ts'
 import {
@@ -88,6 +91,102 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
       invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
     })
   const code = async (fn: () => Promise<unknown>) => (await domainError(fn)).code
+
+  it('returns only other booked hosts’ names to host reads, keeping public and managed DTOs unchanged', async () => {
+    const s = await setup(3)
+    const result = await booking(s)
+    expect(result.booking).not.toHaveProperty('coHosts')
+    expect(await getManagedBooking(s.pub, required(result.manageToken))).not.toHaveProperty(
+      'coHosts',
+    )
+    for (const user of s.users) {
+      const caller = testContext(db, s.team.as(user), now)
+      const expected = s.users
+        .filter((other) => other.id !== user.id)
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((other) => ({ name: other.name }))
+      for (const current of [
+        await getHostBooking(caller, result.booking.id),
+        (await listHostBookings(caller)).data[0],
+      ]) {
+        expect(current?.coHosts).toEqual(expected)
+        for (const other of current?.coHosts ?? []) expect(Object.keys(other)).toEqual(['name'])
+      }
+    }
+    const outsider = await createTestUser(db, 'Other team member')
+    expect(
+      await code(() => getHostBooking(testContext(db, outsider.principal, now), result.booking.id)),
+    ).toBe('booking_not_found')
+  })
+
+  it('keeps unnamed co-hosts neutral and falls back to a handle without disclosing an email', async () => {
+    const s = await setup(3)
+    const result = await booking(s)
+    const unnamed = required(s.users[1])
+    const handled = required(s.users[2])
+    await db
+      .updateTable('auth.user')
+      .set({ name: '  ' })
+      .where('id', 'in', [unnamed.id, handled.id])
+      .execute()
+    const handle = `co-host-${randomUUID().slice(0, 8)}`
+    await db
+      .insertInto('profiles')
+      .values({ user_id: handled.id, handle, time_zone: 'UTC' })
+      .execute()
+    const expected = [
+      { id: unnamed.id, name: '' },
+      { id: handled.id, name: handle },
+    ]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map(({ name }) => ({ name }))
+    for (const current of [
+      await getHostBooking(s.ctx, result.booking.id),
+      (await listHostBookings(s.ctx)).data[0],
+    ]) {
+      expect(current?.coHosts).toEqual(expected)
+      expect(JSON.stringify(current?.coHosts)).not.toContain(unnamed.email)
+      expect(JSON.stringify(current?.coHosts)).not.toContain(handled.email)
+    }
+  })
+
+  it('omits departed and unverified co-hosts consistently from detail and list reads', async () => {
+    const s = await setup(4)
+    const result = await booking(s)
+    const current = required(s.users[1])
+    const departed = required(s.users[2])
+    const unverified = required(s.users[3])
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', s.team.id)
+      .where('userId', '=', departed.id)
+      .execute()
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', unverified.id)
+      .execute()
+    for (const read of [
+      await getHostBooking(s.ctx, result.booking.id),
+      (await listHostBookings(s.ctx)).data[0],
+    ]) {
+      expect(read?.coHosts).toEqual([{ name: current.name }])
+    }
+  })
+
+  it('omits co-host metadata for a single-host booking', async () => {
+    const user = await createTestUser(db, 'Solo host')
+    const f = createFixtures(db)
+    const id = await f.booking(
+      user.principal.organization.id,
+      [user.id],
+      '2026-11-02T09:00Z',
+      '2026-11-02T09:30Z',
+    )
+    expect(await getHostBooking(testContext(db, user.principal, now), id)).not.toHaveProperty(
+      'coHosts',
+    )
+  })
 
   it('assigns two to eight verified members, normalizes IDs, and preserves omitted configuration', async () => {
     const s = await setup(8)

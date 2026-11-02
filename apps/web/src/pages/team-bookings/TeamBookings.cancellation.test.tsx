@@ -38,6 +38,7 @@ function booking(id = FIRST_ID, title = 'Team discovery call'): Schemas['TeamAdm
   return {
     id,
     status: 'confirmed',
+    isRescheduled: false,
     start: '2030-03-04T09:00:00.000Z',
     end: '2030-03-04T09:30:00.000Z',
     cancelledAt: null,
@@ -252,12 +253,12 @@ describe('team booking cancellation refusals', () => {
       expect(screen.queryByText(copy.revoked)).toBeNull()
       const panel = within(screen.getByRole('region', { name: copy.detail }))
       const definitions = panel.getAllByRole('definition')
-      expect(definitions[3]?.querySelector('time')?.dateTime).toBe('2020-03-04T09:00:00.000Z')
-      expect(definitions[4]?.textContent).toBe(copy.confirmed)
-      expect(definitions[5]?.textContent).toBe(copy.notSet)
+      expect(definitions[1]?.querySelector('time')?.dateTime).toBe('2020-03-04T09:00:00.000Z')
+      expect(definitions[2]?.textContent).toBe(copy.confirmed)
+      expect(panel.queryByText(copy.notSet)).toBeNull()
       for (const host of current.hosts) {
-        expect(definitions[6]?.textContent).toContain(host.name)
-        expect(definitions[6]?.textContent).toContain(host.userId)
+        expect(definitions[3]?.textContent).toContain(host.name)
+        expect(definitions[3]?.textContent).not.toContain(host.userId)
       }
       expect(
         screen.getByRole('button', { name: 'Team discovery call' }).closest('tr')?.textContent,
@@ -356,7 +357,7 @@ describe('team booking cancellation outcome', () => {
         isBooker: false,
       })
       const api = server({
-        ...profile({ ...PROFILE, locale: copy.locale }),
+        ...profile({ ...PROFILE, locale: copy.locale, timeZone: 'Asia/Shanghai' }),
         [LIST]: () => json(200, { data: [current], nextCursor: null }),
       })
       const user = userEvent.setup()
@@ -492,9 +493,10 @@ describe('team booking cancellation outcome', () => {
       await user.click(refreshed)
       const panel = within(screen.getByRole('region', { name: 'Team booking details' }))
       expect(panel.getByText('Cancelled', { selector: 'dd' })).toBeDefined()
-      expect(panel.getAllByRole('definition')[5]?.querySelector('time')?.dateTime).toBe(
-        '2029-12-04T09:00:00.000Z',
-      )
+      expect(
+        panel.getByText('Cancelled', { selector: 'dt' }).nextElementSibling?.querySelector('time')
+          ?.dateTime,
+      ).toBe('2029-12-04T09:00:00.000Z')
       expect(api.to(LIST)).toHaveLength(2)
       expect(api.to(cancelRoute())).toHaveLength(1)
     } finally {
@@ -526,7 +528,7 @@ describe('team booking cancellation outcome', () => {
     expect(row?.textContent).not.toContain('Cancelled')
     const panel = within(screen.getByRole('region', { name: 'Team booking details' }))
     expect(panel.getByText('Confirmed', { selector: 'dd' })).toBeDefined()
-    expect(panel.getAllByRole('definition')[5]?.textContent).toBe('Not set')
+    expect(panel.queryByText('Cancelled', { selector: 'dt' })).toBeNull()
     expect(screen.getByDisplayValue('Keep this explanation')).toBeDefined()
     expect(screen.queryByText('The booking is cancelled.')).toBeNull()
     expect(api.to(LIST)).toHaveLength(1)

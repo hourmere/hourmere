@@ -28,6 +28,7 @@ export {
   type PublicHost,
   type SlotView,
 } from './availability.ts'
+export { resolveBookingOrganization } from './booking-organization.ts'
 export {
   type Attendee,
   type Booking,
@@ -217,7 +218,11 @@ export {
   TeamAdminBookingSchema,
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
-export { cancelTeamAdminBooking, listTeamAdminBookings } from './team-bookings.ts'
+export {
+  cancelTeamAdminBooking,
+  getTeamAdminBooking,
+  listTeamAdminBookings,
+} from './team-bookings.ts'
 export {
   cleanText,
   isMultiLineText,

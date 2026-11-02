@@ -93,6 +93,7 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
     'POST /api/v1/calendar-connections/microsoft/authorize',
@@ -109,6 +110,7 @@ const classes = {
     'POST /api/v1/mcp-oauth/select',
     'GET /api/v1/readiness/self',
     'GET /api/v1/team/bookings',
+    'GET /api/v1/team/bookings/{id}',
     'POST /api/v1/team/bookings/{id}/cancel',
     'GET /api/v1/team/invitations',
     'GET /api/v1/team/invitations/{invitationId}',
@@ -284,19 +286,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
         const error =
-          template === '/api/v1/readiness/self'
-            ? 'readiness_access_denied'
-            : template.startsWith('/api/v1/team') || template.startsWith('/api/v1/teams')
-              ? 'team_management_access_denied'
-              : template.startsWith('/api/v1/conference-connections')
-                ? 'conference_session_required'
-                : 'session_required'
+          template === '/api/v1/bookings/{id}/organization'
+            ? 'booking_not_found'
+            : template === '/api/v1/readiness/self'
+              ? 'readiness_access_denied'
+              : template.startsWith('/api/v1/team') || template.startsWith('/api/v1/teams')
+                ? 'team_management_access_denied'
+                : template.startsWith('/api/v1/conference-connections')
+                  ? 'conference_session_required'
+                  : 'session_required'
         return {
           method,
           path,
           payload,
           headers,
-          expectedStatus: 403,
+          expectedStatus: error === 'booking_not_found' ? 404 : 403,
           nativeError: error,
           cleanupEvent,
           cleanupSchedule,
@@ -498,14 +502,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 81-operation contract and all 243 scope combinations', () => {
+    it('covers the exact 83-operation contract and all 249 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(81)
-      expect(new Set(ids).size).toBe(81)
+      expect(ids).toHaveLength(83)
+      expect(new Set(ids).size).toBe(83)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(243)
+      expect(cases).toHaveLength(249)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -522,7 +526,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
         })
         if (kind === 'session_only') {
-          expect(response.status).toBe(403)
+          expect(response.status).toBe(fixture.expectedStatus)
           expect(await response.json()).toMatchObject({ error: fixture.nativeError })
           expect(google.calls.length).toBe(beforeProvider)
         } else if (!allowed[kind].includes(scope)) {

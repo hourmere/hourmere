@@ -57,7 +57,7 @@ export async function getManagedBookingDetails(
           title: eventType.title,
           durationMinutes: eventType.duration_minutes,
           ...(eventType.allowed_durations_minutes.length > 1 && {
-            allowedDurationsMinutes: [...eventType.allowed_durations_minutes],
+            allowedDurationsMinutes: [...eventType.allowed_durations_minutes].sort((a, b) => a - b),
           }),
         }
       : null,
