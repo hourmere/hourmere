@@ -137,8 +137,10 @@ detail fields; use the corresponding detail tool when needed. Event-type writes 
 available through REST and the web app. Always check public availability
 with `find_available_slots` before booking an event found in the catalog.
 
-`set_event_type_notifications` replaces both arrays as one value; it never sends mail
-immediately or changes existing booking snapshots. `get_event_type` returns the saved
+See [Reminders and follow-ups](/docs/reminders-and-follow-ups) for timing, recipients,
+host notes and known limitations. `set_event_type_notifications` replaces both arrays as
+one value; it never sends mail immediately or changes existing booking snapshots.
+`get_event_type` returns the saved
 canonical value. For example, `{ "id": "<event-type-id>", "notifications": {
 "reminders": [], "followUps": [] } }` disables scheduled messages for new bookings.
 See [notification validation](/docs/api-conventions#event-type-notification-settings)

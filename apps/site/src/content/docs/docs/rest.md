@@ -72,6 +72,9 @@ invitee choices, rescheduling and shared-rule limits.
 
 ## Configure reminders and follow-ups
 
+See [Reminders and follow-ups](/docs/reminders-and-follow-ups) for editor steps, timing,
+recipients and known limitations.
+
 Use a `full` API key and an event-type ID from `GET /api/v1/event-types`. Protected event
 reads include `notifications`. To replace only that setting:
 
