@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { isReservedName, RESERVED_NAMES } from './reserved.ts'
+import { isPublicTeamSlug, isReservedName, RESERVED_NAMES } from './reserved.ts'
 
 describe('reserved names', () => {
   it('cover the top-level paths of the app, the server and the product', () => {
@@ -66,5 +68,24 @@ describe('reserved names', () => {
     expect(isReservedName('ada')).toBe(false)
     expect(isReservedName('admins')).toBe(false)
     expect(isReservedName('')).toBe(false)
+  })
+
+  it('keeps waitlist available to existing personal and team accounts, including in a source copy', () => {
+    const assertCompatible = (reserved = isReservedName, team = isPublicTeamSlug) => {
+      for (const name of ['waitlist', 'Waitlist']) {
+        expect(reserved(name)).toBe(false)
+        expect(team(name)).toBe(true)
+      }
+    }
+    assertCompatible()
+    const source = readFileSync(new URL('./reserved.ts', import.meta.url), 'utf8')
+    const marker = "  'booking',"
+    expect(source.includes(marker)).toBe(true)
+    const copied = new Function(
+      `${stripTypeScriptTypes(source.replace(marker, `${marker}\n  'waitlist',`)).replace(/\bexport /g, '')}; return { isReservedName, isPublicTeamSlug }`,
+    )() as { isReservedName: typeof isReservedName; isPublicTeamSlug: typeof isPublicTeamSlug }
+    expect(() => assertCompatible(copied.isReservedName, copied.isPublicTeamSlug)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 })

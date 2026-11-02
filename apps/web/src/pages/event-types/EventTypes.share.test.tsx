@@ -141,6 +141,21 @@ function teamRole(role: 'owner' | 'member'): Routes {
 }
 
 describe('viewing and sharing the saved event type', () => {
+  it('keeps the existing waitlist handle shareable without a missing-handle warning', async () => {
+    server([eventType()], {
+      'GET /api/v1/profile': () => json(200, { ...PROFILE, handle: 'waitlist' }),
+    })
+    await openExisting()
+    expect(
+      within(share())
+        .getByRole('link', { name: /View booking page/ })
+        .getAttribute('href'),
+    ).toBe(`${window.location.origin}/waitlist/intro-call`)
+    expect(
+      within(share()).queryByText('Set a handle in Settings before sharing this event type.'),
+    ).toBeNull()
+  })
+
   it('opens the saved editor after creation and copies its full link with the keyboard', async () => {
     const user = userEvent.setup()
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)

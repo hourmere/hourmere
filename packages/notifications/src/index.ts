@@ -56,6 +56,13 @@ export {
 } from './invitation-mail-limits.ts'
 export { deliverInvitationEmail, type InvitationEmailSenderDeps } from './invitation-sender.ts'
 export { notificationEmailCleanupJob } from './mail-limits.ts'
+export {
+  createWaitlistEmailWorker,
+  deliverWaitlistEmail,
+  type WaitlistEmailDeps,
+  type WaitlistEmailRequest,
+  waitlistEmailJob,
+} from './waitlist.ts'
 
 export const NOTIFICATION_KINDS = [
   'confirmed',
