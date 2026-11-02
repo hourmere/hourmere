@@ -15,6 +15,9 @@ export const AUDIT_EMAIL = `${'long.synthetic.attendee.'.repeat(6)}@hourmere.inv
 export const AUDIT_CONFIRMATION_EMAIL = `${'synthetic.confirmation.'.repeat(6)}attendee@hourmere.invalid`
 export const AUDIT_TEAM_NAME = 'InternationalResearchAndSchedulingTeam'.repeat(5)
 export const AUDIT_GUEST_NAME = '跨地区协作访客InternationalResearchGuest'.repeat(5)
+export const AUDIT_HOST_NOTE =
+  'Thanks for joining this synthetic scheduling discussion.\n' +
+  '请分享你的后续问题：这是一段用于检查窄屏留言输入框的合成主持人留言。'
 
 export interface AuditFixtureState {
   organizationId: string

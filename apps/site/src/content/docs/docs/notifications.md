@@ -15,6 +15,9 @@ every booking change, whether it came over REST or MCP (last section).
 
 ## Configure reminders and follow-ups
 
+For host steps in the event-type editor, see
+[Reminders and follow-ups](/docs/reminders-and-follow-ups).
+
 Protected event-type reads include `notifications`. Set it through event-type creation or
 update, `PUT /api/v1/event-types/{id}/notifications`, MCP `set_event_type_notifications`, or
 CLI `set-event-notifications`. Personal types require their owner; team types require an
