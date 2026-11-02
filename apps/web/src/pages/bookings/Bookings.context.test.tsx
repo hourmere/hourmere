@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
 import {
   fakeApi,
@@ -27,6 +27,7 @@ const team = {
   },
 }
 const detail = `/app/bookings/${BOOKING_ID}`
+beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
 const cancelPath = `/api/v1/bookings/${BOOKING_ID}/cancel`
 const refusal = () => json(409, { error: 'organization_context_changed' })
 

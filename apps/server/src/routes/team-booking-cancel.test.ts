@@ -27,6 +27,7 @@ import {
   type TestUser,
 } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
 import { createApp } from '../app.ts'
@@ -462,7 +463,7 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
           else
             await db
               .updateTable('auth.session')
-              .set({ expiresAt: new Date(Date.now() - 60_000) })
+              .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
               .where('id', '=', f.sessionId)
               .execute()
         },

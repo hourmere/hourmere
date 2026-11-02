@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Booking } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
 import { browserLocale } from '../../test/browser-locale.ts'
@@ -17,6 +17,12 @@ import { BOOKING_ID, booking, EVENT_TYPE_ID, eventType } from '../../test/fixtur
 import { PAGE_SIZE } from './Bookings.tsx'
 
 const location = () => screen.getByTestId('location').textContent
+// Both the list's initial new Date() and the detail's Date.now() share one fixture clock.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-03-01T12:00:00Z'))
+})
+afterEach(() => vi.useRealTimers())
 const query = (path: string) => Object.fromEntries(new URL(path, 'http://x').searchParams)
 
 /** Bookings numbered from 1, a day apart, starting 2030-03-01 09:00 UTC. */

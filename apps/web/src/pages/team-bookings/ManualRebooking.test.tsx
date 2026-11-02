@@ -57,6 +57,7 @@ function panel(value = booking(), expectedOrganizationId = TEAM_ID) {
 }
 
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z'))
   session.me.organization = { id: TEAM_ID, slug: 'Research-Team', personal: false }
 })
 

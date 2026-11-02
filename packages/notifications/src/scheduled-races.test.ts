@@ -12,7 +12,7 @@ import {
   rescheduleManagedBooking,
 } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeBookingConference } from '../../calendars/src/conferences.ts'
 import {
   bookingNotifier,
@@ -21,6 +21,7 @@ import {
   sendBookingNotification,
 } from './index.ts'
 import { deliverScheduledBookingEmail } from './scheduled.ts'
+import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
@@ -90,10 +91,12 @@ describe.skipIf(!serverUrl)('scheduled mail lifecycle and conference races', () 
     await owned?.drop()
   })
   beforeEach(async () => {
+    await alignSmtpDateNowWithDatabase(db)
     now = NOW
     sent = []
     await db.deleteFrom('notification_email_sends').execute()
   })
+  afterEach(() => vi.restoreAllMocks())
   const queue = { enqueue: async () => randomUUID() }
   const deps = (): NotificationDeps => ({
     db,

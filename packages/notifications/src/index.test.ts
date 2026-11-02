@@ -115,7 +115,9 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
   })
 
   /** A Berlin-scheduled host in New York with one event type, booked by Ada from Tokyo. */
-  async function booked(options: { guests?: boolean } = {}) {
+  async function booked(
+    options: { guests?: boolean; now?: Temporal.Instant; start?: Temporal.Instant } = {},
+  ) {
     const host = await f.host({ name: 'Grace Hopper', timeZone: 'America/New_York' })
     await f.schedule(host.userId)
     await f.eventType(host.organizationId, host.userId, {
@@ -128,14 +130,17 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         { id: 'topic', label: 'What should we talk about?', type: 'long_text', required: false },
       ],
     })
-    const result = await createPublicBooking(ctx, {
-      handle: host.handle,
-      slug: 'intro',
-      start: instant(START),
-      invitee: { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'Asia/Tokyo' },
-      guests: options.guests ? [{ name: 'Charles Babbage', email: 'charles@example.com' }] : [],
-      responses: { topic: 'Engines,\nanalytical ones.' },
-    })
+    const result = await createPublicBooking(
+      { ...ctx, now: () => options.now ?? NOW },
+      {
+        handle: host.handle,
+        slug: 'intro',
+        start: options.start ?? instant(START),
+        invitee: { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'Asia/Tokyo' },
+        guests: options.guests ? [{ name: 'Charles Babbage', email: 'charles@example.com' }] : [],
+        responses: { topic: 'Engines,\nanalytical ones.' },
+      },
+    )
     const hostEmail = (
       await db
         .selectFrom('auth.user')
@@ -738,10 +743,21 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
 
   describe('through the job queue', () => {
     it('queues the email and the reminder with the booking, and sends them from a worker', async () => {
+      // pg-boss reads PostgreSQL time, so its delayed reminder must stay in the
+      // database's future even when the application clock is shifted by the test runner.
+      const { now: databaseTime } = (
+        await testDb.pool.query<{ now: Date }>('SELECT clock_timestamp() AS now')
+      ).rows[0] as { now: Date }
+      const now = Temporal.Instant.fromEpochMilliseconds(databaseTime.getTime())
+      const localNow = now.toZonedDateTimeISO('Europe/Berlin')
+      const start = localNow
+        .add({ days: 15 - localNow.dayOfWeek })
+        .with({ hour: 10, minute: 0, second: 0, millisecond: 0, microsecond: 0, nanosecond: 0 })
+        .toInstant()
       const { mailer, sent } = testMailer()
       const jobs = createJobs({
         connectionString: testDb.url,
-        definitions: [bookingNotificationJob(deps(mailer))],
+        definitions: [bookingNotificationJob(deps(mailer, now))],
         work: true,
         migrate: true,
         pollingIntervalSeconds: 0.5,
@@ -749,16 +765,11 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       })
       await jobs.start()
       try {
-        const { bookingId } = await booked()
+        const { bookingId } = await booked({ now, start })
         // As the booking service will: inside the transaction that wrote the booking.
         await expect(
           db.transaction().execute(async (trx) => {
-            await enqueueBookingNotifications(
-              jobs,
-              trx,
-              { type: 'created', bookingId, start: instant(START) },
-              NOW,
-            )
+            await enqueueBookingNotifications(jobs, trx, { type: 'created', bookingId, start }, now)
             throw new Error('rolled back')
           }),
         ).rejects.toThrow('rolled back')
@@ -772,12 +783,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         await db
           .transaction()
           .execute((trx) =>
-            enqueueBookingNotifications(
-              jobs,
-              trx,
-              { type: 'created', bookingId, start: instant(START) },
-              NOW,
-            ),
+            enqueueBookingNotifications(jobs, trx, { type: 'created', bookingId, start }, now),
           )
         const rows = (await queued()).rows
         // Only the booking id and the kind: no secret is ever stored in the queue.
@@ -785,7 +791,9 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
           { bookingId, kind: 'confirmed' },
           { bookingId, kind: 'reminder' },
         ])
-        expect(rows[1]?.start_after.toISOString()).toBe('2026-11-02T09:00:00.000Z')
+        expect(rows[1]?.start_after.toISOString()).toBe(
+          start.subtract({ hours: 24 }).toString({ fractionalSecondDigits: 3 }),
+        )
 
         const deadline = Date.now() + 10_000
         while (sent.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50))

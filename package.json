@@ -27,6 +27,7 @@
     "format": "biome check --write .",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types && tsc -p tools/cli && tsc -p scripts",
     "test": "vitest run",
+    "test:clock": "node scripts/test-clock-offsets.ts",
     "build": "npm run build --workspaces --if-present && npm run cli:build",
     "start": "node apps/server/src/index.ts",
     "auth:sql": "npm run --workspace @hourmere/auth schema:sql",

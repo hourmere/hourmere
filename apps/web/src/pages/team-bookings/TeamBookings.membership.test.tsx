@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import {
   fakeApi,
@@ -14,6 +14,7 @@ import {
 } from '../../test/fake-api.tsx'
 
 const PAGE = '/app/team/bookings'
+beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
 const MEMBER = 'GET /api/auth/organization/get-active-member'
 const LIST = 'GET /api/v1/team/bookings'
 const TEAM: Schemas['Me'] = {

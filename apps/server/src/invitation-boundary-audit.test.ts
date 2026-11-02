@@ -7,9 +7,11 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type MailMessage, MailRejectedError } from '@hourmere/mail'
 import { deliverInvitationEmail, type InvitationEmailSenderDeps } from '@hourmere/notifications'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { withDatabaseClock } from './database-clock-testing.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -212,15 +214,19 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
   }
 
   const read = (i: Instance, f: Fixture, cookie: string) =>
-    i.app.request(`/api/auth/organization/get-invitation?id=${f.invitation.id}`, {
-      headers: { cookie },
-    })
+    withDatabaseClock(db, () =>
+      i.app.request(`/api/auth/organization/get-invitation?id=${f.invitation.id}`, {
+        headers: { cookie },
+      }),
+    )
   const accept = (i: Instance, f: Fixture, cookie: string) =>
-    i.app.request('/api/auth/organization/accept-invitation', {
-      method: 'POST',
-      headers: { origin, cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ invitationId: f.invitation.id }),
-    })
+    withDatabaseClock(db, () =>
+      i.app.request('/api/auth/organization/accept-invitation', {
+        method: 'POST',
+        headers: { origin, cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ invitationId: f.invitation.id }),
+      }),
+    )
 
   async function delivery(f: Fixture) {
     return db
@@ -371,7 +377,7 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
         .set(
           state === 'canceled'
             ? { status: 'canceled' }
-            : { expiresAt: new Date(Date.now() - 60_000) },
+            : { expiresAt: sql`clock_timestamp() - interval '1 minute'` },
         )
         .where('id', '=', f.invitation.id)
         .execute()
@@ -393,11 +399,13 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       const r = await recipient(f)
       expect((await read(i, f, r.cookie)).status).toBe(400)
       expect((await accept(i, f, r.cookie)).status).toBe(400)
-      const direct = await i.auth.api.acceptInvitation({
-        body: { invitationId: f.invitation.id },
-        headers: new Headers({ cookie: r.cookie }),
-        asResponse: true,
-      })
+      const direct = await withDatabaseClock(db, () =>
+        i.auth.api.acceptInvitation({
+          body: { invitationId: f.invitation.id },
+          headers: new Headers({ cookie: r.cookie }),
+          asResponse: true,
+        }),
+      )
       expect(direct.status).toBe(400)
       expect(await memberships(f)).toEqual([])
     },
@@ -427,11 +435,13 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       const cookie = await signIn(i, f)
       expect((await read(i, f, cookie)).status).toBe(200)
       expect(await memberships(f), 'loading invitation details never joins').toEqual([])
-      const accepted = await i.auth.api.acceptInvitation({
-        body: { invitationId: f.invitation.id },
-        headers: new Headers({ cookie }),
-        asResponse: true,
-      })
+      const accepted = await withDatabaseClock(db, () =>
+        i.auth.api.acceptInvitation({
+          body: { invitationId: f.invitation.id },
+          headers: new Headers({ cookie }),
+          asResponse: true,
+        }),
+      )
       expect(accepted.status).toBe(200)
       expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
     },
@@ -452,11 +462,13 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       const responses = [
         await read(i, f, cookie),
         await accept(i, f, cookie),
-        await i.auth.api.acceptInvitation({
-          body: { invitationId: f.invitation.id },
-          headers: new Headers({ cookie }),
-          asResponse: true,
-        }),
+        await withDatabaseClock(db, () =>
+          i.auth.api.acceptInvitation({
+            body: { invitationId: f.invitation.id },
+            headers: new Headers({ cookie }),
+            asResponse: true,
+          }),
+        ),
       ]
       for (const response of responses) {
         expect(response.status).toBe(403)
@@ -475,7 +487,7 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
     const r = await recipient(f)
     expect(await deliver(f)).toMatchObject({ state: 'smtp_accepted', generation: 1 })
     expect((await read(i, f, r.cookie)).status).toBe(200)
-    const earlier = new Date(Date.now() - 120_000)
+    const earlier = sql<Date>`clock_timestamp() - interval '2 minutes'`
     await db
       .updateTable('invitation_deliveries')
       .set({ generation_started_at: earlier, updated_at: earlier })
@@ -524,11 +536,13 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       .execute()
     expect((await read(i, f, r.cookie)).status).toBe(200)
     expect(await memberships(f)).toEqual([])
-    const accepted = await i.auth.api.acceptInvitation({
-      body: { invitationId: f.invitation.id },
-      headers: new Headers({ cookie: r.cookie }),
-      asResponse: true,
-    })
+    const accepted = await withDatabaseClock(db, () =>
+      i.auth.api.acceptInvitation({
+        body: { invitationId: f.invitation.id },
+        headers: new Headers({ cookie: r.cookie }),
+        asResponse: true,
+      }),
+    )
     expect(accepted.status).toBe(200)
     expect(await memberships(f)).toEqual([{ userId: r.user.id, role: 'member' }])
   })
@@ -588,11 +602,13 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
       const claim = await interceptInvitationClaim(i, () => terminalDelivery(f, 'failed'))
       try {
         const response = direct
-          ? await i.auth.api.acceptInvitation({
-              body: { invitationId: f.invitation.id },
-              headers: new Headers({ cookie: r.cookie }),
-              asResponse: true,
-            })
+          ? await withDatabaseClock(db, () =>
+              i.auth.api.acceptInvitation({
+                body: { invitationId: f.invitation.id },
+                headers: new Headers({ cookie: r.cookie }),
+                asResponse: true,
+              }),
+            )
           : await accept(i, f, r.cookie)
         expect(
           claim.injections(),
@@ -618,11 +634,13 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
         .execute()
     })
     try {
-      const response = await i.auth.api.acceptInvitation({
-        body: { invitationId: f.invitation.id },
-        headers: new Headers({ cookie: r.cookie }),
-        asResponse: true,
-      })
+      const response = await withDatabaseClock(db, () =>
+        i.auth.api.acceptInvitation({
+          body: { invitationId: f.invitation.id },
+          headers: new Headers({ cookie: r.cookie }),
+          asResponse: true,
+        }),
+      )
       expect(
         claim.injections(),
         'the stored role changes after native preflight before recheck',

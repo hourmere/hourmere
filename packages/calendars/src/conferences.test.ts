@@ -23,12 +23,15 @@ import {
 } from '../../notifications/src/index.ts'
 import { calendarBookingNotifier, writeBookingCalendar } from './booking-events.ts'
 import { retryBookingConference, writeBookingConference } from './conferences.ts'
+import { encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from './google.ts'
 import {
   beginGoogleConnection,
   type CalendarDeps,
   disconnectCalendar,
   finishGoogleConnection,
+  readTokens,
+  tokenAad,
 } from './index.ts'
 import { configureCalendar, setCalendarDestination, syncGoogleCalendar } from './sync.ts'
 import { calendarTestSession, fakeGoogle, TEST_CALENDAR_KEY } from './testing.ts'
@@ -214,6 +217,32 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await db
       .updateTable('booking_conferences')
       .set({ next_attempt_at: future(), lease_until: null })
+      .execute()
+  }
+  const expireTokens = async () => {
+    const connection = await db
+      .selectFrom('calendar_connections')
+      .selectAll()
+      .executeTakeFirstOrThrow()
+    const key = Buffer.from(TEST_CALENDAR_KEY, 'base64')
+    const tokens = readTokens(
+      key,
+      connection.user_id,
+      connection.external_account_id,
+      connection.credentials,
+    )
+    // OAuth and refresh responses use the adapter's real clock. Tests of refresh
+    // failures must explicitly expire that grant under the injected worker clock.
+    await db
+      .updateTable('calendar_connections')
+      .set({
+        credentials: encryptCredential(
+          key,
+          tokenAad(connection.user_id, connection.external_account_id),
+          JSON.stringify({ ...tokens, expiresAt: NOW.epochMilliseconds - 1 }),
+        ),
+      })
+      .where('id', '=', connection.id)
       .execute()
   }
   const imports = () =>
@@ -556,6 +585,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     'transient token HTTP %s retains credentials and retries with bounded backoff',
     async (status) => {
       const b = await book()
+      await expireTokens()
       if (typeof status === 'number') provider.controls.tokenStatus = status
       else
         provider.controls.tokenHook = async () => {
@@ -1157,6 +1187,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
   })
   it('token refresh failure retains a durable intent and cancellation remains usable without provider cleanup', async () => {
     const b = await book()
+    await expireTokens()
     provider.controls.tokenStatus = 400
     provider.controls.token.error = 'invalid_grant'
     await writeBookingConference(deps, b.booking.id)
@@ -1172,6 +1203,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
   })
   it('cancel with an existing remote event and revoked credentials reports unresolved cleanup while still notifying', async () => {
     const b = await ready()
+    await expireTokens()
     provider.controls.tokenStatus = 400
     provider.controls.token.error = 'invalid_grant'
     await cancelManagedBooking(ctx, b.manageToken as string)
@@ -1282,6 +1314,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
       .updateTable('booking_conferences')
       .set({ state: 'pending', next_attempt_at: future() })
       .execute()
+    await expireTokens()
     provider.controls.tokenStatus = 400
     provider.controls.token.error = 'invalid_grant'
     await writeBookingConference(deps, b.booking.id)

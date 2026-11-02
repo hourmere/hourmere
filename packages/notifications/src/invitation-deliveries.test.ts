@@ -456,11 +456,11 @@ describe.skipIf(!serverUrl)('invitation delivery storage queries', () => {
       (
         await db
           .selectFrom('auth.invitation')
-          .select('expiresAt')
+          .select(sql<boolean>`"expiresAt" > clock_timestamp()`.as('unexpired'))
           .where('id', '=', row.id)
           .executeTakeFirstOrThrow()
-      ).expiresAt.getTime(),
-    ).toBeGreaterThan(Date.now())
+      ).unexpired,
+    ).toBe(true)
   })
 
   it('keeps a retry key to one pending queue job and one record, with transactional rollback', async () => {

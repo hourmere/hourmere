@@ -568,7 +568,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
         } else {
           await db
             .updateTable('auth.session')
-            .set({ expiresAt: new Date(Date.now() - 60_000) })
+            .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
             .where('id', '=', f.sessionId)
             .execute()
         }

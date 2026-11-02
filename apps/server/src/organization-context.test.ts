@@ -9,6 +9,7 @@ import {
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -296,7 +297,7 @@ describe.skipIf(!bootstrap)('organization-bound event-type web writes', () => {
         else if (change === 'expired session')
           await db
             .updateTable('auth.session')
-            .set({ expiresAt: new Date(Date.now() - 60_000) })
+            .set({ expiresAt: sql`clock_timestamp() - interval '1 minute'` })
             .where('id', '=', f.sessionId)
             .execute()
         else if (change === 'deleted session')

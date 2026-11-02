@@ -15,6 +15,7 @@ import type { MailMessage } from '@hourmere/mail'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { withDatabaseClock } from './database-clock-testing.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -114,19 +115,25 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
               .executeTakeFirst()
           )?.organizationId
         : undefined)
-    return app.request(`/api/auth/organization/${action}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin,
-        cookie,
-        ...(expected && action !== 'set-active' ? { 'x-expected-organization-id': expected } : {}),
-      },
-      body: JSON.stringify(body),
-    })
+    return withDatabaseClock(db, () =>
+      app.request(`/api/auth/organization/${action}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie,
+          ...(expected && action !== 'set-active'
+            ? { 'x-expected-organization-id': expected }
+            : {}),
+        },
+        body: JSON.stringify(body),
+      }),
+    )
   }
   const get = (app: Instance['app'], id: string, cookie = '') =>
-    app.request(`/api/auth/organization/get-invitation?id=${id}`, { headers: { cookie } })
+    withDatabaseClock(db, () =>
+      app.request(`/api/auth/organization/get-invitation?id=${id}`, { headers: { cookie } }),
+    )
 
   /** A genuine signed session for a fixture identity, including legacy unverified accounts. */
   async function account(i: Instance, email: string, verified = true) {
@@ -281,11 +288,11 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       const org = await team(i, owner.cookie)
       const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
       await testDb.pool.query(
-        `UPDATE auth.invitation SET status = $2, "expiresAt" = $3 WHERE id = $1`,
+        `UPDATE auth.invitation SET status = $2, "expiresAt" = clock_timestamp() + $3::interval WHERE id = $1`,
         [
           invitation.id,
           lifecycle === 'expired' ? 'pending' : lifecycle,
-          new Date(Date.now() + (lifecycle === 'expired' ? -60_000 : 60_000)),
+          lifecycle === 'expired' ? '-1 minute' : '1 minute',
         ],
       )
       expect((await get(i.app, invitation.id, recipient.cookie)).status).toBe(400)
@@ -407,7 +414,9 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     expect(resent.status).toBe(200)
     const resentInvitation = (await resent.json()) as Invitation
     expect(resentInvitation).toEqual({ ...invitation, expiresAt: expect.any(String) })
-    expect(Date.parse(resentInvitation.expiresAt) - Date.now()).toBeGreaterThan(47 * 3_600_000)
+    await withDatabaseClock(db, () => {
+      expect(Date.parse(resentInvitation.expiresAt) - Date.now()).toBeGreaterThan(47 * 3_600_000)
+    })
     expect(await state(org.id)).toEqual([{ status: 'pending', members: 1 }])
     // Resend bypasses create hooks and does not replace the originally invited role.
     expect(calls).toEqual(['mail', 'created', 'mail'])

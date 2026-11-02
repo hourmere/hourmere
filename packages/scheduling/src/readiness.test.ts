@@ -126,7 +126,9 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
         token: randomUUID(),
         activeOrganizationId: principal.organization.id,
         updatedAt: new Date(),
-        expiresAt: new Date('2027-11-01T12:00:00Z'),
+        // Session authorization uses the database clock, independently of the fixed
+        // scheduling clock used for the readiness observations below.
+        expiresAt: sql<Date>`clock_timestamp() + interval '1 day'`,
       })
       .returning('id')
       .executeTakeFirstOrThrow()

@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import * as formatting from '../../format.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
@@ -19,6 +19,7 @@ import {
 import bookingStyles from './team-bookings.css?raw'
 
 const PAGE = '/app/team/bookings'
+beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
 const LIST = 'GET /api/v1/team/bookings'
 const FIRST_ID = 'b0000000-0000-7000-8000-000000000001'
 const LATER_ID = 'b0000000-0000-7000-8000-000000000002'

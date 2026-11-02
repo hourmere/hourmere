@@ -47,6 +47,23 @@ npm test            # Vitest; database tests are skipped unless DATABASE_URL is 
 npm run build
 ```
 
+An optional clock diagnostic runs the same suite at +7, +30, +90 and +400 days:
+
+```sh
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run test:clock
+# One offset, optionally limited to particular test files:
+HOURMERE_TEST_CLOCK_OFFSET_DAYS=400 npm run test:clock -- scripts/test-clock.test.ts
+```
+
+This lane is not a required CI check. It offsets ticking `Date` and native `Temporal.Now`
+reads in both Vitest projects, leaving explicit dates and ordinary timers intact. Local
+fake clocks still take precedence. Child processes do not inherit the clock shim.
+PostgreSQL's clock is unchanged: fixtures and assertions for database expiry, leases and
+queue scheduling must use `clock_timestamp()` from their throwaway database. Tests that
+exercise both DB leases and Node SMTP deadlines align that narrow clock path with the DB.
+The `security.txt` test deliberately uses actual system time: its renewal warning is an
+intentional publication deadline and remains enforced during offset runs.
+
 When you add a migration, apply it and regenerate the table types, then commit
 `packages/db/src/tables.ts` with it (CI checks that they match):
 

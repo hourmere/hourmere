@@ -80,7 +80,7 @@ export async function seedEarly(pool: pg.Pool) {
         VALUES (personal,users[1],'owner',stamp),(team,users[1],'owner',stamp),
           (team,users[2],'admin',stamp),(team,users[3],'member',stamp);
       INSERT INTO auth.invitation ("organizationId",email,role,status,"expiresAt","createdAt","inviterId")
-        VALUES (team,'upgrade-invitee@example.test','member','pending',stamp + interval '10 years',stamp,users[1]);
+        VALUES (team,'upgrade-invitee@example.test','member','pending',now() + interval '10 years',stamp,users[1]);
       INSERT INTO auth.apikey (id,"configId",name,start,"referenceId",prefix,key,enabled,
         "rateLimitEnabled","rateLimitTimeWindow","rateLimitMax","requestCount",remaining,
         "createdAt","updatedAt",permissions,metadata)
