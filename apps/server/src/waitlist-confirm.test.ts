@@ -394,3 +394,26 @@ describe.skipIf(!serverUrl)('waitlist mail confirmations with real PostgreSQL', 
     expect(stored.verified_at).toBeNull()
   })
 })
+
+describe('confirmation catalogue script escaping', () => {
+  it('keeps tag-shaped translation text inside JSON and detects omission in a source copy', async () => {
+    const source = await readFile(new URL('./waitlist-confirm.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('const CATALOGUES_JSON =')
+    const fragment = source.slice(start, source.indexOf('const SCRIPT =', start))
+    const words = { en: { title: '</script><script>untrusted</script>' } }
+    const assertEscaped = (code: string) => {
+      const serialized = new Function(
+        'waitlistConfirmationCatalogues',
+        `${code}; return CATALOGUES_JSON`,
+      )(words) as string
+      expect(serialized.includes('<')).toBe(false)
+      expect(JSON.parse(serialized)).toEqual(words)
+    }
+    assertEscaped(fragment)
+    const before = String.raw`.replaceAll('<', '\\u003c')`
+    expect(fragment.includes(before), 'mutation matches real script serialization').toBe(true)
+    expect(() => assertEscaped(fragment.replace(before, ''))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+})

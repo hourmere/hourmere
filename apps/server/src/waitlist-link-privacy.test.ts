@@ -101,7 +101,7 @@ describe('waitlist path capability privacy', () => {
       expect(JSON.stringify(output).includes('w'.repeat(42))).toBe(false)
       for (const value of [
         token,
-        token.replace('.', '%2E'),
+        token.replaceAll('.', '%2E'),
         token.replace('.w', '.%77'),
         [...token].map((letter) => `%${letter.charCodeAt(0).toString(16)}`).join(''),
       ]) {

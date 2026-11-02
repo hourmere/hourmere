@@ -28,6 +28,8 @@ const escapeHtml = (value: string) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
 
+const CATALOGUES_JSON = JSON.stringify(waitlistConfirmationCatalogues).replaceAll('<', '\\u003c')
+
 const SCRIPT = `
 (() => {
   const mode = document.body.dataset.mode;
@@ -39,7 +41,7 @@ const SCRIPT = `
   const valid = ${TOKEN.toString()};
   if (!valid.test(token || '')) token = null;
   if (!valid.test(management || '')) management = null;
-  const catalogues = ${JSON.stringify(waitlistConfirmationCatalogues).replaceAll('<', '\u003c')};
+  const catalogues = ${CATALOGUES_JSON};
   const language = document.getElementById('language');
   const action = document.getElementById('action');
   const remove = document.getElementById('remove');
