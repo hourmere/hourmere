@@ -28,7 +28,7 @@ import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
-import { createJobs } from '@hourmere/jobs'
+import { createJobs, oneTimeBookingLinksRetentionJob } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
   bookingNotificationJob,
@@ -393,6 +393,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
+      oneTimeBookingLinksRetentionJob(db),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,

@@ -602,6 +602,23 @@ export interface NotificationEmailSends {
   sent_at: Timestamp;
 }
 
+export interface OneTimeBookingLinks {
+  booking_id: string | null;
+  created_at: Generated<Timestamp>;
+  creator_user_id: string;
+  event_type_id: string;
+  expires_at: Timestamp | null;
+  id: Generated<string>;
+  organization_id: string;
+  prefill_email: string | null;
+  prefill_name: string | null;
+  revoked_at: Timestamp | null;
+  state: Generated<string>;
+  token_hash: string;
+  updated_at: Generated<Timestamp>;
+  used_at: Timestamp | null;
+}
+
 export interface OrganizationOperations {
   actor_user_id: string | null;
   api_key_id: string | null;
@@ -732,6 +749,7 @@ export interface DB {
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
   notification_email_sends: NotificationEmailSends;
+  one_time_booking_links: OneTimeBookingLinks;
   organization_operations: OrganizationOperations;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
