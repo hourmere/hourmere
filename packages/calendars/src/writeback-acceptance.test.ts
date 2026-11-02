@@ -391,21 +391,23 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     const id = await booking()
     await notify(id)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
-    await db
-      .updateTable('calendar_connections')
-      .set({
-        credentials: encryptCredential(
-          calendarEncryptionKey(TEST_CALENDAR_KEY),
-          `google:${a.user.id}:account-a`,
-          JSON.stringify({
-            accessToken: 'fake-expired',
-            refreshToken: 'fake-refresh',
-            expiresAt: NOW - 1,
-          }),
-        ),
-      })
-      .where('id', '=', connectionA)
-      .execute()
+    const expireConnectionToken = () =>
+      db
+        .updateTable('calendar_connections')
+        .set({
+          credentials: encryptCredential(
+            calendarEncryptionKey(TEST_CALENDAR_KEY),
+            `google:${a.user.id}:account-a`,
+            JSON.stringify({
+              accessToken: 'fake-expired',
+              refreshToken: 'fake-refresh',
+              expiresAt: NOW - 1,
+            }),
+          ),
+        })
+        .where('id', '=', connectionA)
+        .execute()
+    await expireConnectionToken()
     const outer = new AbortController().signal
     const refresh = vi.spyOn(provider.client, 'refresh')
     const find = vi.spyOn(provider.client, 'findEvent')
@@ -421,6 +423,9 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
       .set({ status: 'cancelled', cancelled_at: new Date(NOW) })
       .where('id', '=', id)
       .execute()
+    // The refreshed token's expiry comes from the real clock; expire it again so the second
+    // write also refreshes, independent of how the wall clock relates to the fixed NOW.
+    await expireConnectionToken()
     await writeBookingCalendar(deps, id, outer)
     const second = find.mock.calls[1]?.[3]
     expect(second).not.toBe(outer)
