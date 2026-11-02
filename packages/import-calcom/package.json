@@ -1,0 +1,21 @@
+{
+  "name": "@hourmere/import-calcom",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "dry-run": "node src/cli.ts"
+  },
+  "dependencies": {
+    "@hourmere/core": "*",
+    "@hourmere/db": "*",
+    "@hourmere/scheduling": "*",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}
