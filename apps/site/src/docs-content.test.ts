@@ -526,6 +526,10 @@ describe('complete public documentation', () => {
       )
     } else if (guide === 'api-conventions') {
       // Requested policy excerpts mirror the canonical guide rather than diverging.
+      const scopePolicy = source
+        .match(/^### API key scopes\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
+        ?.replace('](/docs/api-keys)', '](https://hourmere.com/docs/api-keys)')
+        ?.trimEnd()
       const resendPolicy = source
         .match(/ {2}The original inviter must still belong[\s\S]*?validity requirement\./)?.[0]
         ?.replace(/^ {2}/gm, '')
@@ -538,6 +542,7 @@ describe('complete public documentation', () => {
       const summaryPolicy = source.match(
         /Rows with `invalidReason:[\s\S]*?cancellation remains available\./,
       )?.[0]
+      expect(scopePolicy).toBeDefined()
       expect(resendPolicy).toBeDefined()
       expect(acceptancePolicy).toBeDefined()
       expect(recipientPolicy).toBeDefined()
@@ -547,6 +552,8 @@ describe('complete public documentation', () => {
       expect(read(original)).toBe(
         [
           '[API conventions](https://hourmere.com/docs/api-conventions).',
+          '',
+          scopePolicy,
           '',
           resendPolicy,
           '',

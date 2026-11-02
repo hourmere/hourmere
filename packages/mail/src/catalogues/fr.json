@@ -68,5 +68,8 @@
   "teamInvitation.expiry": "Cette invitation expire le {expiry}.",
   "teamInvitation.button": "Voir et accepter l’invitation",
   "teamInvitation.fallback": "Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :",
-  "teamInvitation.footer": "Si vous ne connaissez pas cette équipe ou ne souhaitez pas la rejoindre, vous pouvez ignorer cet e-mail."
+  "teamInvitation.footer": "Si vous ne connaissez pas cette équipe ou ne souhaitez pas la rejoindre, vous pouvez ignorer cet e-mail.",
+  "followUp.subject": "Fin du créneau prévu : {event}",
+  "followUp.introduction": "Le créneau prévu pour votre réunion avec {other} est terminé.",
+  "followUp.hostNote": "Message de l’hôte"
 }

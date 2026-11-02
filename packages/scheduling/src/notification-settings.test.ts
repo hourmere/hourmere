@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { FOLLOW_UP_HOST_NOTE_MAX_LENGTH } from '@hourmere/core/follow-up-note'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { DomainError } from './errors.ts'
@@ -30,8 +31,9 @@ function sourceCopy(replacement?: Replacement): SettingsModule {
   return new Function(
     'z',
     'DomainError',
+    'FOLLOW_UP_HOST_NOTE_MAX_LENGTH',
     `${source}; return { validateNotifications, createNotificationSnapshot, notificationSnapshot, isLegacyDefault }`,
-  )(z, DomainError) as SettingsModule
+  )(z, DomainError, FOLLOW_UP_HOST_NOTE_MAX_LENGTH) as SettingsModule
 }
 
 function rule(id = 'rule-1', offsetMinutes = 60) {
@@ -170,7 +172,86 @@ function verifyModes(copy: SettingsModule) {
   })
 }
 
+function verifyHostNotes(copy: SettingsModule) {
+  for (const hostNote of [
+    '',
+    '<script>A & B</script>\r\nNext\tline',
+    'a'.repeat(2000),
+    '😀'.repeat(1000),
+  ]) {
+    const input = { reminders: [], followUps: [{ ...rule('f'), hostNote }] }
+    expect(copy.validateNotifications(input)).toEqual(input)
+    const snapshot = copy.createNotificationSnapshot(input)
+    expect(copy.notificationSnapshot(snapshot).notifications).toEqual(input)
+  }
+  for (const hostNote of [
+    null,
+    42,
+    {},
+    'a'.repeat(2001),
+    '😀'.repeat(1001),
+    '\ud800',
+    '\udc00',
+    '\u0000',
+    '\u000b',
+    '\u007f',
+    '\u0085',
+    '\u202a',
+    '\u2066',
+  ]) {
+    expect(() =>
+      copy.validateNotifications({ reminders: [], followUps: [{ ...rule('f'), hostNote }] }),
+    ).toThrow(z.ZodError)
+  }
+  expect(() =>
+    copy.validateNotifications({ reminders: [{ ...rule(), hostNote: '' }], followUps: [] }),
+  ).toThrow(z.ZodError)
+  expect(() =>
+    copy.validateNotifications({ reminders: [], followUps: [{ ...rule('f'), unexpected: true }] }),
+  ).toThrow(z.ZodError)
+}
+
 describe('notification settings contract', () => {
+  it('stores optional plain-text follow-up notes with bounded well-formed Unicode, rejects notes on reminders', () => {
+    verifyHostNotes({
+      validateNotifications,
+      createNotificationSnapshot,
+      notificationSnapshot,
+      isLegacyDefault,
+    })
+    verifyHostNotes(sourceCopy())
+    expect(DEFAULT_NOTIFICATIONS).toEqual({
+      reminders: [
+        {
+          id: 'default-24h',
+          offsetMinutes: 1440,
+          recipients: { invitee: true, guests: true, host: true },
+        },
+      ],
+      followUps: [],
+    })
+  })
+
+  it.each<[string, Replacement]>([
+    [
+      'host note length bound',
+      ['.refine((note) => note.length <= FOLLOW_UP_HOST_NOTE_MAX_LENGTH)', ''],
+    ],
+    [
+      'host note control exclusion',
+      [
+        '/^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$/',
+        '/^[\\s\\S]*$/',
+      ],
+    ],
+    ['host note Unicode validation', ['.refine((note) => note.isWellFormed())', '']],
+    ['follow-up-only host note', ['reminders: z.array(rule)', 'reminders: z.array(followUpRule)']],
+    ['strict follow-up fields', ['const rule = z.strictObject(', 'const rule = z.object(']],
+  ])('detects broken %s using host note assertions', (_, replacement) => {
+    expect(() => verifyHostNotes(sourceCopy(replacement))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
   it.each(malformed)('rejects %s as a shape error', (_, value) => {
     expect(() => validateNotifications(value)).toThrow(z.ZodError)
   })

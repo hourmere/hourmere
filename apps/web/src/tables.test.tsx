@@ -134,7 +134,7 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
               createdAt: '2026-10-01T09:00:00Z',
               expiresAt: null,
               lastRequest: null,
-              metadata: { organizationId: ME.organization.id },
+              metadata: { organizationId: ME.organization.id, scope: 'full' },
             },
           ],
           total: 1,
@@ -146,14 +146,14 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
       screen.getByRole('table'),
       'api-keys',
       zh
-        ? ['密钥', '组织', '创建时间', '上次使用', '到期时间']
-        : ['Key', 'Organization', 'Created', 'Last used', 'Expires'],
+        ? ['密钥', '组织', '权限范围', '创建时间', '上次使用', '到期时间']
+        : ['Key', 'Organization', 'Scope', 'Created', 'Last used', 'Expires'],
     )
     // Key prefix, dates and the revoke button shrink; the name and organization may break.
     expectCellKinds(screen.getByRole('table'), {
       userContent: [0, 2],
       nowrap: [1],
-      fit: [1, 3, 4, 5, 6],
+      fit: [1, 4, 5, 6, 7],
     })
     expect(screen.getByRole('button', { name: new RegExp(zh ? '撤销' : 'Revoke') })).toBeDefined()
   })

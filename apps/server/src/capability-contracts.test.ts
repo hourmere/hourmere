@@ -131,8 +131,8 @@ describe('repository and website capability documentation', () => {
       for (const statement of [
         /`list_calendar_connections`/,
         /`list_conference_connections`/,
-        /API keys and enabled MCP OAuth grants/,
-        /user's own API keys can change calendar conflict selection, the writeback destination, refresh the calendar list and sync now through REST/,
+        /`read`\/`full` API keys and enabled MCP OAuth grants/,
+        /user's own `full` API keys can change calendar conflict selection, the writeback destination, refresh the calendar list and sync now through REST/,
         /select their own meeting-mode Zoom connection on event types they actually host/,
         /same organization.*(?:permissions|ownership checks)/,
         /OAuth authorization, code exchange and disconnect require a live browser session/,

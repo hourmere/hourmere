@@ -206,8 +206,9 @@ const publishedTablePages = [
   ['cli', 1],
   ['notifications', 4],
   ['api-conventions', 7],
+  ['api-keys', 4],
   ['google-calendar', 1],
-  ['mcp', 3],
+  ['mcp', 4],
   ['zoom-connections', 2],
 ] as const
 

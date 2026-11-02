@@ -102,11 +102,12 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
         : '用于提供每周时间段的时区。管理日程',
     )
     const hint = document.getElementById('slug-hint')
-    expect(hint?.textContent).toMatch(
-      language === 'en'
-        ? /^Lowercase letters, digits and hyphens\. \/ada\//
-        : /^使用小写字母、数字和连字符。\/ada\//,
+    expect(hint?.textContent).toBe(
+      language === 'en' ? 'Lowercase letters, digits and hyphens.' : '使用小写字母、数字和连字符。',
     )
+    const status = document.getElementById('booking-link-status')
+    expect(status?.textContent).toMatch(/^\/ada\//)
+    expect(hint?.contains(status)).toBe(false)
     expect(document.querySelector('.questions > .hint')?.textContent).toBe(
       language === 'en'
         ? 'Invitees always give their name and email. Add questions for anything else you need to know, up to 20.'

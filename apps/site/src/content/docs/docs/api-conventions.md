@@ -155,6 +155,7 @@ See [Zoom connections](/docs/zoom-connections) for callback replay and recovery 
 | 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
 | 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
 | 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
+| 403 `insufficient_scope` | The API key is valid, but its immutable scope does not allow this operation; use an appropriate replacement key |
 | 404 `not_found` | No such resource or endpoint, or one the caller cannot see |
 | 409 | Conflict with the current state (e.g. the slot was just booked) |
 | 405 `method_not_allowed`, 413 `payload_too_large`, 415 `unsupported_media_type` | Raised by the HTTP layer for the obvious cases; any other 4xx from it is `invalid_request` |
@@ -237,6 +238,42 @@ organization, or null when no marker exists. Clients must not infer it from orga
 The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) accepts API keys and,
 when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
 limited to MCP tools and do not authenticate REST requests.
+
+### API key scopes
+
+Keys have one immutable scope: `full`, `read` or `bookings`. The web creation form defaults
+to `bookings` for AI agents; `read` suits analytics/reporting, and **Full account access**
+(`full`) also permits account configuration changes. Existing roles, ownership and host
+visibility still apply. Neither `read` nor `bookings` removes existing visible attendee
+details or meeting links, and `bookings` can manage previously created bookings you host.
+
+Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
+`full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
+Top-level `scope`/`scopes`, arrays, combinations and unknown values get
+`400 INVALID_METADATA`. Updates containing `metadata.scope`, even the same value, get
+`400 API_KEY_SCOPE_IMMUTABLE`. Create a replacement, update clients, then revoke the old key.
+Owner-authorized organization updates preserve the original scope. `/api/v1/me` and MCP
+`whoami` include `apiKeyScope` for API key callers.
+
+A valid key used for a disallowed operation gets REST `403 insufficient_scope`; invalid,
+expired or revoked keys get 401. Public booking/manage-token endpoints remain available
+without a key; a supplied bearer must additionally be valid and allow the operation,
+without fallback to cookies or anonymous access. Public metadata needs no key. MCP filters
+`tools/list` and returns `isError: true` with `insufficient_scope` for direct calls to known
+disallowed tools. Reconnect or refresh discovery after replacing a cached client's key.
+MCP OAuth retains its existing `mcp:tools` permission.
+
+Native `/api/auth/api-key/create`, `get`, `list`, `update` and `delete` retain their owner
+session/trusted-server boundary. Any Authorization header gets `403 SESSION_REQUIRED`,
+even with a valid cookie; no key scope authorizes key administration. See
+[API keys](/docs/api-keys) for operation tables generated from the shared code registry and
+the creation contract. New operations need explicit classification; GET/read-only hints
+do not grant scoped access.
+
+Stop every old web/all/worker and other old key-authenticating process before migrating,
+then restart all roles with the new code before using scoped keys. Never run old and new
+servers side by side once scoped keys exist: old code treats them as full access. Use the
+supported backup/restore procedure for rollback.
 
 ### Browser organization context
 
@@ -645,7 +682,7 @@ See the [full safe departure contract](https://github.com/hourmere/hourmere/blob
 
 ### Integration settings
 
-The user's own API keys have the same non-credential settings access as browser sessions:
+The user's own `full` API keys have the same non-credential settings access as browser sessions:
 list calendar connections/status, refresh their calendar list, choose conflict calendars,
 set/clear the writeback destination and sync a selected calendar now. They may also list
 their Zoom connections and select their own meeting-mode connection for automatic Zoom
@@ -664,9 +701,10 @@ OAuth authorization, code exchange and disconnect require a live browser session
 Explicit Zoom credential refresh also remains session-only. Calendar list refresh and sync
 may internally refresh existing access tokens without exposing them or granting new scopes.
 Cookie-authenticated writes retain the same-origin requirement; API keys use bearer
-authentication. Read-only MCP `list_calendar_connections` and `list_conference_connections`
+authentication. `read` and `full` API keys can read the connection metadata; `bookings`
+cannot. Read-only MCP `list_calendar_connections` and `list_conference_connections`
 reuse the REST services with the same ownership checks, including for MCP OAuth grants.
-Settings mutations use REST with an API key; MCP OAuth grants remain limited to MCP tools.
+Settings mutations use REST with a `full` API key; MCP OAuth grants remain limited to MCP tools.
 
 ## Validation
 

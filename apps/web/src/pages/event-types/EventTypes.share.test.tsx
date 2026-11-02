@@ -504,7 +504,7 @@ describe('viewing and sharing the saved event type', () => {
     expectShareHashTargets()
   })
 
-  it('waits for a complete team configuration check before offering its saved link', async () => {
+  it('keeps the saved team link copyable while configuration loads', async () => {
     const pending = later()
     const api = server(
       [eventType({ organizationId: TEAM.organization.id, ownerUserId: null })],
@@ -513,7 +513,8 @@ describe('viewing and sharing the saved event type', () => {
     )
     await openExisting()
     await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(1))
-    expectNoShareActions()
+    expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
+    expect(within(share()).getByText('Checking configuration…')).toBeDefined()
     expect(share().querySelector('a[href="#saved-readiness-heading"]')).not.toBeNull()
     await pending.answer(json(200, teamPage()))
     expect(
@@ -557,7 +558,8 @@ describe('viewing and sharing the saved event type', () => {
       expect(
         within(screen.getByRole('region', { name: 'Saved version readiness' })).getByText(message),
       ).toBeDefined()
-      expectNoShareActions()
+      expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
+      expect(within(share()).queryByText('Configuration needs attention')).toBeNull()
       expect(share().querySelector('a[href="#saved-readiness-heading"]')).not.toBeNull()
       expectShareHashTargets()
       await user.click(
@@ -567,7 +569,7 @@ describe('viewing and sharing the saved event type', () => {
       )
       await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(2))
       expect(within(share()).getByText('Checking configuration…')).toBeDefined()
-      expectNoShareActions()
+      expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
       await recovery.answer(json(200, teamPage()))
       expect(
         (await within(share()).findByRole('link', { name: /View booking page/ })).getAttribute(
@@ -578,7 +580,7 @@ describe('viewing and sharing the saved event type', () => {
     },
   )
 
-  it('withholds a team link when its completed readiness page omits the saved event', async () => {
+  it('keeps a team link copyable when its completed readiness page omits the saved event', async () => {
     server(
       [eventType({ organizationId: TEAM.organization.id, ownerUserId: null })],
       { [TEAM_ROUTE]: () => json(200, teamPage([])) },
@@ -588,7 +590,9 @@ describe('viewing and sharing the saved event type', () => {
     await within(screen.getByRole('region', { name: 'Saved version readiness' })).findByText(
       'Configuration not checked',
     )
-    expectNoShareActions()
+    expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
+    expect(within(share()).getByText('Configuration not checked')).toBeDefined()
+    expect(within(share()).queryByText('Configuration needs attention')).toBeNull()
     expect(share().querySelector('a[href="#saved-readiness-heading"]')).not.toBeNull()
   })
 

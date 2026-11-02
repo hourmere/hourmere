@@ -68,5 +68,8 @@
   "teamInvitation.expiry": "邀请有效期至：{expiry}。",
   "teamInvitation.button": "查看并接受邀请",
   "teamInvitation.fallback": "如果按钮无法使用，请将此链接复制到浏览器中：",
-  "teamInvitation.footer": "如果你不认识此团队或不想加入，可以忽略此邮件。"
+  "teamInvitation.footer": "如果你不认识此团队或不想加入，可以忽略此邮件。",
+  "followUp.subject": "预约时段已结束：{event}",
+  "followUp.introduction": "你与{other}预约的会议时段已结束。",
+  "followUp.hostNote": "主持人留言"
 }

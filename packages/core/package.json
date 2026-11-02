@@ -9,6 +9,7 @@
     "./language": "./src/language.ts",
     "./locales": "./src/locales.ts",
     "./conference-url": "./src/conference-url.ts",
+    "./follow-up-note": "./src/follow-up-note.ts",
     "./public-avatar": "./src/public-avatar.ts"
   },
   "scripts": {

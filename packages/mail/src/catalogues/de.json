@@ -68,5 +68,8 @@
   "teamInvitation.expiry": "Diese Einladung ist bis {expiry} gültig.",
   "teamInvitation.button": "Einladung ansehen und annehmen",
   "teamInvitation.fallback": "Falls die Schaltfläche nicht funktioniert, kopieren Sie diesen Link in Ihren Browser:",
-  "teamInvitation.footer": "Falls Sie dieses Team nicht kennen oder ihm nicht beitreten möchten, können Sie diese E-Mail ignorieren."
+  "teamInvitation.footer": "Falls Sie dieses Team nicht kennen oder ihm nicht beitreten möchten, können Sie diese E-Mail ignorieren.",
+  "followUp.subject": "Geplanter Zeitraum abgelaufen: {event}",
+  "followUp.introduction": "Der für Ihren Termin mit {other} vorgesehene Zeitraum ist abgelaufen.",
+  "followUp.hostNote": "Nachricht der gastgebenden Person"
 }

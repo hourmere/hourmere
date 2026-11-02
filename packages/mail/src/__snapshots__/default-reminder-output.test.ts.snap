@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`default reminder output before follow-up templates > preserves every de reminder byte 1`] = `"691a754a321529aa06e2f0a99f7a193ebbf2d98efe4aa52a4669c10126c2b23f"`;
+
+exports[`default reminder output before follow-up templates > preserves every en reminder byte 1`] = `"ea9c936540a4a6829fedd7b917f26e7461fc8d4be4169fa331be61d55e23f128"`;
+
+exports[`default reminder output before follow-up templates > preserves every es reminder byte 1`] = `"1b57365d8f456d1f6d81eb08bc0d04848ddcf9207be2ac7b0e76c82a443ed2dd"`;
+
+exports[`default reminder output before follow-up templates > preserves every fr reminder byte 1`] = `"824fde853eea6b8e162677615ecb2097eddc5aa07ac455a9ccd14913d2df570b"`;
+
+exports[`default reminder output before follow-up templates > preserves every pt-BR reminder byte 1`] = `"f770d0c2a6d5b328d95068418706acfe058a412249f22fd1f5d0b5d4d6ce05c9"`;
+
+exports[`default reminder output before follow-up templates > preserves every zh-CN reminder byte 1`] = `"6cd4b09a0aba11c079334a9b6cb54da1aa63d3277bc8d8dc91f3d264f9096fe2"`;

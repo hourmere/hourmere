@@ -567,6 +567,13 @@ Keep tracked Compose files unchanged and preserve the worker selection in `.env`
 upgrade rebuilds/recreates any separate worker. If starting from a pre-1.0 checkout, read
 [its migration notes](#upgrading-from-a-pre-10-checkout) before either sequence.
 
+Scoped API keys require all key-authenticating processes to use the new code. Stop every
+old web/all/worker and other old process that can authenticate or write keys before
+migration, then restart all roles with the new version. **Do not run old and new servers
+side by side once scoped keys exist:** old code treats scoped keys as full access.
+Follow backup/restore for rollback; do not simply restart an old binary against scoped
+keys or rewrite them to `full`. See [API keys](/docs/api-keys#upgrade-safely).
+
 ### Single-container upgrade
 
 The app keeps the default `all` role. From the deployment checkout:

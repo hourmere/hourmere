@@ -1,6 +1,7 @@
 // Emails about a booking, to its attendees and its hosts: confirmed, rescheduled, cancelled
 // and reminder. Plain text plus simple HTML with inline styles: no images, no external
 // assets, no tracking. Everything from the booking is someone's input and is treated so.
+import { normalizeFollowUpHostNote } from '@hourmere/core/follow-up-note'
 import {
   formattingLocale,
   type InterfaceLanguage,
@@ -240,6 +241,7 @@ interface Content {
   /** Label and value, already cleaned. */
   fields: { label: string; text: string; muted?: boolean }[]
   answers: readonly { question: string; answer: string }[]
+  hostNote?: { label: string; text: string } | undefined
   join?: { label: string; url: string } | undefined
   bookingUrl?: string | undefined
   manageLinks?: ManageLinks | undefined
@@ -274,6 +276,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
           ...c.answers.map((a) => `${a.question}\n  ${a.answer.replaceAll('\n', '\n  ')}`),
         ]
       : []),
+    ...(c.hostNote ? ['', c.hostNote.label, c.hostNote.text] : []),
     ...(c.join ? ['', c.join.label, c.join.url] : []),
     ...(c.bookingUrl ? ['', textField(t('Open in Hourmere'), c.bookingUrl, c.language)] : []),
     ...actionText,
@@ -305,6 +308,9 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
   const footer = c.footer
     ? `<p lang="${c.footer.language}" style="margin: ${c.manageLinks ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(c.footer.text, c.footer.language)}</p>`
     : ''
+  const hostNote = c.hostNote
+    ? `<p style="margin: 24px 0 4px; font-weight: 600;">${htmlText(c.hostNote.label)}</p>\n<p style="margin: 0 0 12px; ${emailWrapStyle}">${htmlLines(c.hostNote.text, c.language)}</p>`
+    : ''
   const links = c.manageLinks
     ? `<p style="margin: 24px 0 8px;">${htmlText(t('Need to make a change?'))}</p>
 ${emailButton(t('Reschedule'), c.manageLinks.reschedule, false, c.language)}
@@ -322,6 +328,7 @@ ${emailButton(c.join.label, c.join.url, false, c.language)}
     : ''
   const afterDetails = [
     answers,
+    hostNote,
     join,
     bookingLink,
     links,
@@ -345,6 +352,45 @@ ${rows}
     html,
     ...(attachment && { attachments: [attachment] }),
   }
+}
+
+/**
+ * A neutral follow-up after the scheduled end, without implying attendance. Follow-ups
+ * never include a meeting location, join link, manage capability, answers or attachment.
+ */
+export function followUpEmail(
+  meeting: BookingEmailMeeting,
+  recipient: BookingEmailRecipient,
+  options: { hostNote?: string | undefined; bookingUrl?: string | undefined } = {},
+): MailMessage {
+  const language = interfaceLanguage(recipient.locale) ?? 'en'
+  const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
+  const event = singleLine(meeting.eventName)
+  const host = singleLine(meeting.hostName)
+  const invitee = singleLine(meeting.inviteeName)
+  const isHost = recipient.role === 'host'
+  const note = multiLine(normalizeFollowUpHostNote(options.hostNote ?? ''))
+  const bookingUrl = isHost && options.bookingUrl ? linkableUrl(options.bookingUrl) : undefined
+  const receivedWhy = isHost
+    ? 'You received this email because {invitee} booked a meeting with you via Hourmere.'
+    : recipient.email.toLowerCase() === meeting.inviteeEmail.toLowerCase()
+      ? 'You received this email because you booked a meeting with {host} via Hourmere.'
+      : 'You received this email because {invitee} added you to a booking with {host} via Hourmere.'
+  const content: Content = {
+    language,
+    subject: t('followUp.subject', { event }),
+    intro: t('followUp.introduction', { other: isHost ? invitee : host }),
+    fields: [
+      field(t('What'), event),
+      field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
+      field(t('Host'), host),
+    ],
+    answers: [],
+    bookingUrl,
+    hostNote: note ? { label: t('followUp.hostNote'), text: note } : undefined,
+    receivedWhy: t(receivedWhy, { host, invitee }),
+  }
+  return { ...render(recipient.email, content), sensitive: true }
 }
 
 // --- Emails -------------------------------------------------------------------------------

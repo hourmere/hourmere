@@ -305,6 +305,11 @@ app's API keys page (`/app/api-keys`), or with Better Auth's endpoints while sig
 `/api/v1/openapi.json`; its conventions are in [API conventions](https://hourmere.com/docs/api-conventions).
 The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
 [MCP](https://hourmere.com/docs/mcp).
+Choose **Bookings** (the web default) for an AI booking agent, **Read** for
+analytics/reporting, or **Full account access** when you need configuration writes. Existing
+keys retain `full` access. A key's scope cannot change: create a replacement, verify it, then
+revoke the old key. See [API key scopes](https://hourmere.com/docs/api-keys) for the generated
+operation table and the required stop-before-upgrade procedure.
 
 For terminal scripts, the dependency-free [CLI](https://hourmere.com/docs/cli) supports configuration discovery,
 slots, booking, host history, rescheduling and cancellation with the same API key.

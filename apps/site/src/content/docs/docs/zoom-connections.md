@@ -118,7 +118,7 @@ User operations and deletion use the same owner-first row-lock order. Durable cl
 callback replay and rotating-token reuse after failed commits. Provider calls have a bounded
 deadline and response size. The optional signed event endpoint handles URL validation and
 app deauthorization without calling Zoom or storing event payloads. Automatic personal and individual single-host team events require an explicit meeting-mode
-connection, a default-off instance flag and the actual host's session or own API-key selection.
+connection, a default-off instance flag and the actual host's session or own `full` API-key selection.
 They reconcile one pinned meeting through reschedule/cancellation, hold final mail/ICS until
 ready and can pin one optional ordinary Google copy. Collective/round-robin automatic Zoom
 is unsupported. An unknown create is never retried with another POST: inspect/remove any

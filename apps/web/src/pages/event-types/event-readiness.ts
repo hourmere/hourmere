@@ -8,6 +8,36 @@ export type SelfEventReadiness = Schemas['SelfReadinessPage']['eventTypes']['dat
 export type TeamEventReadiness = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
 export type EventReadiness = SelfEventReadiness | TeamEventReadiness
 
+/** Use the service's team result; a partial pool still has an eligible candidate. */
+export function teamReadinessAllowsSharing(item: EventReadiness | undefined) {
+  return (
+    item !== undefined &&
+    'reasonCodes' in item &&
+    item.completeness === 'complete' &&
+    (item.summary === 'checks_passed' || item.summary === 'partial_pool') &&
+    !item.reasonCodes.some(
+      (reason) => reason === 'check_failed' || reason === 'check_not_performed',
+    )
+  )
+}
+
+/** Preserve existing links unless the service reports a configuration problem. */
+export function teamReadinessBlocksSharing(item: EventReadiness | undefined) {
+  if (!item || !('reasonCodes' in item) || item.summary === 'partial_pool') return false
+  return (
+    item.summary === 'configuration_blocked' ||
+    item.summary === 'dependency_unavailable' ||
+    item.reasonCodes.some((reason) =>
+      [
+        'default_schedule_required',
+        'host_configuration_required',
+        'calendar_attention_required',
+        'optional_feature_attention_required',
+      ].includes(reason),
+    )
+  )
+}
+
 export function readinessErrorStatus(me: Me, err: unknown): 'unavailable' | 'error' {
   return !me.organization.personal &&
     err instanceof RequestError &&

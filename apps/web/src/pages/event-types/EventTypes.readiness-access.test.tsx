@@ -62,6 +62,8 @@ const labels = {
     copy: 'Copy link for Intro call',
     hours: 'Set your weekly hours',
     handle: 'Choose your handle',
+    unavailable: 'Readiness checks are unavailable for this account.',
+    noLink: 'No public booking link',
   },
   'zh-CN': {
     checks: '配置检查',
@@ -71,6 +73,8 @@ const labels = {
     copy: '复制链接：Intro call',
     hours: '设置每周时间段',
     handle: '选择用户名',
+    unavailable: '此账号无法使用就绪检查。',
+    noLink: '没有公开预约链接',
   },
 }
 
@@ -149,6 +153,10 @@ describe.each([
       expect(screen.getByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
       expect(screen.getByTestId('location').textContent).toBe('/app/event-types')
       expect(screen.queryByRole('heading', { name: 'Sign in to Hourmere' })).toBeNull()
+      if (!me.organization.personal) {
+        expect(screen.getByText(labels.en.unavailable)).toBeDefined()
+        expect(screen.queryByText(labels.en.noLink)).toBeNull()
+      }
       await user.click(screen.getByRole('button', { name: labels.en.copy }))
       expect(await navigator.clipboard.readText()).toBe(
         `${window.location.origin}${me.organization.personal ? '/ada' : '/team/design-team'}/intro-call`,
@@ -186,6 +194,8 @@ describe('team event readiness access', () => {
       await membership.answer(json(200, member('member')))
       expect(api.to(READINESS_ROUTE)).toHaveLength(0)
       await waitFor(() => expectChecksHidden(language))
+      expect(screen.getByText(labels[language].unavailable)).toBeDefined()
+      expect(screen.queryByText(labels[language].noLink)).toBeNull()
       await user.click(screen.getByRole('button', { name: labels[language].copy }))
       expectChecksHidden(language)
       expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
@@ -207,6 +217,8 @@ describe('team event readiness access', () => {
       await check.answer(json(403, { error: 'team_management_access_denied' }))
       expect(screen.queryByText(labels[language].failed)).toBeNull()
       await waitFor(() => expectChecksHidden(language))
+      expect(screen.getByText(labels[language].unavailable)).toBeDefined()
+      expect(screen.queryByText(labels[language].noLink)).toBeNull()
       await user.click(screen.getByRole('button', { name: labels[language].copy }))
       expectChecksHidden(language)
       expect(api.to(MEMBER_ROUTE)).toHaveLength(2)
@@ -233,6 +245,23 @@ describe('team event readiness access', () => {
     expect(api.to(READINESS_ROUTE)).toHaveLength(1)
   })
 
+  it('keeps the team link copyable with neutral copy while readiness loads', async () => {
+    const user = userEvent.setup()
+    const pending = later()
+    server('owner', { [READINESS_ROUTE]: () => pending.response })
+    await open()
+    const row = screen.getByRole('rowheader', { name: 'Intro call' }).closest('tr') as HTMLElement
+    expect(within(row).getByText('Checking configuration…')).toBeDefined()
+    expect(within(row).queryByText('Configuration needs attention')).toBeNull()
+    expect(within(row).queryByText('No public booking link')).toBeNull()
+    await user.click(within(row).getByRole('button', { name: labels.en.copy }))
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/team/design-team/intro-call`,
+    )
+    await pending.answer(json(200, readiness))
+    await within(row).findByText(labels.en.passed)
+  })
+
   it.each([
     [403, 'forbidden'],
     [503, 'internal_error'],
@@ -245,6 +274,12 @@ describe('team event readiness access', () => {
     })
     await open()
     await screen.findByText('Configuration check failed')
+    expect(screen.queryByText('Configuration needs attention')).toBeNull()
+    expect(screen.queryByText('No public booking link')).toBeNull()
+    await user.click(screen.getByRole('button', { name: labels.en.copy }))
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/team/design-team/intro-call`,
+    )
     await user.click(screen.getByRole('button', { name: 'Retry checks' }))
     await screen.findByText('Configuration checks passed')
     expect(api.to(READINESS_ROUTE)).toHaveLength(2)

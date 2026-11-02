@@ -107,6 +107,7 @@ export default defineConfig({
           label: 'Developers',
           items: [
             { label: 'REST quickstart', link: '/docs/rest' },
+            { label: 'API keys', link: '/docs/api-keys' },
             { label: 'API conventions', link: '/docs/api-conventions' },
             { label: 'MCP quickstart', link: '/docs/mcp' },
             { label: 'CLI', link: '/docs/cli' },
