@@ -930,9 +930,9 @@ stored settings or changing default reminders.
 
 Migration 0051 adds an opt-in `waitlist_enabled` flag, defaulting to false without importing
 historical booking contacts. The internal services support personal and team individual
-event types with exactly one eligible host. Public routes, UI, MCP, CLI and email sending
-are separate work; this layer stores encrypted verification intents and availability
-candidates without dispatching either kind of mail.
+event types with exactly one eligible host. Public join UI, administration summaries and general REST/MCP/CLI operations
+are separate work. The delivery layer sends encrypted verification intents and availability
+candidates through the shared mail pipeline, without a new schema migration.
 
 `waitlist_entries` keeps fixed UTC preference windows and consent, with pending verification,
 active, notified, booked, expired and removed states. Deadlines never renew: verification
@@ -980,7 +980,7 @@ statement timeout uses the remaining budget; completed batches remain committed.
 Every eligible verified recipient in a pass enters the same cohort. Each immutable candidate
 contains at most three full matching UTC intervals and expires at the earliest of discovery
 plus twenty-four hours, entry expiry or the first slot's current notice cutoff. There is no
-hold, rank or intentional delay awaiting another invitee. Future senders must recheck current
+hold, rank or intentional delay awaiting another invitee. Senders recheck current
 lifecycle, exact availability and the shared ordinary-recipient mail budget before sending;
 candidate creation is not evidence of SMTP acceptance or inbox delivery.
 

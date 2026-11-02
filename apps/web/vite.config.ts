@@ -27,6 +27,8 @@ export default defineConfig(({ mode }) => {
       // the page that emailed sign-in links open (not a page of this app).
       proxy: {
         '/api/': `http://localhost:${apiPort}`,
+        '/waitlist/verify': `http://localhost:${apiPort}`,
+        '/waitlist/remove': `http://localhost:${apiPort}`,
         '/sign-in/confirm': `http://localhost:${apiPort}`,
       },
     },

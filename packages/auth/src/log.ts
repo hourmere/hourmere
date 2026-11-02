@@ -26,9 +26,21 @@ const UUID = /\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b/gi
 
 /** Preserve diagnostic text while removing identifiers and URL query/fragment values. */
 export function redactLogDetails(text: string): string {
-  return text
-    .replace(URL_TEXT, (url) => url.split(/[?#]/, 1)[0] ?? url)
-    .replace(UUID, '[redacted UUID]')
+  return (
+    text
+      .replace(URL_TEXT, (url) => url.split(/[?#]/, 1)[0] ?? url)
+      // The capability path segment can be percent-encoded by clients/proxies. Hide it
+      // without decoding arbitrary diagnostic text or relying on UUID recognition.
+      .replace(
+        /(\/waitlist\/)(?!verify(?:[\s/]|$)|remove(?:[\s/]|$))[^\s/]+/gi,
+        '$1[redacted waitlist token]',
+      )
+      .replace(
+        /\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}(?:\.|%2e)(?:[A-Za-z0-9_-]|%[\da-f]{2}){43}/gi,
+        '[redacted waitlist token]',
+      )
+      .replace(UUID, '[redacted UUID]')
+  )
 }
 
 const MAIL_FAILURE = '[auth] sign-in email not sent'

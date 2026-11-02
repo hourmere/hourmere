@@ -894,3 +894,44 @@ Old rows retain their exact `due_at` and `delivered` values on upgrade, and `ski
 starts null without rewriting historical delivery outcomes. Because earlier
 attempt history was not recorded, their new counter starts at zero: one finite post-upgrade
 budget, without inventing historical sends or erasing existing recipient receipts.
+
+## Waitlist delivery
+
+Verified waitlist entries receive a best-effort broadcast when ordinary cached availability
+finds a matching opening. Each message has at most three exact suggestions. Everyone eligible
+enters the same cohort; there is no hold or priority. Shared mail limits, delivery failures
+and earlier bookings can result in partial delivery. Suppressed slots are never back-filled.
+Verification and availability messages use the ordinary booking-recipient budget and the
+instance cap, without the host/sign-in reserve. SMTP must be configured; private waitlist
+messages and capabilities are never printed by the development mailer.
+
+The worker scans durable outboxes at startup and every minute in bounded batches; queue
+payloads contain no recipient or capability. The outboxes own three durable attempts with
+60/120-second backoff and a two-minute recovery lease. Notification deadlines are the earliest
+of discovery plus 24 elapsed hours, entry expiry, and the first suggested start minus the
+current notice requirement. The worker waits for SMTP for at most 60 seconds, shortened to
+the remaining lease and message lifetime.
+A claim commits before SMTP; restart repair consumes it rather than resetting attempts.
+The shared mail lock serializes the final lifecycle, exact availability and budget checks
+through SMTP acceptance and the receipt/ledger commit. No event, host, booking or waitlist
+entry row lock spans SMTP. Accepted receipts prevent subsequent sends; slot tombstones
+survive terminal outcomes, removal and re-enrollment.
+
+SMTP acceptance is not inbox delivery. Acceptance followed by a failed receipt commit may
+cause a duplicate. A timed-out or shutdown-aborted exchange may still finish in the background
+and overlap a later retry. Removal or booking after the final check can also race a send
+already starting. These are bounded external-delivery windows, not an exactly-once promise.
+
+Verification/removal links open a no-store, no-referrer confirmation page; only an explicit
+same-origin POST changes state. Booking suggestions put the management token and notification
+preview deadline in the URL path, never a query. Their responses keep no-referrer/no-store,
+and server diagnostics redact raw and encoded capabilities. After the preview deadline,
+the ordinary picker remains available, including optional waitlist attribution; editing a
+presentation deadline grants no booking permission and never changes the entry deadline.
+The ordinary booking transaction decides the winner. Losing a race refreshes remaining
+available times and keeps the original waiting deadline. Self-removal revokes outstanding
+capabilities and stops unsent work; opening a link alone does not remove or book anything.
+
+Public join UI, administration summaries and general REST/MCP/CLI waitlist operations are
+separate work. The minimal mail-link confirmations and optional public-booking attribution
+are available in this delivery layer.

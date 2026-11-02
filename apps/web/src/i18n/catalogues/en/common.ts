@@ -1,5 +1,9 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'These suggestions have expired. Check the current available times.':
+    'These suggestions have expired. Check the current available times.',
+  'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.':
+    'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.',
   'Your team context changed. Reload before making changes.':
     'Your team context changed. Reload before making changes.',
   '{count} min': '{count} min',

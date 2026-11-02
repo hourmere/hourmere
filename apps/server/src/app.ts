@@ -34,10 +34,18 @@ import {
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import { VERSION } from './version.ts'
+import { registerWaitlistConfirmation } from './waitlist-confirm.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
   checkDb: () => Promise<void>
+  /** Minimal confirmation transports for emailed waitlist capabilities. */
+  waitlist?:
+    | {
+        verify: (token: string) => Promise<unknown>
+        remove: (token: string) => Promise<unknown>
+      }
+    | undefined
   /** Better Auth's request handler (sign-in, sessions, API keys), served at /api/auth/*. */
   authHandler: (request: Request) => Promise<Response>
   /** Identifies the caller of authenticated routes (session cookie or API key). */
@@ -257,7 +265,7 @@ const COLORS = /\u001b\[[0-9;]*m/g
  * there) and without colors.
  */
 const requestLogger = logger((line, ...rest) =>
-  console.log(line.replace(/\?\S*/, '').replace(COLORS, ''), ...rest),
+  console.log(escapeControlCharacters(redactLogDetails(line.replace(COLORS, ''))), ...rest),
 )
 
 export function createApp({
@@ -271,6 +279,7 @@ export function createApp({
   webDist,
   routes = [],
   mcp,
+  waitlist,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   const apiNotFound = (c: Context) => c.json({ error: 'not_found' }, 404)
@@ -456,6 +465,7 @@ export function createApp({
 
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
+  if (waitlist) registerWaitlistConfirmation(app, { publicUrl, trustedProxies, ...waitlist })
 
   // Explicit discovery routes are mounted above. Unknown well-known resources must never
   // resolve to a static file or the SPA, including on self-hosted instances.

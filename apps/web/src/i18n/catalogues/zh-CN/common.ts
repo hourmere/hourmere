@@ -1,5 +1,9 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'These suggestions have expired. Check the current available times.':
+    '这些建议时段已过期，请查看当前可约时间。',
+  'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.':
+    '如果您仍在候补名单中，可以继续等待，直至原定截止时间。我们不会为您预留时段。',
   'Your team context changed. Reload before making changes.':
     '你的团队上下文已改变。请重新加载后再进行修改。',
   '{count} min': '{count}分钟',

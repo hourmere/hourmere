@@ -138,6 +138,10 @@ export const CreateBooking = z
         'Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed',
     }),
     responses: Responses.optional(),
+    waitlistToken: z.string().max(256).optional().openapi({
+      description:
+        'Optional waitlist attribution capability; grants no booking priority or permission',
+    }),
     source: z.literal('embed').optional().openapi({
       description:
         'Optional untrusted attribution hint for an embedded public booking; never grants privileges',
@@ -167,6 +171,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 
 export interface PublicRoutesDeps {
   db: Db
+  waitlistSecret?: string | undefined
   successRedirectPolicy?: PublicContext['successRedirectPolicy']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -188,6 +193,7 @@ export function publicRoutes({
   automaticMeet,
   automaticZoom,
   successRedirectPolicy,
+  waitlistSecret,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
   const ctx: PublicContext = {
@@ -197,6 +203,7 @@ export function publicRoutes({
     automaticMeet,
     automaticZoom,
     successRedirectPolicy,
+    waitlistSecret,
   }
   const limit = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
@@ -367,6 +374,7 @@ export function publicRoutes({
               invitee: body.invitee,
               guests: body.guests,
               responses: body.responses,
+              waitlistToken: body.waitlistToken,
               idempotencyKey: c.req.valid('header')['idempotency-key'],
             },
             { source: body.source ?? 'web', apiKeyId: null },

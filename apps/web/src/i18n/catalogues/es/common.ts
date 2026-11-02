@@ -1,4 +1,8 @@
 export const common = {
+  'These suggestions have expired. Check the current available times.':
+    'Estas sugerencias han vencido. Consulte los horarios disponibles actualmente.',
+  'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.':
+    'Si sigue en la lista de espera, puede esperar hasta la fecha de vencimiento original. No se reserva ningún horario.',
   'Your team context changed. Reload before making changes.':
     'El contexto de su equipo ha cambiado. Vuelva a cargar la página antes de realizar cambios.',
   '{count} min': '{count} min',

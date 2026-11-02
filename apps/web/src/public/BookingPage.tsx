@@ -60,6 +60,12 @@ import {
   responsesFor,
 } from './validation.ts'
 import { rememberVisitorTimeZone, visitorTimeZone } from './visitor-time-zone.ts'
+import {
+  loadWaitlistSuggestion,
+  parseWaitlistLink,
+  type WaitlistLink,
+  waitlistPreviewActive,
+} from './waitlist-link.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
@@ -74,16 +80,26 @@ export function BookingPage({ team = false }: { team?: boolean } = {}) {
   const rawSlug = params.slug ?? ''
   const handle = team ? teamSlug(rawHandle) : normalizedHandle(rawHandle)
   const slug = normalizedSlug(rawSlug)
+  const waitlist = useMemo(
+    () => parseWaitlistLink(params.waitlistToken, params.suggestedStart, params.previewExpiresAt),
+    [params.waitlistToken, params.suggestedStart, params.previewExpiresAt],
+  )
   if (handle === undefined || slug === undefined) return <PublicNotFound what="event" />
   if (handle !== rawHandle || slug !== rawSlug)
     return (
       <Navigate
-        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${handle}/${slug}${embedded ? location.search : ''}`}
+        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${handle}/${slug}${waitlist ? `/waitlist/${waitlist.token}/${encodeURIComponent(waitlist.start)}/${waitlist.expiresAt}` : ''}${embedded ? location.search : ''}`}
         replace
       />
     )
   return (
-    <BookingPageContent key={`${team}/${handle}/${slug}`} handle={handle} slug={slug} team={team} />
+    <BookingPageContent
+      key={`${team}/${handle}/${slug}`}
+      handle={handle}
+      slug={slug}
+      team={team}
+      waitlist={waitlist}
+    />
   )
 }
 
@@ -91,10 +107,12 @@ function BookingPageContent({
   handle,
   slug,
   team,
+  waitlist,
 }: {
   handle: string
   slug: string
   team: boolean
+  waitlist?: WaitlistLink | undefined
 }) {
   const { t, ui } = useI18n()
 
@@ -133,7 +151,9 @@ function BookingPageContent({
       </PublicLayout>
     )
   }
-  return <BookingFlow event={state.data} handle={handle} slug={slug} team={team} />
+  return (
+    <BookingFlow event={state.data} handle={handle} slug={slug} team={team} waitlist={waitlist} />
+  )
 }
 
 const EMPTY_FORM: BookingFormValues = { name: '', email: '', guests: [], answers: {} }
@@ -149,11 +169,13 @@ function BookingFlow({
   handle,
   slug,
   team,
+  waitlist,
 }: {
   event: PublicEventType
   handle: string
   slug: string
   team: boolean
+  waitlist?: WaitlistLink | undefined
 }) {
   const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
 
@@ -229,6 +251,44 @@ function BookingFlow({
     }
   }, [handle, slug, team, durationMinutes, hasDurationChoices, event.questions, refreshDurations])
 
+  // A suggested time is a preview, never a hold. Read normal availability before
+  // opening the ordinary form; the booking transaction checks it again on submit.
+  const [suggestion, setSuggestion] = useState(waitlist ? 'loading' : 'done')
+  useEffect(() => {
+    if (!waitlist) return
+    if (!waitlistPreviewActive(waitlist, currentTime())) {
+      setNotice('These suggestions have expired. Check the current available times.')
+      setSuggestion('done')
+      return
+    }
+    const controller = new AbortController()
+    setSuggestion('loading')
+    loadWaitlistSuggestion(
+      eventSlots(handle, slug, team),
+      waitlist.start,
+      initialEvent.durationMinutes,
+      controller.signal,
+    ).then(
+      (offered) => {
+        if (controller.signal.aborted) return
+        if (!waitlistPreviewActive(waitlist, currentTime())) {
+          setNotice('These suggestions have expired. Check the current available times.')
+          setSuggestion('done')
+          return
+        }
+        if (offered) setSlot(offered)
+        else setNotice('That time is no longer available. Please pick another one.')
+        setSuggestion('done')
+      },
+      (error) => {
+        if (controller.signal.aborted) return
+        setNotice(failureMessage(error))
+        setSuggestion('done')
+      },
+    )
+    return () => controller.abort()
+  }, [waitlist, handle, slug, team, initialEvent.durationMinutes])
+
   if (gone) return <PublicNotFound what="event" />
   if (confirmed)
     return <Confirmation event={event} confirmed={confirmed} locale={locale} team={team} />
@@ -254,6 +314,7 @@ function BookingFlow({
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
+      ...(waitlist && { waitlistToken: waitlist.token }),
       ...(hasDurationChoices && { durationMinutes }),
       invitee: {
         name: values.name.trim(),
@@ -424,7 +485,16 @@ function BookingFlow({
           )}
         </aside>
         <div className="booking-main">
-          {durationRefresh ? (
+          {waitlist && (
+            <p className="muted">
+              {t(
+                'If you are still on the waitlist, you can keep waiting until its original expiry. No time is reserved.',
+              )}
+            </p>
+          )}
+          {suggestion === 'loading' ? (
+            <PublicStatus>{t('Loading…')}</PublicStatus>
+          ) : durationRefresh ? (
             <section className="details-step" aria-labelledby="duration-refresh-heading">
               <FocusHeading level={2} id="duration-refresh-heading" className="step-title">
                 {t('Pick a time')}

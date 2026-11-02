@@ -67,6 +67,7 @@ describe('routing between the app and the public pages', () => {
       ...NAV_ITEMS.map((item) => item.to),
       '/sign-in',
       '/booking',
+      '/waitlist',
       '/app',
       '/api',
       '/assets',

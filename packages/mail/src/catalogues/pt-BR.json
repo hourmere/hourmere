@@ -71,5 +71,20 @@
   "teamInvitation.footer": "Se você não reconhece esta equipe ou não quer participar dela, pode ignorar este e-mail.",
   "followUp.subject": "Fim do horário agendado: {event}",
   "followUp.introduction": "O horário agendado para sua reunião com {other} terminou.",
-  "followUp.hostNote": "Mensagem do anfitrião"
+  "followUp.hostNote": "Mensagem do anfitrião",
+  "waitlist.event": "Sua reunião",
+  "waitlist.verify.subject": "Confirme sua solicitação de lista de espera: {event}",
+  "waitlist.verify.introduction": "Confirme este endereço de e-mail para entrar na lista de espera de “{event}”. Abrir o link não confirma sua solicitação.",
+  "waitlist.verify.action": "Abra o link e confirme na página:",
+  "waitlist.verify.expiry": "Este link de verificação expira em {expiry}, no máximo 30 minutos após a solicitação.",
+  "waitlist.verify.footer": "Se você não fez esta solicitação, ignore este e-mail ou remova a solicitação pelo link acima.",
+  "waitlist.broadcast": "As sugestões são compartilhadas com todas as pessoas elegíveis na lista de espera. Nenhum horário fica reservado; a primeira reserva concluída com sucesso fica com o horário. Os e-mails podem ser enviados apenas a parte das pessoas ou chegar com atraso.",
+  "waitlist.remove": "Para sair da lista de espera, abra este link e confirme a remoção:",
+  "waitlist.notice.subject": "Horários sugeridos para {event}",
+  "waitlist.notice.introduction": "Foram encontrados horários para “{event}”. Eles podem já ter sido reservados. Escolha uma sugestão para verificar a disponibilidade atual e fazer uma reserva.",
+  "waitlist.slot": "{start} – {end}",
+  "waitlist.notice.expiry": "Estas sugestões expiram em {expiry}. Esse prazo não reserva um horário.",
+  "waitlist.notice.page": "Confira todos os horários atuais na página de reservas:",
+  "waitlist.notice.waiting": "Se um horário não estiver mais disponível, você continuará na lista de espera até o prazo original. Se reservou por outro meio, use o link abaixo para sair.",
+  "waitlist.notice.footer": "Você recebeu este e-mail porque verificou uma solicitação de lista de espera para esta reunião."
 }
