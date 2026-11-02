@@ -90,7 +90,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
       await f.schedule(u.id, { timeZone: 'UTC' })
       if (i < 2) await destination(u)
     }
-    provider = fakeGoogle()
+    provider = fakeGoogle(() => NOW.epochMilliseconds)
     copies = new Map()
     calls = []
     sent = []

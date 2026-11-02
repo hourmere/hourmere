@@ -45,25 +45,24 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
     await db.deleteFrom('bookings').execute()
     await db.deleteFrom('notification_email_sends').execute()
   })
-  async function blockedBy(pid: number, ownsLock: boolean) {
-    const deadline = Date.now() + 3000
-    while (Date.now() < deadline) {
+  async function blockedBy(waiterPid: number, blockerPid: number, signal: AbortSignal) {
+    for (;;) {
+      signal.throwIfAborted()
       const result = await owned.pool.query<{ blocked: boolean }>(
-        ownsLock
-          ? 'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))) AS blocked'
-          : 'SELECT cardinality(pg_blocking_pids($1))>0 AS blocked',
-        [pid],
+        'SELECT $2=ANY(pg_blocking_pids($1)) AS blocked',
+        [waiterPid, blockerPid],
       )
       if (result.rows[0]?.blocked) return
       await new Promise((resolve) => setTimeout(resolve, 5))
     }
-    throw new Error('Expected the real identity row-lock barrier')
   }
 
   for (const path of ['outbox', 'legacy', 'legacy-null'] as const) {
     for (const lock of ['user', 'member'] as const) {
       for (const change of ['cancel', 'reschedule', 'revision'] as const) {
-        it(`${path} rechecks ${change} after the organizer ${lock} lock wait`, async () => {
+        it(`${path} rechecks ${change} after the organizer ${lock} lock wait`, async ({
+          signal,
+        }) => {
           const f = createFixtures(db)
           const host = await f.host()
           await f.schedule(host.userId)
@@ -120,10 +119,35 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
               .execute()
           const entered = gate(),
             hold = gate(),
+            nextRecipient = gate(),
+            nextTransaction = gate(),
             messages: MailMessage[] = []
+          let senderPid!: number
+          const sendingDb = new Proxy(db, {
+            get(target, property) {
+              if (property === 'transaction')
+                return () => ({
+                  execute: async <T>(run: (trx: Db) => Promise<T>) => {
+                    // Do not let the invitee transaction race the blocker's lock acquisition.
+                    if (messages.length === 1) await nextRecipient.promise
+                    return target.transaction().execute(async (trx) => {
+                      const sender = (
+                        await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
+                      ).rows[0]
+                      if (!sender) throw new Error('Expected the sender backend pid')
+                      senderPid = sender.pid
+                      if (messages.length === 1) nextTransaction.release()
+                      return run(trx)
+                    })
+                  },
+                })
+              const value = Reflect.get(target, property, target)
+              return typeof value === 'function' ? value.bind(target) : value
+            },
+          })
           let now = NOW
           const deps = {
-            db,
+            db: sendingDb,
             now: () => now,
             secret: 'synthetic-notification-secret',
             publicUrl: 'https://hourmere.example',
@@ -163,10 +187,12 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
                 : sql`SELECT id FROM auth.member WHERE "userId"=${host.userId} AND "organizationId"=${host.organizationId} FOR UPDATE`.execute(
                     blocker,
                   )
-            await blockedBy(pid as number, false)
+            await blockedBy(pid as number, senderPid, signal)
             hold.release()
             await acquiring
-            await blockedBy(pid as number, true)
+            nextRecipient.release()
+            await nextTransaction.promise
+            await blockedBy(senderPid, pid as number, signal)
             expect(messages).toHaveLength(1)
             expect(messages[0]?.to).toBe(organizer.email)
             if (path === 'outbox') {
@@ -273,6 +299,7 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
             }
           } finally {
             hold.release()
+            nextRecipient.release()
             await acquiring?.catch(() => {})
             if (!finished) await blocker.rollback().execute()
             await sending

@@ -85,7 +85,7 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     await db.deleteFrom('schedules').where('user_id', '=', owner.user.id).execute()
     await db.deleteFrom('profiles').where('user_id', '=', owner.user.id).execute()
     await db.deleteFrom('calendar_connections').execute()
-    provider = fakeGoogle()
+    provider = fakeGoogle(() => now)
     provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
     now = Date.parse('2026-11-01T12:00:00Z')
     // The real session clock is independent of the injected calendar clock.

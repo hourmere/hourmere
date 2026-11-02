@@ -30,9 +30,9 @@ describe.skipIf(!url)('OAuth token error recovery (real Postgres)', () => {
   })
   beforeEach(async () => {
     await db.deleteFrom('calendar_connections').execute()
-    google = fakeGoogle()
+    google = fakeGoogle(() => now)
     google.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
-    microsoft = fakeMicrosoft()
+    microsoft = fakeMicrosoft(() => now)
     now = Date.now()
     deps = {
       db,
