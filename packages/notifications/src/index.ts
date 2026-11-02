@@ -78,7 +78,7 @@ export const BOOKING_NOTIFICATION_JOB = 'booking-notification'
  */
 export const REMINDER_LEAD = { hours: 24 } as const
 
-export { REMINDER_MIN_GAP }
+export { REMINDER_MIN_GAP } from './scheduled.ts'
 
 /** Fixed, so changing PUBLIC_URL does not orphan calendar entries made before. */
 export const CALENDAR_UID_DOMAIN = 'hourmere'
