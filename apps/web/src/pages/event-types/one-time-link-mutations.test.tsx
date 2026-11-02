@@ -8,6 +8,8 @@ import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { Field } from '../../components/forms.tsx'
+import { spaceCjkBoundaries } from '../../i18n/formatting.ts'
+import type { translate } from '../../i18n/translate.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { type oneTimeLinkError, oneTimeLinkMetadata } from './OneTimeLinks.tsx'
@@ -137,11 +139,30 @@ describe('one-time link UI production-source negative controls', () => {
     },
   )
 
-  it('detects removing the literal Chinese spacing before a revoke link id', async () => {
+  it('detects bypassing Chinese interpolation spacing before a revoke link id', async () => {
     const chinese = readFileSync('apps/web/src/i18n/catalogues/zh-CN/admin.ts', 'utf8')
-    await detects(chinese, '撤销一次性链接 {0}', '撤销一次性链接{0}', (value) => {
-      const catalogue = copy<Record<string, string>>(value, 'admin')
-      expect(catalogue['Revoke one-time link {0}']).toBe('撤销一次性链接 {0}')
+    const catalogue = copy<Record<string, string>>(chinese, 'admin')
+    const translation = readFileSync('apps/web/src/i18n/translate.ts', 'utf8')
+    const code = translation.slice(
+      translation.indexOf('export function translate('),
+      translation.indexOf('/** Plain strings here'),
+    )
+    await detects(code, "return locale === 'zh-CN'", 'return false', (value) => {
+      const translateCopy = copy<typeof translate>(value, 'translate', {
+        templateFor: (_locale: string, key: string) => catalogue[key],
+        spaceCjkBoundaries,
+      })
+      const id = 'a0000000-0000-7000-8000-000000000001'
+      const view = render(
+        <button type="button">
+          {translateCopy('zh-CN', 'Revoke one-time link {0}', { '0': id })}
+        </button>,
+      )
+      try {
+        expect(screen.getByRole('button').textContent).toBe(`撤销一次性链接 ${id}`)
+      } finally {
+        view.unmount()
+      }
     })
   })
 

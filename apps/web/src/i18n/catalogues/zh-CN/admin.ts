@@ -49,7 +49,7 @@ export const admin = {
   'Used at': '使用时间',
   'Booking reference': '预约编号',
   'Revoke link': '撤销链接',
-  'Revoke one-time link {0}': '撤销一次性链接 {0}',
+  'Revoke one-time link {0}': '撤销一次性链接{0}',
   'Revoke this one-time link? It will stop accepting new bookings.':
     '撤销此一次性链接？撤销后将不再接受新预约。',
   'Copy your one-time link': '复制你的一次性链接',
