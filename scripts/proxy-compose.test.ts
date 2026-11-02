@@ -206,6 +206,7 @@ it('routes the complete public HTTPS origin with Caddy forwarding defaults', () 
 		format filter {
 			request>uri replace "REDACTED"
 			request>headers delete
+			resp_headers delete
 		}
 	}
 }
