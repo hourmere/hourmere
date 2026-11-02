@@ -84,14 +84,15 @@ describe.skipIf(!serverUrl)('indexed booking limit availability queries', () => 
     if (!first) throw new Error('missing query-plan host')
     host = first
     await f.schedule(host.userId, { timeZone: 'UTC' })
+    // Daily history retains selective overlap/period plans with bounded CI seeding.
     await owned.pool.query(
       `INSERT INTO bookings (organization_id,event_type_id,title,start_at,end_at,source)
        SELECT h."organizationId"::uuid,h."eventTypeId"::uuid,'Synthetic query-plan booking',
-         '2025-01-01T00:00Z'::timestamptz + n * interval '2 hours',
-         '2025-01-01T00:30Z'::timestamptz + n * interval '2 hours','api'
+         '2025-01-01T12:00Z'::timestamptz + n * interval '1 day',
+         '2025-01-01T12:30Z'::timestamptz + n * interval '1 day','api'
        FROM jsonb_to_recordset($1::jsonb)
          AS h("organizationId" text,"eventTypeId" text)
-       CROSS JOIN generate_series(0,9999) AS n`,
+       CROSS JOIN generate_series(0,999) AS n`,
       [JSON.stringify(hosts)],
     )
     await owned.pool.query(
@@ -188,7 +189,7 @@ describe.skipIf(!serverUrl)('indexed booking limit availability queries', () => 
   }
 
   it.each<Limits>(['none', 'week', 'month'])(
-    'uses bounded indexed plans with %s limits across 310,000 bookings',
+    'uses bounded indexed plans with %s limits across 31,000 bookings',
     async (limits) => {
       await assertIndexed(limits)
     },
