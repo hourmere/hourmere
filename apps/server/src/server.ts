@@ -49,6 +49,7 @@ import {
   scheduledBookingEmailRepairJob,
   signInEmailJobs,
 } from '@hourmere/notifications'
+import type { ServiceContext } from '@hourmere/scheduling'
 import {
   type BookingNotifier,
   cleanupWaitlist,
@@ -209,6 +210,7 @@ export function productRoutes({
 export function productTools({
   db,
   followUpHostNotesEnabled,
+  successRedirectPolicy,
   notify,
   automaticMeet,
   automaticZoom,
@@ -218,6 +220,7 @@ export function productTools({
 }: {
   db: Db
   followUpHostNotesEnabled?: boolean | undefined
+  successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -229,7 +232,13 @@ export function productTools({
     whoamiTool,
     ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
-    ...eventTypeTools({ db, automaticMeet, automaticZoom, followUpHostNotesEnabled }),
+    ...eventTypeTools({
+      db,
+      automaticMeet,
+      automaticZoom,
+      followUpHostNotesEnabled,
+      successRedirectPolicy,
+    }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
@@ -619,6 +628,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         tools: productTools({
           db,
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+          successRedirectPolicy: {
+            publicUrl: config.PUBLIC_URL,
+            allowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
+          },
           notify,
           automaticMeet: config.GOOGLE_MEET_ENABLED,
           automaticZoom: config.ZOOM_MEETINGS_ENABLED,

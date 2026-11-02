@@ -1773,6 +1773,11 @@ input[type="radio"] {
   contain: inline-size;
 }
 
+.success-redirect-preview {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
 .booking-link a,
 .booking-link .preview {
   position: relative;

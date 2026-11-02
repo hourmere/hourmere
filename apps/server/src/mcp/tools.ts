@@ -21,6 +21,12 @@ import {
 import { hasUnsafeJsonText } from '../app.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import type { RateLimiter } from '../rate-limit.ts'
+import {
+  type SuccessRedirectErrorField,
+  successRedirectErrorField,
+  successRedirectIssueField,
+  successRedirectUnsafeField,
+} from '../success-redirect-errors.ts'
 
 /**
  * Who calls a tool. MCP accepts API keys only for now; OAuth access tokens (later) will
@@ -87,6 +93,7 @@ export function defineTool<I extends z.ZodType, O extends z.ZodType>(tool: Tool<
 /** The body of an error result: the REST API's error shape, plus Retry-After's value. */
 export interface ToolErrorBody {
   error: string
+  field?: SuccessRedirectErrorField
   message?: string
   retryAfterSeconds?: number
 }
@@ -162,12 +169,22 @@ export async function runTool(
     requireApiKeyOperation(call.caller, `mcp:${tool.name}`)
     if (tool.scopeMode)
       requireApiKeyOperation(call.caller, `mcp:${tool.name}:${tool.scopeMode(args)}`)
-    if (hasUnsafeJsonText(args))
-      return errorResult({ error: 'invalid_request', message: UNSAFE_TEXT })
+    if (hasUnsafeJsonText(args)) {
+      const field = privateInput ? undefined : successRedirectUnsafeField(args, hasUnsafeJsonText)
+      return errorResult({
+        error: 'invalid_request',
+        message: UNSAFE_TEXT,
+        ...(field && { field }),
+      })
+    }
     const parsed = tool.input.safeParse(args ?? {})
     if (!parsed.success) {
       return errorResult({
         error: 'invalid_request',
+        ...(!privateInput &&
+          successRedirectIssueField(parsed.error.issues) && {
+            field: successRedirectIssueField(parsed.error.issues),
+          }),
         message: privateInput ? 'Invalid booking request' : describeIssues(parsed.error.issues),
       })
     }
@@ -201,7 +218,13 @@ export async function runTool(
         logError(`${tool.name}: ${err.code} caused by `, diagnostic(err.cause))
       return errorResult(
         err.detail && !privateInput
-          ? { error: err.code, message: err.detail }
+          ? {
+              error: err.code,
+              message: err.detail,
+              ...(successRedirectErrorField(err.code, err.detail) && {
+                field: successRedirectErrorField(err.code, err.detail),
+              }),
+            }
           : { error: err.code },
       )
     }
@@ -227,6 +250,10 @@ function adaptJsonSchema(ctx: { zodSchema: unknown; jsonSchema: JsonSchema }): v
   const meta = getOpenApiMetadata(ctx.zodSchema as z.ZodType)
   if (typeof meta.description === 'string') ctx.jsonSchema.description = meta.description
   if (meta.example !== undefined) ctx.jsonSchema.examples = [meta.example]
+  // Some inputs document service-validated names without duplicating their validation.
+  if (Array.isArray(meta.enum)) ctx.jsonSchema.enum = [...meta.enum]
+  for (const key of ['format', 'maxLength', 'uniqueItems', 'default'] as const)
+    if (meta[key] !== undefined) ctx.jsonSchema[key] = structuredClone(meta[key])
   if (typeof ctx.jsonSchema.format === 'string') delete ctx.jsonSchema.pattern
   const def = (ctx.zodSchema as { _zod?: { def?: { type?: string; catchall?: unknown } } })._zod
     ?.def

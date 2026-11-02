@@ -1,5 +1,39 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'After booking': '预约完成后',
+  'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
+    '在预约确认信息后提供继续访问链接。受邀人离开前可以查看日历信息和管理链接。清空网址即可关闭此功能。',
+  'Continue to URL': '继续访问的网址',
+  'Use HTTPS. The server checks the destination when you save.':
+    '请使用 HTTPS 网址。保存时，服务器会检查目标地址。',
+  'URL parameters': '网址参数',
+  'Only selected values are added. Answers, guests, phone numbers and private booking links are never included.':
+    '仅添加所选信息，不会包含问题回答、来宾、电话号码或私人预约链接。',
+  'Event type slug': '活动类型链接标识',
+  'Start time': '开始时间',
+  'End time': '结束时间',
+  'Host name': '主持人姓名',
+  'Invitee name': '受邀人姓名',
+  'Invitee email': '受邀人邮箱',
+  'Warning: sharing invitee name or email makes them visible to the target site and its analytics, and may put them in browser history. Enable this only with a clear reason to share that data.':
+    '警告：分享受邀人的姓名或邮箱后，目标网站及其分析工具将能看到这些信息，浏览器历史记录也可能保存这些信息。仅在确有必要分享时启用。',
+  'Allow sharing invitee name and email': '允许分享受邀人姓名和邮箱',
+  'Allow embedded bookings to open the parent page': '允许嵌入预约跳转所在页面',
+  'Off by default: Continue opens a new tab from an embed. Enabling this allows an invitee’s click to replace the page containing the booking widget, when its sandbox permits it.':
+    '默认关闭：从嵌入预约点击继续访问时，会打开新标签页。启用后，若沙箱允许，受邀人点击链接即可跳转嵌入预约组件所在的页面。',
+  'Example continuation URL': '继续访问网址示例',
+  'Enter a URL to preview the continuation.': '输入网址即可预览继续访问的地址。',
+  'Sample values only. The server validates your settings on save.':
+    '此处仅使用示例信息。保存时，服务器会验证设置。',
+  'Check the after-booking settings and try again.': '请检查预约完成后的设置，然后重试。',
+  'Use an absolute HTTPS URL of at most 2000 characters, without spaces or user information. Local hosts need permission from your instance operator.':
+    '请输入不超过 2000 个字符的完整 HTTPS 网址，不得包含空格或用户认证信息。本地主机需要实例管理员授权。',
+  'Choose only the listed URL parameters, without duplicates.':
+    '请选择列表中的网址参数，不要重复选择。',
+  'Allow sharing invitee name and email before selecting those parameters.':
+    '选择受邀人姓名或邮箱参数前，请先允许分享这些信息。',
+  'Choose whether embedded bookings may open the parent page.':
+    '请选择是否允许嵌入预约跳转所在页面。',
   'Allowed durations': '可选时长',
   'Offer 1–12 different lengths, from 1 to 1,440 minutes. Invitees choose a length before a time.':
     '提供 1–12 种不同时长，每种为 1–1440 分钟。受邀人先选择时长，再选择时间。',

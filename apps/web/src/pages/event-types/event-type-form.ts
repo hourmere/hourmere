@@ -12,6 +12,16 @@ import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text
 export type QuestionType = Schemas['Question']['type']
 export type LocationKind = NonNullable<EventType['location']>['kind']
 export type EventTypeBody = Schemas['EventTypeInput']
+export const SUCCESS_REDIRECT_PARAMETERS = [
+  'eventTypeSlug',
+  'start',
+  'end',
+  'timeZone',
+  'hostName',
+  'inviteeName',
+  'inviteeEmail',
+] as const
+export type SuccessRedirectParameter = (typeof SUCCESS_REDIRECT_PARAMETERS)[number]
 
 export const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: 'short_text', label: 'Short text' },
@@ -79,6 +89,10 @@ export interface EventTypeDraft {
   isActive: boolean
   isHidden: boolean
   allowGuests: boolean
+  successRedirectUrl: string
+  successRedirectParameters: SuccessRedirectParameter[]
+  includeInviteePersonalData: boolean
+  allowEmbedParent: boolean
 }
 
 let nextKey = 0
@@ -125,6 +139,10 @@ export function emptyDraft(): EventTypeDraft {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    successRedirectUrl: '',
+    successRedirectParameters: [],
+    includeInviteePersonalData: false,
+    allowEmbedParent: false,
   }
 }
 
@@ -167,6 +185,10 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     isActive: e.isActive,
     isHidden: e.isHidden,
     allowGuests: e.allowGuests,
+    successRedirectUrl: e.successRedirect?.url ?? '',
+    successRedirectParameters: [...(e.successRedirect?.parameters ?? [])],
+    includeInviteePersonalData: e.successRedirect?.includeInviteePersonalData ?? false,
+    allowEmbedParent: e.successRedirect?.allowEmbedParent ?? false,
   }
 }
 
@@ -447,12 +469,18 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     isActive: draft.isActive,
     isHidden: draft.isHidden,
     allowGuests: draft.allowGuests,
+    ...(draft.successRedirectUrl !== '' && { successRedirect: redirectInput(draft) }),
   }
 }
 
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // Saved targets can stop meeting instance policy. Do not re-submit an untouched target,
+  // or overwrite another client's redirect edit with this editor session's older copy.
+  if (JSON.stringify(redirectInput(draft)) === JSON.stringify(redirectInput(baseline)))
+    delete body.successRedirect
+  else body.successRedirect = redirectInput(draft)
   // Preserve a concurrent API edit when this session did not change the offered lengths.
   if (draft.allowedDurationsMinutes.join() === baseline.allowedDurationsMinutes.join())
     delete body.allowedDurationsMinutes
@@ -508,6 +536,11 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     maxBookingsPerDay: 'Daily limit',
     bookingWindowDays: 'Booking window',
     position: 'Position',
+    successRedirect: 'After booking',
+    'successRedirect.url': 'Continue to URL',
+    'successRedirect.parameters': 'URL parameters',
+    'successRedirect.includeInviteePersonalData': 'Allow sharing invitee name and email',
+    'successRedirect.allowEmbedParent': 'Allow embedded bookings to open the parent page',
   }
   draft.questions.forEach((q, i) => {
     const name = msg('Question {0}', { '0': i + 1 })
@@ -542,6 +575,23 @@ export function serverErrors(
   if (!(err instanceof RequestError)) return { fields: {}, message: null }
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
+  if (
+    (err.code === 'invalid_success_redirect' || err.code === 'invalid_request') &&
+    err.field?.startsWith('successRedirect')
+  ) {
+    const messages: Record<string, UiText> = {
+      successRedirect: 'Check the after-booking settings and try again.',
+      'successRedirect.url':
+        'Use an absolute HTTPS URL of at most 2000 characters, without spaces or user information. Local hosts need permission from your instance operator.',
+      'successRedirect.parameters': 'Choose only the listed URL parameters, without duplicates.',
+      'successRedirect.includeInviteePersonalData':
+        'Allow sharing invitee name and email before selecting those parameters.',
+      'successRedirect.allowEmbedParent':
+        'Choose whether embedded bookings may open the parent page.',
+    }
+    const message = messages[err.field]
+    if (message) return field(err.field, message)
+  }
   switch (err.code) {
     case 'automatic_zoom_disabled':
       return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
@@ -648,5 +698,18 @@ export function serverErrors(
     }
     default:
       return { fields: {}, message: literal(detail) }
+  }
+}
+
+function redirectInput(draft: EventTypeDraft): EventTypeBody['successRedirect'] {
+  if (draft.successRedirectUrl === '') return null
+  return {
+    // Preserve the exact input for service validation, including rejected whitespace.
+    url: draft.successRedirectUrl,
+    parameters: SUCCESS_REDIRECT_PARAMETERS.filter((parameter) =>
+      draft.successRedirectParameters.includes(parameter),
+    ),
+    includeInviteePersonalData: draft.includeInviteePersonalData,
+    allowEmbedParent: draft.allowEmbedParent,
   }
 }

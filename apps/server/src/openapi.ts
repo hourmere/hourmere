@@ -7,6 +7,7 @@ import type { MiddlewareHandler } from 'hono'
 import { routeBodyLimit } from './body-limit.ts'
 import type { CallerEnv, requireCaller } from './caller.ts'
 import { errorAliases } from './error-aliases.ts'
+import { SUCCESS_REDIRECT_ERROR_FIELDS } from './success-redirect-errors.ts'
 
 export const ErrorAlias = z.enum(Object.values(errorAliases)).openapi('ErrorAlias', {
   description:
@@ -18,6 +19,9 @@ export const ErrorBody = z
   .object({
     error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
     errorAlias: ErrorAlias.optional(),
+    field: z.enum(SUCCESS_REDIRECT_ERROR_FIELDS).optional().openapi({
+      description: 'Stable field name for after-booking redirect validation errors',
+    }),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })
   .openapi('Error')

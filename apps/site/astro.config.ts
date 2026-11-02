@@ -87,6 +87,7 @@ export default defineConfig({
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
+            { label: 'After-booking redirects', link: '/docs/after-booking' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },
             { label: 'Interface languages', link: '/docs/interface-languages' },
