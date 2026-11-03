@@ -1,11 +1,11 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`existing language output before Brazilian Portuguese registration > preserves every rendered de message byte 1`] = `"a0455477e08f912d6deb08eb0afce9f036374bf482c1d6fe4969621cd0c198e4"`;
+exports[`existing language output before Brazilian Portuguese registration > preserves every rendered de message byte 1`] = `"584aa92867292441d59fd73be76fa586ff83c6c1377ab3b4dacb5efe4d05be4e"`;
 
-exports[`existing language output before Brazilian Portuguese registration > preserves every rendered en message byte 1`] = `"4865a29ddddec481b7e2ec08bdfb88b10c71a363aa8c2124ce6613e7204e86ff"`;
+exports[`existing language output before Brazilian Portuguese registration > preserves every rendered en message byte 1`] = `"fb149c37bc46a926dac19de1e32f1e950bb94832070435ca117aee0cc351daaf"`;
 
-exports[`existing language output before Brazilian Portuguese registration > preserves every rendered es message byte 1`] = `"a85bcc699abfeb719e1104132e9a854e55d4a45784932221181cf4912eb51138"`;
+exports[`existing language output before Brazilian Portuguese registration > preserves every rendered es message byte 1`] = `"4103a43c2f53a85a92758167df93878e043d832ce70bc5fe461e7e03ebcefe51"`;
 
-exports[`existing language output before Brazilian Portuguese registration > preserves every rendered fr message byte 1`] = `"5063503a61a32c524a8139d123af5861ce392788aa2cc46a9c92780faa497c54"`;
+exports[`existing language output before Brazilian Portuguese registration > preserves every rendered fr message byte 1`] = `"5379802c80b5543d25d5adec74ae69610b5fbca32be7c9bceed709d0ab5ff0d3"`;
 
-exports[`existing language output before Brazilian Portuguese registration > preserves every rendered zh-CN message byte 1`] = `"6c4b18516da15642d199143557b2ce548b5be94537402b55f6706b29e172b3e0"`;
+exports[`existing language output before Brazilian Portuguese registration > preserves every rendered zh-CN message byte 1`] = `"350c40686491102af970aa9f589d3be023f166aeff87e325ad48a3c9179ad3ee"`;

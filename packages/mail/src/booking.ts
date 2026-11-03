@@ -157,7 +157,7 @@ const CHINESE_TIME: Intl.DateTimeFormatOptions = {
 }
 
 // ICU puts a narrow no-break space before AM/PM; a plain space reads the same everywhere.
-const format = (
+export const formatMailDateTime = (
   time: Temporal.ZonedDateTime,
   options: Intl.DateTimeFormatOptions,
   language: InterfaceLanguage,
@@ -188,15 +188,15 @@ export function formatMeetingTime(
   const s = start.toZonedDateTimeISO(zone)
   const e = end.toZonedDateTimeISO(zone)
   const until = s.toPlainDate().equals(e.toPlainDate())
-    ? format(e, TIME, language)
+    ? formatMailDateTime(e, TIME, language)
     : message(language, 'format.dateTime', {
-        date: format(e, LONG_DATE, language),
-        time: format(e, TIME, language),
+        date: formatMailDateTime(e, LONG_DATE, language),
+        time: formatMailDateTime(e, TIME, language),
       })
   return message(language, 'format.timeRange', {
     start: message(language, 'format.dateTime', {
-      date: format(s, LONG_DATE, language),
-      time: format(s, TIME, language),
+      date: formatMailDateTime(s, LONG_DATE, language),
+      time: formatMailDateTime(s, TIME, language),
     }),
     end: until,
     zone: zoneLabel(s, language),
@@ -212,8 +212,8 @@ function formatShortTime(
   const zone = displayZone(timeZone)
   const s = start.toZonedDateTimeISO(zone)
   return `${message(language, 'format.dateTime', {
-    date: format(s, SHORT_DATE, language),
-    time: format(s, TIME, language),
+    date: formatMailDateTime(s, SHORT_DATE, language),
+    time: formatMailDateTime(s, TIME, language),
   })}${zoneLabel(s, language)}`
 }
 

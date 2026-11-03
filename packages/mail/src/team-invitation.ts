@@ -1,5 +1,6 @@
 // Rendering only. Invitation business state and eventual mail delivery belong to callers.
-import { interfaceLanguage } from '@hourmere/core/language'
+import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
+import { formatMailDateTime } from './booking.ts'
 import { mailMessage } from './catalogue.ts'
 import type { MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
@@ -47,12 +48,17 @@ function acceptUrl(publicUrl: string, invitationId: string): string {
   return url.href
 }
 
-function expiryText(expiresAt: Date | string): string {
+function expiryText(expiresAt: Date | string, language: InterfaceLanguage): string {
   try {
     const instant = Temporal.Instant.from(
       expiresAt instanceof Date ? expiresAt.toISOString() : expiresAt,
     )
-    return instant.toString().replace('T', ' ').replace(/Z$/, ' UTC')
+    const date = formatMailDateTime(
+      instant.toZonedDateTimeISO('UTC'),
+      { dateStyle: 'long', timeStyle: 'short', hourCycle: 'h23' },
+      language,
+    )
+    return language === 'zh-CN' ? `${date}（UTC）` : `${date} UTC`
   } catch {
     throw new Error('Invalid invitation expiry')
   }
@@ -76,7 +82,7 @@ export function teamInvitationEmail({
 }: TeamInvitationEmailOptions): MailMessage {
   const language = interfaceLanguage(chosenLanguage) ?? interfaceLanguage(defaultLanguage) ?? 'en'
   const url = acceptUrl(publicUrl, invitationId)
-  const expiry = expiryText(expiresAt)
+  const expiry = expiryText(expiresAt, language)
   if (!to || safeText(to) !== to) throw new Error('Invalid invitation recipient')
   const team = safeText(teamName) || mailMessage(language, 'teamInvitation.defaultTeam')
   const inviter = safeText(inviterName) || mailMessage(language, 'teamInvitation.defaultInviter')

@@ -40,13 +40,15 @@ function renderError(options: Parameters<typeof teamInvitationEmail>[0]): Error 
 }
 
 describe('teamInvitationEmail', () => {
-  // Captured before moving the original English/Chinese copy into locale tables.
-  it.each(['en', 'zh-CN'])('preserves the complete %s message bytes', (language) => {
-    expect(teamInvitationEmail({ ...invitation, language })).toMatchSnapshot()
-    expect(
-      teamInvitationEmail({ ...invitation, language, teamName: '', inviterName: '' }),
-    ).toMatchSnapshot()
-  })
+  it.each(['en', 'zh-CN', 'de', 'fr', 'es', 'pt-BR'])(
+    'renders the complete %s message',
+    (language) => {
+      expect(teamInvitationEmail({ ...invitation, language })).toMatchSnapshot()
+      expect(
+        teamInvitationEmail({ ...invitation, language, teamName: '', inviterName: '' }),
+      ).toMatchSnapshot()
+    },
+  )
 
   it.each([
     {
@@ -54,7 +56,7 @@ describe('teamInvitationEmail', () => {
       subject: 'Invitation to join Orbital Design',
       identity: /Sign in with the invited email address .* and verify it/,
       acceptance: /Signing in alone does not join the team; you must explicitly accept/,
-      expiry: /This invitation expires at 2026-10-29 17:30:00 UTC/,
+      expiry: /This invitation expires at October 29, 2026 at 17:30 UTC/,
       aliases: /Email aliases cannot replace this address/,
       action: 'View and accept invitation',
     },
@@ -63,7 +65,7 @@ describe('teamInvitationEmail', () => {
       subject: '邀请你加入团队：Orbital Design',
       identity: /请使用受邀邮箱 .* 登录并完成邮箱验证/,
       acceptance: /仅登录不会加入团队；你需要在页面上明确接受邀请/,
-      expiry: /邀请有效期至：2026-10-29 17:30:00 UTC/,
+      expiry: /邀请有效期至：2026年10月29日 17:30（UTC）/,
       aliases: /邮箱别名不能代替此地址/,
       action: '查看并接受邀请',
     },
@@ -73,7 +75,7 @@ describe('teamInvitationEmail', () => {
       identity:
         /Melden Sie sich mit der eingeladenen E-Mail-Adresse .* an und bestätigen Sie diese/,
       acceptance: /Durch die Anmeldung allein treten Sie dem Team nicht bei/,
-      expiry: /Diese Einladung ist bis 2026-10-29 17:30:00 UTC gültig/,
+      expiry: /Diese Einladung ist bis 29\. Oktober 2026 um 17:30 UTC gültig/,
       aliases: /E-Mail-Aliasse können diese Adresse nicht ersetzen/,
       action: 'Einladung ansehen und annehmen',
     },
@@ -83,7 +85,7 @@ describe('teamInvitationEmail', () => {
       identity: /Connectez-vous avec l’adresse e-mail invitée .* et vérifiez-la/,
       acceptance:
         /La connexion seule ne vous fait pas rejoindre l’équipe\s*; vous devez accepter explicitement/,
-      expiry: /Cette invitation expire le 2026-10-29 17:30:00 UTC/,
+      expiry: /Cette invitation expire le 29 octobre 2026 à 17:30 UTC/,
       aliases: /Les alias de messagerie ne peuvent pas remplacer cette adresse/,
       action: 'Voir et accepter l’invitation',
     },
@@ -249,9 +251,58 @@ describe('teamInvitationEmail', () => {
   ])('renders Better Auth expiry %s as the same UTC instant', (expiresAt) => {
     const message = teamInvitationEmail({ ...invitation, expiresAt })
     expect(message).toEqual(teamInvitationEmail(invitation))
-    expect(message.text).toContain('2026-10-29 17:30:00 UTC')
-    expect(message.html).toContain('2026-10-29 17:30:00 UTC')
+    expect(message.text).toContain('October 29, 2026 at 17:30 UTC')
+    expect(message.html).toContain('October 29, 2026 at 17:30 UTC')
   })
+
+  describe.each([
+    { language: 'en', expected: 'November 5, 2026 at 03:07 UTC' },
+    { language: 'zh-CN', expected: '2026年11月5日 03:07（UTC）' },
+    { language: 'de', expected: '5. November 2026 um 03:07 UTC' },
+    { language: 'fr', expected: '5 novembre 2026 à 03:07 UTC' },
+    { language: 'es', expected: '5 de noviembre de 2026 a las 3:07 UTC' },
+    { language: 'pt-BR', expected: '5 de novembro de 2026 às 03:07 UTC' },
+  ])('readable $language expiry', ({ language, expected }) => {
+    it.each([
+      '2026-11-05T03:07:34.631Z',
+      '2026-11-05T03:07:14.77Z',
+      new Date('2026-11-05T03:07:34.631Z'),
+    ])('omits seconds and fractions from %s in both alternatives', (expiresAt) => {
+      const message = teamInvitationEmail({ ...invitation, language, expiresAt })
+      for (const body of [message.text, visibleText(message.html ?? '')]) {
+        expect(body).toContain(expected)
+        expect(body).not.toMatch(/\d{1,2}:\d{2}:\d{2}|\.631|\.77/)
+      }
+    })
+
+    it('uses the UTC date when an offset crosses midnight', () => {
+      const message = teamInvitationEmail({
+        ...invitation,
+        language,
+        expiresAt: '2026-11-04T20:07:34.631-07:00',
+      })
+      expect(message).toEqual(
+        teamInvitationEmail({ ...invitation, language, expiresAt: '2026-11-05T03:07:34.631Z' }),
+      )
+      for (const body of [message.text, visibleText(message.html ?? '')]) {
+        expect(body).toContain(expected)
+      }
+    })
+  })
+
+  it.each([
+    { expiresAt: '2026-12-31T23:59:59.77Z', expected: 'December 31, 2026 at 23:59 UTC' },
+    { expiresAt: '2027-01-01T00:00:00.631Z', expected: 'January 1, 2027 at 00:00 UTC' },
+  ])(
+    'keeps the UTC date and minute at the year boundary: $expiresAt',
+    ({ expiresAt, expected }) => {
+      const message = teamInvitationEmail({ ...invitation, expiresAt })
+      for (const body of [message.text, visibleText(message.html ?? '')]) {
+        expect(body).toContain(expected)
+        expect(body).not.toMatch(/\d{1,2}:\d{2}:\d{2}|\.631|\.77/)
+      }
+    },
+  )
 
   it.each([
     '',
