@@ -272,7 +272,7 @@ describe('Spanish mail catalogue', () => {
       expect(content).toContain(
         'Iniciar sesión no le incorpora al equipo; debe aceptar expresamente la invitación en la página.',
       )
-      expect(content).toContain('Esta invitación caduca el 29 de octubre de 2026 a las 17:30 UTC.')
+      expect(content).toContain('Esta invitación caduca el 29 de octubre de 2026, 17:30 UTC.')
       expect(content).toContain('Ver y aceptar invitación')
       expect(content).toContain(
         'https://example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22',

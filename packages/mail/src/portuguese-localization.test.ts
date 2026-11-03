@@ -281,7 +281,7 @@ describe('Brazilian Portuguese mail catalogue', () => {
       expect(content).toContain(
         'Entrar na conta não faz você participar da equipe; você precisa aceitar o convite explicitamente na página.',
       )
-      expect(content).toContain('Este convite expira em 29 de outubro de 2026 às 17:30 UTC.')
+      expect(content).toContain('Este convite expira em 29 de outubro de 2026, 17:30 UTC.')
       expect(content).toContain('Ver e aceitar convite')
       expect(content).toContain(
         'https://example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22',

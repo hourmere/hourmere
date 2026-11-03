@@ -1,7 +1,7 @@
 // Rendering only. Invitation business state and eventual mail delivery belong to callers.
 import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
-import { formatMailDateTime } from './booking.ts'
 import { mailMessage } from './catalogue.ts'
+import { formatMailDateTime } from './date-time.ts'
 import type { MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
@@ -53,11 +53,15 @@ function expiryText(expiresAt: Date | string, language: InterfaceLanguage): stri
     const instant = Temporal.Instant.from(
       expiresAt instanceof Date ? expiresAt.toISOString() : expiresAt,
     )
-    const date = formatMailDateTime(
-      instant.toZonedDateTimeISO('UTC'),
-      { dateStyle: 'long', timeStyle: 'short', hourCycle: 'h23' },
-      language,
-    )
+    const time = instant.toZonedDateTimeISO('UTC')
+    const date = mailMessage(language, 'format.dateTime', {
+      date: formatMailDateTime(time, { dateStyle: 'long' }, language),
+      time: formatMailDateTime(
+        time,
+        { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
+        language,
+      ),
+    })
     return language === 'zh-CN' ? `${date}（UTC）` : `${date} UTC`
   } catch {
     throw new Error('Invalid invitation expiry')

@@ -8,6 +8,7 @@ import {
   interfaceLanguage,
 } from '@hourmere/core/language'
 import { type MailKey, mailMessage as message } from './catalogue.ts'
+import { formatMailDateTime } from './date-time.ts'
 import type { MailAttachment, MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
@@ -156,18 +157,16 @@ const CHINESE_TIME: Intl.DateTimeFormatOptions = {
   hourCycle: 'h23',
 }
 
-// ICU puts a narrow no-break space before AM/PM; a plain space reads the same everywhere.
-export const formatMailDateTime = (
+const format = (
   time: Temporal.ZonedDateTime,
   options: Intl.DateTimeFormatOptions,
   language: InterfaceLanguage,
 ) =>
-  new Intl.DateTimeFormat(formattingLocale(language), {
-    ...(language === 'zh-CN' && options === TIME ? CHINESE_TIME : options),
-    timeZone: time.timeZoneId,
-  })
-    .format(time.epochMilliseconds)
-    .replace(/[\u00a0\u202f]/g, ' ')
+  formatMailDateTime(
+    time,
+    language === 'zh-CN' && options === TIME ? CHINESE_TIME : options,
+    language,
+  )
 
 /** The same readable zone and date-specific GMT offset used on booking pages. */
 function zoneLabel(time: Temporal.ZonedDateTime, language: InterfaceLanguage): string {
@@ -188,15 +187,15 @@ export function formatMeetingTime(
   const s = start.toZonedDateTimeISO(zone)
   const e = end.toZonedDateTimeISO(zone)
   const until = s.toPlainDate().equals(e.toPlainDate())
-    ? formatMailDateTime(e, TIME, language)
+    ? format(e, TIME, language)
     : message(language, 'format.dateTime', {
-        date: formatMailDateTime(e, LONG_DATE, language),
-        time: formatMailDateTime(e, TIME, language),
+        date: format(e, LONG_DATE, language),
+        time: format(e, TIME, language),
       })
   return message(language, 'format.timeRange', {
     start: message(language, 'format.dateTime', {
-      date: formatMailDateTime(s, LONG_DATE, language),
-      time: formatMailDateTime(s, TIME, language),
+      date: format(s, LONG_DATE, language),
+      time: format(s, TIME, language),
     }),
     end: until,
     zone: zoneLabel(s, language),
@@ -212,8 +211,8 @@ function formatShortTime(
   const zone = displayZone(timeZone)
   const s = start.toZonedDateTimeISO(zone)
   return `${message(language, 'format.dateTime', {
-    date: formatMailDateTime(s, SHORT_DATE, language),
-    time: formatMailDateTime(s, TIME, language),
+    date: format(s, SHORT_DATE, language),
+    time: format(s, TIME, language),
   })}${zoneLabel(s, language)}`
 }
 
