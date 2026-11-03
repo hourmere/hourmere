@@ -1709,17 +1709,20 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
   })
 
   it('detects removed single-line prefill validation with a real assertion failure', async () => {
-    await mutation(['cleanText(input.name, { max: 200 })', 'input.name'], async (module) => {
-      const s = await setup()
-      expect(
-        await failure(() =>
-          module.createOneTimeBookingLink(s.ctx, {
-            eventTypeId: s.eventTypeId,
-            prefill: { name: 'Grace\nHopper' },
-          }),
-        ),
-      ).toMatchObject({ code: 'invalid_one_time_link' })
-    })
+    await mutation(
+      ['cleanText(input.name, { max: ONE_TIME_LINK_PREFILL_NAME_MAX })', 'input.name'],
+      async (module) => {
+        const s = await setup()
+        expect(
+          await failure(() =>
+            module.createOneTimeBookingLink(s.ctx, {
+              eventTypeId: s.eventTypeId,
+              prefill: { name: 'Grace\nHopper' },
+            }),
+          ),
+        ).toMatchObject({ code: 'invalid_one_time_link' })
+      },
+    )
   })
 
   it('detects removed prefill field whitelist with a real assertion failure', async () => {

@@ -12,6 +12,11 @@ import { cleanText } from './text.ts'
 export const ONE_TIME_BOOKING_LINK_LIMIT = 1000
 /** Ordinary team members share this sub-limit across all of their team event types. */
 export const ONE_TIME_BOOKING_LINK_MEMBER_LIMIT = 200
+export const ONE_TIME_LINK_PAGE_DEFAULT = 50
+export const ONE_TIME_LINK_PAGE_MIN = 1
+export const ONE_TIME_LINK_PAGE_MAX = 100
+export const ONE_TIME_LINK_PREFILL_NAME_MAX = 200
+export const ONE_TIME_LINK_PREFILL_EMAIL_MAX = 254
 export const ONE_TIME_LINK_ALREADY_CREATED_MESSAGE =
   'This link was already created. Its URL was shown once and cannot be retrieved. Use the id from its creation response, or ask a manager with history access to find it; revoke it before creating a replacement with a new key.'
 
@@ -185,8 +190,8 @@ export async function listOneTimeBookingLinks(
   input: { eventTypeId: string; limit?: number | undefined; after?: string | undefined },
 ): Promise<{ data: OneTimeBookingLink[]; nextAfter: string | null }> {
   requireReadScope(ctx)
-  const limit = input.limit ?? 50
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+  const limit = input.limit ?? ONE_TIME_LINK_PAGE_DEFAULT
+  if (!Number.isInteger(limit) || limit < ONE_TIME_LINK_PAGE_MIN || limit > ONE_TIME_LINK_PAGE_MAX)
     throw new DomainError('invalid', 'invalid_limit')
   if (input.after !== undefined && !isUuid(input.after))
     throw new DomainError('invalid', 'invalid_cursor')
@@ -665,8 +670,10 @@ function validPrefill(value: unknown): OneTimeBookingLinkPrefill {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalid()
   if (Object.keys(value).some((key) => key !== 'name' && key !== 'email')) throw invalid()
   const input = value as { name?: unknown; email?: unknown }
-  const name = input.name == null ? null : cleanText(input.name, { max: 200 })
-  const email = input.email == null ? null : cleanText(input.email, { max: 254 })
+  const name =
+    input.name == null ? null : cleanText(input.name, { max: ONE_TIME_LINK_PREFILL_NAME_MAX })
+  const email =
+    input.email == null ? null : cleanText(input.email, { max: ONE_TIME_LINK_PREFILL_EMAIL_MAX })
   if (name === undefined || email === undefined || (email !== null && !EMAIL.test(email)))
     throw invalid()
   return { name, email: email?.toLowerCase() ?? null }
