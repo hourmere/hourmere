@@ -160,6 +160,7 @@ export function TeamMemberActions({
           memberUserId={memberUserId}
           viewerUserId={currentUserId}
           memberName={selectedMember?.user.name}
+          memberEmail={selectedMember?.user.email}
           mode={mode}
           canManage={mayManage(role)}
           onOpen={() => {
@@ -250,6 +251,7 @@ function DepartureReview({
   memberUserId,
   viewerUserId,
   memberName,
+  memberEmail,
   mode,
   canManage,
   onOpen,
@@ -262,6 +264,7 @@ function DepartureReview({
   memberUserId: string
   viewerUserId: string | undefined
   memberName?: string
+  memberEmail?: string
   mode: 'leave' | 'remove'
   canManage: boolean
   onOpen: () => void
@@ -483,6 +486,11 @@ function DepartureReview({
       {memberName && (
         <p className="user-content">
           <BreakableText>{memberName.trim() || t('Unnamed team member')}</BreakableText>
+        </p>
+      )}
+      {memberEmail && (
+        <p className="user-content">
+          <BreakableText>{memberEmail}</BreakableText>
         </p>
       )}
       {mode === 'remove' && !removal && (
