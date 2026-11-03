@@ -11,7 +11,7 @@ import { createApp } from '../app.ts'
 import { catalogTools } from '../mcp/catalog.ts'
 import { mcpEndpoint } from '../mcp/endpoint.ts'
 import { eventTypeTools } from '../mcp/event-types.ts'
-import type { McpCaller } from '../mcp/tools.ts'
+import { type McpCaller, prepareTools } from '../mcp/tools.ts'
 import * as routes from './event-types.ts'
 import { openApiDocument } from './test-app.ts'
 
@@ -22,8 +22,12 @@ type Schemas = Pick<
 >
 
 /** The complete route module; the boundary assertions assume no response-helper name. */
-async function sourceCopy(change?: Change): Promise<Schemas> {
-  const url = new URL('event-types.ts', import.meta.url)
+async function moduleSourceCopy(
+  url: URL,
+  exports: string,
+  change?: Change,
+  dependencies: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
   let source = readFileSync(url, 'utf8')
   if (change) {
     expect(source.includes(change[0]), 'mutation must match source').toBe(true)
@@ -41,14 +45,42 @@ async function sourceCopy(change?: Change): Promise<Schemas> {
       .map((name) => name.trim())
       .filter(Boolean)) {
       const [name, local] = binding.split(/\s+as\s+/)
-      bindings[local ?? (name as string)] = module[name as string]
+      bindings[local ?? (name as string)] = dependencies[name as string] ?? module[name as string]
     }
     source = source.replace(imported[0], '')
   }
   return new Function(
     ...Object.keys(bindings),
-    `${source.replace(/\bexport /g, '')}; return { eventTypeRoutes, EventType, EventTypeInput, EventTypeUpdate }`,
-  )(...Object.values(bindings)) as Schemas
+    `${source.replace(/\bexport /g, '')}; return { ${exports} }`,
+  )(...Object.values(bindings)) as Record<string, unknown>
+}
+
+async function sourceCopy(
+  change?: Change,
+  dependencies?: Record<string, unknown>,
+): Promise<Schemas> {
+  return (await moduleSourceCopy(
+    new URL('event-types.ts', import.meta.url),
+    'eventTypeRoutes, EventType, EventTypeInput, EventTypeUpdate',
+    change,
+    dependencies,
+  )) as Schemas
+}
+
+async function serviceSourceCopy(change?: Change, locationChange?: Change) {
+  const dependencies = locationChange
+    ? await moduleSourceCopy(
+        new URL('../../../../packages/scheduling/src/location-options.ts', import.meta.url),
+        'applyLegacyLocation',
+        locationChange,
+      )
+    : undefined
+  return moduleSourceCopy(
+    new URL('../../../../packages/scheduling/src/event-types.ts', import.meta.url),
+    'createEventType, updateEventType',
+    change,
+    dependencies,
+  )
 }
 
 const options: LocationOption[] = [
@@ -90,6 +122,17 @@ async function verifyPublishedLocation(schemas: Schemas) {
   const properties = doc.components.schemas.EventType?.properties as Record<string, unknown>
   expect(properties.location).toHaveProperty('oneOf', expect.any(Array))
   expect(properties.location).not.toHaveProperty('anyOf')
+  expect(properties.location).toHaveProperty(
+    'description',
+    expect.stringContaining('accepted only as an unchanged echo'),
+  )
+  for (const tool of prepareTools(eventTypeTools({ db: {} as Db }))) {
+    const schema = tool.inputSchema['~standard'].jsonSchema.input({ target: 'draft-07' }) as {
+      properties: { location: { description: string } }
+    }
+    expect(schema.properties.location.description).toContain('accepted only as an unchanged echo')
+    expect(schema.properties.location.description).toContain('returns invalid_location')
+  }
   const variants = (
     properties.location as { oneOf: { properties?: { kind?: { enum?: string[] } } }[] }
   ).oneOf
@@ -149,11 +192,21 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     await owned?.drop()
   })
 
-  async function setup(schemas: Schemas = routes) {
+  async function setup(schemas: Schemas = routes, dependencies?: Record<string, unknown>) {
+    const factory = dependencies
+      ? ((
+          await moduleSourceCopy(
+            new URL('../mcp/event-types.ts', import.meta.url),
+            'eventTypeTools',
+            undefined,
+            dependencies,
+          )
+        ).eventTypeTools as typeof eventTypeTools)
+      : eventTypeTools
     const user = await createTestUser(db)
     const caller = user.principal as McpCaller
     const ctx = testContext(db, caller)
-    const tools = [...eventTypeTools({ db }), ...catalogTools({ db })].map((tool) =>
+    const tools = [...factory({ db }), ...catalogTools({ db })].map((tool) =>
       [
         'create_event_type',
         'update_event_type',
@@ -280,27 +333,35 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
   )
   it.each(['REST', 'MCP'] as const)(
     'rejects destructive %s legacy edits and clears atomically',
-    async (mode) => {
-      const s = await setup()
-      for (const locations of [options, [options[0] as LocationOption]]) {
-        const created = await s.create(locations)
-        for (const location of [null, { kind: 'phone', number: '+14155550124' }]) {
-          expect(
-            await s.update(mode, created.id, { title: 'Rejected title', location }),
-          ).toMatchObject({
-            status: mode === 'REST' ? 409 : 200,
-            isError: true,
-            body: {
-              error: 'location_options_conflict',
-              message: expect.stringContaining('Use locations'),
-            },
-          })
-          expect(await s.stored(created.id)).toEqual({ locations })
-          expect((await s.read(mode, created.id)).body.title).toBe(base.title)
-        }
-      }
-    },
+    (mode) => verifyConflict(mode),
   )
+  async function verifyConflict(mode: 'REST' | 'MCP', dependencies?: Record<string, unknown>) {
+    const s = await setup(
+      dependencies ? await sourceCopy(undefined, dependencies) : routes,
+      dependencies,
+    )
+    for (const locations of [
+      options.map(({ label: _label, ...option }) => option),
+      options,
+      [options[0] as LocationOption],
+    ]) {
+      const created = await s.create(locations)
+      for (const location of [null, { kind: 'phone', number: '+14155550124' }]) {
+        expect(
+          await s.update(mode, created.id, { title: 'Rejected title', location }),
+        ).toMatchObject({
+          status: mode === 'REST' ? 409 : 200,
+          isError: true,
+          body: {
+            error: 'location_options_conflict',
+            message: expect.stringContaining('Use locations'),
+          },
+        })
+        expect(await s.stored(created.id)).toEqual({ locations })
+        expect((await s.read(mode, created.id)).body.title).toBe(base.title)
+      }
+    }
+  }
   it.each(['REST', 'MCP'] as const)(
     'round-trips default invitee-phone compatibility on %s saves',
     async (mode) => {
@@ -316,6 +377,72 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
         await s.update(mode, created.id, { title: 'Saved phone', location: read.body.location }),
       ).toMatchObject({ status: 200, body: { location: read.body.location } })
       expect(await s.stored(created.id)).toEqual({ locations })
+    },
+  )
+
+  async function verifyPhoneWrite(
+    mode: 'REST' | 'MCP',
+    update: boolean,
+    dependencies?: Record<string, unknown>,
+  ) {
+    const s = await setup(
+      dependencies ? await sourceCopy(undefined, dependencies) : routes,
+      dependencies,
+    )
+    const location = { kind: 'phone', askInvitee: true }
+    const created = update
+      ? await s.create([{ id: 'host', kind: 'phone', number: '+14155550123' }])
+      : null
+    const response = created
+      ? await s.update(mode, created.id, { title: 'Must not commit', location })
+      : mode === 'REST'
+        ? await s.rest('POST', '/api/v1/event-types', { ...base, slug: randomUUID(), location })
+        : await s.mcp('create_event_type', { ...base, slug: randomUUID(), location })
+    expect(response).toMatchObject({
+      status: mode === 'REST' ? 400 : 200,
+      isError: true,
+      body: { error: 'invalid_location' },
+    })
+    if (created) {
+      expect((await s.read(mode, created.id)).body).toMatchObject({
+        title: base.title,
+        location: created.location,
+      })
+      expect(await s.stored(created.id)).toEqual({ locations: created.locations })
+    } else {
+      expect((await s.rest('GET', '/api/v1/event-types')).body.data).toEqual([])
+    }
+  }
+  it.each(['REST', 'MCP'] as const)(
+    'rejects new and changed invitee-phone configuration over %s',
+    async (mode) => {
+      await verifyPhoneWrite(mode, false)
+      await verifyPhoneWrite(mode, true)
+    },
+  )
+  it.each(['REST', 'MCP'] as const)(
+    'detects re-enabled invitee-phone writes through %s in a service source copy',
+    async (mode) => {
+      const services = await serviceSourceCopy([
+        "return fail('Invitee phone collection is not available yet')",
+        'return { kind, askInvitee: true }',
+      ])
+      for (const update of [false, true]) {
+        await verifyPhoneWrite(mode, update)
+        await expect(verifyPhoneWrite(mode, update, services)).rejects.toMatchObject({
+          name: 'AssertionError',
+        })
+        await verifyPhoneWrite(mode, update)
+      }
+    },
+  )
+  it.each(['REST', 'MCP'] as const)(
+    'detects lost unlabelled multi-option protection through %s in a service source copy',
+    async (mode) => {
+      const services = await serviceSourceCopy(undefined, ['locations.length > 1 ||', 'false ||'])
+      await verifyConflict(mode)
+      await expect(verifyConflict(mode, services)).rejects.toMatchObject({ name: 'AssertionError' })
+      await verifyConflict(mode)
     },
   )
 
@@ -356,6 +483,15 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
   }
   it('keeps options out of actual REST and MCP responses regardless of projection helpers', () =>
     verifyBoundary())
+  it('detects removal of the REST location projection', async () => {
+    await verifyBoundary(await sourceCopy())
+    const mutant = await sourceCopy([
+      'const eventTypeResponse = ({ locations: _locations, ...eventType }: ServiceEventType) => eventType',
+      'const eventTypeResponse = (eventType: ServiceEventType) => eventType',
+    ])
+    await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
+    await verifyBoundary(await sourceCopy())
+  })
   it('detects a REST response leak introduced after its projection', async () => {
     await verifyBoundary(await sourceCopy())
     const mutant = await sourceCopy([

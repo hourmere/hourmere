@@ -79,7 +79,7 @@ const locationKinds = {
 }
 const locationDoc = {
   description:
-    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. Phone uses a host number or askInvitee: true. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
+    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
 }
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.

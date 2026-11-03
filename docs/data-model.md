@@ -473,9 +473,11 @@ slice does not expose `locations` through REST/OpenAPI, MCP or CLI, add booking
 request fields, or enable public choice or per-choice conference creation.
 The existing protected event-type response's `location` schema additionally accepts
 `{ kind: "phone", askInvitee: true }` so reads of internal configuration remain
-well-typed. Legacy REST/MCP writes accept this same phone configuration so clients can
-read and write it back; a host number and `askInvitee` together remain invalid. The
-published `EventType.location` retains its discriminated `oneOf` shape, with optional
+well-typed. Legacy service, REST, MCP and CLI writes accept this phone value only as
+an unchanged echo of an existing saved location. Creating or changing to it returns
+`invalid_location` until public booking can collect the invitee’s phone number. New phone
+configuration requires the host’s number; a host number and `askInvitee` together remain
+invalid. The published `EventType.location` retains its discriminated `oneOf` shape, with optional
 `number`/`askInvitee` fields on its single phone branch. The current editor preserves this
 configuration and omits an unchanged location when saving unrelated settings.
 Until the booking follow-up adds phone collection, existing personal, team and one-time

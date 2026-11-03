@@ -4173,7 +4173,7 @@ export interface components {
             isActive: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. Phone uses a host number or askInvitee: true. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4292,7 +4292,7 @@ export interface components {
              * @default false
              */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. Phone uses a host number or askInvitee: true. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4463,7 +4463,7 @@ export interface components {
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden?: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. Phone uses a host number or askInvitee: true. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;

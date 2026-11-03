@@ -24,7 +24,7 @@ type SourceCopy = Services & {
 type Change = readonly [string, string]
 
 /** Mutants run isolated source copies against the same behavioral assertions. */
-async function sourceCopy(change?: Change): Promise<SourceCopy> {
+async function sourceCopy(change?: Change, locationChange?: Change): Promise<SourceCopy> {
   const url = new URL('event-types.ts', import.meta.url)
   let source = readFileSync(url, 'utf8')
   if (change) {
@@ -35,9 +35,22 @@ async function sourceCopy(change?: Change): Promise<SourceCopy> {
   const bindings: Record<string, unknown> = {}
   for (const imported of source.matchAll(/^import\s*\{([\s\S]*?)\}\s*from '([^']+)'\n/gm)) {
     const specifier = imported[2] as string
-    const module = await import(
-      specifier.startsWith('.') ? new URL(specifier, url).href : specifier
-    )
+    let module: Record<string, unknown>
+    if (specifier === './location-options.ts' && locationChange) {
+      const locationUrl = new URL(specifier, url)
+      const original = readFileSync(locationUrl, 'utf8')
+      expect(original.includes(locationChange[0]), 'mutation must match source').toBe(true)
+      const modified = stripTypeScriptTypes(original.replace(...locationChange)).replace(
+        /from '([^']+)'/g,
+        (_, dependency: string) =>
+          `from '${dependency.startsWith('.') ? new URL(dependency, locationUrl).href : import.meta.resolve(dependency)}'`,
+      )
+      module = await import(
+        `data:text/javascript;base64,${Buffer.from(modified).toString('base64')}`
+      )
+    } else {
+      module = await import(specifier.startsWith('.') ? new URL(specifier, url).href : specifier)
+    }
     for (const binding of (imported[1] as string)
       .split(',')
       .map((name) => name.trim())
@@ -252,7 +265,12 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
 
   async function verifyLegacyConflict(api: Services = events) {
     const ctx = await context()
-    for (const locations of [options, [options[0] as LocationOption]]) {
+    const unlabelled: LocationOption[] = [
+      { id: 'office', kind: 'in_person', address: '1 Main Street' },
+      { id: 'call', kind: 'phone', number: '+14155550123', isDefault: true },
+      link,
+    ]
+    for (const locations of [unlabelled, options, [options[0] as LocationOption]]) {
       const saved = await api.createEventType(ctx, { ...base, slug: randomUUID(), locations })
       for (const location of [null, { kind: 'zoom' as const }])
         await expect(
@@ -269,6 +287,53 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
   it('rejects changed and cleared legacy writes for multiple or labelled options atomically', () =>
     verifyLegacyConflict())
 
+  async function verifyLegacyPhoneCreate(api: Services = events) {
+    const ctx = await context()
+    await expect(
+      api.createEventType(ctx, {
+        ...base,
+        location: { kind: 'phone', askInvitee: true },
+      }),
+    ).rejects.toMatchObject({ kind: 'invalid', code: 'invalid_location' })
+    expect(await api.listEventTypes(ctx)).toEqual([])
+  }
+  it('rejects new legacy invitee-phone configuration before creating an event', () =>
+    verifyLegacyPhoneCreate())
+
+  async function verifyLegacyPhoneUpdate(api: Services = events) {
+    const ctx = await context()
+    for (const fields of [
+      {},
+      { location: { kind: 'phone' as const, number: '+14155550123' } },
+      {
+        locations: [link, { id: 'call', kind: 'phone' as const, askInvitee: true as const }],
+      },
+    ]) {
+      const saved = await api.createEventType(ctx, {
+        ...base,
+        slug: randomUUID(),
+        ...fields,
+      })
+      await expect(
+        api.updateEventType(ctx, saved.id, {
+          title: 'Must not commit',
+          location: { kind: 'phone', askInvitee: true },
+        }),
+      ).rejects.toMatchObject({ kind: 'invalid', code: 'invalid_location' })
+      expect(await api.getEventType(ctx, saved.id)).toMatchObject({
+        title: base.title,
+        location: saved.location,
+        locations: saved.locations,
+      })
+      expect(await stored(saved.id)).toEqual({
+        location: saved.location,
+        locations: saved.locations,
+      })
+    }
+  }
+  it('rejects non-verbatim legacy invitee-phone updates without changing stored settings', () =>
+    verifyLegacyPhoneUpdate())
+
   async function verifyLegacyPhone(api: Services = events) {
     const ctx = await context()
     const locations: LocationOption[] = [
@@ -276,20 +341,21 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       { id: 'call', kind: 'phone', askInvitee: true, isDefault: true },
     ]
     const saved = await api.createEventType(ctx, { ...base, locations })
+    const before = await stored(saved.id)
     await expect(
-      api.createEventType(ctx, {
-        ...base,
-        slug: 'legacy-phone',
-        location: { kind: 'phone', askInvitee: true },
+      api.updateEventType(ctx, saved.id, { location: saved.location }),
+    ).resolves.toMatchObject({ locations, location: { kind: 'phone', askInvitee: true } })
+    await expect(
+      api.updateEventType(ctx, saved.id, {
+        title: 'Phone save',
+        location: { askInvitee: true, kind: 'phone' },
       }),
-    ).resolves.toMatchObject({ location: { kind: 'phone', askInvitee: true } })
-    await expect(
-      api.updateEventType(ctx, saved.id, { title: 'Phone save', location: saved.location }),
     ).resolves.toMatchObject({
       title: 'Phone save',
       locations,
       location: { kind: 'phone', askInvitee: true },
     })
+    expect(await stored(saved.id)).toEqual(before)
     for (const location of [
       { kind: 'phone', askInvitee: true, number: '+14155550123' },
       { kind: 'phone', askInvitee: false },
@@ -561,23 +627,33 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
   it('validates Meet readiness even when an earlier Zoom choice is fully authorized', () =>
     verifyBothConferences())
 
-  it('passes unmodified source-copy controls', async () => {
-    const api = await sourceCopy()
-    await verifyRoundTrip(api)
-    await verifyLegacy(api)
-    await verifyLegacyEcho(api)
-    await verifyHistoricalEcho(api)
-    await verifyLegacySettings(api)
-    await verifyLegacyIdentity(api)
-    await verifyLegacyConflict(api)
-    await verifyLegacyPhone(api)
-    await verifyConflict(api)
-    await verifyValidation(api)
-    await verifyProjection(api)
-    await verifyMeet(api)
-    await verifyConferenceEcho(api)
-    await verifyZoom(api)
-    await verifyBothConferences(api)
+  it.each(
+    [
+      verifyRoundTrip,
+      verifyLegacy,
+      verifyLegacyEcho,
+      verifyHistoricalEcho,
+      verifyLegacySettings,
+      verifyLegacyIdentity,
+      verifyLegacyConflict,
+      verifyLegacyPhoneCreate,
+      verifyLegacyPhoneUpdate,
+      verifyLegacyPhone,
+      verifyConflict,
+      verifyValidation,
+      verifyProjection,
+      verifyMeet,
+      verifyConferenceEcho,
+      verifyZoom,
+      verifyBothConferences,
+    ].map((verify) => ({ name: verify.name, verify })),
+  )('passes the unmodified source-copy $name control', async ({ verify }) =>
+    verify(await sourceCopy()),
+  )
+
+  it('detects removing the multiple-unlabelled-option conflict with a real service assertion', async () => {
+    const api = await sourceCopy(undefined, ['locations.length > 1 ||', 'false ||'])
+    await expect(verifyLegacyConflict(api)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
   it.each<[string, Change, (api: Services) => Promise<void>]>([
@@ -627,21 +703,24 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
     ],
     [
       'invitee-phone compatibility',
-      ['return { kind, askInvitee: true }', "return fail('Invitee phone unsupported')"],
+      ['isLegacyLocationEcho(currentLocations, input.location)', 'false'],
       verifyLegacyPhone,
     ],
     [
-      'exclusive legacy phone modes',
-      ['value.askInvitee !== true || value.number !== undefined', 'value.askInvitee !== true'],
-      verifyLegacyPhone,
-    ],
-    [
-      'legacy invitee phone opt-in type',
+      'new legacy invitee-phone rejection',
       [
-        'value.askInvitee !== true || value.number !== undefined',
-        'false || value.number !== undefined',
+        "return fail('Invitee phone collection is not available yet')",
+        'return { kind, askInvitee: true }',
       ],
-      verifyLegacyPhone,
+      verifyLegacyPhoneCreate,
+    ],
+    [
+      'non-verbatim legacy invitee-phone update rejection',
+      [
+        "return fail('Invitee phone collection is not available yet')",
+        'return { kind, askInvitee: true }',
+      ],
+      verifyLegacyPhoneUpdate,
     ],
     [
       'write validation',

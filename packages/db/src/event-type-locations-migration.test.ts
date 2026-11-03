@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
@@ -12,14 +12,27 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0056_event_type_locations.sql'
+const basePredecessor = '0053_one_time_booking_links.sql'
 const predecessor = '0058_one_time_link_idempotency.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
 
-async function copyPredecessor(directory: string, through = predecessor) {
-  const files = (await readdir(migrationsDir))
-    .filter((file) => file.endsWith('.sql') && file <= through && file !== migration)
+async function copyPredecessor(
+  directory: string,
+  through = predecessor,
+  sourceDirectory = migrationsDir,
+) {
+  // The late-arrival scenario needs 0053 and 0058's link retry metadata only.
+  // Later event-type columns would have a different physical order when 0056
+  // arrives last; isolate this fixture instead of weakening schema comparisons.
+  const files = (await readdir(sourceDirectory))
+    .filter(
+      (file) =>
+        file.endsWith('.sql') &&
+        file <= through &&
+        (file <= basePredecessor || file === predecessor),
+    )
     .sort()
-  for (const file of files) await copyFile(join(migrationsDir, file), join(directory, file))
+  for (const file of files) await copyFile(join(sourceDirectory, file), join(directory, file))
   return files
 }
 
@@ -319,7 +332,16 @@ describe.skipIf(!serverUrl)('event type location migration', () => {
       await copyPredecessor(directory, '0012_zz.sql')
       upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'locations_old' })
       await seedEarly(upgraded.pool)
-      const predecessors = await copyPredecessor(directory)
+      const available = join(directory, 'available')
+      await mkdir(available)
+      await copyPredecessor(available)
+      // A later migration can add event-type columns before a deployment sees 0056.
+      // Its availability must not expand this scenario's historical fixture.
+      await writeFile(
+        join(available, '0057_later_event_type_column.sql'),
+        'ALTER TABLE event_types ADD COLUMN later_event_type_setting integer;',
+      )
+      const predecessors = await copyPredecessor(directory, predecessor, available)
       expect(predecessors.at(-1)).toBe(predecessor)
       expect(predecessors).not.toContain(migration)
       await runMigrations(upgraded.pool, directory)

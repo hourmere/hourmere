@@ -1012,11 +1012,8 @@ function validLocation(value: unknown): LocationSettings | null {
       return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
     case 'phone': {
       expect(['number', 'askInvitee'])
-      if (value.askInvitee !== undefined) {
-        if (value.askInvitee !== true || value.number !== undefined)
-          return fail('A phone location requires either a host number or askInvitee: true')
-        return { kind, askInvitee: true }
-      }
+      if (value.askInvitee !== undefined)
+        return fail('Invitee phone collection is not available yet')
       const { number } = value
       if (typeof number !== 'string' || !PHONE_NUMBER_PATTERN.test(number)) {
         return fail('location.number must be a phone number in E.164 format, e.g. +14155550123')
