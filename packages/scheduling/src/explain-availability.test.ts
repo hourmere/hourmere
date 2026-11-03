@@ -273,6 +273,42 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     })
   })
 
+  it('requires management-capable API key scope before disclosing owner or admin host identities', async () => {
+    const s = await team('collective')
+    const principal = s.ctx.principal
+    if (principal.kind !== 'api_key') throw new Error('Expected an API key fixture')
+    const verify = async (read: Explain) => {
+      for (const role of ['owner', 'admin']) {
+        await db
+          .updateTable('auth.member')
+          .set({ role })
+          .where('organizationId', '=', s.team.id)
+          .where('userId', '=', s.owner.id)
+          .execute()
+        for (const apiKeyScope of ['full', 'read', 'bookings'] as const) {
+          const slots = await read({ ...s.ctx, principal: { ...principal, apiKeyScope } }, s.query)
+          expect(slots.length).toBeGreaterThan(0)
+          const serialized = JSON.stringify(slots)
+          if (apiKeyScope === 'full') expect(serialized).toContain(s.owner.id)
+          else {
+            expect(serialized).not.toContain(s.owner.id)
+            expect(serialized).not.toContain(s.member.id)
+          }
+        }
+      }
+    }
+    await verify(explainEventAvailability)
+    await expect(
+      verify(
+        sourceCopy([
+          "if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full') return false",
+          '',
+        ]).explainEventAvailability,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(explainEventAvailability)
+  })
+
   it('keeps a stale round-robin member neutral and matches the normal failure when no fresh slot is offered', async () => {
     const s = await team('round_robin')
     const busy = await f.calendarBusy(s.owner.id, [])

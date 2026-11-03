@@ -1433,6 +1433,7 @@ async function canDiscloseExplanationHosts(
   event: PublicEventTypeRecord,
 ): Promise<boolean> {
   if (!('principal' in ctx) || ctx.principal.organization.id !== event.organizationId) return false
+  if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full') return false
   const membership = await ctx.db
     .selectFrom('auth.member as member')
     .innerJoin('auth.user as user', 'user.id', 'member.userId')

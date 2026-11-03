@@ -78,8 +78,10 @@ The scheduling layer constructs the projection from an explicit field allowlist.
 
 Team host identities require current permission to manage the event type. Being
 one of its hosts, an ordinary team member or a former administrator does not grant
-that permission. An unprivileged explanation omits host identifiers. Transports
-must use the scheduling service, rather than publishing raw engine inputs, database
+that permission. An unprivileged explanation omits host identifiers. API keys
+also require `full` scope for host identity disclosure; `read` and
+`bookings` retain redacted explanations even for an owner or administrator.
+Transports must use the scheduling service, rather than publishing raw engine inputs, database
 rows or a caller-supplied permission flag.
 
 Blocking intervals express the part of the candidate affected by a constraint.
