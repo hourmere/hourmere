@@ -102,6 +102,7 @@ export interface FixtureApp {
 export interface FixtureOptions {
   uiAudit: boolean
   notificationEditor: boolean
+  slotSnippets: boolean
 }
 export const test = base.extend<{
   app: FixtureApp
@@ -110,11 +111,13 @@ export const test = base.extend<{
   multiHostMeet: boolean
   uiAudit: boolean
   notificationEditor: boolean
+  slotSnippets: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
   uiAudit: [false, { option: true }],
   notificationEditor: [false, { option: true }],
+  slotSnippets: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -129,7 +132,10 @@ export const test = base.extend<{
     },
     { auto: true },
   ],
-  app: async ({ context, automaticMeet, multiHostMeet, uiAudit, notificationEditor }, use) => {
+  app: async (
+    { context, automaticMeet, multiHostMeet, uiAudit, notificationEditor, slotSnippets },
+    use,
+  ) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error(
@@ -437,6 +443,7 @@ export const test = base.extend<{
         EMBED_ALLOWED_ORIGINS: parentUrl,
         ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
         ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
+        ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
         ...(automaticMeet && {
           GOOGLE_MEET_ENABLED: 'true',
           GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',

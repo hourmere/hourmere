@@ -123,6 +123,7 @@ export function productRoutes({
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
+  slotSnippetsEnabled = false,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
@@ -136,6 +137,7 @@ export function productRoutes({
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
+  slotSnippetsEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -166,6 +168,7 @@ export function productRoutes({
       automaticMeet,
       automaticZoom,
       followUpHostNotesEnabled,
+      slotSnippetsEnabled,
       hostedSignupUrl,
       privacyPolicyUrl,
       termsUrl,
@@ -641,6 +644,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+        slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
         successRedirectPolicy,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,

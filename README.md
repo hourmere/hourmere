@@ -70,6 +70,14 @@ booking page or copy its full link there; unsaved address changes cannot be copi
 published link. When setup or enablement needs attention, the panel links to the relevant
 settings. Round-robin pools still require a separate explicit activation after saving.
 
+When the operator enables `SLOT_SNIPPETS_ENABLED` (off by default), saved event views
+let personal owners and team owners/admins pick 1–10 open alternatives for one meeting
+length and copy a plain-text or rich-text email snippet. The picker checks ordinary
+public availability again before every copy; no time is reserved. Hidden event links
+can be forwarded. Enable this setting only after public direct-slot booking pages are
+deployed on the same instance. Email language and display zone affect labels only;
+the booking page keeps the invitee’s own preferences.
+
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
