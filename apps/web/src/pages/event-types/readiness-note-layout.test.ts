@@ -9,11 +9,13 @@ function expectCardCaption(source: string) {
   const cardRule = [...sheet.cssRules].find(
     (rule) => 'conditionText' in rule && rule.conditionText === 'data-table not (min-width: 880px)',
   ) as CSSConditionRule | undefined
-  expect(cardRule, 'caption uses the same exclusive 880px breakpoint as event cards').toBeDefined()
+  expect(cardRule, 'caption uses the same exclusive 880px breakpoint as card tables').toBeDefined()
   const caption = [...(cardRule?.cssRules ?? [])].find(
-    (rule) => 'selectorText' in rule && rule.selectorText === '.table-event-types caption',
+    (rule) =>
+      'selectorText' in rule &&
+      rule.selectorText === ':is(.table-bookings, .table-api-keys, .table-event-types) caption',
   ) as CSSStyleRule | undefined
-  expect(caption, 'readiness note has its own full-width card rule').toBeDefined()
+  expect(caption, 'all card tables share the full-width caption rule').toBeDefined()
   // Native table-caption sizing creates an anonymous narrow table in card mode.
   // The old generic <640px rule left the 640–879px container range uncovered.
   expect(caption?.style.display).toBe('block')
@@ -21,7 +23,7 @@ function expectCardCaption(source: string) {
 }
 
 describe('readiness note card layout', () => {
-  it('uses the full event card width throughout the card breakpoint', () => {
+  it('uses the full card table width throughout the card breakpoint', () => {
     expectCardCaption(styles)
   })
 
@@ -33,6 +35,11 @@ describe('readiness note card layout', () => {
     },
     { name: 'native caption sizing', before: 'display: block;', after: 'display: table-caption;' },
     { name: 'a narrow caption width', before: 'width: 100%;', after: 'width: 1%;' },
+    {
+      name: 'omitted shared card tables',
+      before: ':is(.table-bookings, .table-api-keys, .table-event-types) caption',
+      after: '.table-event-types caption',
+    },
   ])('detects $name in a stylesheet source copy', ({ before, after }) => {
     const start = styles.indexOf('@container data-table not (min-width: 880px)')
     const end = styles.indexOf('\n}', start) + 2

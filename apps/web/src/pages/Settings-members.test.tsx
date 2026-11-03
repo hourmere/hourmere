@@ -148,6 +148,7 @@ describe('joined team members and pending invitations in settings', () => {
       for (const number of [1, 2, 3]) {
         expect(within(members).getByText(`person-${number}@example.com`)).toBeDefined()
       }
+      expect(members.textContent).not.toContain('invitee-')
       expect(invitations.textContent).not.toMatch(/delivered/i)
       expect(api.to('GET /api/v1/team/invitations')).toHaveLength(1)
       expect(api.to('GET /api/v1/event-type-hosts')).toHaveLength(0)

@@ -1140,9 +1140,9 @@ input[readonly] {
   min-width: 0;
 }
 
-/* Match event cards' breakpoint so native caption sizing cannot squeeze their note. */
+/* Match card tables' breakpoint so native caption sizing cannot squeeze their captions. */
 @container data-table not (min-width: 880px) {
-  .table-event-types caption {
+  :is(.table-bookings, .table-api-keys, .table-event-types) caption {
     display: block;
     width: 100%;
     padding-inline: var(--space-3);

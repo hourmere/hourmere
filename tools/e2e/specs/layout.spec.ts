@@ -129,6 +129,35 @@ for (const viewport of [
   })
 }
 
+for (const viewport of [
+  { width: 1024, height: 768 },
+  { width: 768, height: 1024 },
+]) {
+  test.describe(`event types readiness caption at ${viewport.width}px`, () => {
+    test.use({ viewport })
+    for (const locale of ['en-US', 'zh-CN'] as const)
+      test(`uses the available table width ${locale}`, async ({ page, app }) => {
+        await openAuditPage(page, app, 'event-types', { locale })
+        const table = page.locator('.table-event-types')
+        await expect(table.locator('caption')).toHaveText(
+          locale === 'zh-CN'
+            ? '配置检查不保证有可约时段。当前可约时间以预约页为准。'
+            : 'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+        )
+        const widths = await table.evaluate((node) => {
+          const caption = node.querySelector('caption')
+          if (!caption) throw new Error('Event types readiness caption is missing')
+          return {
+            table: node.getBoundingClientRect().width,
+            caption: caption.getBoundingClientRect().width,
+          }
+        })
+        expect(widths.table).toBeGreaterThan(0)
+        expect(widths.caption).toBeGreaterThanOrEqual(widths.table * 0.8)
+      })
+  })
+}
+
 test.describe('notification editor at 320px', () => {
   const viewport = { width: 320, height: 568 }
   test.use({ viewport, isMobile: true, hasTouch: true, notificationEditor: true })
