@@ -43,6 +43,11 @@ import {
   strictTransportSecurity,
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
+import {
+  successRedirectErrorField,
+  successRedirectIssueField,
+  successRedirectUnsafeField,
+} from './success-redirect-errors.ts'
 import { VERSION } from './version.ts'
 import { registerWaitlistConfirmation } from './waitlist-confirm.ts'
 
@@ -146,7 +151,8 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   const message = result.error.issues
     .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
     .join('; ')
-  return c.json({ error: 'invalid_request', message }, 400)
+  const field = successRedirectIssueField(result.error.issues)
+  return c.json({ error: 'invalid_request', message, ...(field && { field }) }, 400)
 }
 
 /**
@@ -259,8 +265,13 @@ const jsonTextGuard = createMiddleware(async (c, next) => {
         text = ''
       }
       if (hasUnsafeJsonText(parsed)) {
+        const message = 'Text in the request must not contain NUL characters or malformed Unicode'
+        const field = isOneTimeLinkPath(c.req.path)
+          ? undefined
+          : successRedirectUnsafeField(parsed, hasUnsafeJsonText)
         throw new HTTPException(400, {
-          message: 'Text in the request must not contain NUL characters or malformed Unicode',
+          message,
+          ...(field && { res: c.json({ error: 'invalid_request', message, field }, 400) }),
         })
       }
     },
@@ -393,8 +404,10 @@ export function createApp({
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
       const errorAlias = errorAliasFor(err.code)
+      const field = successRedirectErrorField(err.code, err.detail)
       const body = {
         error: err.code,
+        ...(field && !isOneTimeLinkPath(c.req.path) && { field }),
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail && !isOneTimeLinkPath(c.req.path) && { message: err.detail }),
         ...(err.code === 'one_time_link_already_created' &&

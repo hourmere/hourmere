@@ -135,6 +135,23 @@ Omitting the list on creation makes a single-length type. Use JSON fields for co
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for editor
 steps, update rules and rescheduling behavior.
 
+## Configure an after-booking redirect
+
+`event` reads `successRedirect`; `create-event` and `update-event` accept the same nested
+object as REST/MCP through JSON, or the flags `--success-redirect-url`,
+`--success-redirect-parameters` (comma-separated names, empty string for no parameters),
+`--success-redirect-include-invitee-personal-data true|false`, and
+`--success-redirect-allow-embed-parent true|false`. Include the URL and all values to keep
+when replacing this object. `--clear-success-redirect` is a switch with no value and sends
+`null`; do not combine it with redirect flags or non-null JSON settings. Conflicting flags
+and JSON are refused before the request. Omission preserves the saved setting.
+
+Writes require a `full` key and normal event-type permissions. Names and emails become
+visible to the target website and its analytics when explicitly selected and opted in.
+Validation remains on the server; errors preserve the code and safe `field` without
+printing arbitrary messages. See [after-booking redirects](https://hourmere.com/docs/after-booking)
+for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and limitations.
+
 ## Commands
 
 `whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,

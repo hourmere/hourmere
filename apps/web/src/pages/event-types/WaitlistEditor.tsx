@@ -80,7 +80,9 @@ export function WaitlistEditor({
           </p>
           {!supported && (
             <p className="hint">
-              {t('Waitlists are available for event types with a single host.')}
+              {t(
+                'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).',
+              )}
             </p>
           )}
           {errors.waitlist && <FieldError id="waitlist-error">{errors.waitlist}</FieldError>}

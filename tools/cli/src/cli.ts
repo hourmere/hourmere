@@ -44,6 +44,11 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+After booking: create-event/update-event accept --success-redirect-url URL,
+               --success-redirect-parameters NAME,... (empty string clears the list),
+               --success-redirect-include-invitee-personal-data true|false,
+               --success-redirect-allow-embed-parent true|false, or --clear-success-redirect.
+Invitee name/email become visible to the target website and its analytics when enabled.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
@@ -63,6 +68,8 @@ interface Options {
   output?: string
   url?: string
   durationMinutes?: number
+  successRedirect?: Record<string, unknown>
+  clearSuccessRedirect?: boolean
 }
 
 function parse(argv: readonly string[]): Options {
@@ -73,18 +80,40 @@ function parse(argv: readonly string[]): Options {
   if (!command || !Object.hasOwn(COMMANDS, command)) throw new CliError('invalid_command')
   const options: Options = { command: command as keyof typeof COMMANDS }
   const seen = new Set<string>()
-  for (let i = 0; i < rest.length; i += 2) {
+  for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i]
-    const value = rest[i + 1]
     if (
       !flag ||
-      !['--input', '--output', '--url', '--duration-minutes'].includes(flag) ||
+      ![
+        '--input',
+        '--output',
+        '--url',
+        '--duration-minutes',
+        '--success-redirect-url',
+        '--success-redirect-parameters',
+        '--success-redirect-include-invitee-personal-data',
+        '--success-redirect-allow-embed-parent',
+        '--clear-success-redirect',
+      ].includes(flag) ||
       seen.has(flag)
     )
       throw new CliError('invalid_options')
-    if (!value || (value.startsWith('-') && !(flag === '--input' && value === '-')))
-      throw new CliError('invalid_options')
     seen.add(flag)
+    const redirectFlag =
+      flag.startsWith('--success-redirect-') || flag === '--clear-success-redirect'
+    if (redirectFlag && !['create-event', 'update-event'].includes(command))
+      throw new CliError('invalid_options')
+    if (flag === '--clear-success-redirect') {
+      options.clearSuccessRedirect = true
+      continue
+    }
+    const value = rest[++i]
+    if (
+      value === undefined ||
+      (value === '' && flag !== '--success-redirect-parameters') ||
+      (value.startsWith('-') && !(flag === '--input' && value === '-'))
+    )
+      throw new CliError('invalid_options')
     if (flag === '--input') options.input = value
     if (flag === '--output') options.output = value
     if (flag === '--url') options.url = value
@@ -95,7 +124,27 @@ function parse(argv: readonly string[]): Options {
         throw new CliError('invalid_request')
       options.durationMinutes = durationMinutes
     }
+    if (redirectFlag) {
+      options.successRedirect ??= {}
+      const redirect = options.successRedirect
+      if (flag === '--success-redirect-url') redirect.url = value
+      if (flag === '--success-redirect-parameters')
+        redirect.parameters = value === '' ? [] : value.split(',')
+      if (
+        flag === '--success-redirect-include-invitee-personal-data' ||
+        flag === '--success-redirect-allow-embed-parent'
+      ) {
+        if (value !== 'true' && value !== 'false') throw new CliError('invalid_options')
+        redirect[
+          flag === '--success-redirect-include-invitee-personal-data'
+            ? 'includeInviteePersonalData'
+            : 'allowEmbedParent'
+        ] = value === 'true'
+      }
+    }
   }
+  if (options.clearSuccessRedirect && options.successRedirect)
+    throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
     throw new CliError('one_time_link_output_forbidden')
   return options
@@ -185,6 +234,24 @@ export async function runCli(options: {
         throw new CliError('invalid_duration')
       input.durationMinutes = args.durationMinutes
     }
+    if (args.clearSuccessRedirect) {
+      if (Object.hasOwn(input, 'successRedirect') && input.successRedirect !== null)
+        throw new CliError('invalid_success_redirect_options')
+      input.successRedirect = null
+    } else if (args.successRedirect) {
+      if (Object.hasOwn(input, 'successRedirect') && !isObject(input.successRedirect))
+        throw new CliError('invalid_success_redirect_options')
+      const redirect = isObject(input.successRedirect) ? { ...input.successRedirect } : {}
+      for (const [field, value] of Object.entries(args.successRedirect)) {
+        if (
+          Object.hasOwn(redirect, field) &&
+          JSON.stringify(redirect[field]) !== JSON.stringify(value)
+        )
+          throw new CliError('invalid_success_redirect_options')
+        redirect[field] = value
+      }
+      input.successRedirect = redirect
+    }
     if (Object.hasOwn(input, 'oneTimeToken')) {
       if (
         args.command !== 'book' ||
@@ -245,6 +312,7 @@ export async function runCli(options: {
         {
           error: code,
           ...(error instanceof CliError && error.detail !== undefined && { message: error.detail }),
+          ...(error instanceof CliError && error.field !== undefined && { field: error.field }),
           ...(error instanceof CliError && error.status !== undefined && { status: error.status }),
           ...(error instanceof CliError &&
             error.retryAfterSeconds !== undefined && {

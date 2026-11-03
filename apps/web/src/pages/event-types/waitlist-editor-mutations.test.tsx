@@ -22,6 +22,9 @@ import type { WaitlistEditor } from './WaitlistEditor.tsx'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
 const editor = readFileSync('apps/web/src/pages/event-types/WaitlistEditor.tsx', 'utf8')
+const eligibilityMessage =
+  'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).'
+const incompleteEligibilityMessage = 'Waitlists are available for event types with a single host.'
 function copy<T>(source: string, exported: string, dependencies: Record<string, unknown>): T {
   const compiled = execFileSync(
     process.execPath,
@@ -46,7 +49,7 @@ function mutate(source: string, before: string, after: string) {
 const buildForm = (source: string) =>
   copy<typeof eventFunctions>(
     source,
-    '{emptyDraft, draftFromEventType, toInput, toPatchInput, validateDraft}',
+    '{emptyDraft, draftFromEventType, toInput, toPatchInput, validateDraft, serverErrors}',
     {
       RequestError,
       parseWhole,
@@ -353,6 +356,62 @@ describe('waitlist editor production-source mutation controls', () => {
       },
       { supported: false },
     )
+  })
+  it('detects omitting the one-on-one restriction from the eligibility hint', async () => {
+    await detectsEditor(
+      `'${eligibilityMessage}'`,
+      `'${incompleteEligibilityMessage}'`,
+      async () => {
+        expect(screen.queryByText(eligibilityMessage)).not.toBeNull()
+      },
+      { supported: false },
+    )
+  })
+  it('detects incomplete eligibility guidance from client validation', () => {
+    detects(
+      `errors.waitlist =\n      '${eligibilityMessage}'`,
+      `errors.waitlist = '${incompleteEligibilityMessage}'`,
+      (source) => {
+        const form = buildForm(source)
+        for (const schedulingType of ['round_robin', 'collective'] as const)
+          expect(
+            form.validateDraft({
+              ...form.emptyDraft(),
+              title: 'Test',
+              slug: 'test',
+              schedulingType,
+              hostUserIds: [ME.user.id],
+              waitlistEnabled: true,
+            }).waitlist,
+          ).toBe(eligibilityMessage)
+      },
+    )
+  })
+  it('detects incomplete eligibility guidance from server refusals', () => {
+    detects(
+      `        '${eligibilityMessage}',`,
+      `        '${incompleteEligibilityMessage}',`,
+      (source) => {
+        const form = buildForm(source)
+        const error = new RequestError(400, 'waitlist_unsupported', 'Unsupported event shape')
+        expect(form.serverErrors(error, form.emptyDraft()).fields.waitlist).toBe(eligibilityMessage)
+      },
+    )
+  })
+  it.each([
+    ['en', eligibilityMessage],
+    ['zh-CN', '候补名单仅适用于只有一位主持人的一对一活动类型（不含轮询和集体活动）。'],
+  ])('detects incomplete eligibility guidance in the %s catalogue', (locale, expected) => {
+    const source = readFileSync(`apps/web/src/i18n/catalogues/${locale}/admin.ts`, 'utf8')
+    const assertCatalogue = (source: string) =>
+      expect(copy<Record<string, string>>(source, 'admin', {})[eligibilityMessage]).toBe(expected)
+    assertCatalogue(source)
+    expect(() =>
+      assertCatalogue(
+        mutate(source, `:\n    '${expected}'`, `:\n    '${incompleteEligibilityMessage}'`),
+      ),
+    ).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
+    assertCatalogue(source)
   })
   it('detects removing an entry without confirmation', async () => {
     await detectsEditor('<ConfirmAction', '<ImmediateAction', async (user, calls) => {

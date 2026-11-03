@@ -131,6 +131,13 @@ apply migrations, then restart all roles with the new code before using scoped k
 **Do not run old and new servers side by side once scoped keys exist:** old code treats
 them as full access. Follow the supported backup/restore procedure for rollback.
 
+## Configure an after-booking redirect
+
+`get_event_type` returns `successRedirect`; `create_event_type` and `update_event_type`
+accept the same object or `null` as REST, requiring `full` API key scope. Omit the field on
+update to preserve it. See [after-booking redirects](/docs/after-booking#mcp) for parameters,
+privacy and embed permissions, stable error fields and policy-change behavior.
+
 ## Discover your configuration
 
 Call `whoami` to check the key's organization and `get_profile` for your booking-page handle,

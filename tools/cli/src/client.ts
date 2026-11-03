@@ -15,13 +15,21 @@ export class CliError extends Error {
   readonly status?: number
   readonly retryAfterSeconds?: number
   readonly detail?: string
+  readonly field?: string
 
-  constructor(code: string, status?: number, retryAfterSeconds?: number, detail?: string) {
+  constructor(
+    code: string,
+    status?: number,
+    retryAfterSeconds?: number,
+    detail?: string,
+    field?: string,
+  ) {
     super(code)
     this.code = code
     this.status = status
     this.retryAfterSeconds = retryAfterSeconds
     this.detail = detail
+    this.field = field
   }
 }
 
@@ -92,6 +100,20 @@ function notificationDetail(code: string, value: unknown): string | undefined {
 
 function retrySeconds(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+function redirectField(code: string, value: unknown): string | undefined {
+  if (!['invalid_request', 'invalid_success_redirect'].includes(code)) return undefined
+  return typeof value === 'string' &&
+    [
+      'successRedirect',
+      'successRedirect.url',
+      'successRedirect.parameters',
+      'successRedirect.includeInviteePersonalData',
+      'successRedirect.allowEmbedParent',
+    ].includes(value)
+    ? value
+    : undefined
 }
 
 async function readResponse(response: Response): Promise<unknown> {
@@ -211,6 +233,7 @@ export async function callTool(options: {
         undefined,
         retrySeconds(isObject(detail) ? detail.retryAfterSeconds : undefined),
         notificationDetail(code, isObject(detail) ? detail.message : undefined),
+        redirectField(code, isObject(detail) ? detail.field : undefined),
       )
     }
     if (result.isError !== undefined && result.isError !== false)
