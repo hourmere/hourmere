@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug, isReservedName } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
 import * as react from 'react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
@@ -23,6 +23,7 @@ const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', '
 const share = readFileSync('apps/web/src/pages/event-types/SavedEventShare.tsx', 'utf8')
 const shareFunction = share.slice(share.indexOf('export function SavedEventShare('))
 const EmptyEmbedAction = () => null
+const EmptySlotPicker = () => null
 
 /** Only in-memory copies are mutated; the production files stay intact. */
 function copy<T>(source: string, exported: string, dependencies: Record<string, unknown> = {}): T {
@@ -270,9 +271,14 @@ describe('first-run editor production-source negative controls', () => {
     detects(shareFunction, before, after, (code) => {
       const Share = copy<typeof SavedEventShare>(code, 'SavedEventShare', {
         EventEmbedAction: EmptyEmbedAction,
+        HostSlotPicker: EmptySlotPicker,
+        verifySlotPickerAccess: async () => {},
         ...paths,
         useEffect,
         useRef,
+        useState,
+        useLoad: () => [{ status: 'loading' }],
+        loadInstance: () => {},
         Link,
         CopyButton,
         isPublicTeamSlug,

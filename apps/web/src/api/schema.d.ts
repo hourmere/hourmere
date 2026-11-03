@@ -4645,6 +4645,8 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
+            slotSnippetsEnabled?: boolean;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured

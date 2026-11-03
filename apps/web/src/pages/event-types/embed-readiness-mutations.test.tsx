@@ -5,7 +5,7 @@ import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
-import { type ComponentType, useEffect, useRef } from 'react'
+import { type ComponentType, useEffect, useRef, useState } from 'react'
 import { Link, MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
@@ -36,6 +36,7 @@ const sources = {
   row: readFileSync('apps/web/src/pages/event-types/EventTypes.tsx', 'utf8'),
 }
 const ConfigurationChecks = () => null
+const EmptySlotPicker = () => null
 
 beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
@@ -73,6 +74,11 @@ function copy<T>(source: string, exported: string): T {
     isPublicTeamSlug,
     useEffect,
     useRef,
+    useState,
+    useLoad: () => [{ status: 'loading' }],
+    loadInstance: () => {},
+    HostSlotPicker: EmptySlotPicker,
+    verifySlotPickerAccess: async () => {},
     useI18n: () => ({ t: (text: string) => text, locale: 'en' }),
     useTeamManagementAccess: () => ({ status: 'ready', role: 'owner' }),
     teamReadinessBlocksSharing,

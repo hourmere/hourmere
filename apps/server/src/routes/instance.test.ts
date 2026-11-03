@@ -76,6 +76,7 @@ describe('GET /api/v1/instance', () => {
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
+      slotSnippetsEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -91,6 +92,7 @@ describe('GET /api/v1/instance', () => {
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
+      slotSnippetsEnabled: false,
       signIn: { email: true, google: true, microsoft: true },
     })
     expect(text).not.toMatch(/client/i)
@@ -102,6 +104,7 @@ describe('GET /api/v1/instance', () => {
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
+      slotSnippetsEnabled: false,
       signIn: { email: true, google: true, microsoft: false },
     })
   })
@@ -117,6 +120,7 @@ describe('GET /api/v1/instance', () => {
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
+      slotSnippetsEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -439,8 +443,8 @@ describe('GET /api/v1/instance', () => {
 
   it('detects removing host-note capability wiring from the product routes', async () => {
     const copy = await sourceCopy<typeof import('../server.ts')>('../server.ts', [
-      '      automaticZoom,\n      followUpHostNotesEnabled,\n      hostedSignupUrl,',
-      '      automaticZoom,\n      hostedSignupUrl,',
+      '      automaticZoom,\n      followUpHostNotesEnabled,\n      slotSnippetsEnabled,\n      hostedSignupUrl,',
+      '      automaticZoom,\n      slotSnippetsEnabled,\n      hostedSignupUrl,',
     ])
     await expect(verifyHostNoteCapability(copy.productRoutes)).rejects.toMatchObject({
       name: 'AssertionError',

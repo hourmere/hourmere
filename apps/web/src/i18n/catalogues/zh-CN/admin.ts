@@ -1632,4 +1632,60 @@ export const admin = {
   'You have no working hours yet. Use the setup guide to add a default schedule.':
     '你尚未设置工作时间。请通过设置引导添加默认日程。',
   'Set working hours with the setup guide': '通过设置引导添加工作时间',
+  'Pick open times': '挑选可约时间',
+  'Copy open times into an email': '将可约时间复制到邮件',
+  'Choose 1–10 available times for the saved event type. Unsaved changes are not included.':
+    '为已保存的活动类型选择 1 至 10 个可约时间。未保存的更改不会包含在内。',
+  'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.':
+    '复制时会重新检查所选时间是否可约。这些时间不会被预留，受邀人打开链接时可能已不可约。受邀人仍需在预约页面上确认预约。',
+  'This event type is unlisted. Anyone with these links can open the booking page and book an available time.':
+    '此活动类型未公开列出。任何获得这些链接的人都可以打开预约页面，并选择可约时间进行预约。',
+  'Email display': '邮件显示',
+  'Meeting length': '会议时长',
+  'Email language': '邮件语言',
+  'Display time zone': '显示时区',
+  'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.':
+    '此处选择的语言和时区仅用于邮件片段。预约页面会使用每位受邀人的偏好设置。',
+  'Available times': '可选时间',
+  'Loading available times…': '正在加载可约时间……',
+  'We could not load available times. Please try again.': '无法加载可约时间。请重试。',
+  'No times are offered on this date.': '此日期没有可约时间。',
+  'Check availability again': '重新检查可约时间',
+  'Selected times: {0} (maximum 10)': '已选择{0}个备选时间，最多可选 10 个',
+  'Selected times': '已选时间',
+  'No longer offered': '已不可约',
+  'Remove {time}': '移除{time}',
+  'Remove time': '移除时间',
+  'Preview email': '预览邮件',
+  'The email preview could not be created. Please choose fewer times and try again.':
+    '无法创建邮件预览。请少选几个时间后重试。',
+  'Complete plain-text email preview': '完整的纯文本邮件预览',
+  'Copy plain text': '复制纯文本',
+  'Copy rich text': '复制富文本',
+  'The full plain text above includes every booking link.': '上方的完整纯文本包含每一个预约链接。',
+  'Checking selected times…': '正在检查已选时间……',
+  'This meeting length is no longer offered. Reload the saved event type before trying again.':
+    '此会议时长已不可选。请重新加载已保存的活动类型后重试。',
+  'We could not check the selected times. Nothing was copied. Please try again.':
+    '无法检查已选时间，未复制任何内容。请重试。',
+  'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.':
+    '部分已选时间已不可约，未复制任何内容。请手动移除这些时间后重试。',
+  'Plain text copied.': '已复制纯文本。',
+  'Rich text copied with a plain-text fallback.': '已复制富文本，并包含纯文本备用版本。',
+  'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
+    '无法访问剪贴板。请手动选中并复制完整的纯文本预览。',
+  '{0} min': '{0}分钟',
+  'Checking that you can preview these times…': '正在确认你是否可以预览这些时间……',
+  'We could not prepare the preview. Nothing was copied. Please try again.':
+    '无法准备预览，未复制任何内容。请重试。',
+  'Availability date ({zone})': '可约日期（{zone}）',
+  'Email preview ready.': '邮件预览已就绪。',
+  'This time could not be displayed. Please try another display time zone.':
+    '无法显示此时间。请尝试其他显示时区。',
+  'The saved event title is invalid. Reload the saved event type and try again.':
+    '已保存的活动标题无效。请重新加载已保存的活动类型后重试。',
+  'The saved booking link is invalid. Reload the saved event type and try again.':
+    '已保存的预约链接无效。请重新加载已保存的活动类型后重试。',
+  'The email preview could not be created. Reload the saved event type and try again.':
+    '无法创建邮件预览。请重新加载已保存的活动类型后重试。',
 } as const
