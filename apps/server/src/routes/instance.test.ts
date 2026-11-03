@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import type { CallerResolver, Principal } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
@@ -8,6 +9,41 @@ import { productRoutes } from '../server.ts'
 import { instanceRoutes } from './instance.ts'
 
 const publicUrl = 'https://instance.example.com:8443'
+const host: Extract<Principal, { kind: 'session' }> = {
+  kind: 'session',
+  sessionId: '00000000-0000-4000-8000-000000000001',
+  user: {
+    id: '00000000-0000-4000-8000-000000000002',
+    name: 'Embed host',
+    email: 'embed-host@example.test',
+  },
+  organization: {
+    id: '00000000-0000-4000-8000-000000000003',
+    name: 'Embed host',
+    slug: 'embed-host',
+    personal: true,
+  },
+}
+const hostResolver: CallerResolver = async (headers) => {
+  const authorization = headers.get('authorization')
+  const principal: Principal | undefined =
+    authorization === 'Bearer hm_embed_host'
+      ? { ...host, kind: 'api_key', apiKeyId: host.sessionId, apiKeyScope: 'full' }
+      : authorization === 'Bearer embed_oauth'
+        ? {
+            ...host,
+            kind: 'oauth',
+            oauthConsentId: host.sessionId,
+            clientId: 'synthetic-embed-client',
+            scopes: ['mcp:tools'],
+          }
+        : authorization === null && headers.get('cookie') === 'embed-host=valid'
+          ? host
+          : undefined
+  return principal
+    ? { ok: true, principal, setCookie: [] }
+    : { ok: false, error: 'unauthorized', setCookie: [] }
+}
 const appWith = (
   socialProviders: Parameters<typeof instanceRoutes>[0]['socialProviders'],
   hostedSignupUrl?: string,
@@ -219,15 +255,22 @@ describe('GET /api/v1/instance', () => {
       checkDb: async () => {},
       publicUrl,
       authHandler: async () => new Response(null, { status: 404 }),
-      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      resolveCaller: hostResolver,
       routes: [factory({ publicUrl, socialProviders: {}, embedAllowedOrigins })],
     })
-    for (const headers of [{}, { authorization: 'Bearer hm_unknown' }]) {
+    for (const headers of [
+      {},
+      { authorization: 'Bearer hm_unknown' },
+      { cookie: 'embed-host=valid' },
+    ]) {
       const response = await app.request('/api/v1/instance', { headers })
       expect(response.status).toBe(200)
       const body = await response.json()
-      if (embedAllowedOrigins === undefined) expect(body).not.toHaveProperty('embedAllowedOrigins')
-      else expect(body).toHaveProperty('embedAllowedOrigins', embedAllowedOrigins)
+      expect(body).not.toHaveProperty('embedAllowedOrigins')
+      for (const origin of embedAllowedOrigins ?? [])
+        expect(JSON.stringify(body).includes(origin)).toBe(false)
+      if (embedAllowedOrigins === undefined) expect(body).not.toHaveProperty('embedEnabled')
+      else expect(body).toHaveProperty('embedEnabled', embedAllowedOrigins.length > 0)
     }
   }
 
@@ -236,7 +279,7 @@ describe('GET /api/v1/instance', () => {
     ['disabled', []],
     ['configured', ['https://www.example.com', 'http://localhost:4173']],
   ] as const)(
-    'publishes %s embed readiness without requiring authentication',
+    'publishes only %s embed readiness without exposing approved origins',
     async (_, origins) => {
       await verifyPublicEmbedCapability(origins)
     },
@@ -261,7 +304,7 @@ describe('GET /api/v1/instance', () => {
           checkDb: async () => {},
           publicUrl,
           authHandler: async () => new Response(null, { status: 404 }),
-          resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+          resolveCaller: hostResolver,
           routes: factory({
             db,
             publicUrl,
@@ -272,18 +315,98 @@ describe('GET /api/v1/instance', () => {
         })
         const response = await app.request('/api/v1/instance')
         expect(response.status).toBe(200)
-        expect(await response.json()).toHaveProperty(
-          'embedAllowedOrigins',
-          configured ? ['https://www.example.com', 'https://blog.example.com'] : [],
-        )
+        const body = await response.json()
+        expect(body).toHaveProperty('embedEnabled', Boolean(configured))
+        expect(body).not.toHaveProperty('embedAllowedOrigins')
+        const privateResponse = await app.request('/api/v1/instance/embed', {
+          headers: { cookie: 'embed-host=valid' },
+        })
+        expect(privateResponse.status).toBe(200)
+        expect(await privateResponse.json()).toEqual({
+          publicUrl,
+          embedAllowedOrigins: configured
+            ? ['https://www.example.com', 'https://blog.example.com']
+            : [],
+        })
       }
     } finally {
       await db.destroy()
     }
   }
 
-  it('publishes normalized embed origins through server route composition', async () => {
+  it('keeps normalized embed origins private through server route composition', async () => {
     await verifyEmbedCapabilityWiring()
+  })
+
+  function privateEmbedApp(
+    origins: readonly string[] | undefined,
+    factory: typeof instanceRoutes = instanceRoutes,
+  ) {
+    return createApp({
+      checkDb: async () => {},
+      publicUrl,
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: hostResolver,
+      routes: [factory({ publicUrl, socialProviders: {}, embedAllowedOrigins: origins })],
+    })
+  }
+
+  async function verifyPrivateEmbedCapability(
+    origins: readonly string[] | undefined,
+    factory: typeof instanceRoutes = instanceRoutes,
+  ) {
+    const response = await privateEmbedApp(origins, factory).request(
+      'https://request-host.example/api/v1/instance/embed',
+      {
+        headers: {
+          cookie: 'embed-host=valid',
+          host: 'host-header.example',
+          'x-forwarded-host': 'forwarded-host.example',
+        },
+      },
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(response.headers.get('vary')).toBe('Cookie, Authorization')
+    expect(await response.json()).toEqual({
+      publicUrl,
+      ...(origins !== undefined && { embedAllowedOrigins: [...origins] }),
+    })
+  }
+
+  async function verifyPrivateEmbedDenial(
+    headers: Record<string, string>,
+    expectedStatus: number,
+    factory: typeof instanceRoutes = instanceRoutes,
+  ) {
+    const origin = 'https://unannounced-staging.example.test'
+    const response = await privateEmbedApp([origin], factory).request('/api/v1/instance/embed', {
+      headers,
+    })
+    expect(response.status).toBe(expectedStatus)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    const body = await response.text()
+    expect(body.includes(origin)).toBe(false)
+    expect(body.includes('embedAllowedOrigins')).toBe(false)
+  }
+
+  it.each([
+    ['unknown', undefined],
+    ['disabled', []],
+    ['configured', ['https://www.example.com', 'http://localhost:4173']],
+  ] as const)('shows %s embed configuration only to the signed-in host', async (_, origins) => {
+    await verifyPrivateEmbedCapability(origins)
+  })
+
+  it('denies anonymous, invalid-session, API-key and OAuth configuration reads', async () => {
+    await verifyPrivateEmbedDenial({}, 401)
+    await verifyPrivateEmbedDenial({ cookie: 'embed-host=invalid' }, 401)
+    for (const authorization of ['Bearer hm_embed_host', 'Bearer embed_oauth']) {
+      await verifyPrivateEmbedDenial({ authorization }, 403)
+      await verifyPrivateEmbedDenial({ authorization, cookie: 'embed-host=valid' }, 403)
+    }
+    for (const authorization of ['', 'Basic synthetic', 'Bearer invalid'])
+      await verifyPrivateEmbedDenial({ authorization, cookie: 'embed-host=valid' }, 401)
   })
 
   async function sourceCopy<T>(file: string, replacement?: [string, string]): Promise<T> {
@@ -339,8 +462,91 @@ describe('GET /api/v1/instance', () => {
     await verifyPublicEmbedCapability(undefined, publicCopy.instanceRoutes)
     await verifyPublicEmbedCapability([], publicCopy.instanceRoutes)
     await verifyPublicEmbedCapability(['https://www.example.com'], publicCopy.instanceRoutes)
+    for (const origins of [undefined, [], ['https://www.example.com']])
+      await verifyPrivateEmbedCapability(origins, publicCopy.instanceRoutes)
+    await verifyPrivateEmbedDenial({}, 401, publicCopy.instanceRoutes)
+    await verifyPrivateEmbedDenial(
+      { authorization: 'Bearer hm_embed_host' },
+      403,
+      publicCopy.instanceRoutes,
+    )
     const serverCopy = await sourceCopy<typeof import('../server.ts')>('../server.ts')
     await verifyEmbedCapabilityWiring(serverCopy.productRoutes)
+  })
+
+  it('detects exposing approved origins through public instance discovery', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      '...(embedAllowedOrigins !== undefined && { embedEnabled: embedAllowedOrigins.length > 0 })',
+      '...(embedAllowedOrigins !== undefined && { embedEnabled: embedAllowedOrigins.length > 0, embedAllowedOrigins: [...embedAllowedOrigins] })',
+    ])
+    await expect(
+      verifyPublicEmbedCapability(
+        ['https://unannounced-staging.example.test'],
+        copy.instanceRoutes,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('detects removing authentication from the private embed configuration', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      'middleware: [privateHeaders, caller, sessionOnly]',
+      'middleware: [privateHeaders]',
+    ])
+    await expect(verifyPrivateEmbedDenial({}, 401, copy.instanceRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: 200,
+      expected: 401,
+    })
+  })
+
+  it('detects allowing API keys to enumerate private embed origins', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      'middleware: [privateHeaders, caller, sessionOnly]',
+      'middleware: [privateHeaders, caller]',
+    ])
+    await expect(
+      verifyPrivateEmbedDenial({ authorization: 'Bearer hm_embed_host' }, 403, copy.instanceRoutes),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 200, expected: 403 })
+  })
+
+  it('detects a cacheable private embed configuration', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      "c.header('Cache-Control', 'private, no-store')",
+      "c.header('Cache-Control', 'public, max-age=60')",
+    ])
+    await expect(
+      verifyPrivateEmbedCapability(['https://www.example.com'], copy.instanceRoutes),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('detects losing private configuration credential variance', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      "c.header('Vary', 'Cookie, Authorization')",
+      "c.header('Vary', 'Accept')",
+    ])
+    await expect(
+      verifyPrivateEmbedCapability(['https://www.example.com'], copy.instanceRoutes),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('detects classifying unknown private embed configuration as disabled', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      '  embedAllowedOrigins,\n',
+      '  embedAllowedOrigins = [],\n',
+    ])
+    await expect(
+      verifyPrivateEmbedCapability(undefined, copy.instanceRoutes),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('detects omitting known disabled private embed configuration', async () => {
+    const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
+      '...(embedAllowedOrigins !== undefined && { embedAllowedOrigins: [...embedAllowedOrigins] })',
+      '...(embedAllowedOrigins?.length && { embedAllowedOrigins: [...embedAllowedOrigins] })',
+    ])
+    await expect(verifyPrivateEmbedCapability([], copy.instanceRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
   })
 
   it('detects classifying unknown embed readiness as disabled', async () => {
@@ -351,19 +557,19 @@ describe('GET /api/v1/instance', () => {
     await expect(verifyPublicEmbedCapability(undefined, copy.instanceRoutes)).rejects.toMatchObject(
       {
         name: 'AssertionError',
-        message: expect.stringContaining('embedAllowedOrigins'),
+        message: expect.stringContaining('embedEnabled'),
       },
     )
   })
 
   it('detects hiding known disabled embed readiness', async () => {
     const copy = await sourceCopy<typeof import('./instance.ts')>('./instance.ts', [
-      '...(embedAllowedOrigins !== undefined && { embedAllowedOrigins: [...embedAllowedOrigins] })',
-      '...(embedAllowedOrigins?.length && { embedAllowedOrigins: [...embedAllowedOrigins] })',
+      '...(embedAllowedOrigins !== undefined && { embedEnabled: embedAllowedOrigins.length > 0 })',
+      '...(embedAllowedOrigins?.length && { embedEnabled: true })',
     ])
     await expect(verifyPublicEmbedCapability([], copy.instanceRoutes)).rejects.toMatchObject({
       name: 'AssertionError',
-      message: expect.stringContaining('embedAllowedOrigins'),
+      message: expect.stringContaining('embedEnabled'),
     })
   })
 
@@ -374,7 +580,7 @@ describe('GET /api/v1/instance', () => {
     ])
     await expect(verifyEmbedCapabilityWiring(copy.productRoutes)).rejects.toMatchObject({
       name: 'AssertionError',
-      message: expect.stringContaining('embedAllowedOrigins'),
+      message: expect.stringContaining('embedEnabled'),
     })
   })
 
@@ -406,13 +612,23 @@ describe('GET /api/v1/instance', () => {
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     })
     expect(instance?.required).not.toContain('followUpHostNotesEnabled')
-    expect(instance?.properties).toHaveProperty('embedAllowedOrigins', {
+    expect(instance?.properties).toHaveProperty('embedEnabled', {
+      type: 'boolean',
+      description: 'Whether embedding is enabled; absent when unknown',
+    })
+    expect(instance?.required).not.toContain('embedEnabled')
+    expect(instance?.properties).not.toHaveProperty('embedAllowedOrigins')
+    const embedOperation = doc.paths['/api/v1/instance/embed']?.get
+    expect(embedOperation?.security).toEqual([{ session: [] }])
+    expect(Object.keys(embedOperation?.responses ?? {})).toEqual(['200', '401', '403', '429'])
+    const configuration = doc.components.schemas.EmbedConfiguration
+    expect(configuration?.properties).toHaveProperty('embedAllowedOrigins', {
       type: 'array',
       items: { type: 'string', format: 'uri' },
       maxItems: 32,
       description:
         'Exact website origins approved for embedding; empty when disabled, absent when unknown',
     })
-    expect(instance?.required).not.toContain('embedAllowedOrigins')
+    expect(configuration?.required).not.toContain('embedAllowedOrigins')
   })
 })

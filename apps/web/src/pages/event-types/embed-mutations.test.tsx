@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { embedSnippet } from '@hourmere/core/embed-snippet'
 import { render, screen } from '@testing-library/react'
 import * as react from 'react'
@@ -15,6 +16,11 @@ const DISABLED =
   'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:'
 const UNKNOWN =
   'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.'
+const INVALID_PUBLIC_URL =
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.'
+const INVALID_BOOKING_PATH =
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.'
+const GENERATION_FAILED = 'Could not generate embed code. Check the embed settings and try again.'
 
 type InstanceState =
   | { status: 'loading' | 'error' }
@@ -37,7 +43,7 @@ beforeEach(() => {
 })
 
 /** Compile copies in memory; every negative control must fail a real rendered assertion. */
-function copy(code: string, state: InstanceState): Dialog {
+function copy(code: string, state: InstanceState, snippet = embedSnippet): Dialog {
   const compiled = execFileSync(
     process.execPath,
     [
@@ -53,7 +59,9 @@ function copy(code: string, state: InstanceState): Dialog {
     useRef: react.useRef,
     useState: react.useState,
     createPortal,
-    embedSnippet,
+    embedSnippet: snippet,
+    embedOrigin,
+    publicBookingPath,
     CopyButton,
     loadInstance: () => {},
     useLoad: () => [state, () => {}],
@@ -90,7 +98,6 @@ function assertStatus(code: string, state: InstanceState, disabled: boolean) {
 
 describe('embed production-source mutation controls', () => {
   it.each([
-    { status: 'loading' },
     { status: 'error' },
     { status: 'ready', data: { publicUrl: 'https://schedule.example.test' } },
   ] satisfies InstanceState[])(
@@ -103,6 +110,79 @@ describe('embed production-source mutation controls', () => {
       )
     },
   )
+
+  it('detects showing unavailable guidance before loading finishes', () => {
+    detects("instance.status === 'loading' ? (", 'false ? (', (code) => {
+      const DialogCopy = copy(code, { status: 'loading' })
+      const view = render(
+        <DialogCopy event={eventType()} bookingPath="/ada/intro-call" onClose={() => {}} />,
+      )
+      try {
+        expect(screen.queryByText('Loading instance settings…')).not.toBeNull()
+        expect(screen.queryByText(UNKNOWN)).toBeNull()
+        expect(screen.queryByText(DISABLED)).toBeNull()
+        expect(screen.getAllByRole('status')).toHaveLength(1)
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it.each([
+    {
+      condition: "generationError === 'publicUrl'",
+      publicUrl: 'https://schedule.example.test/app',
+      bookingPath: '/ada/intro-call',
+      reason: INVALID_PUBLIC_URL,
+    },
+    {
+      condition: "generationError === 'bookingPath'",
+      publicUrl: 'https://schedule.example.test',
+      bookingPath: '/book/one-time-test-value',
+      reason: INVALID_BOOKING_PATH,
+    },
+  ])('detects losing the specific generation cause: $condition', (options) => {
+    detects(options.condition, 'false', (code) => {
+      const DialogCopy = copy(code, {
+        status: 'ready',
+        data: { publicUrl: options.publicUrl, embedAllowedOrigins: [] },
+      })
+      const view = render(
+        <DialogCopy event={eventType()} bookingPath={options.bookingPath} onClose={() => {}} />,
+      )
+      try {
+        expect(screen.queryByText(options.reason)).not.toBeNull()
+        expect(screen.queryByLabelText('Embed code')).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    })
+  })
+
+  it('detects blaming PUBLIC_URL for unexpected generation failures', () => {
+    detects(`'${GENERATION_FAILED}'`, `'${INVALID_PUBLIC_URL}'`, (code) => {
+      const DialogCopy = copy(
+        code,
+        {
+          status: 'ready',
+          data: { publicUrl: 'https://schedule.example.test', embedAllowedOrigins: [] },
+        },
+        () => {
+          throw new Error('Unexpected generation failure')
+        },
+      )
+      const view = render(
+        <DialogCopy event={eventType()} bookingPath="/ada/intro-call" onClose={() => {}} />,
+      )
+      try {
+        expect(screen.queryByText(GENERATION_FAILED)).not.toBeNull()
+        expect(screen.queryByText(INVALID_PUBLIC_URL)).toBeNull()
+        expect(screen.queryByLabelText('Embed code')).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    })
+  })
 
   it('detects losing the known empty-origin operator guidance', () => {
     detects('origins.length === 0', 'false', (code) =>

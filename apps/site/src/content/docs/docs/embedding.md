@@ -3,7 +3,8 @@ title: Website booking widgets
 description: Embed a public booking page inline or in a popup.
 ---
 
-Hourmere offers an iframe widget for personal and single-host team booking pages. Visitors
+Hourmere offers an iframe widget for personal and team booking pages, including collective
+meetings and activated round-robin pools. Visitors
 use the same public booking flow without signing in. Both variants keep Powered by Hourmere
 branding. Embedded pages hide the page-level language picker and outer card frame while
 retaining the form's panels and spacing. An iframe isolates the booking page's styles, and
@@ -11,6 +12,9 @@ a Shadow DOM protects the popup title and close control from your website's styl
 
 Widgets reuse the public booking API and do not require a visitor account or third-party
 cookies.
+The [embedded team page](https://github.com/hourmere/hourmere/blob/main/apps/web/src/public/Embed.tsx#L58)
+uses the same team booking flow; the [public event lookup](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/availability.ts#L252)
+accepts individual, collective and activated round-robin team event types.
 
 First, the instance operator sets `EMBED_ALLOWED_ORIGINS` to your exact HTTPS website
 origin (for example `https://www.example.com`) and restarts the web process. The default is
@@ -47,11 +51,15 @@ the generated code into your website. The code uses the instance's `PUBLIC_URL` 
 saved booking address; save address changes before copying again. If clipboard access is
 unavailable, select the code and copy it manually.
 
-The dialog shows the allowed website origins when the instance configuration is available.
+The dialog loads allowed website origins through the session-authenticated
+`GET /api/v1/instance/embed` endpoint. The public `GET /api/v1/instance` endpoint exposes
+only the optional `embedEnabled` flag, never the origin list. The list is available to
+signed-in hosts, including ordinary team members; API keys cannot read it.
 If embedding is disabled, ask the instance operator to set `EMBED_ALLOWED_ORIGINS` using
 the example above and restart the web process. You can still copy the code while waiting
 for that configuration. A loading or unavailable configuration does not confirm whether
-embedding is enabled. The dialog does not load the booking widget inside the admin page;
+embedding is enabled. Loading shows only a neutral progress message; contact the operator
+if the configuration remains unavailable after loading. The dialog does not load the booking widget inside the admin page;
 test the copied code on an allowed website.
 
 Hidden event types can be embedded through their saved address without appearing in a

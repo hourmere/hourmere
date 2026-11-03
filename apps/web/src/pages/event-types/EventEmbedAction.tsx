@@ -1,4 +1,5 @@
 import './EventEmbedAction.css'
+import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { embedSnippet } from '@hourmere/core/embed-snippet'
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -8,7 +9,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 
-const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
+const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance/embed', { signal }))
 
 export interface EventEmbedProps {
   event: EventType
@@ -128,6 +129,7 @@ function EventEmbedDialog({
   const [buttonLabel, setButtonLabel] = useState(t('Book a meeting'))
   const origins = instance.status === 'ready' ? instance.data.embedAllowedOrigins : undefined
   let code: string | null = null
+  let generationError: 'publicUrl' | 'bookingPath' | 'unexpected' | null = null
   if (event.isActive && bookingPath && instance.status === 'ready') {
     try {
       code = embedSnippet({
@@ -139,6 +141,12 @@ function EventEmbedDialog({
       })
     } catch {
       // Invalid or unavailable public instance metadata must never fall back to the admin host.
+      generationError =
+        typeof instance.data.publicUrl !== 'string' || !embedOrigin(instance.data.publicUrl)
+          ? 'publicUrl'
+          : !publicBookingPath(bookingPath)
+            ? 'bookingPath'
+            : 'unexpected'
     }
   }
   const invalidHeight =
@@ -175,7 +183,9 @@ function EventEmbedDialog({
       <p id={`${id}-description`}>
         {t('This booking link uses the saved version. Unsaved changes are not included.')}
       </p>
-      {origins === undefined ? (
+      {instance.status === 'loading' ? (
+        <p role="status">{t('Loading instance settings…')}</p>
+      ) : origins === undefined ? (
         <p role="status">
           {t(
             'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.',
@@ -208,7 +218,6 @@ function EventEmbedDialog({
           </ul>
         </div>
       )}
-      {instance.status === 'loading' && <p role="status">{t('Loading instance settings…')}</p>}
       {instance.status === 'error' && (
         <button type="button" className="button button-small" onClick={retry}>
           {t('Try again')}
@@ -287,12 +296,14 @@ function EventEmbedDialog({
               />
               <CopyButton key={code} text={code} label={t('Copy embed code')} />
             </div>
-          ) : instance.status === 'ready' &&
-            !(mode === 'inline' && invalidHeight) &&
-            !invalidButtonLabel ? (
+          ) : generationError && !(mode === 'inline' && invalidHeight) && !invalidButtonLabel ? (
             <p>
               {t(
-                'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
+                generationError === 'publicUrl'
+                  ? 'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.'
+                  : generationError === 'bookingPath'
+                    ? 'This saved booking address cannot be embedded. Use a saved personal or team booking link.'
+                    : 'Could not generate embed code. Check the embed settings and try again.',
               )}
             </p>
           ) : null}

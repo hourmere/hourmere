@@ -3,7 +3,6 @@ export const admin = {
   'Enter button text so visitors can identify the button.':
     '请输入按钮文字，以便访客了解按钮的用途。',
   Embed: '嵌入',
-  'More actions': '更多操作',
   'More actions for {0}': '{0}的更多操作',
   'Embed {0}': '嵌入{0}',
   'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
@@ -27,8 +26,12 @@ export const admin = {
   'Button text': '按钮文字',
   'Embed code': '嵌入代码',
   'Copy embed code': '复制嵌入代码',
-  'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
-    '公开预约地址暂时无法用于嵌入。请联系实例运维人员检查 PUBLIC_URL。',
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    '实例的公开网址暂时无法用于嵌入。请联系实例运维人员检查 PUBLIC_URL。',
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.':
+    '此已保存的预约地址无法嵌入。请使用已保存的个人或团队预约链接。',
+  'Could not generate embed code. Check the embed settings and try again.':
+    '无法生成嵌入代码。请检查嵌入设置，然后重试。',
   'Book a meeting': '预约会议',
   'After booking': '预约完成后',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':

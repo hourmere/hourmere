@@ -3,7 +3,6 @@ export const admin = {
   'Enter button text so visitors can identify the button.':
     'Enter button text so visitors can identify the button.',
   Embed: 'Embed',
-  'More actions': 'More actions',
   'More actions for {0}': 'More actions for {0}',
   'Embed {0}': 'Embed {0}',
   'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
@@ -27,8 +26,12 @@ export const admin = {
   'Button text': 'Button text',
   'Embed code': 'Embed code',
   'Copy embed code': 'Copy embed code',
-  'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
-    'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.':
+    'This saved booking address cannot be embedded. Use a saved personal or team booking link.',
+  'Could not generate embed code. Check the embed settings and try again.':
+    'Could not generate embed code. Check the embed settings and try again.',
   'Book a meeting': 'Book a meeting',
   'After booking': 'After booking',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':

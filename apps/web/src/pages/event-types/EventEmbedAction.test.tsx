@@ -1,4 +1,5 @@
 import '../../i18n/admin.ts'
+import * as embedSnippets from '@hourmere/core/embed-snippet'
 import { embedSnippet } from '@hourmere/core/embed-snippet'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -21,6 +22,11 @@ const PUBLIC_URL = 'https://schedule.example.test'
 const ORIGINS = ['https://www.example.com', 'https://blog.example.com']
 const UNKNOWN =
   'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.'
+const INVALID_PUBLIC_URL =
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.'
+const INVALID_BOOKING_PATH =
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.'
+const GENERATION_FAILED = 'Could not generate embed code. Check the embed settings and try again.'
 const DISABLED =
   'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:'
 const TEAM = { ...ME, organization: { ...ME.organization, personal: false, slug: 'Design-TEAM' } }
@@ -60,7 +66,7 @@ async function openAction(
   bookingPath: string | null = '/ada/intro-call',
   routes: Routes = {},
 ) {
-  fakeApi({ 'GET /api/v1/instance': () => json(200, instance()), ...routes })
+  fakeApi({ 'GET /api/v1/instance/embed': () => json(200, instance()), ...routes })
   render(<EventEmbedAction event={event} bookingPath={bookingPath} />)
   const user = userEvent.setup()
   await user.click(screen.getByRole('button', { name: 'Embed' }))
@@ -78,7 +84,7 @@ function page(event = eventType(), me = ME, routes: Routes = {}) {
   return fakeApi({
     ...signedInAs(me),
     ...profile(),
-    'GET /api/v1/instance': () => json(200, instance()),
+    'GET /api/v1/instance/embed': () => json(200, instance()),
     'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
     'GET /api/v1/event-types': () => json(200, { data: [event] }),
     [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, event),
@@ -137,7 +143,7 @@ describe('saved event embed dialog', () => {
 
   it('shows the exact operator example for known empty origins and still offers code', async () => {
     await openAction(eventType(), '/ada/intro-call', {
-      'GET /api/v1/instance': () => json(200, instance([])),
+      'GET /api/v1/instance/embed': () => json(200, instance([])),
     })
     await screen.findByText(DISABLED)
     expect(dialog().querySelector('pre')?.textContent).toBe(
@@ -152,7 +158,7 @@ describe('saved event embed dialog', () => {
     async (status) => {
       let attempt = 0
       const user = await openAction(eventType(), '/ada/intro-call', {
-        'GET /api/v1/instance': () =>
+        'GET /api/v1/instance/embed': () =>
           ++attempt === 1 ? json(status, { error: 'unavailable' }) : json(200, instance()),
       })
       await screen.findByRole('button', { name: 'Try again' })
@@ -164,16 +170,20 @@ describe('saved event embed dialog', () => {
     },
   )
 
-  it('keeps loading and absent capability neutral while using a known PUBLIC_URL', async () => {
+  it('shows only a neutral loading status until configuration discovery finishes', async () => {
     const pending = later()
     await openAction(eventType(), '/ada/intro-call', {
-      'GET /api/v1/instance': () => pending.response,
+      'GET /api/v1/instance/embed': () => pending.response,
     })
-    expect(screen.getByText(UNKNOWN)).toBeDefined()
+    expect(screen.getByText('Loading instance settings…')).toBeDefined()
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.queryByText(UNKNOWN)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     expect(screen.queryByText(DISABLED)).toBeNull()
     expect(screen.queryByLabelText('Embed code')).toBeNull()
     await pending.answer(json(200, { publicUrl: PUBLIC_URL }))
     expect(screen.getByText(UNKNOWN)).toBeDefined()
+    expect(screen.queryByText('Loading instance settings…')).toBeNull()
     expect(screen.queryByText(DISABLED)).toBeNull()
     expect(code().value).toContain(PUBLIC_URL)
   })
@@ -182,24 +192,45 @@ describe('saved event embed dialog', () => {
     'never substitutes the admin origin for invalid PUBLIC_URL %s',
     async (publicUrl) => {
       await openAction(eventType(), '/ada/intro-call', {
-        'GET /api/v1/instance': () => json(200, { ...instance(), publicUrl }),
+        'GET /api/v1/instance/embed': () => json(200, { ...instance(), publicUrl }),
       })
-      await screen.findByText(
-        'The public booking address is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
-      )
+      await screen.findByText(INVALID_PUBLIC_URL)
+      expect(screen.queryByText(INVALID_BOOKING_PATH)).toBeNull()
+      expect(screen.queryByText(GENERATION_FAILED)).toBeNull()
       expect(screen.queryByLabelText('Embed code')).toBeNull()
     },
   )
 
-  it.each([null, '/book/one-time-test-value'])(
-    'offers no code for unavailable or one-time path %s',
+  it('asks to finish setup when no saved booking path is available', async () => {
+    await openAction(eventType(), null)
+    await screen.findByText('Complete the saved event setup before generating embed code.')
+    expect(screen.queryByLabelText('Embed code')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy embed code' })).toBeNull()
+    expect(screen.queryByText(INVALID_PUBLIC_URL)).toBeNull()
+  })
+
+  it.each(['/book/one-time-test-value', '/app/event-types', '/ada/<script>'])(
+    'explains the rejected booking path %s without blaming PUBLIC_URL',
     async (bookingPath) => {
       await openAction(eventType(), bookingPath)
-      await screen.findByText('Allowed website origins')
+      await screen.findByText(INVALID_BOOKING_PATH)
+      expect(screen.queryByText(INVALID_PUBLIC_URL)).toBeNull()
+      expect(screen.queryByText(GENERATION_FAILED)).toBeNull()
       expect(screen.queryByLabelText('Embed code')).toBeNull()
       expect(screen.queryByRole('button', { name: 'Copy embed code' })).toBeNull()
     },
   )
+
+  it('describes an unexpected generation failure without blaming an accepted address', async () => {
+    vi.spyOn(embedSnippets, 'embedSnippet').mockImplementation(() => {
+      throw new Error('Unexpected generation failure')
+    })
+    await openAction()
+    await screen.findByText(GENERATION_FAILED)
+    expect(screen.queryByText(INVALID_PUBLIC_URL)).toBeNull()
+    expect(screen.queryByText(INVALID_BOOKING_PATH)).toBeNull()
+    expect(screen.queryByLabelText('Embed code')).toBeNull()
+  })
 
   it('explains inactivity and offers no code', async () => {
     await openAction(eventType({ isActive: false }))
@@ -239,7 +270,7 @@ describe('saved event embed dialog', () => {
 
   it('translates the complete dialog into Simplified Chinese', async () => {
     chooseLanguage('zh-CN')
-    fakeApi({ 'GET /api/v1/instance': () => json(200, instance([])) })
+    fakeApi({ 'GET /api/v1/instance/embed': () => json(200, instance([])) })
     render(<EventEmbedAction event={eventType()} bookingPath="/ada/intro-call" />)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '嵌入' }))

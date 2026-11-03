@@ -1,16 +1,36 @@
+import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { createTestUser } from '../../../packages/scheduling/src/testing.ts'
 import { startServer } from './server.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('server embed capability configuration', () => {
   let testDb: TestDatabase
+  let hostCookie: string
+  const secret = 'embed-capability-test-secret-at-least-32-characters'
 
   beforeAll(async () => {
     testDb = await createTestDatabase(serverUrl as string)
+    const db = createDb(testDb.pool)
+    const host = await createTestUser(db)
+    const token = randomBytes(24).toString('base64url')
+    await db
+      .insertInto('auth.session')
+      .values({
+        userId: host.id,
+        token,
+        activeOrganizationId: host.principal.organization.id,
+        expiresAt: new Date(Date.now() + 3_600_000),
+        updatedAt: new Date(),
+      })
+      .execute()
+    const signature = createHmac('sha256', secret).update(token).digest('base64')
+    hostCookie = `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
   })
 
   afterAll(async () => {
@@ -26,7 +46,7 @@ describe.skipIf(!serverUrl)('server embed capability configuration', () => {
         DATABASE_URL: testDb.url,
         PORT: '0',
         PUBLIC_URL: 'http://localhost',
-        BETTER_AUTH_SECRET: 'embed-capability-test-secret-at-least-32-characters',
+        BETTER_AUTH_SECRET: secret,
         EMBED_ALLOWED_ORIGINS: configured,
         HOURMERE_ROLE: 'web',
         SIGNUP: 'closed',
@@ -34,10 +54,22 @@ describe.skipIf(!serverUrl)('server embed capability configuration', () => {
       try {
         const response = await fetch(`http://127.0.0.1:${server.port}/api/v1/instance`)
         expect(response.status).toBe(200)
-        expect(await response.json()).toHaveProperty(
-          'embedAllowedOrigins',
-          configured ? ['https://www.example.com', 'https://blog.example.com'] : [],
-        )
+        const body = await response.json()
+        expect(body).toHaveProperty('embedEnabled', Boolean(configured))
+        expect(body).not.toHaveProperty('embedAllowedOrigins')
+        const privatePath = `http://127.0.0.1:${server.port}/api/v1/instance/embed`
+        const anonymous = await fetch(privatePath)
+        expect(anonymous.status).toBe(401)
+        expect((await anonymous.text()).includes('embedAllowedOrigins')).toBe(false)
+        const host = await fetch(privatePath, { headers: { cookie: hostCookie } })
+        expect(host.status).toBe(200)
+        expect(host.headers.get('cache-control')).toBe('private, no-store')
+        expect(await host.json()).toEqual({
+          publicUrl: 'http://localhost',
+          embedAllowedOrigins: configured
+            ? ['https://www.example.com', 'https://blog.example.com']
+            : [],
+        })
       } finally {
         await server.close()
       }
@@ -48,7 +80,7 @@ describe.skipIf(!serverUrl)('server embed capability configuration', () => {
 
   const configured = 'https://WWW.example.com:443, https://blog.example.com'
 
-  it('publishes disabled and normalized configured origins through the real server', async () => {
+  it('publishes only the capability publicly and normalized origins to a real host session', async () => {
     await verify('')
     await verify(configured)
   })
@@ -86,7 +118,7 @@ describe.skipIf(!serverUrl)('server embed capability configuration', () => {
     ])
     await expect(verify(configured, copy.startServer)).rejects.toMatchObject({
       name: 'AssertionError',
-      message: expect.stringContaining('embedAllowedOrigins'),
+      message: expect.stringContaining('embedEnabled'),
     })
   })
 })
