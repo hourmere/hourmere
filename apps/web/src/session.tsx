@@ -72,6 +72,8 @@ interface Session {
 
 export interface Notice {
   message: UiText
+  /** A successful join is consumed by the landing page, never stored in browser history. */
+  joinedTeam?: { userId: string; organizationId: string }
   /**
    * The page it is about (a pathname), or null for a session-wide context notice. A page
    * notice is dropped once the person is elsewhere, including after a slow request.

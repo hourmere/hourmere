@@ -257,6 +257,8 @@ without the recipient or link.
 Team invitation links open `/app/join?invitationId=<uuid>`. Sign in with the exact email
 address that received the invitation; email-link and enabled social sign-in return to that
 page. Signing in does not join the team: review the team and signed-in account, then choose **Join team**.
+After joining, the event types page confirms the team name and links to your default
+availability. Dismiss this one-time notice, navigate away or reload to clear it.
 If you used a different account, **Change account** signs you out while keeping the invitation
 for your next sign-in. Invitation details remain restricted to the verified recipient.
 An existing member can open the team without accepting again.
