@@ -145,7 +145,9 @@ describe('joined team members and pending invitations in settings', () => {
       expect(within(invitations).getByText('Waiting to send')).toBeDefined()
       expect(within(invitations).getByText('Accepted by the mail server')).toBeDefined()
       expect(members.contains(invitations)).toBe(false)
-      expect(members.textContent).not.toContain('@example.com')
+      for (const number of [1, 2, 3]) {
+        expect(within(members).getByText(`person-${number}@example.com`)).toBeDefined()
+      }
       expect(invitations.textContent).not.toMatch(/delivered/i)
       expect(api.to('GET /api/v1/team/invitations')).toHaveLength(1)
       expect(api.to('GET /api/v1/event-type-hosts')).toHaveLength(0)

@@ -1140,6 +1140,15 @@ input[readonly] {
   min-width: 0;
 }
 
+/* Match event cards' breakpoint so native caption sizing cannot squeeze their note. */
+@container data-table not (min-width: 880px) {
+  .table-event-types caption {
+    display: block;
+    width: 100%;
+    padding-inline: var(--space-3);
+  }
+}
+
 /* Negated min-width keeps upper bounds exclusive, including fractional CSS widths. */
 @container data-table not (min-width: 640px) {
   .table caption {
