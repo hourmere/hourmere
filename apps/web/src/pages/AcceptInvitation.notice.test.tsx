@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { StrictMode } from 'react'
+import { Profiler, StrictMode, useRef } from 'react'
 import { BrowserRouter, Link, MemoryRouter, useLocation, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
@@ -94,10 +94,36 @@ function Navigation() {
   )
 }
 
+// A missing handoff consumption can loop synchronously inside act(), starving timer-based
+// timeouts. Bound commits as well as the ordinary findBy/waitFor deadlines below.
+function BoundedApp() {
+  const commits = useRef(0)
+  return (
+    <Profiler
+      id="invitation-notice"
+      onRender={() => {
+        expect(++commits.current, 'The join handoff must settle after consumption').toBeLessThan(80)
+        // Inspect every commit: a duplicate shell alert may disappear during consumption.
+        const confirmations = screen
+          .queryAllByRole('alert')
+          .filter((alert) =>
+            [joinedText, '你已加入 Team Alpha。'].includes(alert.textContent ?? ''),
+          )
+        expect(
+          confirmations,
+          'Join confirmations use status, including during handoff',
+        ).toHaveLength(0)
+      }}
+    >
+      <App />
+    </Profiler>
+  )
+}
+
 function renderInvitation() {
   return render(
     <MemoryRouter initialEntries={[invitationPath]}>
-      <App />
+      <BoundedApp />
       <Navigation />
     </MemoryRouter>,
   )
@@ -109,7 +135,8 @@ async function join() {
 }
 
 async function joinedNotice() {
-  const status = await screen.findByText(joinedText)
+  await waitFor(() => expect(screen.queryByText(joinedText)).not.toBeNull(), { timeout: 1000 })
+  const status = screen.getByText(joinedText)
   expect(status.getAttribute('role')).toBe('status')
   return status.closest('.notice') as HTMLElement
 }
@@ -126,7 +153,8 @@ describe('the invitation landing confirmation', () => {
       renderInvitation()
       await userEvent.click(await screen.findByRole('button', { name: joinLabel }))
       await screen.findByRole('heading', { name: heading, level: 1 })
-      const status = await screen.findByText(message)
+      await waitFor(() => expect(screen.queryByText(message)).not.toBeNull(), { timeout: 1000 })
+      const status = screen.getByText(message)
       expect(status.getAttribute('role')).toBe('status')
       const notice = status.closest('.notice') as HTMLElement
       expect(notice.classList.contains('alert-info')).toBe(true)
@@ -146,7 +174,7 @@ describe('the invitation landing confirmation', () => {
     render(
       <StrictMode>
         <MemoryRouter initialEntries={[invitationPath]}>
-          <App />
+          <BoundedApp />
         </MemoryRouter>
       </StrictMode>,
     )
@@ -216,7 +244,7 @@ describe('the invitation landing confirmation', () => {
     try {
       const mounted = render(
         <BrowserRouter>
-          <App />
+          <BoundedApp />
         </BrowserRouter>,
       )
       await join()
@@ -229,7 +257,7 @@ describe('the invitation landing confirmation', () => {
       mounted.unmount()
       render(
         <BrowserRouter>
-          <App />
+          <BoundedApp />
         </BrowserRouter>,
       )
       await screen.findByRole('heading', { name: 'Event types', level: 1 })
@@ -271,7 +299,7 @@ describe('the invitation landing confirmation', () => {
     const { api } = server({ [listRoute]: () => json(200, [ME.organization, teamMe.organization]) })
     renderInvitation()
     await userEvent.click(await screen.findByRole('button', { name: 'Go to team' }))
-    await screen.findByRole('heading', { name: 'Event types', level: 1 })
+    await screen.findByText('You have no event types yet. Create one to start taking bookings.')
     expect(screen.queryByText(joinedText)).toBeNull()
     expect(screen.queryByRole('link', { name: 'Review default availability' })).toBeNull()
     expect(api.to(acceptRoute)).toHaveLength(0)
