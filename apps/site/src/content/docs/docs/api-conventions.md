@@ -6,6 +6,16 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Imported local bookings
+
+Protected booking reads may return `source: "import"` and
+`managementPolicy: "local_only_read_only"`. These local busy records remain managed in the
+original system. Host cancellation, rescheduling and provider retries return the stable
+`imported_booking_read_only` conflict. Private management capabilities are unavailable,
+including stale receipts; no new manage link or ICS can be issued. The local import CLI
+is documented in the [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md);
+it adds no network import endpoint.
+
 ## One-time link administration
 
 One-time links use the authenticated event-type subresource

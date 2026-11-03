@@ -14,7 +14,6 @@ import {
   MAX_PAGE_SIZE,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
-  QuestionsSchema,
   ResponsesSchema,
   rescheduleHostBooking,
   rescheduleManagedBooking,
@@ -25,7 +24,7 @@ import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
-import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
+import { authenticated, ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 
@@ -134,7 +133,7 @@ export const Booking = z
         description: 'Authenticated host reads only: this caller’s ordinary calendar copy.',
       }),
     responses: Responses,
-    questions: QuestionsSchema.optional().openapi({
+    questions: z.array(Question).optional().openapi({
       description:
         'Authenticated host reads only: the imported booking’s original question definitions, including preserved notes.',
     }),

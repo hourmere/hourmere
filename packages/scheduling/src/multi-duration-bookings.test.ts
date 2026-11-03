@@ -1,13 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as availability from './availability.ts'
 import * as bookingPage from './booking-page.ts'
 import {
+  assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
   type CreateBookingInput,
   canonicalJson,
@@ -25,7 +26,7 @@ import { activateRoundRobin, createEventType } from './event-types.ts'
 import * as hosts from './hosts.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
 import * as notificationSettings from './notification-settings.ts'
-import { validateResponses } from './questions.ts'
+import { parseQuestions, validateResponses } from './questions.ts'
 import * as roundRobin from './round-robin.ts'
 import * as successRedirect from './success-redirect.ts'
 import {
@@ -66,6 +67,7 @@ function manageSourceCopy(change?: Change): ManageApi {
   )
   const bindings = {
     ...availability,
+    assertBookingLocallyManaged,
     assertInviteeRescheduleAllowed,
     getHostBooking,
     getManagedBooking,
@@ -93,6 +95,8 @@ function sourceCopy(change?: Change): Api {
   const bindings = {
     createHash,
     randomBytes,
+    importedBookingIds,
+    isImportedBooking,
     sql,
     ...availability,
     ...bookingPage,
@@ -100,6 +104,7 @@ function sourceCopy(change?: Change): Api {
     DomainError,
     ...hosts,
     ...notificationSettings,
+    parseQuestions,
     validateResponses,
     ...roundRobin,
     ...successRedirect,

@@ -341,7 +341,9 @@ export function createFixtures(db: Db) {
           manage_token_hash:
             source === 'import' ? null : createHash('sha256').update(unique()).digest(),
           source,
-          import_questions: source === 'import' ? '[]' : null,
+          // Older-schema migration fixtures use this helper too. Only imported
+          // fixtures require the new historical question snapshot column.
+          ...(source === 'import' ? { import_questions: '[]' } : {}),
         })
         .returning('id')
         .executeTakeFirstOrThrow()

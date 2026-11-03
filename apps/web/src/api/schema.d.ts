@@ -3964,15 +3964,7 @@ export interface components {
              */
             managementPolicy?: "local_only_read_only";
             /** @description Authenticated host reads only: the imported booking’s original question definitions, including preserved notes. */
-            questions?: {
-                id: string;
-                label: string;
-                options?: string[];
-                /** @default false */
-                required: boolean;
-                /** @enum {string} */
-                type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
-            }[];
+            questions?: components["schemas"]["Question"][];
             /**
              * Format: uuid
              * @description The booking this one replaced when it was rescheduled

@@ -1191,8 +1191,10 @@ reads neither join copies nor expose host retry controls. If a concurrent resche
 the conference pointer to a successor after the initial lookup, the predecessor still
 hydrates as cancelled without a conference or join link. The same applies when the successor
 has already been cancelled.
-This reuses the existing hydration query without extra round trips, a transaction-held
-connection or booking row locks. Manage-token resolution and list membership still precede
+Lifecycle fields still use the existing hydration query without a transaction-held
+connection or booking row locks. A preceding bulk import-policy lookup covers the immutable
+source policy for the complete selected booking list; no policy query follows lifecycle
+hydration or changes its final snapshot boundary. Manage-token resolution and list membership still precede
 hydration; a later read follows a moved token according to the existing token rules.
 
 Migration 0032 indexes the mutable `booking_conferences.booking_id` pointer used by

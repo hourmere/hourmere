@@ -568,6 +568,12 @@ async function toBookings(
     for (const replacement of replacements)
       successors.set(replacement.predecessor_id, replacement.id)
   }
+  // Read immutable import attribution before lifecycle hydration, preserving the
+  // existing snapshot boundary for status, location and retry controls.
+  const imported = await importedBookingIds(
+    db,
+    rows.map((row) => row.id),
+  )
   // Read successor metadata before the lifecycle snapshot so no later successor read
   // can outlive the status, location and conference state returned together below.
   const conferences = await bookingConferenceViews(
@@ -601,10 +607,6 @@ async function toBookings(
         timeZone: host.time_zone,
       })
   }
-  const imported = await importedBookingIds(
-    db,
-    rows.map((row) => row.id),
-  )
   const now = host?.now()
   return rows.map((row) => {
     const view = imported.has(row.id) ? undefined : conferences.get(row.id)
