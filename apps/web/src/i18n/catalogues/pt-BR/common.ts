@@ -33,6 +33,15 @@ export const common = {
     'A lista de espera não está disponível para este período. Confira os horários disponíveis e tente novamente.',
   'Joining…': 'Entrando…',
   'Sending…': 'Enviando…',
+  'We could not use the time details in this link. Please choose a time.':
+    'Não foi possível usar as informações de horário deste link. Escolha um horário.',
+  'This meeting length is no longer offered. Please choose a time again.':
+    'Esta duração de reunião não é mais oferecida. Escolha um horário novamente.',
+  'Checking the suggested time…': 'Verificando o horário sugerido…',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    'O horário sugerido está selecionado. Confira os detalhes e confirme seu agendamento.',
+  'We could not check this time. Please try again.':
+    'Não foi possível verificar este horário. Tente novamente.',
   'These suggestions have expired. Check the currently available times.':
     'Estas sugestões expiraram. Confira os horários disponíveis agora.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

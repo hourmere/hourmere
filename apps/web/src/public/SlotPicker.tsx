@@ -86,6 +86,7 @@ interface SlotPickerProps {
   notice?: UiText | null | undefined
   /** Only supplied for an enabled, supported event. Errors never offer enrollment. */
   renderWaitlist?: ((window: WaitlistWindow) => ReactNode) | undefined
+  noticeRole?: 'alert' | 'status' | undefined
 }
 
 const monthKey = ({ year, month }: YearMonth) => `${year}-${month}`
@@ -148,6 +149,7 @@ export function SlotPicker({
   focusTitle = false,
   notice,
   renderWaitlist,
+  noticeRole = 'alert',
 }: SlotPickerProps) {
   const { t, uiText } = useI18n()
 
@@ -353,7 +355,7 @@ export function SlotPicker({
       {afterTitle}
       {notice && (
         <div className="alert alert-info">
-          <p role="alert">{uiText(notice)}</p>
+          <p role={noticeRole}>{uiText(notice)}</p>
         </div>
       )}
       {positionUnavailable && (

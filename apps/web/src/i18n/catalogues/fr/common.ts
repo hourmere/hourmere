@@ -33,6 +33,15 @@ export const common = {
     'La liste d’attente n’est pas disponible pour cette période. Consultez les créneaux disponibles et réessayez.',
   'Joining…': 'Inscription en cours…',
   'Sending…': 'Envoi en cours…',
+  'We could not use the time details in this link. Please choose a time.':
+    'Nous n’avons pas pu utiliser les informations de date et d’heure de ce lien. Veuillez choisir un créneau.',
+  'This meeting length is no longer offered. Please choose a time again.':
+    'Cette durée de réunion n’est plus proposée. Veuillez choisir à nouveau un créneau.',
+  'Checking the suggested time…': 'Vérification du créneau proposé…',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    'Le créneau proposé est sélectionné. Vérifiez les détails et confirmez votre réservation.',
+  'We could not check this time. Please try again.':
+    'Nous n’avons pas pu vérifier ce créneau. Veuillez réessayer.',
   'These suggestions have expired. Check the currently available times.':
     'Ces suggestions ont expiré. Consultez les créneaux actuellement disponibles.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':
