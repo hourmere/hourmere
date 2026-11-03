@@ -1,6 +1,6 @@
 # Cal.com import attribution and local bookings
 
-Migration 0059 adds persistent random source namespaces, immutable source-to-target
+Migration 0060 adds persistent random source namespaces, immutable source-to-target
 attribution, stable question/option crosswalks and non-personal deletion tombstones.
 It does not import data, enqueue jobs or alter existing business rows. Source namespaces
 must be reused only for the same real source instance, including its backups.

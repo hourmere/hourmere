@@ -11,7 +11,7 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0059_calcom_import_state.sql'
+const migration = '0060_calcom_import_state.sql'
 const predecessor = '0058_one_time_link_idempotency.sql'
 const fingerprint = 'a'.repeat(64)
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`

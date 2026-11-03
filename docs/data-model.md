@@ -133,7 +133,7 @@ calendar-list access.
 
 ## Guarantees and why
 
-Migration 0059 supports the local [Cal.com import CLI](calcom-import.md). Preview reads real
+Migration 0060 supports the local [Cal.com import CLI](calcom-import.md). Preview reads real
 source and target snapshots; applying an explicitly authorized plan uses one atomic target
 transaction and a brief target write barrier. Source writes and external provider actions
 are forbidden. Imported bookings remain confirmed local busy records with `source=import`,
@@ -141,7 +141,7 @@ NULL manage tokens, historical `import_questions` and explicit empty notificatio
 REST/MCP/CLI expose `managementPolicy=local_only_read_only`; ordinary mutation, ICS,
 reconnection, repair and delivery paths refuse or ignore them, including stale connected
 reschedule chains. Deletion clears all mapping payloads into non-personal tombstones so
-reruns cannot restore erased targets. See the [0059 rollout note](../packages/db/migrations/0059_calcom_import_state.md).
+reruns cannot restore erased targets. See the [0060 rollout note](../packages/db/migrations/0060_calcom_import_state.md).
 
 - **No double-booking.** `booking_hosts` has
   `EXCLUDE USING gist (user_id WITH =, period WITH &&) WHERE (active)`. Two invitees
