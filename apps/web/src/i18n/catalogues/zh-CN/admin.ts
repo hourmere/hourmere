@@ -642,8 +642,8 @@ export const admin = {
   'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
   'Notification language': '通知语言',
   'Choose a supported notification language.': '请选择支持的通知语言。',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
-    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。在顶栏选择界面语言之前，管理界面也使用此语言；选择后，两种语言互不影响。',
   'Connect a calendar account to get started.': '连接日历账号以开始使用。',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     '此 Google 日历使用{calendarZone}时区；你的可预约时段使用{scheduleZone}时区。预约对应同一时刻；Google 日历通常以{calendarZone}时间显示。',

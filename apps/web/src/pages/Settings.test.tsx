@@ -63,7 +63,7 @@ describe('the profile settings', () => {
       bookingLanguage.getAttribute('aria-describedby') ?? '',
     )
     expect(explanation?.textContent).toBe(
-      'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
+      'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
     )
     await user.selectOptions(bookingLanguage, 'zh-CN')
     expect(screen.getByLabelText<HTMLSelectElement>('Interface language').value).toBe('en')
@@ -72,7 +72,7 @@ describe('the profile settings', () => {
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(screen.getByLabelText<HTMLSelectElement>('通知语言').value).toBe('zh-CN')
     expect(explanation?.textContent).toBe(
-      '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+      '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。在顶栏选择界面语言之前，管理界面也使用此语言；选择后，两种语言互不影响。',
     )
     await user.click(screen.getByRole('button', { name: '保存个人资料' }))
     await screen.findByText('已保存。')
