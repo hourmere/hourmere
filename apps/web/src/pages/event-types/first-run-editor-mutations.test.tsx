@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug, isReservedName } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
 import * as react from 'react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
@@ -271,6 +271,9 @@ describe('first-run editor production-source negative controls', () => {
         ...paths,
         useEffect,
         useRef,
+        useState,
+        useLoad: () => [{ status: 'loading' }],
+        loadInstance: () => {},
         Link,
         CopyButton,
         isPublicTeamSlug,
