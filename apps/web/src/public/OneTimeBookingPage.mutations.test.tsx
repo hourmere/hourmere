@@ -24,12 +24,14 @@ import * as publicApi from './api.ts'
 import * as details from './BookingDetails.tsx'
 import * as form from './BookingForm.tsx'
 import type { OneTimeBookingPage } from './BookingPage.tsx'
+import * as calendarDates from './calendar.ts'
 import * as description from './EventDescription.tsx'
 import * as embed from './embed-context.ts'
 import * as env from './env.ts'
 import * as layout from './PublicLayout.tsx'
 import * as paths from './paths.ts'
 import * as picker from './SlotPicker.tsx'
+import * as slotLink from './slot-link.ts'
 import * as time from './time.ts'
 import * as validation from './validation.ts'
 import * as visitorZone from './visitor-time-zone.ts'
@@ -85,6 +87,7 @@ function pageCopy(text = source): typeof OneTimeBookingPage {
     './api.ts': publicApi,
     './BookingDetails.tsx': details,
     './BookingForm.tsx': form,
+    './calendar.ts': calendarDates,
     './EventDescription.tsx': description,
     './embed-context.ts': embed,
     './env.ts': {
@@ -96,6 +99,7 @@ function pageCopy(text = source): typeof OneTimeBookingPage {
     './PublicLayout.tsx': layout,
     './paths.ts': paths,
     './SlotPicker.tsx': picker,
+    './slot-link.ts': slotLink,
     './time.ts': time,
     './validation.ts': validation,
     './visitor-time-zone.ts': visitorZone,

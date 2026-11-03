@@ -2,6 +2,14 @@
 export const common = {
   'This location is unavailable. Contact the host to book.':
     '此地点暂时无法预约。请联系主持人安排预约。',
+  'We could not use the time details in this link. Please choose a time.':
+    '无法使用此链接中的时间信息。请选择时间。',
+  'This meeting length is no longer offered. Please choose a time again.':
+    '此会议时长已不再提供。请重新选择时间。',
+  'Checking the suggested time…': '正在检查建议的时间……',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    '已选中建议时间。请核对详情并确认预约。',
+  'We could not check this time. Please try again.': '无法检查此时间。请重试。',
   'These suggestions have expired. Check the currently available times.':
     '这些建议时段已过期，请查看当前可约时间。',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

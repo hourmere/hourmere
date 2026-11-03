@@ -2,6 +2,15 @@
 export const common = {
   'This location is unavailable. Contact the host to book.':
     'This location is unavailable. Contact the host to book.',
+  'We could not use the time details in this link. Please choose a time.':
+    'We could not use the time details in this link. Please choose a time.',
+  'This meeting length is no longer offered. Please choose a time again.':
+    'This meeting length is no longer offered. Please choose a time again.',
+  'Checking the suggested time…': 'Checking the suggested time…',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    'The suggested time is selected. Review the details and confirm your booking.',
+  'We could not check this time. Please try again.':
+    'We could not check this time. Please try again.',
   'These suggestions have expired. Check the currently available times.':
     'These suggestions have expired. Check the currently available times.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':
