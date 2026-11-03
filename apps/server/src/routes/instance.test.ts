@@ -386,7 +386,7 @@ describe('GET /api/v1/instance', () => {
     expect(response.status).toBe(expectedStatus)
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     const body = await response.text()
-    expect(body.includes(origin)).toBe(false)
+    expect(body).not.toContain(origin)
     expect(body.includes('embedAllowedOrigins')).toBe(false)
   }
 
