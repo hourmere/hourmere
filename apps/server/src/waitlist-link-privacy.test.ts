@@ -43,10 +43,14 @@ async function assertHeaders(
   expected = 'no-referrer',
 ) {
   const app = new Hono()
+  app.onError((error) => {
+    throw error
+  })
   app.use('*', headers())
   app.get('*', (c) => c.html('<title>Booking</title>'))
   const response = await app.request(`/ada/intro/waitlist/${token}/${suggested}`)
-  expect(response.headers.get(name)).toBe(expected)
+  expect(response.status).toBe(200)
+  expect(response.headers.get(name), `${name} on the successful waitlist page`).toBe(expected)
 }
 
 describe('waitlist path capability privacy', () => {
@@ -147,16 +151,40 @@ describe('waitlist capability privacy source-copy controls', () => {
     ['Cache-Control', "headers.set('Cache-Control', 'no-store')", 'no-store'],
   ])('detects removal of %s from path booking responses', async (name, before, expected) => {
     await assertHeaders(securityHeaders, name, expected)
+    const bindings = { isIP, embedParent, createMiddleware, isOneTimeLinkPath }
+    const unchanged = copy<typeof securityHeaders>(
+      'apps/server/src/security-headers.ts',
+      'securityHeaders',
+      before,
+      before,
+      bindings,
+    )
+    await assertHeaders(unchanged, name, expected)
     const copied = copy<typeof securityHeaders>(
       'apps/server/src/security-headers.ts',
       'securityHeaders',
       before,
       '',
-      { isIP, embedParent, createMiddleware },
+      bindings,
     )
     await expect(assertHeaders(copied, name, expected)).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
+      expect.objectContaining({
+        name: 'AssertionError',
+        message: expect.stringContaining(`${name} on the successful waitlist page`),
+      }),
     )
+    await assertHeaders(unchanged, name, expected)
+  })
+  it('propagates runtime faults instead of counting them as header mutation failures', async () => {
+    const before = "headers.set('Cache-Control', 'no-store')"
+    const copied = copy<typeof securityHeaders>(
+      'apps/server/src/security-headers.ts',
+      'securityHeaders',
+      before,
+      before,
+      { isIP, embedParent, createMiddleware },
+    )
+    await expect(assertHeaders(copied)).rejects.toMatchObject({ name: 'ReferenceError' })
   })
   it('detects bypassing capability redaction in the request logger', async () => {
     const source = readFileSync('apps/server/src/app.ts', 'utf8')
