@@ -341,12 +341,14 @@ export interface BookingConferences {
 
 export interface BookingHosts {
   /**
-   * Derived from the booking status by booking_host_slot(); any value written is replaced.
+   * Derived from its booking or group slot lifecycle; caller values are replaced.
    */
   active: Generated<boolean>;
-  booking_id: string;
+  booking_id: string | null;
+  group_slot_id: string | null;
+  id: Generated<string>;
   /**
-   * Derived from the booking by booking_host_slot(); any value written is replaced.
+   * Derived from its booking or group slot parent; caller values are replaced.
    */
   period: Generated<string>;
   user_id: string;
@@ -373,6 +375,8 @@ export interface Bookings {
   created_at: Generated<Timestamp>;
   end_at: Timestamp;
   event_type_id: string | null;
+  group_booker_key: string | null;
+  group_slot_id: string | null;
   hosts_use_default_schedule: Generated<boolean>;
   ical_organizer_email: string | null;
   ical_organizer_name: string | null;
@@ -516,6 +520,7 @@ export interface EventTypeHosts {
 export interface EventTypes {
   allow_guests: Generated<boolean>;
   allowed_durations_minutes: Generated<number[]>;
+  booking_mode: Generated<string>;
   booking_window_days: number | null;
   buffer_after_minutes: Generated<number>;
   buffer_before_minutes: Generated<number>;
@@ -524,6 +529,7 @@ export interface EventTypes {
   deleted_at: Timestamp | null;
   description: string | null;
   duration_minutes: number;
+  group_capacity: number | null;
   id: Generated<string>;
   is_active: Generated<boolean>;
   is_hidden: Generated<boolean>;
@@ -542,6 +548,64 @@ export interface EventTypes {
   title: string;
   updated_at: Generated<Timestamp>;
   waitlist_enabled: Generated<boolean>;
+  zoom_connection_id: string | null;
+}
+
+export interface GroupBookingMoveReceipts {
+  authority_hash: Buffer;
+  authority_kind: string;
+  created_at: Generated<Timestamp>;
+  fingerprint: Buffer;
+  id: Generated<string>;
+  is_noop: boolean;
+  organization_id: string;
+  request_key: string;
+  result_booking_id: string;
+  result_group_slot_id: string;
+  source_booking_id: string;
+  source_group_slot_id: string;
+}
+
+export interface GroupSlotCancelReceipts {
+  authority_hash: Buffer;
+  authority_kind: string;
+  cancelled_seat_count: number;
+  created_at: Generated<Timestamp>;
+  fingerprint: Buffer;
+  group_slot_id: string;
+  id: Generated<string>;
+  organization_id: string;
+  request_key: string;
+  result_revision: Int8;
+}
+
+export interface GroupSlots {
+  active_seats: Generated<number>;
+  buffer_after_minutes: Generated<number>;
+  buffer_before_minutes: Generated<number>;
+  capacity: number;
+  conference_organizer_user_id: string | null;
+  count_revision: Generated<Int8>;
+  created_at: Generated<Timestamp>;
+  destination_calendar_id: string | null;
+  end_at: Timestamp;
+  event_type_id: string | null;
+  host_notification_settings: Generated<Json>;
+  host_schedule_id: string | null;
+  host_schedule_uses_default: Generated<boolean>;
+  host_time_zone: Generated<string>;
+  host_user_id: string;
+  id: Generated<string>;
+  location: Json | null;
+  logistics_revision: Generated<Int8>;
+  organization_id: string;
+  organizer_user_id: string | null;
+  original_event_type_id: string;
+  revision: Generated<Int8>;
+  start_at: Timestamp;
+  state: Generated<string>;
+  title: string;
+  updated_at: Generated<Timestamp>;
   zoom_connection_id: string | null;
 }
 
@@ -627,6 +691,7 @@ export interface OrganizationOperations {
   actor_user_id: string | null;
   api_key_id: string | null;
   booking_id: string | null;
+  group_slot_id: string | null;
   id: Generated<string>;
   new_role: string | null;
   oauth_consent_id: string | null;
@@ -878,6 +943,9 @@ export interface DB {
   conference_token_operations: ConferenceTokenOperations;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
+  group_booking_move_receipts: GroupBookingMoveReceipts;
+  group_slot_cancel_receipts: GroupSlotCancelReceipts;
+  group_slots: GroupSlots;
   invitation_deliveries: InvitationDeliveries;
   invitation_email_requests: InvitationEmailRequests;
   mcp_oauth_client_activity: McpOauthClientActivity;
