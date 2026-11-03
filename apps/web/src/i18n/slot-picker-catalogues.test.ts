@@ -17,7 +17,6 @@ const reviewed = {
     '此活动类型未公开列出。任何获得这些链接的人都可以打开预约页面，并选择可约时间进行预约。',
   'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.':
     '此处选择的语言和时区仅用于邮件片段。预约页面会使用每位受邀人的偏好设置。',
-  'Availability date (UTC)': '可约日期（UTC）',
   'Available times': '可选时间',
   'Loading available times…': '正在加载可约时间……',
   'Check availability again': '重新检查可约时间',
@@ -40,8 +39,8 @@ const reviewed = {
     '无法显示此时间。请尝试其他显示时区。',
   'The saved event title is invalid. Reload the saved event type and try again.':
     '已保存的活动标题无效。请重新加载已保存的活动类型后重试。',
-  'The saved booking address is invalid. Reload the saved event type and try again.':
-    '已保存的预约地址无效。请重新加载已保存的活动类型后重试。',
+  'The saved booking link is invalid. Reload the saved event type and try again.':
+    '已保存的预约链接无效。请重新加载已保存的活动类型后重试。',
   'The email preview could not be created. Reload the saved event type and try again.':
     '无法创建邮件预览。请重新加载已保存的活动类型后重试。',
 } satisfies Partial<Record<MessageKey, string>>

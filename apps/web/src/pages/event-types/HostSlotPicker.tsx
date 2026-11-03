@@ -52,7 +52,7 @@ function formattingMessage(error: unknown): MessageKey {
     if (error.code === 'invalid_title')
       return 'The saved event title is invalid. Reload the saved event type and try again.'
     if (error.code === 'invalid_address')
-      return 'The saved booking address is invalid. Reload the saved event type and try again.'
+      return 'The saved booking link is invalid. Reload the saved event type and try again.'
     if (error.code === 'snippet_too_large')
       return 'The email preview could not be created. Please choose fewer times and try again.'
   }

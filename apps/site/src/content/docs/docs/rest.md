@@ -70,6 +70,13 @@ of a single-length type also replaces its sole allowed length. Invalid values re
 The [multiple meeting lengths guide](/docs/multiple-durations) covers the editor,
 invitee choices, rescheduling and shared-rule limits.
 
+## Configure an after-booking redirect
+
+Event-type create/PATCH accepts `successRedirect`, and protected reads return the saved
+configuration. Writes require `full` key scope. Omit the field to preserve it; send `null`
+to clear it. See [after-booking redirects](/docs/after-booking#rest) for the complete object,
+field errors, privacy warning and policy-change behavior.
+
 ## Configure reminders and follow-ups
 
 See [Reminders and follow-ups](/docs/reminders-and-follow-ups) for editor steps, timing,

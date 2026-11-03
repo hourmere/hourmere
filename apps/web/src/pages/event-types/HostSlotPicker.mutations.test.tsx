@@ -1036,7 +1036,7 @@ describe('host picker production-source protections', () => {
     ],
     [
       'invalid_address',
-      'The saved booking address is invalid. Reload the saved event type and try again.',
+      'The saved booking link is invalid. Reload the saved event type and try again.',
     ],
     [
       'snippet_too_large',

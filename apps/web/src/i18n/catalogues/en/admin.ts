@@ -1,5 +1,41 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'After booking': 'After booking',
+  'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
+    'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.',
+  'Continue to URL': 'Continue to URL',
+  'Use HTTPS. The server checks the destination when you save.':
+    'Use HTTPS. The server checks the destination when you save.',
+  'URL parameters': 'URL parameters',
+  'Only selected values are added. Answers, guests, phone numbers and private booking links are never included.':
+    'Only selected values are added. Answers, guests, phone numbers and private booking links are never included.',
+  'Event type slug': 'Event type slug',
+  'Start time': 'Start time',
+  'End time': 'End time',
+  'Host name': 'Host name',
+  'Invitee name': 'Invitee name',
+  'Invitee email': 'Invitee email',
+  'Warning: sharing invitee name or email makes them visible to the target site and its analytics, and may put them in browser history. Enable this only with a clear reason to share that data.':
+    'Warning: sharing invitee name or email makes them visible to the target site and its analytics, and may put them in browser history. Enable this only with a clear reason to share that data.',
+  'Allow sharing invitee name and email': 'Allow sharing invitee name and email',
+  'Allow embedded bookings to open the parent page':
+    'Allow embedded bookings to open the parent page',
+  'Off by default: Continue opens a new tab from an embed. Enabling this allows an invitee’s click to replace the page containing the booking widget, when its sandbox permits it.':
+    'Off by default: Continue opens a new tab from an embed. Enabling this allows an invitee’s click to replace the page containing the booking widget, when its sandbox permits it.',
+  'Example continuation URL': 'Example continuation URL',
+  'Enter a URL to preview the continuation.': 'Enter a URL to preview the continuation.',
+  'Sample values only. The server validates your settings on save.':
+    'Sample values only. The server validates your settings on save.',
+  'Check the after-booking settings and try again.':
+    'Check the after-booking settings and try again.',
+  'Use an absolute HTTPS URL of at most 2000 characters, without spaces or user information. Local hosts need permission from your instance operator.':
+    'Use an absolute HTTPS URL of at most 2000 characters, without spaces or user information. Local hosts need permission from your instance operator.',
+  'Choose only the listed URL parameters, without duplicates.':
+    'Choose only the listed URL parameters, without duplicates.',
+  'Allow sharing invitee name and email before selecting those parameters.':
+    'Allow sharing invitee name and email before selecting those parameters.',
+  'Choose whether embedded bookings may open the parent page.':
+    'Choose whether embedded bookings may open the parent page.',
   Revoked: 'Revoked',
   'Event type': 'Event type',
   'Created by': 'Created by',
@@ -1664,7 +1700,6 @@ export const admin = {
   'Display time zone': 'Display time zone',
   'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.':
     'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.',
-  'Availability date (UTC)': 'Availability date (UTC)',
   'Available times': 'Available times',
   'Loading available times…': 'Loading available times…',
   'We could not load available times. Please try again.':
@@ -1705,8 +1740,8 @@ export const admin = {
     'This time could not be displayed. Please try another display time zone.',
   'The saved event title is invalid. Reload the saved event type and try again.':
     'The saved event title is invalid. Reload the saved event type and try again.',
-  'The saved booking address is invalid. Reload the saved event type and try again.':
-    'The saved booking address is invalid. Reload the saved event type and try again.',
+  'The saved booking link is invalid. Reload the saved event type and try again.':
+    'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
 } as const

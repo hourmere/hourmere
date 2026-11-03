@@ -15,6 +15,11 @@ import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as limits from '../rate-limit.ts'
 import * as bookingSchemas from '../routes/bookings.ts'
 import * as publicSchemas from '../routes/public.ts'
+import {
+  successRedirectErrorField,
+  successRedirectIssueField,
+  successRedirectUnsafeField,
+} from '../success-redirect-errors.ts'
 import type { bookingTools } from './bookings.ts'
 import { defineTool, type McpCaller, runTool, type Tool } from './tools.ts'
 
@@ -108,6 +113,9 @@ function runner(change?: Change) {
       hasUnsafeJsonText,
       inspect,
       redactOneTimeLogDetails,
+      successRedirectErrorField,
+      successRedirectIssueField,
+      successRedirectUnsafeField,
     },
     change,
   )
