@@ -581,7 +581,13 @@ Migration 0050 adds nullable `event_types.success_redirect` configuration and
 `bookings.success_redirect` snapshots. Existing event types and bookings remain unset;
 their data and confirmation behavior are preserved. The service accepts optional
 `successRedirect: { url, parameters?, includeInviteePersonalData?, allowEmbedParent? }`
-(or null to clear it). Configuration UI and REST/MCP/CLI writes are a later change.
+(or null to clear it). Hosts configure it in the event editor, REST event-type
+create/PATCH, MCP `create_event_type` / `update_event_type`, or CLI `create-event` /
+`update-event`; protected event-type reads include the saved configuration. API-key
+configuration writes require `full` scope and retain event-type ownership and team-role
+checks. See [after-booking redirects](https://hourmere.com/docs/after-booking) for steps,
+examples and error fields. The editor submits only settings changed from its session
+baseline, so an untouched redirect is not revalidated by an unrelated save.
 
 URLs must be absolute HTTPS, without userinfo, whitespace/control characters or malformed
 Unicode, and at most 2000 characters both before and after URL normalization. IDN hosts

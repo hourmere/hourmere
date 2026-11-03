@@ -19,6 +19,7 @@ import { profileRoutes } from '../routes/profile.ts'
 import { bookingTools } from './bookings.ts'
 import { catalogTools } from './catalog.ts'
 import { mcpEndpoint } from './endpoint.ts'
+import { eventTypeTools } from './event-types.ts'
 import { whoamiTool } from './whoami.ts'
 
 const bootstrap = process.env.DATABASE_URL
@@ -85,6 +86,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
           tools: [
             whoamiTool,
             ...catalogTools({ db }),
+            ...eventTypeTools({ db }),
             ...bookingTools({ db, now: () => Temporal.Instant.from('2026-11-01T12:00:00Z') }),
           ],
         }),
@@ -97,7 +99,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       async function run(
         command: string,
         input: Record<string, unknown> = {},
-        options: { key?: string; output?: string; durationMinutes?: number } = {},
+        options: { key?: string; output?: string; durationMinutes?: number; flags?: string[] } = {},
       ) {
         let stdout = ''
         let stderr = ''
@@ -111,6 +113,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
             ...(options.durationMinutes === undefined
               ? []
               : ['--duration-minutes', String(options.durationMinutes)]),
+            ...(options.flags ?? []),
           ],
           env: { HOURMERE_URL: url, HOURMERE_API_KEY: options.key ?? key.key },
           stdin: (async function* () {
@@ -160,6 +163,94 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       const defaultEvent = await run('event', { id: event })
       expect(defaultEvent.code).toBe(0)
       expect(defaultEvent.data.notifications).toEqual(DEFAULT_NOTIFICATIONS)
+      const redirect = {
+        url: 'https://target.example.test/thanks?campaign=cli#done',
+        parameters: ['eventTypeSlug', 'inviteeName', 'inviteeEmail'],
+        includeInviteePersonalData: true,
+        allowEmbedParent: true,
+      }
+      const configured = await run(
+        'create-event',
+        { slug: 'cli-redirect', title: 'CLI continuation', durationMinutes: 30 },
+        {
+          flags: [
+            '--success-redirect-url',
+            redirect.url,
+            '--success-redirect-parameters',
+            redirect.parameters.join(','),
+            '--success-redirect-include-invitee-personal-data',
+            'true',
+            '--success-redirect-allow-embed-parent',
+            'true',
+          ],
+        },
+      )
+      expect(configured.code).toBe(0)
+      expect(configured.data.successRedirect).toEqual(redirect)
+      const redirectId = configured.data.id as string
+      expect((await run('event', { id: redirectId })).data.successRedirect).toEqual(redirect)
+      const restRedirect = await app.request(`/api/v1/event-types/${redirectId}`, {
+        headers: { Authorization: `Bearer ${key.key}` },
+      })
+      expect(restRedirect.status).toBe(200)
+      expect(await restRedirect.json()).toHaveProperty('successRedirect', redirect)
+      expect(
+        (await run('update-event', { id: redirectId, title: 'Renamed continuation' })).data
+          .successRedirect,
+      ).toEqual(redirect)
+      const invalidRedirect = await run(
+        'update-event',
+        { id: redirectId },
+        { flags: ['--success-redirect-url', 'http://target.example.test/thanks'] },
+      )
+      expect(invalidRedirect.code).toBe(1)
+      expect(invalidRedirect.error).toMatchObject({
+        error: 'invalid_success_redirect',
+        field: 'successRedirect.url',
+      })
+      const privateWithoutConsent = await run('update-event', {
+        id: redirectId,
+        successRedirect: { url: redirect.url, parameters: ['inviteeEmail'] },
+      })
+      expect(privateWithoutConsent.code).toBe(1)
+      expect(privateWithoutConsent.error).toMatchObject({
+        error: 'invalid_success_redirect',
+        field: 'successRedirect.includeInviteePersonalData',
+      })
+      for (const token of [readKey.key, bookingsKey.key]) {
+        expect(
+          (await run('event', { id: redirectId }, { key: token })).data.successRedirect,
+        ).toEqual(redirect)
+        const denied = await run(
+          'update-event',
+          { id: redirectId },
+          { key: token, flags: ['--clear-success-redirect'] },
+        )
+        expect(denied.code).toBe(1)
+        expect(denied.error.error).toBe('insufficient_scope')
+      }
+      expect(
+        (await run('update-event', { id: redirectId }, { key: otherKey.key })).error.error,
+      ).toBe('event_type_not_found')
+      const replacement = await run(
+        'update-event',
+        { id: redirectId },
+        { flags: ['--success-redirect-url', 'https://new.example.test/thanks'] },
+      )
+      expect(replacement.code).toBe(0)
+      expect(replacement.data.successRedirect).toEqual({
+        url: 'https://new.example.test/thanks',
+        parameters: [],
+        includeInviteePersonalData: false,
+        allowEmbedParent: false,
+      })
+      const cleared = await run(
+        'update-event',
+        { id: redirectId },
+        { flags: ['--clear-success-redirect'] },
+      )
+      expect(cleared.code).toBe(0)
+      expect(cleared.data.successRedirect).toBeNull()
       const notifications = {
         reminders: [
           {

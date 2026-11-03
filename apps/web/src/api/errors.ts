@@ -16,6 +16,8 @@ export class RequestError extends Error {
   readonly retryAfterSeconds: number | undefined
   /** Saved replacement to inspect when its invitation delivery could not be queued. */
   readonly invitationId: string | undefined
+  /** Stable API field path for inline form errors. */
+  readonly field: string | undefined
 
   constructor(
     status: number,
@@ -25,6 +27,7 @@ export class RequestError extends Error {
     codeAlias?: string,
     retryAfterSeconds?: number,
     invitationId?: string,
+    field?: string,
   ) {
     super(message)
     this.name = 'RequestError'
@@ -34,6 +37,7 @@ export class RequestError extends Error {
     this.codeAlias = codeAlias
     this.retryAfterSeconds = retryAfterSeconds
     this.invitationId = invitationId
+    this.field = field
   }
 }
 
@@ -128,6 +132,7 @@ export function requestError(
     codeAlias,
     retryAfterSeconds,
     invitationId,
+    typeof record.field === 'string' ? record.field : undefined,
   )
 }
 

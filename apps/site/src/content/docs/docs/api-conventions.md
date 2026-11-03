@@ -161,6 +161,13 @@ for the generic cases in the table below (services cannot use them): `invalid_re
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
 renamed within `/api/v1`.
 
+An optional `field` string identifies a stable validation field name. Known values are
+`successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
+`successRedirect.includeInviteePersonalData` and `successRedirect.allowEmbedParent`.
+New values may appear within `/api/v1`; clients must ignore unknown values and fall back
+to the error code and optional message. The published schema is an open string, not a
+closed enum. The field may be absent, including when talking to older servers.
+
 Notification writes return `invalid_notifications` with a `message` identifying the array
 or zero-based rule index, field and violated constraint, for example
 `notifications.followUps[1].offsetMinutes: must be between 5 and 43200 minutes` or

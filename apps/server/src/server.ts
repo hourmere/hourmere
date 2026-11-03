@@ -51,6 +51,7 @@ import {
   signInEmailJobs,
   waitlistEmailJob,
 } from '@hourmere/notifications'
+import type { ServiceContext } from '@hourmere/scheduling'
 import {
   type BookingNotifier,
   cleanupWaitlist,
@@ -122,6 +123,7 @@ export function productRoutes({
   automaticZoom = false,
   followUpHostNotesEnabled = true,
   successRedirectAllowIpHosts = false,
+  successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
   hostedSignupUrl,
   privacyPolicyUrl,
@@ -134,6 +136,7 @@ export function productRoutes({
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
+  successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
@@ -187,7 +190,7 @@ export function productRoutes({
       followUpHostNotesEnabled,
       automaticMeet,
       automaticZoom,
-      successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
+      successRedirectPolicy,
     }),
     publicRoutes({
       db,
@@ -195,14 +198,14 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
-      successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
+      successRedirectPolicy,
     }),
     oneTimeBookingRoutes({
       db,
       notify,
       automaticMeet,
       automaticZoom,
-      successRedirectPolicy: { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
+      successRedirectPolicy,
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
@@ -221,6 +224,7 @@ export function productTools({
   db,
   publicUrl,
   followUpHostNotesEnabled,
+  successRedirectPolicy,
   notify,
   automaticMeet,
   automaticZoom,
@@ -231,6 +235,7 @@ export function productTools({
   db: Db
   publicUrl?: string
   followUpHostNotesEnabled?: boolean | undefined
+  successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -242,7 +247,13 @@ export function productTools({
     whoamiTool,
     ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
-    ...eventTypeTools({ db, automaticMeet, automaticZoom, followUpHostNotesEnabled }),
+    ...eventTypeTools({
+      db,
+      automaticMeet,
+      automaticZoom,
+      followUpHostNotesEnabled,
+      successRedirectPolicy,
+    }),
     ...oneTimeLinkTools({ db, publicUrl }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
@@ -274,6 +285,11 @@ export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise
 
 async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promise<RunningServer> {
   const config = loadConfig(env)
+  // All configuration transports and public booking routes share the instance policy.
+  const successRedirectPolicy = {
+    publicUrl: config.PUBLIC_URL,
+    allowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
+  }
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
@@ -613,7 +629,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
-        successRedirectAllowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
+        successRedirectPolicy,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
         privacyPolicyUrl: config.PRIVACY_POLICY_URL,
@@ -647,6 +663,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           db,
           publicUrl: config.PUBLIC_URL,
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+          successRedirectPolicy,
           notify,
           automaticMeet: config.GOOGLE_MEET_ENABLED,
           automaticZoom: config.ZOOM_MEETINGS_ENABLED,

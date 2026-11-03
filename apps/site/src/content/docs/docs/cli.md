@@ -175,6 +175,16 @@ and `hourmere update-event --input event-update.json`. Omitting the list on crea
 makes a single-length type. See [multiple meeting lengths](/docs/multiple-durations) for
 update compatibility, rescheduling and shared-rule limits.
 
+## Configure an after-booking redirect
+
+Use `event` to read `successRedirect` and `create-event` / `update-event` with a `full` key
+to write it through JSON or the matching redirect flags.
+`--success-redirect-url`, `--success-redirect-parameters`,
+`--success-redirect-include-invitee-personal-data` and `--success-redirect-allow-embed-parent`
+construct the replacement object; `--clear-success-redirect` clears it. See
+[after-booking redirects](/docs/after-booking#cli) for flag syntax, privacy warnings,
+field errors and the current limitations.
+
 ## Booking and private results
 
 Choose a slot's UTC `start` unchanged. A booking input could contain:

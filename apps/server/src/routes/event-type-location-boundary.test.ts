@@ -349,7 +349,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
       expect(response.status).toBe(200)
       expect(response.isError).toBe(false)
       expect(response.body).not.toHaveProperty('locations')
-      expect(response.body).not.toHaveProperty('successRedirect')
+      expect(response.body).toHaveProperty('successRedirect', null)
     }
     for (const item of list.body.data as unknown[]) expect(item).not.toHaveProperty('locations')
     expect(await s.stored(created.id)).toEqual({ locations: options })
