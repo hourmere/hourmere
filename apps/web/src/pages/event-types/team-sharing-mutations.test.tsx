@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
 import * as react from 'react'
-import { type ComponentType, useEffect, useRef } from 'react'
+import { type ComponentType, useEffect, useRef, useState } from 'react'
 import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
@@ -91,6 +91,9 @@ function share(source: string, role: 'owner' | null = 'owner') {
     ...common,
     useEffect,
     useRef,
+    useState,
+    useLoad: () => [{ status: 'loading' }],
+    loadInstance: () => {},
     useTeamManagementAccess: () => ({ status: 'ready', role }),
   })
 }

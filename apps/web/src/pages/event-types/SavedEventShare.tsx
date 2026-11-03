@@ -1,8 +1,10 @@
 import { isPublicTeamSlug, isReservedName } from '@hourmere/core/reserved'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { api, unwrap } from '../../api/client.ts'
 import type { EventType, Profile, Schedule } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
+import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { PROFILE } from '../../limits.ts'
 import {
@@ -17,6 +19,10 @@ import { useTeamManagementAccess } from '../../team-management.tsx'
 import { validSchedule } from '../availability/valid-default.ts'
 import type { EditorReadiness } from './editor-readiness.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
+import { HostSlotPicker } from './HostSlotPicker.tsx'
+import { verifySlotPickerAccess } from './slot-picker-access.ts'
+
+const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 
 /** Sharing always describes a saved server response, independently of the editable draft. */
 export function SavedEventShare({
@@ -40,6 +46,8 @@ export function SavedEventShare({
 }) {
   const { t } = useI18n()
   const access = useTeamManagementAccess()
+  const [instance] = useLoad(loadInstance)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const canRetryUnavailable =
     me.principal.kind === 'session' && access.status === 'ready' && access.role !== null
   const heading = useRef<HTMLHeadingElement>(null)
@@ -115,6 +123,17 @@ export function SavedEventShare({
       ? publicPageUrl(profile.handle, event.slug)
       : publicTeamPageUrl(me.organization.slug, event.slug)
     : null
+  const canPick =
+    instance.status === 'ready' &&
+    instance.data.slotSnippetsEnabled === true &&
+    !!instance.data.publicUrl &&
+    !disabled &&
+    me.principal.kind === 'session' &&
+    event.organizationId === me.organization.id &&
+    event.isActive &&
+    needsActivation === false &&
+    ((personal && !missingHandle) ||
+      (team && !invalidTeamSlug && access.status === 'ready' && access.role !== null))
 
   return (
     <section className="panel" aria-labelledby="view-and-share">
@@ -270,6 +289,26 @@ export function SavedEventShare({
           )}
         </ul>
       )}
+      {canPick &&
+        instance.status === 'ready' &&
+        (pickerOpen ? (
+          <HostSlotPicker
+            key={`${me.organization.id}:${event.id}:${event.updatedAt}`}
+            event={event}
+            profile={profile}
+            publicUrl={instance.data.publicUrl}
+            address={
+              personal && profile
+                ? { kind: 'personal', handle: profile.handle, slug: event.slug }
+                : { kind: 'team', teamSlug: me.organization.slug, slug: event.slug }
+            }
+            verifyAccess={() => verifySlotPickerAccess(me, event, profile)}
+          />
+        ) : (
+          <button type="button" className="button" onClick={() => setPickerOpen(true)}>
+            {t('Pick open times')}
+          </button>
+        ))}
     </section>
   )
 }

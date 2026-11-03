@@ -1689,4 +1689,62 @@ export const admin = {
   'You have no working hours yet. Use the setup guide to add a default schedule.':
     'You have no working hours yet. Use the setup guide to add a default schedule.',
   'Set working hours with the setup guide': 'Set working hours with the setup guide',
+  'Pick open times': 'Pick open times',
+  'Copy open times into an email': 'Copy open times into an email',
+  'Choose 1–10 available times for the saved event type. Unsaved changes are not included.':
+    'Choose 1–10 available times for the saved event type. Unsaved changes are not included.',
+  'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.':
+    'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.',
+  'This event type is unlisted. Anyone with these links can open the booking page and book an available time.':
+    'This event type is unlisted. Anyone with these links can open the booking page and book an available time.',
+  'Email display': 'Email display',
+  'Meeting length': 'Meeting length',
+  'Email language': 'Email language',
+  'Display time zone': 'Display time zone',
+  'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.':
+    'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.',
+  'Available times': 'Available times',
+  'Loading available times…': 'Loading available times…',
+  'We could not load available times. Please try again.':
+    'We could not load available times. Please try again.',
+  'No times are offered on this date.': 'No times are offered on this date.',
+  'Check availability again': 'Check availability again',
+  'Selected times: {0} (maximum 10)': 'Selected times: {0} (maximum 10)',
+  'Selected times': 'Selected times',
+  'No longer offered': 'No longer offered',
+  'Remove {time}': 'Remove {time}',
+  'Remove time': 'Remove time',
+  'Preview email': 'Preview email',
+  'The email preview could not be created. Please choose fewer times and try again.':
+    'The email preview could not be created. Please choose fewer times and try again.',
+  'Complete plain-text email preview': 'Complete plain-text email preview',
+  'Copy plain text': 'Copy plain text',
+  'Copy rich text': 'Copy rich text',
+  'The full plain text above includes every booking link.':
+    'The full plain text above includes every booking link.',
+  'Checking selected times…': 'Checking selected times…',
+  'This meeting length is no longer offered. Reload the saved event type before trying again.':
+    'This meeting length is no longer offered. Reload the saved event type before trying again.',
+  'We could not check the selected times. Nothing was copied. Please try again.':
+    'We could not check the selected times. Nothing was copied. Please try again.',
+  'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.':
+    'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.',
+  'Plain text copied.': 'Plain text copied.',
+  'Rich text copied with a plain-text fallback.': 'Rich text copied with a plain-text fallback.',
+  'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
+    'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.',
+  '{0} min': '{0} min',
+  'Checking that you can preview these times…': 'Checking that you can preview these times…',
+  'We could not prepare the preview. Nothing was copied. Please try again.':
+    'We could not prepare the preview. Nothing was copied. Please try again.',
+  'Availability date ({zone})': 'Availability date ({zone})',
+  'Email preview ready.': 'Email preview ready.',
+  'This time could not be displayed. Please try another display time zone.':
+    'This time could not be displayed. Please try another display time zone.',
+  'The saved event title is invalid. Reload the saved event type and try again.':
+    'The saved event title is invalid. Reload the saved event type and try again.',
+  'The saved booking link is invalid. Reload the saved event type and try again.':
+    'The saved booking link is invalid. Reload the saved event type and try again.',
+  'The email preview could not be created. Reload the saved event type and try again.':
+    'The email preview could not be created. Reload the saved event type and try again.',
 } as const

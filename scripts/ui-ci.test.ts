@@ -334,9 +334,16 @@ describe('report-only browser command', () => {
       const reporter = join(directory, 'projects.mjs')
       writeFileSync(
         reporter,
-        `export default class {
+        `import { basename } from 'node:path'
+        export default class {
           onBegin(config, suite) {
-            console.log(JSON.stringify({projects:config.projects.map(({name,use})=>({name,browserName:use.browserName,channel:use.channel})),tests:suite.allTests().length}))
+            const specs = suite => [...new Set(suite.allTests().map(test=>basename(test.location.file)))].sort()
+            console.log(JSON.stringify({
+              projects:config.projects.map(({name,use})=>({name,browserName:use.browserName,channel:use.channel})),
+              specs:specs(suite),
+              coverage:suite.suites.map(project=>({project:project.title,specs:specs(project)})),
+              tests:suite.allTests().length,
+            }))
           }
         }`,
       )
@@ -366,7 +373,12 @@ describe('report-only browser command', () => {
           { name: 'webkit-iphone', browserName: 'webkit' },
           { name: 'firefox-desktop', browserName: 'firefox' },
         ],
-        tests: 12,
+        specs: ['cross-engine.spec.ts', 'host-slot-picker.spec.ts'],
+        coverage: ['webkit-desktop', 'webkit-iphone', 'firefox-desktop'].map((project) => ({
+          project,
+          specs: ['cross-engine.spec.ts', 'host-slot-picker.spec.ts'],
+        })),
+        tests: 15,
       })
     } finally {
       rmSync(directory, { recursive: true, force: true })

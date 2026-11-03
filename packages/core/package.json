@@ -10,7 +10,8 @@
     "./locales": "./src/locales.ts",
     "./conference-url": "./src/conference-url.ts",
     "./follow-up-note": "./src/follow-up-note.ts",
-    "./public-avatar": "./src/public-avatar.ts"
+    "./public-avatar": "./src/public-avatar.ts",
+    "./slot-snippet": "./src/slot-snippet.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
