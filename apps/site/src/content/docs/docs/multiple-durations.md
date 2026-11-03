@@ -37,6 +37,36 @@ and asks the invitee to choose again, preserving their entered details, guests a
 Confirmation details, emails and calendar invitations use the meeting's actual start and
 end times. Changing the event type later does not change an existing booking's length.
 
+## Open a suggested time
+
+An ordinary personal booking URL (`/{handle}/{slug}`) or team URL
+(`/team/{teamSlug}/{slug}`) can include `start` and `durationMinutes` to suggest one time:
+
+```text
+https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=30
+```
+
+Use a UTC instant with milliseconds for `start` and an explicit currently offered
+whole-minute `durationMinutes`, even when the event offers only one length. The page
+freshly checks the complete interval against the current booking rules before selecting
+it. The invitee reviews the current meeting details, fills in the form and deliberately
+confirms the booking, or chooses **Change time**. Times use the invitee's own language
+and time zone. A round-robin link suggests a team time; a host is assigned only on booking.
+
+Opening a link makes no booking or reservation and sends no email. Links have no expiry
+timer and do not hold a time: availability is checked again on confirmation. If the time
+is no longer offered, the page shows the normal picker with a general availability
+notice. A removed meeting length asks the invitee to choose again. An unavailable event
+shows the neutral unavailable page; a failed availability check offers a retry without
+claiming the time is taken.
+
+These ordinary links can be edited and forwarded, including links to hidden event types;
+hidden means unlisted, so anyone with the link may open it. They use the event currently
+at the address, including its latest title and questions. If an address is later reused,
+an old link can open the replacement event, so review the details before confirming.
+The suggested-time parameters are ignored on embedded pages, one-time booking links and
+waitlist capability pages. Existing waitlist suggestions keep their separate behavior.
+
 ## Configure through REST, MCP or CLI
 
 Event-type configuration uses these fields:

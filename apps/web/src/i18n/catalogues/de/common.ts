@@ -1,6 +1,15 @@
 export const common = {
   'This imported booking is read-only and managed in the original system.':
     'Diese importierte Buchung ist schreibgeschützt und wird im ursprünglichen System verwaltet.',
+  'We could not use the time details in this link. Please choose a time.':
+    'Die Zeitangaben in diesem Link konnten nicht verwendet werden. Bitte wählen Sie eine Zeit.',
+  'This meeting length is no longer offered. Please choose a time again.':
+    'Diese Besprechungsdauer wird nicht mehr angeboten. Bitte wählen Sie erneut eine Zeit.',
+  'Checking the suggested time…': 'Die vorgeschlagene Zeit wird geprüft…',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    'Die vorgeschlagene Zeit ist ausgewählt. Prüfen Sie die Angaben und bestätigen Sie Ihre Buchung.',
+  'We could not check this time. Please try again.':
+    'Diese Zeit konnte nicht geprüft werden. Bitte versuchen Sie es erneut.',
   'These suggestions have expired. Check the currently available times.':
     'Diese Terminvorschläge sind abgelaufen. Prüfen Sie die aktuell verfügbaren Zeiten.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

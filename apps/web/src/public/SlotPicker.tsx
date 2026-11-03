@@ -83,6 +83,7 @@ interface SlotPickerProps {
   focusTitle?: boolean
   /** A message about the last attempt, shown above the calendar (e.g. the time was taken). */
   notice?: UiText | null | undefined
+  noticeRole?: 'alert' | 'status' | undefined
 }
 
 const monthKey = ({ year, month }: YearMonth) => `${year}-${month}`
@@ -144,6 +145,7 @@ export function SlotPicker({
   afterTitle,
   focusTitle = false,
   notice,
+  noticeRole = 'alert',
 }: SlotPickerProps) {
   const { t, uiText } = useI18n()
 
@@ -340,7 +342,7 @@ export function SlotPicker({
       {afterTitle}
       {notice && (
         <div className="alert alert-info">
-          <p role="alert">{uiText(notice)}</p>
+          <p role={noticeRole}>{uiText(notice)}</p>
         </div>
       )}
       {positionUnavailable && (
