@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This imported booking is read-only and managed in the original system.':
+    '此导入预约为只读记录，请在原系统中管理。',
   'These suggestions have expired. Check the currently available times.':
     '这些建议时段已过期，请查看当前可约时间。',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

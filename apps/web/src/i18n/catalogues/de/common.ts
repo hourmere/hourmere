@@ -1,4 +1,6 @@
 export const common = {
+  'This imported booking is read-only and managed in the original system.':
+    'Diese importierte Buchung ist schreibgeschützt und wird im ursprünglichen System verwaltet.',
   'These suggestions have expired. Check the currently available times.':
     'Diese Terminvorschläge sind abgelaufen. Prüfen Sie die aktuell verfügbaren Zeiten.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

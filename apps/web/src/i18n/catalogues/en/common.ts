@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'This imported booking is read-only and managed in the original system.':
+    'This imported booking is read-only and managed in the original system.',
   'These suggestions have expired. Check the currently available times.':
     'These suggestions have expired. Check the currently available times.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

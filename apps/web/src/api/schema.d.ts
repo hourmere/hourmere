@@ -3959,6 +3959,21 @@ export interface components {
             id: string;
             location: components["schemas"]["BookingLocation"];
             /**
+             * @description Present for imported busy records: managed in the original system, without Hourmere management links, changes, retries, calendar writes or notifications.
+             * @enum {string}
+             */
+            managementPolicy?: "local_only_read_only";
+            /** @description Authenticated host reads only: the imported booking’s original question definitions, including preserved notes. */
+            questions?: {
+                id: string;
+                label: string;
+                options?: string[];
+                /** @default false */
+                required: boolean;
+                /** @enum {string} */
+                type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
+            }[];
+            /**
              * Format: uuid
              * @description The booking this one replaced when it was rescheduled
              */
@@ -3970,10 +3985,10 @@ export interface components {
             rescheduledToId?: string | null;
             responses: components["schemas"]["Responses"];
             /**
-             * @description How the booking was made; api and mcp are agents
+             * @description How the booking was made; import means a read-only busy record managed in the original system
              * @enum {string}
              */
-            source: "web" | "embed" | "api" | "mcp";
+            source: "web" | "embed" | "api" | "mcp" | "import";
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.

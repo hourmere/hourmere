@@ -1,5 +1,13 @@
 [Notifications and background jobs](https://hourmere.com/docs/notifications).
 
+Cal.com/cal.diy imports use durable `source=import` local-only bookings. Their empty
+notification snapshots do not authorize confirmation delivery. Every enqueue, retry,
+recovery, repair and worker entry checks the persistent policy, including connected
+reschedule chains and stale artifacts from before a restart. No mail, ICS, calendar,
+conference, webhook or scheduled-message delivery is produced for them. Bounded dispatchers
+exclude import-connected records before applying their page limit so ordinary work can
+continue behind stale imported intents. See [Cal.com imports](calcom-import.md).
+
 If the original inviter leaves or is removed from the team, their pending invitations are
 no longer valid. Neither resend nor the expired-row replacement action can reuse them:
 both refuse with `INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION`.

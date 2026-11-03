@@ -120,7 +120,9 @@ calendar-list access.
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
 | `one_time_booking_links` | event type + organization | Hash-only booking capabilities, optional expiry and invitee prefill, terminal lifecycle and the confirmed booking that consumed them |
-| `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |
+| `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`/`import`), idempotency key |
+| `import_sources` | instance | Persistent random identity of a real Cal.com/cal.diy source, audited schema/version and creating operator |
+| `import_items` | source + owner | Immutable source/target hashes, policy, question/option crosswalk and minimal deletion tombstones |
 | `organization_operations` | organization | Minimal actual-actor records for cancellation, member removal/leave and role changes; identifiers, origin, role transition and time only |
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
 | `booking_attendees` | organization | The invitee who booked plus guests |
@@ -130,6 +132,16 @@ calendar-list access.
 | `invitation_deliveries` | invitation | Current delivery generation, bounded attempts, claim lease and safe outcome; deleted with its Better Auth invitation |
 
 ## Guarantees and why
+
+Migration 0059 supports the local [Cal.com import CLI](calcom-import.md). Preview reads real
+source and target snapshots; applying an explicitly authorized plan uses one atomic target
+transaction and a brief target write barrier. Source writes and external provider actions
+are forbidden. Imported bookings remain confirmed local busy records with `source=import`,
+NULL manage tokens, historical `import_questions` and explicit empty notification settings.
+REST/MCP/CLI expose `managementPolicy=local_only_read_only`; ordinary mutation, ICS,
+reconnection, repair and delivery paths refuse or ignore them, including stale connected
+reschedule chains. Deletion clears all mapping payloads into non-personal tombstones so
+reruns cannot restore erased targets. See the [0059 rollout note](../packages/db/migrations/0059_calcom_import_state.md).
 
 - **No double-booking.** `booking_hosts` has
   `EXCLUDE USING gist (user_id WITH =, period WITH &&) WHERE (active)`. Two invitees

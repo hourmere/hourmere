@@ -1,5 +1,8 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  Imported: '已导入',
+  'the original scheduling system': '原预约系统',
+
   'After booking': '预约完成后',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
     '在预约确认信息后提供继续访问链接。受邀人离开前可以查看日历信息和管理链接。清空网址即可关闭此功能。',

@@ -14,6 +14,7 @@ import {
   MAX_PAGE_SIZE,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  QuestionsSchema,
   ResponsesSchema,
   rescheduleHostBooking,
   rescheduleManagedBooking,
@@ -133,6 +134,10 @@ export const Booking = z
         description: 'Authenticated host reads only: this caller’s ordinary calendar copy.',
       }),
     responses: Responses,
+    questions: QuestionsSchema.optional().openapi({
+      description:
+        'Authenticated host reads only: the imported booking’s original question definitions, including preserved notes.',
+    }),
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     coHosts: z
       .array(z.object({ name: z.string() }))
@@ -150,8 +155,13 @@ export const Booking = z
     }),
     cancelledAt: Instant.nullable(),
     cancelReason: z.string().nullable(),
-    source: z.enum(['web', 'embed', 'api', 'mcp']).openapi({
-      description: 'How the booking was made; api and mcp are agents',
+    source: z.enum(['web', 'embed', 'api', 'mcp', 'import']).openapi({
+      description:
+        'How the booking was made; import means a read-only busy record managed in the original system',
+    }),
+    managementPolicy: z.literal('local_only_read_only').optional().openapi({
+      description:
+        'Present for imported busy records: managed in the original system, without Hourmere management links, changes, retries, calendar writes or notifications.',
     }),
     createdAt: Instant,
     assignedHost: z

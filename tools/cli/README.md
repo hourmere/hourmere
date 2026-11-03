@@ -98,6 +98,16 @@ invitee authority. These commands act immediately and can send notifications. Ca
 never automatically retried. After a lost booking response, inspect the instance and reuse
 the retained request and idempotency key; **rescheduling is not idempotent**.
 
+Imported bookings in `list` have `source: "import"` and
+`managementPolicy: "local_only_read_only"`. They keep the host busy and remain managed in
+the original scheduling system. Hourmere issues no manage link, calendar invitation or
+provider update for them. `cancel`, `reschedule`, `retry-meeting` and
+`retry-calendar-copy` refuse them with `imported_booking_read_only`.
+
+`list` 中的导入预约带有 `source: "import"` 和 `managementPolicy: "local_only_read_only"`。
+它们继续占用主持人的时间，仍由原预约系统管理。Hourmere 不为这些记录签发管理链接、发送日历邀请或
+更新外部服务。取消、改期、重试会议和重试日历副本命令均返回 `imported_booking_read_only`。
+
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.

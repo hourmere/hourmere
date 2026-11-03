@@ -146,6 +146,8 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    imported_booking_read_only:
+      'This imported booking is read-only and managed in the original system.',
     insufficient_scope: 'This API key does not allow this operation.',
     API_KEY_SCOPE_IMMUTABLE: 'API key scope cannot be changed; create a replacement key.',
     SESSION_REQUIRED: 'Use a browser session without an Authorization header.',

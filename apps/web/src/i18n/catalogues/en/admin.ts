@@ -1,5 +1,8 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  Imported: 'Imported',
+  'the original scheduling system': 'the original scheduling system',
+
   'After booking': 'After booking',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
     'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.',

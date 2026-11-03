@@ -1,7 +1,9 @@
-# Cal.com / cal.diy import operator draft
+# Cal.com / cal.diy import
 
-This first slice **only extracts and parses in memory**. Nothing is imported into Hourmere.
-It has no target database connection, apply command, provider calls or preview UI.
+The local operator CLI previews real source and target state and applies the exact reviewed
+plan. Preview is the default and writes no source, business or import-metadata rows.
+There is no import web UI. Use `register-source` once to create a persistent random source
+namespace before previewing. Database administration access alone is not owner consent.
 Supported source versions are cal.diy `a5ee96f77edd644439e7de8c3255ccb2eb2c5941`
 and Cal.com `v6.2.0` (`1c193cca8682b33b9866c792186033f7ef886682`).
 An unrecognized scalar, enum or relationship signature is refused. The operator-supplied
@@ -9,7 +11,9 @@ version and actual schema fingerprint are retained separately. Do not relabel ol
 
 Future accepted personal bookings are candidates for **local-only, read-only busy records**.
 They remain managed in the old system. They must never create emails, ICS, management links,
-calendar copies, meetings or webhooks. This slice creates none of those records.
+calendar copies, meetings or webhooks. The dedicated import transaction creates none of those records or pg-boss jobs. Existing
+waitlist availability triggers can append local scan signals; the preview counts those rows.
+They carry no imported attendee data, and imported booking jobs remain ineligible.
 All event proposals remain inactive drafts; hidden controls listing visibility separately.
 Teams, organizations, managed/multiple-host events, payment and instant features are excluded
 or blocked. The structured report lists each detected loss and includes every out-of-scope
@@ -94,26 +98,29 @@ or set `CALCOM_IMPORT_SOURCE_URL` through your existing secret manager. Choose e
 Neither the DSN nor credentials belong in argv, logs, reports, commits or the plan.
 Do not use automatically discovered databases or an untrusted connection URL.
 
-The protected JSON configuration has this shape (all identities are examples):
+The target connection uses a separate protected `targetConnectionFile`, or
+`CALCOM_IMPORT_TARGET_URL` (exactly one). Both connections are opened with bounded pools;
+source extraction closes immediately after its read-only snapshot. Do not use the source
+connection as the target, or place either connection in arguments or reports.
+
+The protected configuration uses actual target UUIDs and explicit decisions:
 
 ```json
 {
+  "sourceId": "00000000-0000-4000-8000-000000000001",
   "sourceVersion": "cal.diy-a5ee96f77edd",
   "selectedUserIds": [1],
   "utcTimestampsConfirmed": true,
   "sourceConnectionFile": "/private/calcom-source-connection",
-  "target": {
-    "users": [{
-      "id": "019a4321-1234-7000-8000-000000000001",
-      "email": "owner@example.com",
-      "emailVerified": true,
-      "personalOrganizationId": "019a4321-1234-7000-8000-000000000002",
-      "authorized": true,
-      "profile": {"handle": "owner", "timeZone": "UTC", "locale": "en"}
-    }],
-    "occupiedHandles": ["owner"],
-    "occupiedSlugs": [],
-    "busy": []
+  "targetConnectionFile": "/private/hourmere-target-connection",
+  "authorization": {
+    "operatorUserId": "019a4321-1234-7000-8000-000000000001",
+    "operatorAuthorized": true,
+    "owners": [{
+      "sourceUserId": 1,
+      "targetUserId": "019a4321-1234-7000-8000-000000000001",
+      "importPersonalData": true
+    }]
   },
   "bookingDecisions": [{
     "sourceBookingId": 10,
@@ -123,15 +130,28 @@ The protected JSON configuration has this shape (all identities are examples):
 }
 ```
 
-`utcTimestampsConfirmed` confirms the source deployment uses UTC semantics for timestamp
-without time zone; setting a session timezone cannot establish that historical convention.
-`target` is an operator-supplied read-only snapshot, **not a target database verification**.
-Supply all normalized identity matches (including duplicates), occupied handles and relevant
-organization slugs, and existing host busy intervals (`targetUserId`, `start`, `end` as UTC
-ISO instants). Do not treat an unavailable target lookup as an empty array. A later preview
-must read and authorize target state again before any apply. `authorized` records the owner's
-explicit migration choice; database administrator access does not imply account authorization.
-Existing target profiles and display names are preserved. Omit `profile` only when none exists.
+Record each target owner's informed opt-in outside the tool before setting their choice to
+true, including confirmation of the historical single host and attendee roles. The local
+operator must also be authorized to perform this migration. The booleans record these
+explicit decisions; the CLI cannot establish consent merely from a database administrator
+connection. The operator and owners must be existing verified accounts; every source user
+must map to exactly the target UUID chosen by that owner and its existing personal
+organization, with current owner membership. The tool creates no accounts, teams or grants.
+Apply requires the same authorization decisions as preview and rechecks target permissions.
+
+`utcTimestampsConfirmed` attests the source deployment's historical UTC convention for
+`timestamp without time zone`; changing the transaction timezone alone cannot prove it.
+Target identities, profiles, handles, slugs, schedules, default schedule, hosts, attendees,
+bookings, mappings and migration checksums come from real database reads. A failed lookup
+is an error, never an empty configuration. Existing profiles and defaults are preserved.
+
+Optional `resolutions` supplies explicitly chosen replacements, for example
+`{"handles":{"1":"chosen-handle"},"slugs":{"100":"chosen-slug"}}`. Re-preview after
+editing it. Existing handles/slugs are never overwritten and suffixes are never guessed.
+Optional `exclusions` narrows an initial batch explicitly, for example
+`{"bookings":[1000],"events":[100],"acknowledged":true}`. Schedules can also be excluded.
+The report lists every exclusion; remaining dependents still block if their dependency is
+missing. Excluding a previously imported entity does not erase its attribution or targets.
 
 Only trim+lowercase email matching is allowed, with both accounts verified, a unique match
 and an existing personal organization. Unmatched users' dependency rows are not extracted.
@@ -141,49 +161,97 @@ without `responses.email` also require `bookerAttendeeId`. Never choose the firs
 Optional `acceptMissingLocation` and `recurringOccurrencesComplete` record explicit source
 owner decisions, and default to false. They cannot override invalid data or unsafe links.
 
+## Register, preview and apply
+
+Run once per **real source instance** (omit `sourceId` for this command):
+
 ```sh
-npm run dry-run --workspace @hourmere/import-calcom -- --config /private/import.json
-# Simplified Chinese operator status messages; structured problem messages remain English.
-npm run dry-run --workspace @hourmere/import-calcom -- --config /private/import.json --lang zh-CN
+npm run import-calcom --workspace @hourmere/import-calcom -- register-source --config /private/import.json
 ```
 
-Exit status: `0` means parsing completed without import blockers, `2` means the plan contains
-import blockers, `1` means extraction/configuration was refused or failed. Every outcome
-means **nothing was imported**. The CLI prints summary counts and safe problems only.
-Refusals include a stable code such as `[SOURCE_LIMIT_EXCEEDED]` or
-`[SOURCE_EXTRACTION_FAILED]`; configuration failures use `[IMPORT_REFUSED]`.
-It never serializes the private in-memory plan, attendee addresses, answers or join links.
-Problem entries have a stable code, severity, source table/id and static English message.
-`activation_blocker` allows an inactive draft proposal; `import_blocker` prevents a future
-user batch from being applied. `excluded` is not a successful import count. Overlapping
-source/target bookings are reported as blockers; buffers and daily-limit effects require
-later preview review.
+Save the returned random `sourceId` in the protected configuration. Reuse it for reruns and
+backups of this same instance. Never generate a new namespace to bypass a conflict, or reuse
+one for a different instance. Namespace identity, schema fingerprint and version are immutable.
 
-Operational caps are 25 selected users, 10,000 rows per table, 50,000 total rows, 1 MB per
-row/JSON input and 32 MiB per snapshot. These caps cover transferred candidates, minimal
-future blocker rows and lineage dependencies, rather than the count of historical/terminal
-exclusions. A single owner's history can exceed 10,000 bookings without consuming candidate
-capacity. An oversized future selection still requires fewer selected users, fewer future
-candidates in the source, or resolution of oversized input; no candidate is silently dropped.
-Target field limits include 20 questions, 50 options, 12 durations, one booker plus ten
-guests, and the normal Hourmere text/timezone bounds. No silent truncation or partial batches.
-Fingerprints and all in-memory data are private migration data; they are not execution
-credentials. Stable question crosswalks are provided for later association persistence.
-Persistent source namespaces, authoritative target reads, difference preview, idempotent
-atomic apply, persistent local-only guards and the failure-report UI belong to later work.
+```sh
+npm run import-calcom --workspace @hourmere/import-calcom -- preview --config /private/import.json --out /private/reviewed-plan.json --report /private/reviewed-report.txt
+# Equivalent default preview, with Chinese operator headings:
+npm run import-calcom --workspace @hourmere/import-calcom -- --config /private/import.json --out /private/another-plan.json --lang zh-CN
+npm run import-calcom --workspace @hourmere/import-calcom -- apply --config /private/import.json --plan /private/reviewed-plan.json
+```
 
-## 中文操作说明
+Outputs are new owner-only regular files (`0600`), created exclusively: existing files and
+symlinks are refused. Human-readable console output masks email addresses and includes
+counts by entity/reason, old/proposed addresses, UTC/local booking times, overlaps, buffers,
+daily counts, loss codes, table row counts and the zero-external-effects guarantee. Machine
+JSON and the optional authorized private report also contain names, emails, questions,
+answers, private join links and inference-sensitive hashes: protect them as migration data.
+Neither contains DSNs, source management capabilities, credentials or provider payloads.
+No report is uploaded or sent to anyone. Structured parser problems retain static English
+messages; operator headings and guidance support English and Simplified Chinese.
 
-本阶段仅以只读事务提取源数据，并在内存中解析、校验；**不会向 Hourmere 写入任何数据**。
-请使用专用、无继承和提权权限的只读账号，并由源数据库管理员在导入器之外配置上述最小列权限。
-源连接凭据和 JSON 配置应保存在仓库之外、权限为 `0600` 的普通文件中；不接受符号链接。
-不得将连接凭据放入命令参数、日志或提交记录。
+Review all defaults, timezone proposals, question/option conversions, omitted policies and
+unimportable future bookings in the private plan. Draft events always remain inactive,
+even when the source event was merely hidden. Reconnect calendars/conferences separately;
+activation requires a later explicit owner review. Historical booking times are retained
+outside current hours or across buffer/daily-limit differences, and remain busy.
 
-必须确认源库无时区时间戳采用 UTC 约定。目标身份、占用名称及忙碌时段来自操作者提供的快照，
-不代表导入器已实时核验目标数据库；无法查询时不可填写空列表冒充无冲突。每位目标所有者须明确授权，
-每项历史预约还须由源所有者确认原始单主持和参加者角色。仅匹配两端已验证且唯一对应的现有个人账号。
+Use a short operator-managed cutover window that freezes source changes. The importer never
+writes to the source to freeze it. Apply re-extracts with the original UTC cutoff and compares
+the full selected allowlist and safety dependencies, source schema, authorization decisions,
+target migration version and relevant target hashes. A changed email, status, reschedule,
+question/option, default schedule, membership or mapped target invalidates the plan. Database
+wall time is checked before new writes and again before commit; a booking that has started
+makes an uncommitted plan expire. A fully committed, unchanged replay remains a no-op after
+its booking starts. Source and target are separate systems, so changes after extraction still
+require the operator's cutover freeze.
 
-所有事件均为停用草稿。未来已接受预约仅拟作本地只读忙碌记录，继续由旧系统管理；不发送邮件、
-不生成 ICS、不写日历、不创建会议、不触发 Webhook。私密地点不得擅自公开。结构化问题消息使用英语，
-包含稳定代码及源表和编号，不包含参加者邮箱或连接秘密。退出码 `0` 表示解析完成且无导入阻断，
-`2` 表示存在导入阻断，`1` 表示配置或提取被拒绝或失败；以上均未导入数据。
+All selected users form one bounded atomic target transaction; source-namespace locking
+serializes competing applies. During this short transaction a bounded table write barrier
+pauses target configuration, identity, booking and relevant waitlist writes instance-wide.
+Reads continue. Busy targets can refuse with a safe concurrency/lock-timeout code; retry
+after a new preview. Schedule/profile changes and predicate insertions cannot race the
+reviewed target snapshot. For separate owner batches use separate previews with the same
+source namespace and each user's explicit choice. Any unresolved import blocker or overlap
+prevents the complete selected batch. No partial user, cancelled placeholder, omitted host,
+disabled exclusion constraint or automatic upsert is used. The normal host exclusion and
+slug/attribution uniqueness constraints remain the final concurrency checks.
+
+First writes and immutable `import_items` mappings commit together. An unchanged rerun is a
+no-op; changed source or mapped target hashes produce conflicts for a new preview and manual
+resolution. After a lost response, retry the same plan: the ledger and the saved post-commit
+business hash establish a no-op without making external calls. If other relevant target
+configuration changed, create a new preview first. Deleted or soft-deleted targets leave
+minimal numeric-source tombstones with no answers, labels, emails, fingerprints or target UUID;
+a rerun cannot recreate them. Account deletion still erases its personal business data.
+
+Apply reports `applied`, `noop` or `failed`, committed state, entity counts, failure stage,
+entity/source key and stable safe codes. A crash before commit rolls back every row; a lost
+connection during commit can make the response uncertain, so rerun the same plan to discover
+the committed ledger. Driver text, causes, paths and credentials are never reported.
+Exit `0` means successful preview/apply/no-op; `2` means preview blockers; `1` means refusal or
+failed apply. Stable codes include `IMPORT_SOURCE_CHANGED`, `IMPORT_TARGET_CHANGED`,
+`IMPORT_PLAN_EXPIRED`, `IMPORT_BOOKING_OVERLAP` and `IMPORT_CONCURRENT_CHANGE`.
+
+Rollback is deliberately not automatic. A separately reviewed local cleanup must preview
+current target hashes, touch only this user's unchanged newly created records and produce no
+cancellation delivery. Never delete source data, existing target data or tombstones to rerun.
+Changes to imported bookings in the source only appear in a new difference preview; releasing
+local busy time or taking over management needs a later reconciliation design.
+
+Imported bookings expose `source: "import"` and
+`managementPolicy: "local_only_read_only"` to authorized REST/MCP/CLI readers. Admin list/detail
+screens label the original-system ownership and hide move/cancel/retry actions. Management
+links and ICS downloads are unavailable. All cancellation, reschedule, retry, notification,
+reminder/follow-up, repair, conference, calendar reconnect/recovery and webhook paths recheck
+the durable policy, including stale artifacts and connected reschedule chains. They never
+send mail/ICS, create or change provider objects, or manufacture suppressed/sent receipts.
+
+Operational limits remain 25 selected users, 10,000 rows per table, 50,000 source rows,
+1 MiB per source JSON value and 32 MiB per snapshot/private plan. Oversized selections fail
+without partial extraction or partial application. Target fields retain normal validation:
+20 questions, 50 options, 12 durations, one booker plus ten guests. Pools stay bounded.
+
+The earlier extraction-only parser remains available explicitly as `parse --config ...` for
+synthetic/offline operator snapshots. Its `target` input is unverified, it creates no executable
+preview, and it cannot apply data. Production migration uses the real-target commands above.

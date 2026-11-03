@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Db } from '@hourmere/db'
+import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
@@ -32,6 +32,7 @@ export function webhookBookingNotifier(
   return async (trx, event, now) => {
     if (!settings.enabled) return
     if (!trx.isTransaction) throw new Error('Webhook capture requires the booking transaction')
+    if (await isImportedBooking(trx, event.bookingId)) return
     const booking = await trx
       .selectFrom('bookings')
       .select([
@@ -152,6 +153,7 @@ export async function deliverWebhook(
       .forUpdate()
       .executeTakeFirst()
     if (delivery?.status !== 'pending') return false
+    if (delivery.booking_id && (await isImportedBooking(trx, delivery.booking_id))) return false
     const now = (deps.now ?? (() => Temporal.Now.instant()))()
     if (
       !deps.enabled ||

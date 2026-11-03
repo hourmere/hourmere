@@ -6,7 +6,7 @@ import type { SourceSnapshot } from './types.ts'
 
 vi.mock('./source.ts', () => ({ extractSource: vi.fn() }))
 
-import { operatorMessages, readProtectedFile, runCli } from './cli.ts'
+import { operatorMessages, readProtectedFile, runParseCli as runCli } from './cli.ts'
 import { checkSourceMutation, required } from './mutation-testing.ts'
 import { SourceRefusal } from './schema.ts'
 import { extractSource } from './source.ts'
@@ -167,7 +167,7 @@ it('kills source-copy private-file permission, symlink and error-output mutation
     source,
     'catch (error) {\n    // Do not forward',
     'catch (error) { write(String(error));\n    // Do not forward',
-    (m) => m.runCli as typeof runCli,
+    (m) => m.runParseCli as typeof runCli,
     async (run) => {
       const output: string[] = []
       expect(await run(['--config', input], {}, (text) => output.push(text))).toBe(1)
@@ -245,7 +245,7 @@ it('kills source-copy refusal-code omission and arbitrary-code output mutations'
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source-copy mutation target
     '`[${code}] ${',
     '`${',
-    (m) => m.runCli as typeof runCli,
+    (m) => m.runParseCli as typeof runCli,
     async (run) => {
       expect(await check(run)).toEqual([`[SOURCE_LIMIT_EXCEEDED] ${operatorMessages.en.refused}`])
     },
@@ -257,7 +257,7 @@ it('kills source-copy refusal-code omission and arbitrary-code output mutations'
     source,
     'error instanceof SourceRefusal && refusalCodes.has(error.code)',
     'error instanceof SourceRefusal',
-    (m) => m.runCli as typeof runCli,
+    (m) => m.runParseCli as typeof runCli,
     async (run) => {
       expect(await check(run)).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
     },

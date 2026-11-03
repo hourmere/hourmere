@@ -1,5 +1,12 @@
 [API conventions](https://hourmere.com/docs/api-conventions).
 
+Protected booking reads may return `source: "import"` and
+`managementPolicy: "local_only_read_only"`. These local busy records remain managed in the
+original system. Host cancellation, rescheduling and provider retries return the stable
+`imported_booking_read_only` conflict. Private management capabilities are unavailable,
+including stale receipts; no new manage link or ICS can be issued. The local import CLI
+is documented in [Cal.com imports](calcom-import.md); it adds no network import endpoint.
+
 ### Validation error fields
 
 An optional `field` string identifies a stable validation field name. Known values are
