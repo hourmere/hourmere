@@ -88,7 +88,7 @@ describe('documented Compose configuration', () => {
       '--image selects docker-compose.image.yml and an exact HOURMERE_VERSION; start without --build',
     )
     expect(header).toContain(
-      '--source builds this checkout with docker compose up -d --build --wait',
+      '--source builds this checkout with ./scripts/compose-up.sh -d --build --wait',
     )
     expect(header).toContain('prints the next commands')
   })

@@ -156,6 +156,7 @@ async function executePastedCommands(
     mkdirSync(scripts)
     mkdirSync(bin)
     writeFileSync(join(directory, '.env'), 'synthetic-backup-settings\n')
+    writeFileSync(join(directory, 'Caddyfile'), 'synthetic-operator-customization\n')
     const log = `printf '%s\\n' "$command" >> "$CALL_LOG"
 `
     const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
@@ -167,6 +168,9 @@ async function executePastedCommands(
         { mode: 0o755 },
       )
     }
+    writeFileSync(join(scripts, 'compose-up.sh'), `#!/bin/sh\nexec docker compose up "$@"\n`, {
+      mode: 0o755,
+    })
     writeFileSync(
       join(bin, 'docker'),
       `#!/bin/sh
@@ -178,7 +182,7 @@ esac
 ${rejectShellOverride}${log}case "$command" in
   'compose config --services') printf '%s\\n' app db${hasProxy ? ' proxy' : ''}${enabled ? ' worker' : ''} ;;
   'compose exec -T db pg_dump -U hourmere -d hourmere -Fc') printf '%s\\n' synthetic-dump ;;
-  'compose pull proxy db'|'compose pull db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
+  'compose pull proxy db'|'compose pull db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose up -d --wait --force-recreate --no-deps proxy'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
   *) exit 1 ;;
 esac
 ${fail}`,
@@ -197,7 +201,7 @@ if [ "$*" = 'rev-parse HEAD' ]; then printf '%s\\n' synthetic-commit; fi
     writeFileSync(
       join(bin, 'install'),
       `#!/bin/sh
-command='install .env'
+command="install $3"
 ${log}${fail}exec /usr/bin/install "$@"
 `,
       { mode: 0o755 },
@@ -221,6 +225,12 @@ ${log}${fail}exec /usr/bin/install "$@"
       result,
       calls: existsSync(callLog) ? readFileSync(callLog, 'utf8').trim().split('\n') : [],
       dump: existsSync(dump) ? readFileSync(dump, 'utf8') : undefined,
+      caddyfile: existsSync(join(backupDirectory, 'Caddyfile'))
+        ? readFileSync(join(backupDirectory, 'Caddyfile'), 'utf8')
+        : undefined,
+      caddyfileMode: existsSync(join(backupDirectory, 'Caddyfile'))
+        ? statSync(join(backupDirectory, 'Caddyfile')).mode & 0o777
+        : undefined,
       backupDirectory,
     }
   } finally {
@@ -319,9 +329,20 @@ describe('documented deployment operations', () => {
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
 docker compose cp "$backup_dir/caddy-config/." proxy:/config
-docker compose up -d --wait`)
+docker compose up -d --wait &&
+docker compose up -d --wait --force-recreate --no-deps proxy`)
     expect(guide).not.toContain('create --build proxy')
     expect(guide).not.toMatch(/docker compose --project-name hourmere-restore/)
+  })
+
+  it('restores operator Caddyfile customizations before any restore container is created', () => {
+    const restore = guide.split('To test restoration,')[1]?.split('For actual recovery,')[0]
+    expect(restore).toContain('install -m 600 "$backup_dir/Caddyfile" Caddyfile')
+    expect(restore?.indexOf('install -m 600 "$backup_dir/Caddyfile" Caddyfile')).toBeLessThan(
+      restore?.indexOf('docker compose up -d --wait db') ?? -1,
+    )
+    expect(restore).toContain('the `/config` volume does not contain this bind-mounted source file')
+    expect(restore).toContain('For older\nbackups without a saved `Caddyfile`')
   })
 
   const separate = guide.split('## Run workers separately\n')[1]?.split('\n### ')[0]
@@ -352,6 +373,24 @@ docker compose up -d --wait`)
   const enableCommands = (source: string | undefined) => verificationCommands(source)
   const upgradeCommands = (title: string) =>
     guide.split(`### ${title} upgrade\n`)[1]?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+
+  it.each(['Single-container', 'Separate-worker'])(
+    'uses the content-hash helper for the %s upgrade',
+    (title) => {
+      expect(upgradeCommands(title)).toContain('./scripts/compose-up.sh -d --build --wait')
+      expect(upgradeCommands(title)).not.toContain('docker compose up ')
+    },
+  )
+
+  it.each([
+    ['README', readme],
+    ['self-hosting guide', guide],
+  ])('documents Caddyfile verification and older-release recovery in the %s', (_name, source) => {
+    expect(source).toContain('sha256sum Caddyfile')
+    expect(source).toContain('docker compose exec -T proxy sha256sum /etc/caddy/Caddyfile')
+    expect(source).toContain('docker compose up -d --wait --force-recreate --no-deps proxy')
+    expect(source).toContain('`shasum -a 256 Caddyfile`')
+  })
 
   const verificationCommands = (section: string | undefined) =>
     [...(section ?? '').matchAll(/```sh\n([\s\S]*?)\n```/g)]
@@ -568,6 +607,7 @@ docker compose up -d --wait`)
     'compose stop app proxy',
     'compose exec -T db pg_dump -U hourmere -d hourmere -Fc',
     'install .env',
+    'install Caddyfile',
     'git rev-parse HEAD',
     'compose cp proxy:/data',
     'compose cp proxy:/config',
@@ -576,13 +616,16 @@ docker compose up -d --wait`)
   it.each([false, true])(
     'stops an enabled worker before backing up (worker: %s)',
     async (enabled) => {
-      const { result, calls, dump, backupDirectory } = await executePastedCommands(backupCommands, {
-        worker: enabled,
-        proxy: true,
-      })
+      const { result, calls, dump, caddyfile, caddyfileMode, backupDirectory } =
+        await executePastedCommands(backupCommands, {
+          worker: enabled,
+          proxy: true,
+        })
       expectInteractiveShells(result, 0)
       expect(calls).toEqual(backupCalls(enabled))
       expect(dump).toBe('synthetic-dump\n')
+      expect(caddyfile).toBe('synthetic-operator-customization\n')
+      expect(caddyfileMode).toBe(0o600)
       expect(result.stdout).toContain(`${backupDirectory}\n`)
     },
   )
@@ -686,7 +729,8 @@ docker compose up -d --wait`)
     )
     expect(text).toMatch(/even before this Compose `up`/)
     expect(text).toMatch(/including a partial `stop` failure/)
-    expect(text).toMatch(/If no service was stopped, only the checkout is needed/)
+    expect(text).toMatch(/(?:even if no service was stopped|If no service was stopped)/)
+    expect(text).toContain('the running proxy still holds its old inode')
     expect(text).toMatch(/do not add `--build` or pull an application image during this recovery/)
   })
 
@@ -705,7 +749,8 @@ docker compose up -d --wait`)
       expect(commands).toBe(`(
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
   unset COMPOSE_FILE &&
-  docker compose up -d --wait
+  docker compose up -d --wait &&
+  docker compose up -d --wait --force-recreate --no-deps proxy
 )`)
     })
 
@@ -719,7 +764,11 @@ docker compose up -d --wait`)
           zshPty,
         })
         expectInteractiveShells(result, 0)
-        expect(calls).toEqual(['git checkout PREVIOUS_BRANCH_OR_TAG', 'compose up -d --wait'])
+        expect(calls).toEqual([
+          'git checkout PREVIOUS_BRANCH_OR_TAG',
+          'compose up -d --wait',
+          'compose up -d --wait --force-recreate --no-deps proxy',
+        ])
       },
     )
 
@@ -808,7 +857,7 @@ docker compose up -d --wait`)
       /while the overlay is still selected:[\s\S]*?docker compose rm -sf worker[\s\S]*?Then deselect the overlay with the helper:[\s\S]*?\.\/scripts\/disable-worker\.sh/,
     )
     expect(single).toContain('Remove any old `HOURMERE_ROLE=web`')
-    expect(single).toContain('docker compose up -d --build --wait')
+    expect(single).toContain('./scripts/compose-up.sh -d --build --wait')
     expect(single).toContain('default `all` role')
     const command = single.match(/```sh\n([^`]*docker compose rm[^`]*)\n```/)?.[1]
     const directory = mkdtempSync(join(tmpdir(), 'hourmere-single-container-docs-'))
@@ -839,7 +888,7 @@ docker compose up -d --wait`)
     {
       name: 'backup failure recovery',
       section: guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0],
-      calls: ['compose up -d --wait'],
+      calls: ['compose-up -d --wait'],
     },
     {
       name: 'restore drill database start',
@@ -860,6 +909,7 @@ docker compose up -d --wait`)
         'compose cp BACKUP/caddy-data/. proxy:/data',
         'compose cp BACKUP/caddy-config/. proxy:/config',
         'compose up -d --wait',
+        'compose up -d --wait --force-recreate --no-deps proxy',
       ],
     },
   ])('reads .env for standalone $name commands', ({ section, calls, databaseOnly }) => {
@@ -872,6 +922,12 @@ docker compose up -d --wait`)
     const directory = mkdtempSync(join(tmpdir(), 'hourmere-standalone-docs-'))
     try {
       writeFileSync(join(directory, 'hourmere.dump'), 'synthetic-dump\n')
+      mkdirSync(join(directory, 'scripts'))
+      writeFileSync(
+        join(directory, 'scripts', 'compose-up.sh'),
+        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "compose-up $*" >> "$CALL_LOG"\n`,
+        { mode: 0o755 },
+      )
       writeFileSync(
         join(directory, 'docker'),
         `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n`,
