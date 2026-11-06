@@ -1,5 +1,7 @@
 import { expect, test } from '../fixtures.ts'
 
+test.use({ waitlistSmtp: true })
+
 for (const kind of ['personal', 'team', 'embed'] as const)
   test(`a full ${kind} booking range joins and verifies through the real mail sink`, async ({
     page,

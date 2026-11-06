@@ -202,6 +202,7 @@ describe('documentation table rendering', () => {
 // Render the real newly published tables as well as the small synthetic classifier fixture.
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
 const publishedTablePages = [
+  ['booking-waitlist', 2],
   ['webhooks', 4],
   ['cli', 1],
   ['notifications', 4],
@@ -241,6 +242,40 @@ describe('published documentation table coverage', () => {
           expect(cell.getAttribute('data-label')).toBe(headers[index])
         }
       }
+    }
+  })
+})
+
+describe('booking waitlist compact table values', () => {
+  it('renders compact identifier groups in one code run and rejects mixed-font source copies', async () => {
+    const source = readFileSync(
+      join(root, 'apps/site/src/content/docs/docs/booking-waitlist.md'),
+      'utf8',
+    ).replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '')
+    const renderer = await createSatteriMarkdownProcessor({
+      hastPlugins: [docsTablesPlugin()],
+      syntaxHighlight: false,
+    })
+    const check = async (markdown: string) => {
+      const { code: html } = await renderer.render(markdown)
+      const document = new JSDOM(html).window.document
+      const cells = [...document.querySelectorAll('td[data-cell="short"]')].filter((cell) =>
+        cell.querySelector('code'),
+      )
+      expect(cells.length).toBeGreaterThan(0)
+      for (const cell of cells) {
+        // Compact lists use one font and one inline run, matching other scope tables.
+        // Mixed prose commas and code text have different text-box tops in Starlight.
+        expect(cell.querySelectorAll('code')).toHaveLength(1)
+        expect(cell.textContent?.trim()).toBe(cell.querySelector('code')?.textContent)
+      }
+    }
+    await check(source)
+    for (const group of ['read, full', 'bookings, full', 'id, enabled', 'id, entryId']) {
+      expect(source).toContain(`\`${group}\``)
+      await expect(
+        check(source.replaceAll(`\`${group}\``, `\`${group.replace(', ', '`, `')}\``)),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
     }
   })
 })

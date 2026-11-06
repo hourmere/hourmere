@@ -1,5 +1,10 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'This waitlist is full (100 entries). Please check available times later.':
+    'This waitlist is full (100 entries). Please check available times later.',
+  'Waitlist email is unavailable. Please contact the host.':
+    'Waitlist email is unavailable. Please contact the host.',
+
   'This imported booking is read-only and managed in the original system.':
     'This imported booking is read-only and managed in the original system.',
   'This location is unavailable. Contact the host to book.':

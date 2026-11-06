@@ -15,6 +15,7 @@ import { DomainError } from './errors.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 import { cleanText } from './text.ts'
 import * as waitlist from './waitlist.ts'
+import * as policy from './waitlist-policy.ts'
 
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 const serverUrl = process.env.DATABASE_URL
@@ -45,6 +46,7 @@ function sourceCopy(changes: Change[] = [], overrides: Partial<typeof availabili
     sql,
     z,
     ...availability,
+    ...policy,
     DomainError,
     cleanText,
     ...overrides,
