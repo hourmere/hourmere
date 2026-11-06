@@ -291,7 +291,7 @@ describe('one-time booking MCP adapter', () => {
   it.each([
     [
       'validation privacy',
-      "privateInput ? 'Invalid booking request' : describeIssues(parsed.error.issues)",
+      "tool.privateValidationMessage ?? 'Invalid booking request'",
       'describeIssues(parsed.error.issues)',
       verifyValidationPrivacy,
     ],
