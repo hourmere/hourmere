@@ -1,4 +1,13 @@
 export const common = {
+  'We could not use the time details in this link. Please choose a time.':
+    'No hemos podido utilizar los datos de fecha y hora de este enlace. Elija un horario.',
+  'This meeting length is no longer offered. Please choose a time again.':
+    'Esta duración de reunión ya no está disponible. Vuelva a elegir un horario.',
+  'Checking the suggested time…': 'Comprobando el horario sugerido…',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    'El horario sugerido está seleccionado. Revise los detalles y confirme su reserva.',
+  'We could not check this time. Please try again.':
+    'No hemos podido comprobar este horario. Vuelva a intentarlo.',
   'These suggestions have expired. Check the currently available times.':
     'Estas sugerencias han vencido. Consulte los horarios disponibles actualmente.',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':

@@ -1,5 +1,38 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Enter button text so visitors can identify the button.':
+    '请输入按钮文字，以便访客了解按钮的用途。',
+  Embed: '嵌入',
+  'More actions for {0}': '{0}的更多操作',
+  'Embed {0}': '嵌入{0}',
+  'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
+    '暂时无法获取嵌入配置。请联系实例运维人员确认允许的网站来源。',
+  'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:':
+    '嵌入功能已停用。实例运维人员需要设置 EMBED_ALLOWED_ORIGINS 并重启网页服务。例如：',
+  'Allowed website origins': '允许的网站来源',
+  'Loading instance settings…': '正在加载实例设置……',
+  'This event type is inactive. Enable it and save before generating embed code.':
+    '此活动类型已停用。请先启用并保存，再生成嵌入代码。',
+  'Complete the saved event setup before generating embed code.':
+    '请先完善已保存活动的设置，再生成嵌入代码。',
+  'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.':
+    '此活动类型未公开列出，但仍可嵌入。任何获得代码或直接链接的人都可以预约。',
+  'Embed mode': '嵌入方式',
+  Inline: '内嵌',
+  'Popup button': '弹窗按钮',
+  'Initial height (pixels)': '初始高度（像素）',
+  'Use a whole number from 240 to 2000. The widget resizes automatically.':
+    '请输入 240 到 2000 之间的整数。嵌入组件会自动调整高度。',
+  'Button text': '按钮文字',
+  'Embed code': '嵌入代码',
+  'Copy embed code': '复制嵌入代码',
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    '实例的公开网址暂时无法用于嵌入。请联系实例运维人员检查 PUBLIC_URL。',
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.':
+    '此已保存的预约地址无法嵌入。请使用已保存的个人或团队预约链接。',
+  'Could not generate embed code. Check the embed settings and try again.':
+    '无法生成嵌入代码。请检查嵌入设置，然后重试。',
+  'Book a meeting': '预约会议',
   'After booking': '预约完成后',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
     '在预约确认信息后提供继续访问链接。受邀人离开前可以查看日历信息和管理链接。清空网址即可关闭此功能。',
@@ -642,8 +675,8 @@ export const admin = {
   'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
   'Notification language': '通知语言',
   'Choose a supported notification language.': '请选择支持的通知语言。',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
-    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。在顶栏选择界面语言之前，管理界面也使用此语言；选择后，两种语言互不影响。',
   'Connect a calendar account to get started.': '连接日历账号以开始使用。',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     '此 Google 日历使用{calendarZone}时区；你的可预约时段使用{scheduleZone}时区。预约对应同一时刻；Google 日历通常以{calendarZone}时间显示。',
@@ -1599,4 +1632,60 @@ export const admin = {
   'You have no working hours yet. Use the setup guide to add a default schedule.':
     '你尚未设置工作时间。请通过设置引导添加默认日程。',
   'Set working hours with the setup guide': '通过设置引导添加工作时间',
+  'Pick open times': '挑选可约时间',
+  'Copy open times into an email': '将可约时间复制到邮件',
+  'Choose 1–10 available times for the saved event type. Unsaved changes are not included.':
+    '为已保存的活动类型选择 1 至 10 个可约时间。未保存的更改不会包含在内。',
+  'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.':
+    '复制时会重新检查所选时间是否可约。这些时间不会被预留，受邀人打开链接时可能已不可约。受邀人仍需在预约页面上确认预约。',
+  'This event type is unlisted. Anyone with these links can open the booking page and book an available time.':
+    '此活动类型未公开列出。任何获得这些链接的人都可以打开预约页面，并选择可约时间进行预约。',
+  'Email display': '邮件显示',
+  'Meeting length': '会议时长',
+  'Email language': '邮件语言',
+  'Display time zone': '显示时区',
+  'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.':
+    '此处选择的语言和时区仅用于邮件片段。预约页面会使用每位受邀人的偏好设置。',
+  'Available times': '可选时间',
+  'Loading available times…': '正在加载可约时间……',
+  'We could not load available times. Please try again.': '无法加载可约时间。请重试。',
+  'No times are offered on this date.': '此日期没有可约时间。',
+  'Check availability again': '重新检查可约时间',
+  'Selected times: {0} (maximum 10)': '已选择{0}个备选时间，最多可选 10 个',
+  'Selected times': '已选时间',
+  'No longer offered': '已不可约',
+  'Remove {time}': '移除{time}',
+  'Remove time': '移除时间',
+  'Preview email': '预览邮件',
+  'The email preview could not be created. Please choose fewer times and try again.':
+    '无法创建邮件预览。请少选几个时间后重试。',
+  'Complete plain-text email preview': '完整的纯文本邮件预览',
+  'Copy plain text': '复制纯文本',
+  'Copy rich text': '复制富文本',
+  'The full plain text above includes every booking link.': '上方的完整纯文本包含每一个预约链接。',
+  'Checking selected times…': '正在检查已选时间……',
+  'This meeting length is no longer offered. Reload the saved event type before trying again.':
+    '此会议时长已不可选。请重新加载已保存的活动类型后重试。',
+  'We could not check the selected times. Nothing was copied. Please try again.':
+    '无法检查已选时间，未复制任何内容。请重试。',
+  'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.':
+    '部分已选时间已不可约，未复制任何内容。请手动移除这些时间后重试。',
+  'Plain text copied.': '已复制纯文本。',
+  'Rich text copied with a plain-text fallback.': '已复制富文本，并包含纯文本备用版本。',
+  'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
+    '无法访问剪贴板。请手动选中并复制完整的纯文本预览。',
+  '{0} min': '{0}分钟',
+  'Checking that you can preview these times…': '正在确认你是否可以预览这些时间……',
+  'We could not prepare the preview. Nothing was copied. Please try again.':
+    '无法准备预览，未复制任何内容。请重试。',
+  'Availability date ({zone})': '可约日期（{zone}）',
+  'Email preview ready.': '邮件预览已就绪。',
+  'This time could not be displayed. Please try another display time zone.':
+    '无法显示此时间。请尝试其他显示时区。',
+  'The saved event title is invalid. Reload the saved event type and try again.':
+    '已保存的活动标题无效。请重新加载已保存的活动类型后重试。',
+  'The saved booking link is invalid. Reload the saved event type and try again.':
+    '已保存的预约链接无效。请重新加载已保存的活动类型后重试。',
+  'The email preview could not be created. Reload the saved event type and try again.':
+    '无法创建邮件预览。请重新加载已保存的活动类型后重试。',
 } as const

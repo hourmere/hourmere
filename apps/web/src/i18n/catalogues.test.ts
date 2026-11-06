@@ -46,6 +46,23 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  it('translates suggested-time statuses in every public locale', () => {
+    const keys = [
+      'We could not use the time details in this link. Please choose a time.',
+      'This meeting length is no longer offered. Please choose a time again.',
+      'Checking the suggested time…',
+      'The suggested time is selected. Review the details and confirm your booking.',
+      'We could not check this time. Please try again.',
+    ]
+    for (const { code } of registeredLocales) {
+      const catalogue = groups.common[`./catalogues/${code}/common.ts`]
+      for (const key of keys) {
+        expect(catalogue?.[key], `${code}: ${key}`).toBeTypeOf('string')
+        if (code !== 'en') expect(catalogue?.[key], `${code}: ${key}`).not.toBe(key)
+      }
+    }
+  })
+
   it('uses the proofread waitlist page keys in every public locale', () => {
     const expired = 'These suggestions have expired. Check the currently available times.'
     const waiting =

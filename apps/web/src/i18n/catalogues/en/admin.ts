@@ -1,5 +1,38 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Enter button text so visitors can identify the button.':
+    'Enter button text so visitors can identify the button.',
+  Embed: 'Embed',
+  'More actions for {0}': 'More actions for {0}',
+  'Embed {0}': 'Embed {0}',
+  'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
+    'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.',
+  'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:':
+    'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:',
+  'Allowed website origins': 'Allowed website origins',
+  'Loading instance settings…': 'Loading instance settings…',
+  'This event type is inactive. Enable it and save before generating embed code.':
+    'This event type is inactive. Enable it and save before generating embed code.',
+  'Complete the saved event setup before generating embed code.':
+    'Complete the saved event setup before generating embed code.',
+  'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.':
+    'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.',
+  'Embed mode': 'Embed mode',
+  Inline: 'Inline',
+  'Popup button': 'Popup button',
+  'Initial height (pixels)': 'Initial height (pixels)',
+  'Use a whole number from 240 to 2000. The widget resizes automatically.':
+    'Use a whole number from 240 to 2000. The widget resizes automatically.',
+  'Button text': 'Button text',
+  'Embed code': 'Embed code',
+  'Copy embed code': 'Copy embed code',
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.':
+    'This saved booking address cannot be embedded. Use a saved personal or team booking link.',
+  'Could not generate embed code. Check the embed settings and try again.':
+    'Could not generate embed code. Check the embed settings and try again.',
+  'Book a meeting': 'Book a meeting',
   'After booking': 'After booking',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
     'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.',
@@ -677,8 +710,8 @@ export const admin = {
     'Review meeting details and manage this booking.',
   'Notification language': 'Notification language',
   'Choose a supported notification language.': 'Choose a supported notification language.',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
-    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
+    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
   'Connect a calendar account to get started.': 'Connect a calendar account to get started.',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
@@ -1686,4 +1719,62 @@ export const admin = {
   'You have no working hours yet. Use the setup guide to add a default schedule.':
     'You have no working hours yet. Use the setup guide to add a default schedule.',
   'Set working hours with the setup guide': 'Set working hours with the setup guide',
+  'Pick open times': 'Pick open times',
+  'Copy open times into an email': 'Copy open times into an email',
+  'Choose 1–10 available times for the saved event type. Unsaved changes are not included.':
+    'Choose 1–10 available times for the saved event type. Unsaved changes are not included.',
+  'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.':
+    'Availability is checked again when you copy. Times are not reserved and may become unavailable. Invitees must confirm their bookings on the booking page.',
+  'This event type is unlisted. Anyone with these links can open the booking page and book an available time.':
+    'This event type is unlisted. Anyone with these links can open the booking page and book an available time.',
+  'Email display': 'Email display',
+  'Meeting length': 'Meeting length',
+  'Email language': 'Email language',
+  'Display time zone': 'Display time zone',
+  'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.':
+    'The language and time zone selected here apply only to the email snippet. Booking pages use each invitee’s preferences.',
+  'Available times': 'Available times',
+  'Loading available times…': 'Loading available times…',
+  'We could not load available times. Please try again.':
+    'We could not load available times. Please try again.',
+  'No times are offered on this date.': 'No times are offered on this date.',
+  'Check availability again': 'Check availability again',
+  'Selected times: {0} (maximum 10)': 'Selected times: {0} (maximum 10)',
+  'Selected times': 'Selected times',
+  'No longer offered': 'No longer offered',
+  'Remove {time}': 'Remove {time}',
+  'Remove time': 'Remove time',
+  'Preview email': 'Preview email',
+  'The email preview could not be created. Please choose fewer times and try again.':
+    'The email preview could not be created. Please choose fewer times and try again.',
+  'Complete plain-text email preview': 'Complete plain-text email preview',
+  'Copy plain text': 'Copy plain text',
+  'Copy rich text': 'Copy rich text',
+  'The full plain text above includes every booking link.':
+    'The full plain text above includes every booking link.',
+  'Checking selected times…': 'Checking selected times…',
+  'This meeting length is no longer offered. Reload the saved event type before trying again.':
+    'This meeting length is no longer offered. Reload the saved event type before trying again.',
+  'We could not check the selected times. Nothing was copied. Please try again.':
+    'We could not check the selected times. Nothing was copied. Please try again.',
+  'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.':
+    'Some selected times are no longer offered. Nothing was copied. Remove those times manually before trying again.',
+  'Plain text copied.': 'Plain text copied.',
+  'Rich text copied with a plain-text fallback.': 'Rich text copied with a plain-text fallback.',
+  'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.':
+    'Clipboard access was unavailable. Select and copy the complete plain-text preview manually.',
+  '{0} min': '{0} min',
+  'Checking that you can preview these times…': 'Checking that you can preview these times…',
+  'We could not prepare the preview. Nothing was copied. Please try again.':
+    'We could not prepare the preview. Nothing was copied. Please try again.',
+  'Availability date ({zone})': 'Availability date ({zone})',
+  'Email preview ready.': 'Email preview ready.',
+  'This time could not be displayed. Please try another display time zone.':
+    'This time could not be displayed. Please try another display time zone.',
+  'The saved event title is invalid. Reload the saved event type and try again.':
+    'The saved event title is invalid. Reload the saved event type and try again.',
+  'The saved booking link is invalid. Reload the saved event type and try again.':
+    'The saved booking link is invalid. Reload the saved event type and try again.',
+  'The email preview could not be created. Reload the saved event type and try again.':
+    'The email preview could not be created. Reload the saved event type and try again.',
 } as const

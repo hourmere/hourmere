@@ -1843,6 +1843,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instance/embed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the embed configuration for the signed-in host interface
+         * @description Requires a verified web session and current organization membership. Returns the operator-approved website origins to hosts generating booking widgets; these origins are never included in public instance discovery. API keys and MCP OAuth tokens cannot read this browser-session-only configuration. An absent origin list means unknown configuration; an empty list means embedding is disabled.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Private host embed configuration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EmbedConfiguration"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description embed_configuration_access_denied: requires a verified web session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp-oauth/connections": {
         parameters: {
             query?: never;
@@ -4126,6 +4192,15 @@ export interface components {
             /** @description Trimmed, well-formed Unicode on one line */
             name: string;
         };
+        EmbedConfiguration: {
+            /** @description Exact website origins approved for embedding; empty when disabled, absent when unknown */
+            embedAllowedOrigins?: string[];
+            /**
+             * Format: uri
+             * @description The public origin of this instance, configured by its operator
+             */
+            publicUrl: string;
+        };
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
@@ -4544,6 +4619,8 @@ export interface components {
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
+            /** @description Whether embedding is enabled; absent when unknown */
+            embedEnabled?: boolean;
             /** @description Whether hosts may add plain-text notes to follow-up emails */
             followUpHostNotesEnabled?: boolean;
             /**
@@ -4568,6 +4645,8 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
+            slotSnippetsEnabled?: boolean;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured

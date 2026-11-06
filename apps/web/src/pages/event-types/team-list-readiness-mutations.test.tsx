@@ -46,6 +46,7 @@ function copy(code: string, exported: string, dependencies: Record<string, unkno
 const EmptyComponent = () => null
 
 const common = {
+  EventEmbedAction: () => null,
   ...paths,
   Link,
   CopyButton,

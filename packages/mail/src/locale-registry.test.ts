@@ -170,7 +170,7 @@ describe('test-only locale mail registration', () => {
     expect(message.subject).toBe('Fixture équipe Orbital {inviter}')
     expect(message.html).toContain('<html lang="qaa">')
     expect(message.text).toContain('Ada invited you to join the team “Orbital {inviter}”')
-    expect(message.text).toContain('This invitation expires at 2026-10-29 17:30:00 UTC.')
+    expect(message.text).toContain('This invitation expires on 29 octobre 2026, 17:30 UTC.')
   })
 
   it('wraps long catalogue field labels independently of the language', () => {

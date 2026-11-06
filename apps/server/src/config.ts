@@ -167,6 +167,9 @@ const schema = z
       ),
     ),
     MAIL_FROM: optional(z.string()),
+    SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
+      (value) => value === 'true',
+    ),
     FOLLOW_UP_HOST_NOTES_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value !== 'false',
     ),

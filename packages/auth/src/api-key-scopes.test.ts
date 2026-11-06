@@ -73,6 +73,7 @@ const restContract = {
     'POST /api/v1/conference-connections/{id}/refresh',
     'POST /api/v1/conference-connections/zoom/authorize',
     'POST /api/v1/conference-connections/zoom/authorize-meetings',
+    'GET /api/v1/instance/embed',
     'GET /api/v1/mcp-oauth/connections',
     'DELETE /api/v1/mcp-oauth/connections/{id}',
     'POST /api/v1/mcp-oauth/consent',
