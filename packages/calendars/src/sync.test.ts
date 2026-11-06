@@ -989,7 +989,13 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     await seen
     const queue = { enqueue: vi.fn(async () => null) }
     const pending = createPublicBooking(
-      { db, now: () => instant('2026-11-01T12:00:00Z'), notify: calendarBookingNotifier(queue) },
+      {
+        db,
+        now: () => instant('2026-11-01T12:00:00Z'),
+        notify: async (trx, event) => {
+          if (!('requestId' in event)) await calendarBookingNotifier(queue)(trx, event)
+        },
+      },
       {
         handle: 'sync-host',
         slug: 'intro',

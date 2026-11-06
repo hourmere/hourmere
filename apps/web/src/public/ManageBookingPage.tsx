@@ -199,7 +199,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
       }}
       onCancelled={(cancelled) => setBooking({ ...booking, ...cancelled })}
       onRescheduled={(next, nextToken) => {
-        setBooking({ ...booking, ...next })
+        setBooking(next)
         if (nextToken) {
           setToken(nextToken)
           setNewToken(nextToken)
@@ -407,6 +407,13 @@ function ManageView({
         </div>
       ) : (
         <div className="card public-card manage">
+          {booking.pendingReschedule && !started && booking.status === 'confirmed' && (
+            <p className="notice" role="status">
+              {t(
+                'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
+              )}
+            </p>
+          )}
           {mode.kind === 'view' && (
             <BookingSummary
               booking={booking}
@@ -464,7 +471,11 @@ function ManageView({
               onBack={() => setMode({ kind: 'view' })}
               onCancel={async (reason) => {
                 try {
-                  const cancelled = await cancelManagedBooking(token, reason)
+                  const cancelled = await cancelManagedBooking(
+                    token,
+                    reason,
+                    booking.pendingReschedule?.id,
+                  )
                   onCancelled({ ...booking, ...cancelled })
                   setMode({
                     kind: 'view',
@@ -499,8 +510,13 @@ function ManageView({
               onConfirm={async () => {
                 const { slot } = mode
                 try {
-                  const result = await rescheduleManagedBooking(token, slot.start)
-                  onRescheduled({ ...booking, ...result.booking }, result.manageToken)
+                  const result = await rescheduleManagedBooking(
+                    token,
+                    slot.start,
+                    booking.pendingReschedule?.id,
+                  )
+                  const { pendingReschedule: _pending, ...previous } = booking
+                  onRescheduled({ ...previous, ...result.booking }, result.manageToken)
                   setMode({
                     kind: 'view',
                     message: 'Your booking is moved to the new time.',
