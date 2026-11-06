@@ -104,7 +104,94 @@ function error(result: Awaited<ReturnType<typeof runTool>>) {
 const call = (tool: Tool, input: unknown, caller: McpCaller = principal) =>
   runTool(tool, input, { caller, trustedIp: '192.0.2.45', rateLimit: () => {} }, () => {})
 
+async function assertMissingSecretParity(
+  factory: Factory,
+  name: string,
+  team: boolean,
+  missingSmtp = false,
+) {
+  const db = {} as Db
+  const app = createApp({
+    publicUrl,
+    checkDb: async () => {},
+    authHandler: async () => new Response(null, { status: 404 }),
+    resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+    routes: [
+      publicSchemas.publicRoutes({ db, ...(missingSmtp ? { waitlistSecret: secret } : {}) }),
+    ],
+  })
+  const resend = name === 'resend_waitlist_verification'
+  const { handle, slug, ...join } = args
+  const body = resend ? { email: args.email } : join
+  const response = await app.request(
+    `/api/v1/public/${team ? 'teams/' : ''}${handle}/${slug}/waitlist${resend ? '/resend' : ''}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  expect(response.status).toBe(409)
+  const rest = await response.json()
+  const expected = missingSmtp ? 'waitlist_smtp_not_configured' : 'waitlist_unavailable'
+  expect(rest).toEqual({ error: expected })
+  const tool = find(factory({ db, ...(missingSmtp ? { secret } : {}) }), name)
+  const mcp = error(
+    await call(tool, { ...body, slug, ...(team ? { teamSlug: handle } : { handle }) }),
+  )
+  expect(mcp.error).toBe(expected)
+  await expect(
+    tool.run(
+      { ...body, slug, ...(team ? { teamSlug: handle } : { handle }) },
+      {
+        caller: principal,
+        trustedIp: '192.0.2.45',
+        rateLimit: () => {},
+      },
+    ),
+  ).rejects.toMatchObject({ kind: 'conflict', code: expected })
+}
+
 describe('MCP waitlist adapter protections', () => {
+  it.each(['join_waitlist', 'resend_waitlist_verification'])(
+    'matches REST missing-secret errors for %s on personal and team pages',
+    async (name) => {
+      for (const team of [false, true]) await assertMissingSecretParity(waitlistTools, name, team)
+    },
+  )
+  it.each(['join_waitlist', 'resend_waitlist_verification'])(
+    'kills source-copy missing-secret divergence for %s',
+    async (name) => {
+      const factory = sourceCopy([
+        "if (!secret) throw new DomainError('conflict', 'waitlist_unavailable')",
+        "if (!secret) throw new DomainError('not_found', 'event_type_not_found')",
+      ])
+      await expect(assertMissingSecretParity(factory, name, false)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
+  it.each(['join_waitlist', 'resend_waitlist_verification'])(
+    'matches REST SMTP-required errors for %s on personal and team pages',
+    async (name) => {
+      for (const team of [false, true])
+        await assertMissingSecretParity(waitlistTools, name, team, true)
+    },
+  )
+  it.each(['join_waitlist', 'resend_waitlist_verification'])(
+    'kills admitting %s without SMTP configuration',
+    async (name) => {
+      const factory = sourceCopy([
+        "    if (!smtpConfigured) throw new DomainError('conflict', 'waitlist_smtp_not_configured')",
+        '',
+      ])
+      await expect(assertMissingSecretParity(factory, name, false, true)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
   const admissionTools = ['join_waitlist', 'resend_waitlist_verification'] as const
   function toolMutation(name: string, before: string, after: string): Change {
     const source = readFileSync('apps/server/src/mcp/waitlist.ts', 'utf8')
@@ -126,7 +213,7 @@ describe('MCP waitlist adapter protections', () => {
     const registry = sourceCopy(change, {
       joinWaitlist: service,
       resendWaitlistVerification: service,
-    })({ db: {} as Db, secret })
+    })({ db: {} as Db, smtpConfigured: true, secret })
     const other: McpCaller = { ...principal, user: { ...principal.user, id: randomUUID() } }
     const app = createApp({
       publicUrl,
@@ -203,7 +290,8 @@ describe('MCP waitlist adapter protections', () => {
   })
   function verifyRetryAnnotation(name: (typeof admissionTools)[number], change?: Change) {
     expect(
-      find(sourceCopy(change)({ db: {} as Db, secret }), name).annotations.idempotentHint,
+      find(sourceCopy(change)({ db: {} as Db, smtpConfigured: true, secret }), name).annotations
+        .idempotentHint,
     ).toBe(false)
   }
   it.each(admissionTools)('advertises no idempotent retry guarantee for %s', (name) =>
@@ -218,7 +306,7 @@ describe('MCP waitlist adapter protections', () => {
     ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
   async function verifyPrivateDiagnostics(
-    name: (typeof admissionTools)[number],
+    name: (typeof admissionTools)[number] | 'list_waitlist_entries' | 'remove_waitlist_entry',
     frameworkChange?: Change,
     toolChange?: Change,
   ) {
@@ -242,12 +330,19 @@ describe('MCP waitlist adapter protections', () => {
       const registry = sourceCopy(toolChange, {
         joinWaitlist: fail,
         resendWaitlistVerification: fail,
-      })({ db: {} as Db, secret })
+        listEventTypeWaitlistEntries: fail,
+        removeEventTypeWaitlistEntry: fail,
+      })({ db: {} as Db, smtpConfigured: true, secret })
       const logs = vi.fn()
       const input =
         name === 'join_waitlist'
           ? args
-          : { handle: args.handle, slug: args.slug, email: args.email }
+          : name === 'resend_waitlist_verification'
+            ? { handle: args.handle, slug: args.slug, email: args.email }
+            : {
+                id: randomUUID(),
+                ...(name === 'remove_waitlist_entry' ? { entryId: randomUUID() } : {}),
+              }
       const result = await frameworkCopy(frameworkChange).runTool(
         find(registry, name),
         input,
@@ -276,13 +371,29 @@ describe('MCP waitlist adapter protections', () => {
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
+  it.each(['list_waitlist_entries', 'remove_waitlist_entry'] as const)(
+    'redacts database emails in %s management diagnostics',
+    (name) => verifyPrivateDiagnostics(name),
+  )
+  it.each(['list_waitlist_entries', 'remove_waitlist_entry'] as const)(
+    'kills exposing database emails in %s management diagnostics',
+    async (name) => {
+      await expect(
+        verifyPrivateDiagnostics(
+          name,
+          undefined,
+          toolMutation(name, 'privateDiagnostics: true', 'privateDiagnostics: false'),
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
   it('kills removing private diagnostic suppression from the framework', async () => {
     await expect(
       verifyPrivateDiagnostics('join_waitlist', ['tool.privateDiagnostics\n', 'false\n']),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
   async function verifyForwarding(factory: Factory, team = false) {
-    const tools = factory({ db: {} as Db, secret, publicUrl, now })
+    const tools = factory({ db: {} as Db, smtpConfigured: true, secret, publicUrl, now })
     const input = team ? { ...args, handle: undefined, teamSlug: 'team' } : args
     for (const name of ['join_waitlist', 'resend_waitlist_verification']) {
       const tool = find(tools, name)
@@ -297,7 +408,10 @@ describe('MCP waitlist adapter protections', () => {
     const join = vi.fn(async (..._input: unknown[]) => ({ accepted: true as const }))
     const factory = sourceCopy(change, { joinWaitlist: join })
     const result = await call(
-      find(factory({ db: {} as Db, secret, publicUrl, now }), 'join_waitlist'),
+      find(
+        factory({ db: {} as Db, smtpConfigured: true, secret, publicUrl, now }),
+        'join_waitlist',
+      ),
       args,
     )
     expect(result.isError).toBeFalsy()
@@ -331,7 +445,7 @@ describe('MCP waitlist adapter protections', () => {
   async function verifyStrictInput(change?: Change) {
     const join = vi.fn(async () => ({ accepted: true as const }))
     const tool = find(
-      sourceCopy(change, { joinWaitlist: join })({ db: {} as Db, secret }),
+      sourceCopy(change, { joinWaitlist: join })({ db: {} as Db, smtpConfigured: true, secret }),
       'join_waitlist',
     )
     expect(error(await call(tool, { ...args, trustedIp: '198.51.100.1' })).error).toBe(
@@ -350,7 +464,7 @@ describe('MCP waitlist adapter protections', () => {
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('requires a unique page reference and explicit consent', async () => {
-    const tools = waitlistTools({ db: {} as Db, secret })
+    const tools = waitlistTools({ db: {} as Db, smtpConfigured: true, secret })
     for (const input of [
       { ...args, teamSlug: 'team' },
       { ...args, handle: undefined },
@@ -361,7 +475,10 @@ describe('MCP waitlist adapter protections', () => {
       expect(error(await call(find(tools, 'join_waitlist'), input)).error).toBe('invalid_request')
   })
   async function verifyPrivateErrors(change?: Change) {
-    const tool = find(sourceCopy(change)({ db: {} as Db, secret }), 'join_waitlist')
+    const tool = find(
+      sourceCopy(change)({ db: {} as Db, smtpConfigured: true, secret }),
+      'join_waitlist',
+    )
     const result = error(await call(tool, { ...args, [args.email]: true }))
     expect(JSON.stringify(result).includes(args.email)).toBe(false)
   }
@@ -374,7 +491,11 @@ describe('MCP waitlist adapter protections', () => {
       removalToken: token,
       email: args.email,
     })
-    const tools = sourceCopy(change, { joinWaitlist })({ db: {} as Db, secret })
+    const tools = sourceCopy(change, { joinWaitlist })({
+      db: {} as Db,
+      smtpConfigured: true,
+      secret,
+    })
     const result = await call(find(tools, 'join_waitlist'), args)
     expect(result.structuredContent).toEqual({ accepted: true })
     expect(JSON.stringify(result).includes(token)).toBe(false)
@@ -404,7 +525,7 @@ describe('MCP waitlist adapter protections', () => {
       const tools = sourceCopy(undefined, {
         joinWaitlist: reject,
         resendWaitlistVerification: reject,
-      })({ db: {} as Db, secret })
+      })({ db: {} as Db, smtpConfigured: true, secret })
       const result = await call(
         find(tools, name),
         name === 'join_waitlist' ? args : { handle: 'host', slug: 'intro', email: args.email },
@@ -417,7 +538,7 @@ describe('MCP waitlist adapter protections', () => {
       joinWaitlist: async () => {
         throw new scheduling.WaitlistRateLimitError(45)
       },
-    })({ db: {} as Db, secret })
+    })({ db: {} as Db, smtpConfigured: true, secret })
     const result = await frameworkCopy(change).runTool(
       find(tools, 'join_waitlist'),
       args,
@@ -600,7 +721,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI waitlist with shared ser
   beforeEach(async () => {
     await db.deleteFrom('waitlist_verification_requests').execute()
   })
-  const tools = () => waitlistTools({ db, secret, publicUrl, now })
+  const tools = () => waitlistTools({ db, secret, smtpConfigured: true, publicUrl, now })
   it('round-trips settings and returns identical acceptance for new and existing email', async () => {
     const registry = tools()
     expect(

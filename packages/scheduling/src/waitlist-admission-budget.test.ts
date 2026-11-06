@@ -13,6 +13,7 @@ import { DomainError } from './errors.ts'
 import { createFixtures } from './testing.ts'
 import { cleanText } from './text.ts'
 import * as waitlist from './waitlist.ts'
+import * as policy from './waitlist-policy.ts'
 
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 type Service = Pick<typeof waitlist, 'joinWaitlist' | 'resendWaitlistVerification'>
@@ -36,6 +37,7 @@ function sourceCopy(change: Change): Service {
     sql,
     z,
     ...availability,
+    ...policy,
     DomainError,
     cleanText,
   }
@@ -211,7 +213,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .execute()
       const before = await db.selectFrom('waitlist_verification_requests').selectAll().execute()
       const mailBefore = await db.selectFrom('waitlist_verification_outbox').selectAll().execute()
-      expect(await issue(service, kind, f.input)).toEqual({ accepted: true })
+      if (kind === 'join' && reason === 'entry capacity')
+        await expect(issue(service, kind, f.input)).rejects.toMatchObject({ code: 'waitlist_full' })
+      else expect(await issue(service, kind, f.input)).toEqual({ accepted: true })
       const after = await db.selectFrom('waitlist_verification_requests').selectAll().execute()
       expect(after, `${kind} ${reason} must debit IP and event`).toHaveLength(before.length + 1)
       expect(
@@ -230,9 +234,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
     }
     for (const kind of ['join', 'resend'] as const)
       it.each(suppressedCases)(
-        `counts silent ${kind} requests for %s without debiting mail`,
+        `counts unmailed ${kind} requests for %s without debiting mail`,
         (reason) => assertSuppressedAccounting(kind, reason),
       )
+
+    it('kills a source-copy capacity rejection that rolls back durable accounting', async () => {
+      await expect(
+        assertSuppressedAccounting(
+          'join',
+          'entry capacity',
+          sourceCopy([
+            "if (Number(count.n) >= 100) return 'full' as const",
+            "if (Number(count.n) >= 100) throw new DomainError('conflict', 'waitlist_full')",
+          ]),
+        ),
+      ).rejects.toThrow(/must debit IP and event/)
+    })
 
     it.each(['join', 'resend'] as const)(
       'kills a source-copy bypass of durable accounting for silent %s',
