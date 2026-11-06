@@ -40,6 +40,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- Booking workflows are [design only](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md).
+  Conditional email and webhook actions are not available yet, including for self-hosters.
+  Existing reminders, follow-ups and signed booking webhooks keep their current behavior.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
