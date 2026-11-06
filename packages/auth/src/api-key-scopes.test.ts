@@ -35,6 +35,7 @@ const restContract = {
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   booking_read: [
+    'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
@@ -345,6 +346,7 @@ describe('shared API-key scope policy', () => {
         'save_schedule_availability',
         'whoami',
         'find_available_slots',
+        'generate_open_time_snippet',
         'create_booking',
         'reschedule_booking',
         'cancel_booking',
@@ -375,6 +377,7 @@ describe('shared API-key scope policy', () => {
       read: [
         'whoami',
         'find_available_slots',
+        'generate_open_time_snippet',
         'list_bookings',
         'get_profile',
         'list_event_types',
@@ -393,6 +396,7 @@ describe('shared API-key scope policy', () => {
         'revoke_one_time_link',
         'whoami',
         'find_available_slots',
+        'generate_open_time_snippet',
         'create_booking',
         'reschedule_booking',
         'cancel_booking',

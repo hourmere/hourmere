@@ -1,4 +1,5 @@
 {
+  "generateOpenTimeSnippet": { "mcp": "generate_open_time_snippet", "cli": "open-time-snippet" },
   "authorizeConferenceConnectionMeetings": {
     "exemption": "browser-session-only",
     "reason": "Authorizing meeting permissions on an existing Zoom connection requires live browser consent."

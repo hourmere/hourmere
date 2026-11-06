@@ -36,6 +36,7 @@ const all = [
   'create_one_time_link',
   'list_one_time_links',
   'revoke_one_time_link',
+  'generate_open_time_snippet',
   'list_calendar_connections',
   'list_conference_connections',
   'get_event_type_waitlist',
@@ -88,7 +89,7 @@ const denial = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
 }
-const catalog = productTools({ db: {} as Db })
+const catalog = productTools({ db: {} as Db, slotSnippetsEnabled: true })
 function principal(scope: ApiKeyScope): McpCaller {
   return {
     kind: 'api_key',

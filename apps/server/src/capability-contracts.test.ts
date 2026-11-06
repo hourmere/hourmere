@@ -33,7 +33,7 @@ describe('REST and MCP capability contract', () => {
     // Use the same registry as the running server, without connecting to a database.
     const db = createDb(createPool('postgres://synthetic@127.0.0.1:9/parity-contract'))
     try {
-      const tools = productTools({ db })
+      const tools = productTools({ db, slotSnippetsEnabled: true })
       const { document, routes: registeredRest } = await openApiRouteInventory()
       const { paths } = document as { paths: Paths }
       const rest = Object.entries(paths).flatMap(([path, item]) =>

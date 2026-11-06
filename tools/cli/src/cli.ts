@@ -21,6 +21,7 @@ export const COMMANDS = {
   'schedule-availability': 'get_schedule_availability',
   'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
+  'open-time-snippet': 'generate_open_time_snippet',
   book: 'create_booking',
   list: 'list_bookings',
   reschedule: 'reschedule_booking',
@@ -38,7 +39,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere --help | --version
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
-          set-event-notifications, schedules, schedule, slots,
+          set-event-notifications, schedules, schedule, slots, open-time-snippet,
           schedule-availability, save-availability,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
@@ -55,7 +56,7 @@ Invitee name/email become visible to the target website and its analytics when e
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
-stdout is JSON with management capabilities redacted. --output creates a new 0600 JSON
+stdout is JSON with management capabilities redacted (--json makes this explicit). --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
 Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
@@ -64,6 +65,9 @@ For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug
 one-time-links create requires bookings or full scope, eventTypeId and an explicit idempotencyKey.
 Its secret URL is printed once to stdout; --output is refused and nothing is stored.
 one-time-links list requires read or full; revoke requires bookings or full and eventTypeId plus id.
+open-time-snippet --json --input - generates text/HTML and direct links without reserving times.
+Input: eventTypeId or slug, from/to instants (at most 31 days), optional count (1–10),
+locale, displayTimeZone and durationMinutes. Requires read, bookings or full scope.
 See https://hourmere.com/docs/cli for complete usage.
 `
 
@@ -90,6 +94,7 @@ function parse(argv: readonly string[]): Options {
     if (
       !flag ||
       ![
+        '--json',
         '--input',
         '--output',
         '--url',
@@ -104,6 +109,7 @@ function parse(argv: readonly string[]): Options {
     )
       throw new CliError('invalid_options')
     seen.add(flag)
+    if (flag === '--json') continue
     const redirectFlag =
       flag.startsWith('--success-redirect-') || flag === '--clear-success-redirect'
     if (redirectFlag && !['create-event', 'update-event'].includes(command))

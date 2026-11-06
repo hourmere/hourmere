@@ -111,6 +111,16 @@ An exact `Idempotency-Key` retry never creates a second link and returns
 `409 one_time_link_already_created` because the URL cannot be recovered.
 See [one-time booking links](/docs/one-time-links) for examples, permissions and limits.
 
+## Generate an email snippet
+
+`POST /api/v1/open-time-snippets` accepts exactly one of `eventTypeId` or `slug`,
+required `from`/`to` instants (at most 31 elapsed days), and optional `count` (1–10, default 3),
+`locale`, `displayTimeZone` and `durationMinutes`. It returns chosen `slots` with direct
+links plus `text` and `html`. Personal owners and team owners/admins can use `read`,
+`bookings` or `full` keys when `SLOT_SNIPPETS_ENABLED` is enabled. It reserves nothing.
+See [the agent guide](/docs/open-time-snippets) for a complete curl example, response
+fields, date boundaries and taken-time fallback.
+
 ## Find a time
 
 Choose a future UTC range within the event type's booking window, at most 62 days.

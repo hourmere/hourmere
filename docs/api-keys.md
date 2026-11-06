@@ -174,6 +174,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `PUT /api/v1/event-types/{id}/waitlist` | Session or API key | `full` |
 | `GET /api/v1/event-types/{id}/waitlist/entries` | Session or API key | `full, read` |
 | `DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}` | Session or API key | `full` |
+| `POST /api/v1/open-time-snippets` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, read` |
 | `POST /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, bookings` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, read` |
@@ -265,6 +266,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
+| `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
