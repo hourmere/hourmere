@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { createRequire } from 'node:module'
 import nock from 'nock'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const App = require(process.env.HOURMERE_ZAPIER_TEST_APP ?? '../index.js')
@@ -385,37 +385,123 @@ describe('Hourmere REST hooks', () => {
       expect(result[0].organizationId).toBeNull()
     },
   )
-  it('returns stable signed IDs on accepted retries for downstream idempotency', async () => {
+  // Core's appTester cache mock persists but ignores nx; model atomic claims here.
+  function hookContext() {
+    const claims = new Set<string>()
+    return {
+      console: { log: vi.fn() },
+      cache: {
+        set: vi.fn(async (key: string, _value: number, _ttl: number, _scope: null, nx: boolean) => {
+          if (nx && claims.has(key)) return false
+          claims.add(key)
+          return true
+        }),
+      },
+    }
+  }
+
+  it('claims durable subscription-scoped replay storage through appTester', async () => {
     const hook = delivery()
-    const perform = App.triggers.booking_created.operation.perform
-    const first = await run(perform, {}, hook.bundle)
-    const replay = await run(perform, {}, hook.bundle)
-    expect(first[0].id).toBe(nextId)
-    expect(replay[0].id).toBe(first[0].id)
+    await run(App.triggers.booking_created.operation.perform, {}, hook.bundle)
+    expect(appTester.zcacheTestObj[`hm:${id}:${nextId}`]).toBe('1')
   })
+  it('drops in-window duplicates including freshly signed retries', async () => {
+    const z = hookContext()
+    const perform = App.triggers.booking_created.operation.perform
+    const first = await perform(z, delivery().bundle)
+    expect(first[0].id).toBe(nextId)
+    await expect(perform(z, delivery().bundle)).resolves.toEqual([])
+    await expect(perform(z, delivery('booking.created', 1).bundle)).resolves.toEqual([])
+    expect(z.cache.set).toHaveBeenCalledWith(`hm:${id}:${nextId}`, 1, 86400, null, true)
+    expect(z.console.log).toHaveBeenCalledWith('Hourmere webhook: duplicate_webhook_event')
+  })
+  it('accepts the same event for different subscriptions', async () => {
+    const z = hookContext()
+    const perform = App.triggers.booking_created.operation.perform
+    await expect(perform(z, delivery().bundle)).resolves.toHaveLength(1)
+    const second = delivery()
+    second.bundle.subscribeData.id = nextId
+    await expect(perform(z, second.bundle)).resolves.toHaveLength(1)
+  })
+  it('accepts perform delayed by 59 minutes after acknowledged intake', async () => {
+    await expect(
+      App.triggers.booking_created.operation.perform(
+        hookContext(),
+        delivery('booking.created', -3540).bundle,
+      ),
+    ).resolves.toHaveLength(1)
+  })
+  it.each(['throws', 'null'])(
+    'accepts authentic events during cache outage: %s',
+    async (failure) => {
+      const z = hookContext()
+      if (failure === 'throws') z.cache.set.mockRejectedValue(new Error(secret))
+      else z.cache.set.mockImplementation(async () => null as unknown as boolean)
+      await expect(
+        App.triggers.booking_created.operation.perform(z, delivery().bundle),
+      ).resolves.toHaveLength(1)
+      expect(z.console.log.mock.calls).toEqual([['Hourmere webhook: replay_cache_unavailable']])
+    },
+  )
   it.each([
     'tampered',
     'wrong secret',
     'missing secret',
+    'missing subscription',
     'stale',
     'future',
     'missing signature',
+    'malformed signature',
     'missing raw body',
+    'invalid JSON',
     'wrong event',
-  ])('rejects %s deliveries', async (failure) => {
+  ])('drops %s deliveries with a masked specific reason and no cache claim', async (failure) => {
     const hook = delivery(
       failure === 'wrong event' ? 'booking.cancelled' : 'booking.created',
-      failure === 'stale' ? -301 : failure === 'future' ? 301 : 0,
+      failure === 'stale' ? -3601 : failure === 'future' ? 3601 : 0,
     )
     if (failure === 'tampered') hook.bundle.rawRequest.content += ' '
     if (failure === 'missing secret') hook.bundle.subscribeData.secret = ''
+    if (failure === 'missing subscription') hook.bundle.subscribeData.id = ''
     if (failure === 'wrong secret') hook.bundle.subscribeData.secret = 'wrong-synthetic-secret'
     if (failure === 'missing signature')
       hook.bundle.rawRequest.headers['Http-Webhook-Signature'] = ''
+    if (failure === 'malformed signature')
+      hook.bundle.rawRequest.headers['Http-Webhook-Signature'] =
+        hook.bundle.rawRequest.headers['Http-Webhook-Signature'].slice(3)
     if (failure === 'missing raw body') hook.bundle.rawRequest.content = ''
+    if (failure === 'invalid JSON') {
+      hook.bundle.rawRequest.content = '{invalid'
+      const timestamp = hook.bundle.rawRequest.headers['Http-Webhook-Timestamp']
+      hook.bundle.rawRequest.headers['Http-Webhook-Signature'] =
+        `v1=${createHmac('sha256', secret).update(`${timestamp}.{invalid`).digest('hex')}`
+    }
+    const z = hookContext()
+    await expect(App.triggers.booking_created.operation.perform(z, hook.bundle)).resolves.toEqual(
+      [],
+    )
+    expect(z.console.log.mock.calls).toEqual([
+      [
+        `Hourmere webhook: ${failure === 'stale' || failure === 'future' ? 'stale_webhook_timestamp' : 'invalid_webhook_signature'}`,
+      ],
+    ])
+    expect(z.cache.set).not.toHaveBeenCalled()
+    // Exercise the real platform execution path as well.
     await expect(
       run(App.triggers.booking_created.operation.perform, {}, hook.bundle),
-    ).rejects.toThrow()
+    ).resolves.toEqual([])
+  })
+  it('treats an already deleted webhook as successfully unsubscribed', async () => {
+    api().delete(`/api/v1/webhooks/${id}`).reply(404, { error: 'webhook_not_found' })
+    await expect(
+      run(App.triggers.booking_created.operation.performUnsubscribe, {}, { subscribeData: { id } }),
+    ).resolves.toEqual({})
+  })
+  it('does not hide unrelated unsubscribe errors', async () => {
+    api().delete(`/api/v1/webhooks/${id}`).reply(404, { error: 'route_not_found' })
+    await expect(
+      run(App.triggers.booking_created.operation.performUnsubscribe, {}, { subscribeData: { id } }),
+    ).rejects.toThrow('route_not_found')
   })
   it('uses signed raw JSON rather than a substituted cleanedRequest', async () => {
     const hook = delivery()
@@ -426,6 +512,14 @@ describe('Hourmere REST hooks', () => {
 })
 
 describe('Hourmere API errors', () => {
+  it('marks a revoked key as expired so Zapier asks for reconnection', async () => {
+    api().get('/api/v1/me').reply(401, { error: 'unauthorized' })
+    await expect(run(App.authentication.test)).rejects.toMatchObject({
+      name: 'ExpiredAuthError',
+      message: expect.stringContaining('unauthorized'),
+    })
+  })
+
   it.each([
     [401, 'unauthorized'],
     [403, 'insufficient_scope'],

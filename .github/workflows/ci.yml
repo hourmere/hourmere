@@ -46,6 +46,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Install the separately licensed Zapier test dependencies
+        run: npm ci --ignore-scripts --audit=false --fund=false --prefix tools/zapier-hourmere
       - run: npm run lint
       - run: npm run typecheck
       - name: Install the interactive deployment-test shell
@@ -99,18 +101,25 @@ jobs:
 
   zapier-compatibility:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/zapier-hourmere
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: tools/zapier-hourmere/.node-version
           cache: npm
+          cache-dependency-path: tools/zapier-hourmere/package-lock.json
       - run: npm ci --ignore-scripts --audit=false --fund=false
-      - name: Test the Zapier runtime with mocked HTTP on Node 22
-        run: npm test -- tools/zapier-hourmere/test/app.test.ts --maxWorkers=2 --no-fsModuleCache
-      - run: npm run build --workspace @hourmere/zapier-hourmere
+      - name: Test the Zapier runtime and deployment protections with mocked HTTP on Node 22
+        run: npm test
+      - run: npm run build
+      - run: npm run typecheck
       - name: Validate locally without a Zapier account or network checks
-        run: npm run validate --workspace @hourmere/zapier-hourmere
+        run: npm run validate
+      - name: Verify the CLI build artifact against its committed dependency lock
+        run: npm run build:verify
 
   docker:
     runs-on: ubuntu-latest

@@ -36,7 +36,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
-| `tools/zapier-hourmere` | Private Zapier Platform CLI app using the existing REST API; deployed separately from Hourmere and excluded from its Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
+| `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
 CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
 iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet

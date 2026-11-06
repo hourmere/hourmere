@@ -27,8 +27,10 @@ npm run dev            # API on :3000, web app on http://localhost:5173
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.
 
-The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with a single
-`package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
+The main npm workspace covers `apps/*`, `packages/*`, `tools/api-types`, `tools/cli`
+and `tools/e2e`, with a `package-lock.json` at the root. The separate
+`tools/zapier-hourmere` package has its own lockfile; root installs do not download its
+Zapier Platform Agreement–licensed dependencies. Add a dependency to the workspace that uses it, e.g.
 `npm install <package> --workspace @hourmere/scheduling`, and commit the updated lockfile.
 
 ## Checks
@@ -41,6 +43,8 @@ tool makes CI fail immediately.
 CI runs these on every pull request; run them before you push:
 
 ```sh
+npm ci --ignore-scripts --prefix tools/zapier-hourmere # opt-in dependencies for API contract tests
+npm --prefix tools/zapier-hourmere test # standalone Zapier runtime and packaging tests
 npm run lint        # Biome: formatting and lint rules (`npm run format` fixes most of it)
 npm run typecheck
 npm test            # Vitest; database tests are skipped unless DATABASE_URL is set (.env sets it)

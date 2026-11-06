@@ -10,16 +10,21 @@
   },
   "scripts": {
     "build": "node --check index.js && node --check lib.js && node --check hooks.js",
-    "test": "vitest run --root ../.. tools/zapier-hourmere --maxWorkers=2 --no-fsModuleCache",
-    "validate": "DISABLE_ZAPIER_ANALYTICS=1 NO_UPDATE_NOTIFIER=1 zapier-platform validate --without-style",
-    "typecheck": "tsc -p tsconfig.json"
+    "test": "vitest run --config vitest.config.mjs --maxWorkers=2 --no-fsModuleCache",
+    "validate": "DISABLE_ZAPIER_ANALYTICS=1 NO_UPDATE_NOTIFIER=1 zapier-platform validate --skip-build --without-style",
+    "typecheck": "tsc -p tsconfig.json",
+    "_zapier-build": "node scripts/guard-build.js",
+    "build:verify": "DISABLE_ZAPIER_ANALYTICS=1 NO_UPDATE_NOTIFIER=1 node scripts/verify-build.js"
   },
   "dependencies": {
     "zapier-platform-core": "19.2.1"
   },
   "devDependencies": {
     "zapier-platform-cli": "19.2.1",
-    "nock": "15.0.5"
+    "nock": "15.0.5",
+    "vitest": "5.0.5",
+    "typescript": "7.0.2",
+    "@types/node": "26.6.5"
   },
   "license": "AGPL-3.0-only"
 }

@@ -37,8 +37,13 @@ shared examples or source control.
 For instant triggers, the operator must enable `WEBHOOKS_ENABLED`, configure
 `WEBHOOK_ENCRYPTION_KEY` and keep a worker running as described in [webhooks](/docs/webhooks).
 Each enabled trigger registers one endpoint; the existing limit is ten endpoints per
-organization. Turning the Zap off unsubscribes its endpoint. Events before registration
-are not backfilled.
+organization. Turning the Zap off attempts to unsubscribe its endpoint; an already-deleted
+endpoint is treated as success. Disable Zaps before revoking their key. An unreachable
+instance, revoked key or lost subscription response can leave an orphan endpoint. It
+still occupies one of the ten slots and Hourmere retries deliveries even when Zapier
+returns 410. With an owner/admin `full` key, inspect `GET /api/v1/webhooks`, identify the
+unused endpoint, and remove it with `DELETE /api/v1/webhooks/{id}`. Events before
+registration are not backfilled.
 
 ## Build a Zap
 
@@ -56,13 +61,15 @@ are not backfilled.
   Supply the invitee's IANA time zone, such as `Europe/Berlin`; do not convert local wall
   times to UTC by assuming a fixed daylight-saving offset. A found slot is not reserved.
 
-For **Create Booking**, retain one idempotency key per upstream request and map that
-same key on retries. Different requests need different keys; changed input with a reused
+For **Create Booking**, generate a random UUID for each new booking attempt upstream,
+map it into Zapier, and retain that same key on retries. Do not use predictable IDs or
+email addresses. Different booking attempts need different random keys; changed input with a reused
 key is refused. Cancellation and rescheduling act immediately and may send booking
 notifications. Rescheduling is not generally idempotent: after an uncertain response,
 inspect the original booking and its successor before replaying the step.
 
-API failures retain the Hourmere error code in the Zapier error. For `insufficient_scope`,
+API failures retain the Hourmere error code in the Zapier error. A 401 marks the
+connection expired so Zapier can ask you to reconnect. For `insufficient_scope`,
 check the connection's scope; for permission failures, check organization/host membership.
 An authorization or availability error does not establish that configuration is missing.
 Rate-limit errors use `Retry-After` to ask Zapier to delay a retry.
@@ -72,19 +79,24 @@ Rate-limit errors use `Retry-After` to ask Zapier to delay a retry.
 The app verifies each delivery's HMAC-SHA256 against the exact raw request body using
 the signing secret returned by webhook registration. Zapier supplies that saved secret
 through `bundle.subscribeData` during the hook's `perform`; its raw headers use the
-`Http-Webhook-*` names. Invalid signatures, wrong secrets, malformed payloads and timestamps
-more than five minutes from the current time are rejected. Keep the instance clock synchronized.
-Treat the Zapier hook URL as private even though deliveries are signed.
+`Http-Webhook-*` names. Invalid signatures, wrong secrets and malformed payloads return
+an empty result with a masked reason code. Stale timestamps have a distinct
+`stale_webhook_timestamp` reason from `invalid_webhook_signature`. Keep the instance
+clock synchronized and the hook URL private.
 
-The signed event ID becomes the trigger's `id`, so retries of the same event have the
-same identity. **Zapier does not deduplicate instant triggers**, as explained in its
-[duplicate-data guide](https://help.zapier.com/hc/en-us/articles/8496260269965-How-Zapier-handles-duplicate-data-in-Zap-workflows).
-Freshness verification rejects stale captured requests, but an authentic replay within
-the window is accepted again and can run the Zap twice. The app has no durable replay
-database. Use the event ID as an idempotency key in a downstream system that atomically
-rejects duplicates, including concurrent deliveries; a separate search-then-create step
-does not provide that guarantee. Event IDs come from the signed body, not the unsigned
-delivery-ID header. Retries never promise exactly-once downstream actions.
+Zapier acknowledges intake before running `perform`. The app therefore allows a one-hour
+timestamp tolerance for queue delays, instead of five minutes. Longer delays still drop
+an event that Hourmere will not retry after that acknowledgement.
+
+The signed event ID becomes the trigger's `id`. After verification, the app uses Zapier's
+durable cache to atomically claim `hm:<subscription ID>:<event ID>` with set-if-absent.
+A duplicate returns an empty result; the same event can reach different subscriptions.
+Claims last 24 hours, covering Hourmere's twelve retry delays capped at one hour each, plus queueing. Replay safety comes from this claim, not the timestamp window.
+If the cache is unavailable, the app logs only a masked reason and accepts the authentic
+event to avoid losing an already-acknowledged delivery. Cache outages or expiry can thus
+permit duplicates. Downstream operations should still atomically deduplicate by signed
+event ID; a separate search-then-create step does not guarantee that. Retries do not
+promise exactly-once downstream actions.
 
 The polling fallback fetches sample bookings that the connected user hosts. It is a
 setup aid, not a complete historical change feed or an outage-recovery poller. Organization
@@ -105,10 +117,13 @@ Hourmere installation on Node.js 26 and use Node.js 22 for this package's Zapier
 The package pins `zapier-platform-core` and `zapier-platform-cli` to **19.2.1**, released
 on October 14, 2026. The package README contains the offline checks.
 
-After installing repository dependencies, review the source and run the package's tests
+Install this package separately with `npm ci --ignore-scripts` in `tools/zapier-hourmere`;
+its committed package lock pins the deployed dependency tree. Root workspace installs
+do not install Zapier dependencies. Review the source and run the package's tests
 and validation. Only the operator who intends to upload the integration should then
 authenticate to their own Zapier developer account, register their private integration,
-and push its version from `tools/zapier-hourmere`. The pinned CLI uses `zapier-platform`;
+and push its version from `tools/zapier-hourmere` with
+`HOURMERE_ZAPIER_PUSH_APPROVED=1` explicitly set for the guarded build. The pinned CLI uses `zapier-platform`;
 the old `zapier` command was removed in version 19. Registration writes a local
 `.zapierapprc` association: keep your
 account-specific file out of Git, and never commit deployment credentials.

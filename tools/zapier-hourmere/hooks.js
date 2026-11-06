@@ -20,6 +20,7 @@ function hook(key, eventType, noun) {
       performUnsubscribe: async (z, bundle) =>
         request(z, bundle, `/webhooks/${encodeURIComponent(bundle.subscribeData.id)}`, {
           method: 'DELETE',
+          allowDeletedWebhook: true,
         }),
       perform: (z, bundle) => verifyDelivery(z, bundle, eventType),
       performList: async (z, bundle) => {
