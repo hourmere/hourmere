@@ -55,6 +55,13 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
   Temporal handles DST when these dates and rules become instants.
 
+## Meeting polls (proposal)
+
+[Meeting polls: data model and flow design](meeting-polls.md) proposes scoped polls,
+candidate slots, voters and votes, with atomic finalization through the booking service.
+These tables and interfaces are not implemented; the document defines the later tasks
+and their acceptance checks.
+
 ## Tables
 
 ### `auth` (Better Auth: core + organization + api-key plugins)
