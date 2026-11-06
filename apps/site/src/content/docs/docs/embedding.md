@@ -11,10 +11,11 @@ retaining the form's panels and spacing. An iframe isolates the booking page's s
 a Shadow DOM protects the popup title and close control from your website's styles.
 
 Widgets reuse the public booking API and do not require a visitor account or third-party
-cookies.
-The [embedded team page](https://github.com/hourmere/hourmere/blob/main/apps/web/src/public/Embed.tsx#L58)
-uses the same team booking flow; the [public event lookup](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/availability.ts#L252)
-accepts individual, collective and activated round-robin team event types.
+cookies. Team embeds follow the same availability and host rules as
+[collective meetings](/docs/collective-scheduling) and
+[activated round-robin pools](/docs/round-robin-scheduling).
+
+## Allow your website (instance operators)
 
 First, the instance operator sets `EMBED_ALLOWED_ORIGINS` to your exact HTTPS website
 origin (for example `https://www.example.com`) and restarts the web process. The default is
@@ -30,12 +31,38 @@ EMBED_ALLOWED_ORIGINS=https://www.example.com,https://blog.example.com
 At most 32 origins are accepted; wildcards,
 credentials, paths, queries and fragments are refused. HTTP is accepted only on loopback
 hosts for development. The Hourmere instance also needs HTTPS outside loopback. Subdomains
-and ports are separate origins. Keep the allow list narrow.
+and ports are separate origins. Keep the allow list narrow. The value lists the website
+hosting the widget, not the Hourmere booking URL: allowing `https://www.example.com` does
+not allow `https://example.com`, `https://preview.example.com` or
+`https://www.example.com:8443`. Include each intended origin explicitly. This is an
+instance setting, shared by personal and team embeds; hosts cannot change it in the dialog.
+See [configuration](/docs/configuration) and [self-hosting](/docs/self-hosting) for operator setup.
+
+For a local parent website running on port 4321, for example:
+
+```dotenv
+PUBLIC_URL=http://localhost:5173
+EMBED_ALLOWED_ORIGINS=http://localhost:4321
+```
+
+Open the parent page through its HTTP server, not a `file://` URL. `localhost` and
+`127.0.0.1` are different origins. A page on an origin outside the allow list receives a
+403 for the embed document and cannot display the booking flow. Copying code successfully
+does not verify that its destination website is allowed.
+
+## Content Security Policy and iframes
 
 The parent website must permit the Hourmere origin in its own `script-src` and `frame-src`
 Content Security Policy. The widget makes no changes to the parent site's policy. A parent
 with a restrictive Permissions Policy may also prevent clipboard copying; the private
 manage-link input can still be selected and copied manually.
+For the example instance, add `https://hourmere.example.com` to both directives.
+Keep the rest of your website's policy. If a site
+builder removes script tags or blocks external frames, enable its supported custom-HTML
+integration before pasting the snippet. A reverse proxy must preserve Hourmere's dedicated
+embed CSP and must not add `X-Frame-Options: DENY` to those embed responses. Ordinary
+booking and account pages remain protected against framing; use the generated widget
+instead of putting a normal booking URL in an iframe.
 
 The popup uses a constructable stylesheet in browsers that support `CSSStyleSheet` and
 `adoptedStyleSheets`, so its styles work with a strict `style-src` policy. Older browsers
@@ -45,11 +72,29 @@ the parent uses a strict policy.
 
 ## Copy from the editor
 
-In **Event types**, save the event type, then choose **Embed** in its **View and share**
-panel or its row's **More actions** menu. Choose an inline widget or popup button and copy
-the generated code into your website. The code uses the instance's `PUBLIC_URL` and the
-saved booking address; save address changes before copying again. If clipboard access is
-unavailable, select the code and copy it manually.
+1. In **Event types**, open and save a personal or team event type. Choose **Embed** in its
+   **View and share** panel, or open the event row's **…** menu (announced as **More actions
+   for** the event title) and choose **Embed**.
+2. Check **Allowed website origins** for the site where you will paste the code. If the
+   dialog says embedding is disabled, ask the instance operator to configure it as above.
+3. Choose **Embed mode**. **Inline**, the default, puts the booking form directly in the
+   page. **Initial height (pixels)** starts at **720** and accepts a whole number from
+   **240** to **2000**; the widget resizes automatically after loading. **Popup button**
+   puts a button in the page and opens the form when a visitor clicks it. Its **Button
+   text** defaults to **Book a meeting** in English, or the equivalent in your admin
+   interface language. Enter nonblank button text, up to 200 characters. The height field
+   is only shown for Inline; the button-text field is only shown for Popup button.
+4. Choose **Copy embed code** and paste the complete **Embed code**, including its script
+   tag, into your website's HTML. Invalid height or blank button text prevents code from
+   being offered. If clipboard access fails, select the read-only code and copy manually.
+5. Load the page on an allowed origin and try a booking. Inline should show the form in
+   the page; Popup button should open it in a modal. Confirm that the visitor can select
+   a time, submit their details and reach the booking confirmation.
+
+The code uses the instance's `PUBLIC_URL` and the saved booking address; unsaved edits
+are not included. Save address changes and replace the snippet on your website afterward.
+Changing the dialog's mode, height or button text only changes the code you copy; it does
+not update a snippet already pasted into your website.
 
 The dialog loads allowed website origins through the session-authenticated
 `GET /api/v1/instance/embed` endpoint. The public `GET /api/v1/instance` endpoint exposes
@@ -62,9 +107,15 @@ embedding is enabled. Loading shows only a neutral progress message; contact the
 if the configuration remains unavailable after loading. The dialog does not load the booking widget inside the admin page;
 test the copied code on an allowed website.
 
-Hidden event types can be embedded through their saved address without appearing in a
-public listing. Inactive event types offer no embed code until they are enabled. One-time
-booking links cannot be embedded; use the event type's reusable public address.
+### Unlisted and inactive event types
+
+Hidden event types are shown as **unlisted** in the dialog. They can be embedded through
+their saved address without appearing in a public listing; anyone with the code or direct
+link can book them. Unlisting is not access control. Inactive event types offer no embed
+code: enable the event type and save before generating code. A previously copied embed
+does not bypass inactivity or other booking availability rules. If saved setup is
+incomplete, finish it before generating code. One-time booking links cannot be embedded;
+use the event type's reusable public address. See [one-time booking links](/docs/one-time-links).
 
 ## Inline
 
@@ -105,7 +156,7 @@ Only one Hourmere popup is open at a time. Use a browser supporting
 `HTMLDialogElement.showModal()`.
 
 The popup frame follows the visitor's system light or dark color scheme. At viewport widths
-of 480px or less, it fills the screen without outer padding (`100vw` by `100dvh`). Otherwise
+or heights of 480px or less, it fills the screen without outer padding (`100vw` by `100dvh`). Otherwise
 its maximum height is `90dvh`; older browsers fall back to the equivalent `vh` sizes.
 Scrolling stays contained within the popup and booking frame.
 
@@ -223,6 +274,26 @@ The public booking request may include `source: "embed"`. This is an anonymous a
 hint, not proof of an embedding origin and never authorization. The default remains `web`;
 API-key/OAuth attribution cannot be chosen through this field. Anonymous retries retain
 their existing idempotency scope and preserve the original booking's source.
+
+## Known limitations
+
+- The generator offers Inline, its initial height, Popup button and its button text. It
+  has no live preview, language selector, color picker or visitor-prefill fields. For an
+  explicit widget language, add the documented language attribute yourself; the popup
+  button's text and the booking interface language are separate choices.
+- Both modes retain Powered by Hourmere branding. The iframe isolates the booking form
+  from your site's CSS; styling the surrounding page does not restyle the form.
+- Only reusable personal and team booking addresses are supported. Account pages,
+  private management links and one-time booking links cannot be embedded. A hidden event
+  remains bookable through its link, while an inactive event does not become bookable by
+  embedding it.
+- JavaScript and iframe support are required. Popup mode also requires a browser with
+  modal-dialog support. Nested frames with a different-origin outer ancestor are not
+  supported. Host pages must satisfy the origin and CSP requirements above.
+- Copying a snippet does not check availability, reserve a time or publish website
+  changes. Test the deployed parent page after changing the snippet or operator settings.
+  The booking-completed event is a UI notification without booking details; use
+  [webhooks](/docs/webhooks) for server-side booking integrations.
 
 ## Local development
 
