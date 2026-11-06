@@ -46,8 +46,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Install the separately licensed Zapier test dependencies
-        run: npm ci --ignore-scripts --audit=false --fund=false --prefix tools/zapier-hourmere
       - run: npm run lint
       - run: npm run typecheck
       - name: Install the interactive deployment-test shell
@@ -120,6 +118,8 @@ jobs:
         run: npm run validate
       - name: Verify the CLI build artifact against its committed dependency lock
         run: npm run build:verify
+      - name: Confirm the verification build left nothing to upload
+        run: test ! -e build/build.zip && test ! -e build/source.zip
 
   docker:
     runs-on: ubuntu-latest

@@ -1,6 +1,8 @@
-const { version: platformVersion } = require('zapier-platform-core')
-const { version } = require('./package.json')
+const { version, dependencies } = require('./package.json')
 const { baseUrl, request, publicPath } = require('./lib.js')
+// The CLI requires an exact core pin, so this equals the installed core version. Reading
+// it here keeps the definition loadable without the separately licensed platform install.
+const platformVersion = dependencies['zapier-platform-core']
 const hooks = require('./hooks.js')
 
 const field = (key, label, required = true, extra = {}) => ({ key, label, required, ...extra })

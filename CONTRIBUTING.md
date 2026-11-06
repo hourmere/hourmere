@@ -43,12 +43,20 @@ tool makes CI fail immediately.
 CI runs these on every pull request; run them before you push:
 
 ```sh
-npm ci --ignore-scripts --prefix tools/zapier-hourmere # opt-in dependencies for API contract tests
-npm --prefix tools/zapier-hourmere test # standalone Zapier runtime and packaging tests
 npm run lint        # Biome: formatting and lint rules (`npm run format` fixes most of it)
 npm run typecheck
 npm test            # Vitest; database tests are skipped unless DATABASE_URL is set (.env sets it)
 npm run build
+```
+
+These need only the root install. `npm test` includes the Zapier app's OpenAPI contract
+test, which loads the app definition without the Zapier Platform packages. Install those
+only if you change `tools/zapier-hourmere`. CI's separate `zapier-compatibility` job runs
+these, plus offline validation and the build check, on Node.js 22:
+
+```sh
+npm ci --ignore-scripts --prefix tools/zapier-hourmere
+npm --prefix tools/zapier-hourmere test # Zapier runtime and packaging tests
 ```
 
 An optional clock diagnostic runs the same suite at +7, +30, +90, +400 and +1600 days:

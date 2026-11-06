@@ -177,8 +177,8 @@ describe('UI measurement CI contract', () => {
 
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
-    // Install the isolated Zapier package for generated API contract tests; PostgreSQL limits stay unchanged.
-    ['check', 'b905090a7a622401fc28d14c9c61e6e2f6abbb6323547b18e1d76b6a6b6dad1c'],
+    // Also run the isolated Caddy upgrade integration; PostgreSQL limits stay unchanged.
+    ['check', '108d0bfde8853d30249ccbb817b61152784571bb04f1c623a465b5371b7896f4'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // PR #58 builds a disposable documentation-site fixture before the browser regressions.
     // The owner approved a 20-minute job limit because the suite now runs close to 10 minutes.

@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import Ajv, { type AnySchemaObject } from 'ajv'
 import addFormats from 'ajv-formats'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { openApiDocument } from '../../../apps/server/src/openapi-document.ts'
 
 const require = createRequire(import.meta.url)
-const app = require(process.env.HOURMERE_ZAPIER_TEST_APP || '../index.js')
+// The root suite installs only the root workspaces, never the package's own dependencies.
+const appPath = require.resolve(process.env.HOURMERE_ZAPIER_TEST_APP || '../index.js')
+const app = require(appPath)
+const manifest = require(join(dirname(appPath), 'package.json'))
 type Schema = AnySchemaObject
 type Operation = {
   parameters?: { name: string; in: string; required?: boolean; schema: Schema }[]
@@ -183,6 +187,17 @@ const operations = [
       .map(([key, fn]) => [`${name}.${key}`, fn]),
   ),
 ] as [string, (z: unknown, bundle: unknown) => Promise<unknown>][]
+
+describe('Zapier app definition in the root suite', () => {
+  it('loads without the separately installed Zapier Platform packages', () => {
+    const platformModules = Object.keys(require.cache).filter((path) =>
+      /[\\/]node_modules[\\/]zapier-platform-[^\\/]+[\\/]/.test(path),
+    )
+    expect(platformModules).toEqual([])
+    expect(app.platformVersion).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(app.platformVersion).toBe(manifest.dependencies['zapier-platform-core'])
+  })
+})
 
 describe('real Zapier operations against generated OpenAPI schemas', () => {
   for (const kind of ['personal', 'team']) {

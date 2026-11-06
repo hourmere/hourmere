@@ -127,15 +127,15 @@ async function verifyDelivery(z, bundle, eventType) {
   try {
     // 24 hours covers all 12 retries (each capped at one hour), plus queue delay.
     // Each endpoint receives the same event ID, so include the subscription ID.
-    const claimed = await z.cache.set(
-      `hm:${bundle.subscribeData.id}:${event.id}`,
-      1,
-      86400,
-      null,
-      true,
-    )
-    if (claimed === false) return reject('duplicate_webhook_event')
-    if (claimed !== true) z.console.log('Hourmere webhook: replay_cache_unavailable')
+    const key = `hm:${bundle.subscribeData.id}:${event.id}`
+    const claimed = await z.cache.set(key, 1, 86400, null, true)
+    if (claimed === false) {
+      // false also means "not stored", for example when the cache rate limit applies.
+      // Only an existing claim proves a duplicate; otherwise keep the authentic event.
+      const existing = await z.cache.get(key)
+      if (existing !== null && existing !== undefined) return reject('duplicate_webhook_event')
+      z.console.log('Hourmere webhook: replay_cache_unavailable')
+    } else if (claimed !== true) z.console.log('Hourmere webhook: replay_cache_unavailable')
   } catch {
     // Intake already succeeded: failing closed here would permanently lose the event.
     z.console.log('Hourmere webhook: replay_cache_unavailable')

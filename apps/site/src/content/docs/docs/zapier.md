@@ -91,6 +91,9 @@ an event that Hourmere will not retry after that acknowledgement.
 The signed event ID becomes the trigger's `id`. After verification, the app uses Zapier's
 durable cache to atomically claim `hm:<subscription ID>:<event ID>` with set-if-absent.
 A duplicate returns an empty result; the same event can reach different subscriptions.
+Zapier's cache can also refuse a write without storing it, for example under its rate
+limit, so the app reads the key back after a refusal. It drops the delivery only when the
+claim exists; otherwise it accepts the event and logs `replay_cache_unavailable`.
 Claims last 24 hours, covering Hourmere's twelve retry delays capped at one hour each, plus queueing. Replay safety comes from this claim, not the timestamp window.
 If the cache is unavailable, the app logs only a masked reason and accepts the authentic
 event to avoid losing an already-acknowledged delivery. Cache outages or expiry can thus
@@ -127,10 +130,30 @@ and push its version from `tools/zapier-hourmere` with
 the old `zapier` command was removed in version 19. Registration writes a local
 `.zapierapprc` association: keep your
 account-specific file out of Git, and never commit deployment credentials.
+Do not run `zapier-platform upload` directly: it sends whatever `build/build.zip` holds
+and runs no hook the package could use to refuse it. `npm run upload` applies the same
+approval check, and `npm run build:verify` deletes its archives. Use `push`.
 
 Newly pushed versions are private by default. Test with synthetic bookings in your own
 instance, then share access only with intended testers through Zapier's private-integration
 sharing controls. Public directory listing requires a separate publication/review process.
+
+**Check duplicate handling once before relying on it.** Unit tests and local
+`zapier-platform invoke` runs use a simulated cache, so they cannot show how Zapier's
+production cache answers. Turn on a test Booking Created Zap and make one synthetic
+booking: the Zap must run once. Within one hour, send that same delivery to the Zap's hook
+URL (listed by `GET /api/v1/webhooks`) again, byte for byte: the same raw body with
+`Content-Type: application/json` and the same `Webhook-Timestamp` and `Webhook-Signature`
+headers. Hourmere does not keep sent signatures; copy them from that run's input in
+`zapier-platform logs --type=bundle`, where the hook's raw request headers carry an
+`Http-` prefix. Then check `zapier-platform logs`:
+
+- `Hourmere webhook: duplicate_webhook_event` and no second action run: deduplication works.
+- `replay_cache_unavailable`, or the actions run again: the cache did not deduplicate for
+  your integration. Rely on downstream deduplication by event ID.
+- `invalid_webhook_signature`: the copy was not exact, so the check is inconclusive. If the
+  bundle log does not show the raw request, this check cannot be run; rely on downstream
+  deduplication by event ID.
 
 See Zapier's official [CLI overview](https://docs.zapier.com/integrations/build-cli/overview),
 [core reference](https://docs.zapier.com/integrations/build-cli/core) and

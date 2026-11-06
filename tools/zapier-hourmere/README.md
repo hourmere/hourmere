@@ -19,6 +19,11 @@ October 14, 2026), more than two weeks before selection on November 6, 2026. CLI
 `zapier-platform`; it removed the older `zapier` command. Dependencies are recorded in
 this package's committed `package-lock.json`. It is outside the root npm workspaces;
 root installs do not download Zapier's Platform Agreement–licensed dependencies.
+`index.js` reads `platformVersion` from the exact `zapier-platform-core` pin in
+`package.json` instead of loading the package, so the root contract test runs without
+the Zapier packages.
+The `overrides` keep development-only transitive packages on releases at least two weeks
+old; they do not change any production dependency.
 
 Official references checked for this implementation:
 
@@ -30,8 +35,13 @@ Official references checked for this implementation:
 
 ## Local checks
 
-Install repository dependencies with `npm ci` for generated-OpenAPI tests, then install
-this separate package using Node.js 26:
+The generated-OpenAPI contract test needs only the repository's root `npm ci`:
+
+```sh
+npm test -- tools/zapier-hourmere/test/contract.test.ts --maxWorkers=2 --no-fsModuleCache
+```
+
+The package's own checks need its separate install:
 
 ```sh
 cd tools/zapier-hourmere
@@ -40,14 +50,13 @@ npm test
 npm run build
 npm run validate
 npm run build:verify
-cd ../..
-npm test -- tools/zapier-hourmere/test/contract.test.ts --maxWorkers=2 --no-fsModuleCache
 ```
 
 The test suite uses `zapier-platform-core`'s `createAppTester`, synthetic fixtures and
 mocked HTTP, with real network access disabled. Contract tests generate Hourmere's OpenAPI
 document without a database in the root Node.js 26 test runner. `build:verify` checks the
-CLI-built production dependency tree against the package lockfile without uploading.
+CLI-built production dependency tree against the package lockfile without uploading, then
+deletes `build/build.zip` and `build/source.zip` whether the check passes or fails.
 Validation runs with `DISABLE_ZAPIER_ANALYTICS=1` and
 `NO_UPDATE_NOTIFIER=1`, using `zapier-platform validate --without-style --skip-build` to skip remote
 style validation. These commands do not log in, register, push or create tokens.
@@ -73,10 +82,13 @@ Webhook `perform` verifies raw-body HMAC with the secret saved in `subscribeData
 A one-hour timestamp tolerance accommodates asynchronous Zapier queueing after intake
 has already acknowledged delivery. Valid events claim `hm:<subscription ID>:<event ID>`
 atomically with Zapier's durable cache (`nx`), retained for 24 hours to cover Hourmere's
-12 retries capped at one hour each, plus queueing. Duplicates return `[]`;
-different subscriptions retain their own claims. Invalid deliveries return `[]` with
-code-only logs; stale timestamps and bad signatures have distinct reasons. Cache outages
-accept authenticated events with a masked warning to avoid losing acknowledged deliveries.
+12 retries capped at one hour each, plus queueing. A refused claim (`false`) can also
+mean the cache did not store it, for example under its rate limit, so the app reads the
+key back: only an existing claim is a duplicate and returns `[]`. Otherwise it accepts
+the event and logs `replay_cache_unavailable`. Different subscriptions retain their own
+claims. Invalid deliveries return `[]` with code-only logs; stale timestamps and bad
+signatures have distinct reasons. Cache outages accept authenticated events with a masked
+warning to avoid losing acknowledged deliveries.
 There is no exactly-once guarantee: cache outages/expiry and downstream failures still
 require downstream idempotency by signed event ID. Delays beyond one hour are dropped
 and cannot trigger a retry after Zapier has acknowledged intake.
@@ -103,6 +115,13 @@ Follow Zapier's prompts with your own developer account. Keep the resulting
 commit `.env` files or API keys. The build hook refuses deployment builds unless
 `HOURMERE_ZAPIER_PUSH_APPROVED=1` is explicitly set. Review the source and lockfile
 before setting it; the variable is an operator acknowledgement, not an authorization system.
+
+Do not run `zapier-platform upload` directly. It sends whatever `build/build.zip` holds and
+runs no app hook, so the package cannot refuse it. `npm run upload` applies the same
+approval check first, and `build:verify` leaves no archive behind. Use `push`.
+
+After the first push, run the guide's one-time duplicate check before relying on
+deduplication: local tests cannot show how Zapier's production cache answers.
 
 A newly pushed integration version is private by default. Use synthetic bookings to
 verify it in your own Zapier account, invite only intended testers, and keep public

@@ -50,6 +50,14 @@ afterAll(() => {
   expect(nock.isActive()).toBe(false)
 })
 
+describe('Hourmere Zapier app definition', () => {
+  it('declares the installed platform version from the exact package pin', () => {
+    const manifest = require('../package.json')
+    expect(App.platformVersion).toBe(require('zapier-platform-core').version)
+    expect(App.platformVersion).toBe(manifest.dependencies['zapier-platform-core'])
+  })
+})
+
 describe('Hourmere Zapier authentication and reads', () => {
   it('tests even an empty account with an authenticated cheap read', async () => {
     api()
@@ -385,20 +393,28 @@ describe('Hourmere REST hooks', () => {
       expect(result[0].organizationId).toBeNull()
     },
   )
-  // Core's appTester cache mock persists but ignores nx; model atomic claims here.
-  function hookContext() {
-    const claims = new Set<string>()
+  // Core's appTester cache mock persists but ignores nx and always reports a write. This
+  // mock honours nx, and with `stores: false` it returns false without writing, which
+  // zapier-platform-core's own tests expect when the app's cache rate limit applies.
+  function hookContext({ stores = true } = {}) {
+    const claims = new Map<string, string>()
     return {
       console: { log: vi.fn() },
       cache: {
-        set: vi.fn(async (key: string, _value: number, _ttl: number, _scope: null, nx: boolean) => {
+        set: vi.fn(async (key: string, value: unknown, _ttl: number, _scope: null, nx: boolean) => {
           if (nx && claims.has(key)) return false
-          claims.add(key)
+          if (!stores) return false
+          claims.set(key, JSON.stringify(value))
           return true
+        }),
+        get: vi.fn(async (key: string) => {
+          const stored = claims.get(key)
+          return stored === undefined ? null : JSON.parse(stored)
         }),
       },
     }
   }
+  const claimKey = `hm:${id}:${nextId}`
 
   it('claims durable subscription-scoped replay storage through appTester', async () => {
     const hook = delivery()
@@ -412,8 +428,32 @@ describe('Hourmere REST hooks', () => {
     expect(first[0].id).toBe(nextId)
     await expect(perform(z, delivery().bundle)).resolves.toEqual([])
     await expect(perform(z, delivery('booking.created', 1).bundle)).resolves.toEqual([])
-    expect(z.cache.set).toHaveBeenCalledWith(`hm:${id}:${nextId}`, 1, 86400, null, true)
-    expect(z.console.log).toHaveBeenCalledWith('Hourmere webhook: duplicate_webhook_event')
+    expect(z.cache.set.mock.calls).toEqual(Array(3).fill([claimKey, 1, 86400, null, true]))
+    expect(z.cache.get.mock.calls).toEqual([[claimKey], [claimKey]])
+    expect(z.console.log.mock.calls).toEqual([
+      ['Hourmere webhook: duplicate_webhook_event'],
+      ['Hourmere webhook: duplicate_webhook_event'],
+    ])
+  })
+  it('accepts authentic events whose claim the cache did not store', async () => {
+    const z = hookContext({ stores: false })
+    const perform = App.triggers.booking_created.operation.perform
+    // A refused write with no stored claim is not a duplicate, even on a retry.
+    await expect(perform(z, delivery().bundle)).resolves.toHaveLength(1)
+    await expect(perform(z, delivery('booking.created', 1).bundle)).resolves.toHaveLength(1)
+    expect(z.cache.get.mock.calls).toEqual([[claimKey], [claimKey]])
+    expect(z.console.log.mock.calls).toEqual([
+      ['Hourmere webhook: replay_cache_unavailable'],
+      ['Hourmere webhook: replay_cache_unavailable'],
+    ])
+  })
+  it('accepts authentic events when confirming a refused claim fails', async () => {
+    const z = hookContext({ stores: false })
+    z.cache.get.mockRejectedValue(new Error(secret))
+    await expect(
+      App.triggers.booking_created.operation.perform(z, delivery().bundle),
+    ).resolves.toHaveLength(1)
+    expect(z.console.log.mock.calls).toEqual([['Hourmere webhook: replay_cache_unavailable']])
   })
   it('accepts the same event for different subscriptions', async () => {
     const z = hookContext()
@@ -441,6 +481,7 @@ describe('Hourmere REST hooks', () => {
         App.triggers.booking_created.operation.perform(z, delivery().bundle),
       ).resolves.toHaveLength(1)
       expect(z.console.log.mock.calls).toEqual([['Hourmere webhook: replay_cache_unavailable']])
+      expect(z.cache.get).not.toHaveBeenCalled()
     },
   )
   it.each([
@@ -486,6 +527,7 @@ describe('Hourmere REST hooks', () => {
       ],
     ])
     expect(z.cache.set).not.toHaveBeenCalled()
+    expect(z.cache.get).not.toHaveBeenCalled()
     // Exercise the real platform execution path as well.
     await expect(
       run(App.triggers.booking_created.operation.perform, {}, hook.bundle),
