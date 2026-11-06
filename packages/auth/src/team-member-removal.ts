@@ -146,7 +146,7 @@ export function removeTeamMember(
       ...auditActor(principal),
       action: 'membership.removed',
       targetType: 'user',
-      targetId: input.memberUserId,
+      targetId: result.memberUserId,
     })
     return result
   }

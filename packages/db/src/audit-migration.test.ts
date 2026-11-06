@@ -48,12 +48,18 @@ describe.skipIf(!serverUrl)('audit migration', () => {
       expect(
         (await upgraded.pool.query('SELECT count(*)::int AS n FROM bookings')).rows[0].n,
       ).toBeGreaterThan(0)
-      expect(await runMigrations(upgraded.pool)).toEqual(['0067_audit_events.sql'])
+      // Verify exactly this migration. Later migrations have their own predecessor tests,
+      // so the checkpoint directory holds only the predecessors plus 0067.
+      await copyFile(
+        join(migrationsDir, '0067_audit_events.sql'),
+        join(predecessor, '0067_audit_events.sql'),
+      )
+      expect(await runMigrations(upgraded.pool, predecessor)).toEqual(['0067_audit_events.sql'])
       expect(await records()).toEqual(before)
-      fresh = await createTestDatabase(serverUrl as string)
+      fresh = await createTestDatabase(serverUrl as string, predecessor)
       expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      expect(await runMigrations(upgraded.pool)).toEqual([])
-      expect(await runMigrations(fresh.pool)).toEqual([])
+      expect(await runMigrations(upgraded.pool, predecessor)).toEqual([])
+      expect(await runMigrations(fresh.pool, predecessor)).toEqual([])
       expect(await records()).toEqual(before)
     } finally {
       await fresh?.drop()

@@ -89,6 +89,9 @@ describe.skipIf(!serverUrl)('audit source-copy mutations', () => {
       'webhook.updated',
       'webhook.deleted',
       'webhook.secret_rotated',
+      'webhook.paused',
+      'webhook.resumed',
+      'oauth.token_revoked',
     ] as const) {
       const assertion = async (text: string) => {
         const module = await load(text)

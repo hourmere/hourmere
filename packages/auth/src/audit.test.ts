@@ -9,6 +9,7 @@ import { authAuditRecords, withAuthAuditTransaction } from './audit.ts'
 import { createCallerResolver } from './caller.ts'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
 import { ensurePersonalOrganization } from './organizations.ts'
+import { removeTeamMember } from './team-member-removal.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4471'
@@ -166,6 +167,35 @@ describe.skipIf(!serverUrl)('auth audit persistence', () => {
       ).status,
     ).toBe(200)
     event((await events(actor.organizationId))[2], 'membership.removed', actor, target.id)
+  })
+  it('names the stored member id when removal input uses another UUID spelling', async () => {
+    const { actor, target } = await teamFixture()
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: actor.organizationId,
+        userId: target.id,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    await removeTeamMember(
+      db,
+      {
+        kind: 'session',
+        sessionId: actor.sessionId,
+        user: { id: actor.id, name: actor.name, email: actor.email },
+        organization: { id: actor.organizationId, name: '', slug: '', personal: false },
+      },
+      {
+        teamId: actor.organizationId,
+        memberUserId: target.id.toUpperCase(),
+        expectedOrganizationId: actor.organizationId,
+      },
+    )
+    const rows = await events(actor.organizationId)
+    expect(rows).toHaveLength(1)
+    event(rows[0], 'membership.removed', actor, target.id)
   })
   it('records concurrent role changes as two ordered events and team settings privately', async () => {
     const { actor, target } = await teamFixture(),

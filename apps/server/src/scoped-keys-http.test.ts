@@ -372,45 +372,73 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(original.includes(before)).toBe(true)
         const replacement =
           protection === 'origin' ? "{ source: body.source ?? 'web', apiKeyId: null }" : 'next()'
-        const source = stripTypeScriptTypes(original.replace(before, replacement)).replace(
-          /from '([^']+)'/g,
-          (_, specifier: string) =>
-            `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
-        )
-        const changed = await import(
-          `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-        )
-        const mutatedApp = (protection === 'request' ? changed.createApp : createApp)({
-          checkDb: async () => {},
-          authHandler: auth.handler,
-          resolveCaller: createCallerResolver({ auth, db }),
-          publicUrl: 'http://localhost',
-          routes: [
-            (protection === 'origin' ? changed.publicRoutes : publicRoutes)({ db, now: () => NOW }),
-          ],
-        })
-        const response = await mutatedApp.request('/api/v1/public/scope-other/intro/bookings', {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...headers('team', 'bookings'),
-            'x-request-id': 'untrusted-personal-data',
-          },
-          body: JSON.stringify(
-            body(protection === 'origin' ? '2026-11-06T09:00:00Z' : '2026-11-06T10:00:00Z'),
-          ),
-        })
-        expect(response.status).toBe(201)
-        const result = (await response.json()) as { booking: { id: string } }
-        const audit = await db
-          .selectFrom('audit_events')
-          .selectAll()
-          .where('target_id', '=', result.booking.id)
-          .executeTakeFirstOrThrow()
-        if (protection === 'origin') {
-          expect(() => expect(audit.actor_id).toBe(keyFor('team', 'bookings').id)).toThrowError()
-        } else {
-          expect(() => expect(audit.request_id).toMatch(/^[0-9a-f-]{36}$/)).toThrowError()
+        // A natively imported copy would otherwise get its own instance of the module that
+        // carries the protected state, losing it with or without the mutation. Share the
+        // test's instance so the unmodified copy and the mutant differ only by the mutation.
+        const sharedSpecifier = protection === 'origin' ? '../rest-scopes.ts' : '@hourmere/db/audit'
+        const sharedKey = `__hourmereAuditControl_${protection}`
+        const namespace: Record<string, unknown> =
+          protection === 'origin'
+            ? await import('./rest-scopes.ts')
+            : await import('@hourmere/db/audit')
+        ;(globalThis as Record<string, unknown>)[sharedKey] = namespace
+        const shared = `data:text/javascript;base64,${Buffer.from(
+          `export const { ${Object.keys(namespace).join(', ')} } = globalThis[${JSON.stringify(sharedKey)}]`,
+        ).toString('base64')}`
+        const book = async (text: string, start: string) => {
+          const source = stripTypeScriptTypes(text).replace(
+            /from '([^']+)'/g,
+            (_, specifier: string) =>
+              `from '${specifier === sharedSpecifier ? shared : specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+          )
+          const changed = await import(
+            `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+          )
+          const copiedApp = (protection === 'request' ? changed.createApp : createApp)({
+            checkDb: async () => {},
+            authHandler: auth.handler,
+            resolveCaller: createCallerResolver({ auth, db }),
+            publicUrl: 'http://localhost',
+            routes: [
+              (protection === 'origin' ? changed.publicRoutes : publicRoutes)({
+                db,
+                now: () => NOW,
+              }),
+            ],
+          })
+          const response = await copiedApp.request('/api/v1/public/scope-other/intro/bookings', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              ...headers('team', 'bookings'),
+              'x-request-id': 'untrusted-personal-data',
+            },
+            body: JSON.stringify(body(start)),
+          })
+          expect(response.status).toBe(201)
+          const result = (await response.json()) as { booking: { id: string } }
+          return db
+            .selectFrom('audit_events')
+            .selectAll()
+            .where('target_id', '=', result.booking.id)
+            .executeTakeFirstOrThrow()
+        }
+        try {
+          const at = (hour: number) => `2026-11-06T${String(hour).padStart(2, '0')}:00:00Z`
+          const first = protection === 'origin' ? 9 : 11
+          const unmodified = await book(original, at(first))
+          const mutant = await book(original.replace(before, replacement), at(first + 1))
+          if (protection === 'origin') {
+            // The unmodified copy records this foreign-key booking as external_api_key;
+            // without the transport origin it degrades to anonymous.
+            expect(unmodified).toMatchObject({ actor_type: 'external_api_key' })
+            expect(mutant).toMatchObject({ actor_type: 'anonymous', credential_type: 'none' })
+          } else {
+            expect(unmodified.request_id).toMatch(/^[0-9a-f-]{36}$/)
+            expect(mutant.request_id).toBeNull()
+          }
+        } finally {
+          delete (globalThis as Record<string, unknown>)[sharedKey]
         }
       },
     )

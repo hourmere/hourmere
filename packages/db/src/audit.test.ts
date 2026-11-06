@@ -74,9 +74,15 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       ['membership.role_changed', { oldRole: 'member', newRole: 'admin' }],
       ['api_key.created', { scope: 'bookings' }],
       ['api_key.rotated', { scope: 'full' }],
-      ...['webhook.created', 'webhook.updated', 'webhook.deleted', 'webhook.secret_rotated'].map(
-        (action) => [action, { events: ['booking.created'] }],
-      ),
+      ...[
+        'webhook.created',
+        'webhook.updated',
+        'webhook.deleted',
+        'webhook.secret_rotated',
+        'webhook.paused',
+        'webhook.resumed',
+      ].map((action) => [action, { events: ['booking.created'] }]),
+      ['oauth.token_revoked', { familySize: 2 }],
     ] as [AuditEvent['action'], Record<string, unknown>][]
     for (const [action, details] of cases) {
       await db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, action, details }))
@@ -98,6 +104,7 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         'events',
         'oldRole',
         'newRole',
+        'familySize',
       ]) {
         if ((auditDetails[action] as readonly string[]).includes(key)) continue
         await expect(
@@ -157,11 +164,28 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       { credential: { type: 'api_key', id: 'key', scope: 'admin' } },
       { credential: { type: 'oauth', grantId: 'grant' } },
       { credential: { type: 'none', id: 'secret' } },
+      { actor: { type: 'external_oauth_client', id: 'foreign-user' } },
+      // External callers never leave their credential identifiers in this journal.
+      {
+        actor: { type: 'external_oauth_client' },
+        credential: { type: 'oauth', clientId: 'client', grantId: 'grant' },
+      },
+      { actor: { type: 'external_api_key' }, credential: { type: 'api_key', id: 'key' } },
+      { actor: { type: 'external_api_key' }, credential: { type: 'session', id: 'session' } },
     ]) {
       await expect(
         db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, ...bad } as AuditEvent)),
       ).rejects.toThrow()
     }
+    for (const type of ['external_api_key', 'external_oauth_client'] as const)
+      await db.transaction().execute((trx) =>
+        writeAuditEvent(trx, {
+          ...event,
+          action: 'booking.created',
+          actor: { type },
+          credential: { type: 'none' },
+        }),
+      )
     const id = randomUUID()
     await expect(
       db.transaction().execute(async (trx) => {

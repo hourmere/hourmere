@@ -14,7 +14,7 @@ const input = {
   url: 'https://hooks.example.com/private-path?token=private-query',
   events: ['booking.created'],
 }
-const operations = ['create', 'update', 'rotate', 'delete'] as const
+const operations = ['create', 'update', 'pause', 'rotate', 'delete'] as const
 
 describe.skipIf(!process.env.DATABASE_URL)('webhook management audit', () => {
   let owned: TestDatabase
@@ -45,6 +45,7 @@ describe.skipIf(!process.env.DATABASE_URL)('webhook management audit', () => {
   ) {
     if (operation === 'create') return createWebhook(ctx, settings, input).then(() => undefined)
     if (operation === 'update') return updateWebhook(ctx, id, { events: ['booking.cancelled'] })
+    if (operation === 'pause') return updateWebhook(ctx, id, { isActive: false })
     if (operation === 'rotate') return rotateWebhookSecret(ctx, settings, id).then(() => undefined)
     return deleteWebhook(ctx, id)
   }
@@ -96,6 +97,28 @@ describe.skipIf(!process.env.DATABASE_URL)('webhook management audit', () => {
         expect(serialized.includes(sensitive)).toBe(false)
     },
   )
+
+  it('records pausing and resuming separately from event edits', async () => {
+    const { user, ctx } = await fixture()
+    const { webhook } = await createWebhook(ctx, settings, input)
+    await updateWebhook(ctx, webhook.id, { isActive: false })
+    await updateWebhook(ctx, webhook.id, { isActive: false })
+    await updateWebhook(ctx, webhook.id, { isActive: true, events: ['booking.cancelled'] })
+    await updateWebhook(ctx, webhook.id, { isActive: true })
+    const rows = await events(user.principal.organization.id)
+    expect(rows.map((row) => [row.action, row.details])).toEqual([
+      ['webhook.created', { events: ['booking.created'] }],
+      ['webhook.paused', { events: ['booking.created'] }],
+      // Repeating a state is an ordinary update, never a second pause or resume.
+      ['webhook.updated', { events: ['booking.created'] }],
+      ['webhook.resumed', { events: ['booking.cancelled'] }],
+      ['webhook.updated', { events: ['booking.cancelled'] }],
+      ['webhook.updated', { events: ['booking.cancelled'] }],
+    ])
+    for (const row of rows)
+      expect(row).toMatchObject({ target_type: 'webhook', target_id: webhook.id })
+    expect(new Set(rows.map((row) => row.request_id))).toEqual(new Set([ctx.requestId]))
+  })
 
   it('rejects another organization without recording its attempted operation', async () => {
     const a = await fixture(),

@@ -13,6 +13,7 @@ export const auditDetails = {
   'organization.updated': [],
   'organization.created': [],
   'membership.invitation_cancelled': [],
+  'membership.invitation_rejected': [],
   'api_key.created': ['scope'],
   'api_key.updated': [],
   'api_key.rotated': ['scope'],
@@ -22,9 +23,11 @@ export const auditDetails = {
   'webhook.updated': ['events'],
   'webhook.deleted': ['events'],
   'webhook.secret_rotated': ['events'],
+  'webhook.paused': ['events'],
+  'webhook.resumed': ['events'],
   'oauth.client_registered': [],
   'oauth.consent_granted': [],
-  'oauth.token_revoked': [],
+  'oauth.token_revoked': ['familySize'],
   'session.revoked': [],
   'sign_in_method.added': [],
   'sign_in_method.removed': [],
@@ -40,7 +43,14 @@ export const auditDetails = {
 } as const
 export type AuditAction = keyof typeof auditDetails
 export interface AuditActor {
-  type: 'user' | 'api_key' | 'oauth_client' | 'system' | 'anonymous' | 'external_api_key'
+  type:
+    | 'user'
+    | 'api_key'
+    | 'oauth_client'
+    | 'system'
+    | 'anonymous'
+    | 'external_api_key'
+    | 'external_oauth_client'
   id?: string
 }
 export interface AuditCredential {

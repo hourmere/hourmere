@@ -136,10 +136,19 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       >`SELECT * FROM audit_events WHERE organization_id=${organizationId} ORDER BY id`.execute(db)
     ).rows
   }
-  async function expiry(factory = createAuth) {
+  async function expiry(
+    factory = createAuth,
+    operation: 'create' | 'update' | 'delete' = 'create',
+  ) {
     const auth = instance(factory),
       actor = await account(),
       other = await account()
+    let own = ''
+    if (operation !== 'create') {
+      const created = await post(auth, '/api-key/create', {}, actor)
+      expect(created.status).toBe(200)
+      own = ((await created.json()) as { id: string }).id
+    }
     const key = await db
       .insertInto('auth.apikey')
       .values({
@@ -156,7 +165,13 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       .executeTakeFirstOrThrow()
     // Better Auth throttles its instance-wide cleanup for ten seconds, including across auth instances.
     await new Promise((resolve) => setTimeout(resolve, 10100))
-    expect((await post(auth, '/api-key/create', {}, actor)).status).toBe(200)
+    const response =
+      operation === 'create'
+        ? await post(auth, '/api-key/create', {}, actor)
+        : operation === 'update'
+          ? await post(auth, '/api-key/update', { keyId: own, name: 'Renamed own key' }, actor)
+          : await post(auth, '/api-key/delete', { keyId: own }, actor)
+    expect(response.status).toBe(200)
     for (let attempt = 0; attempt < 100; attempt++) {
       if (
         !(await db
@@ -172,9 +187,27 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       await db.selectFrom('auth.apikey').select('id').where('id', '=', key.id).execute(),
     ).toEqual([])
     expect(await events(other.organizationId), 'foreign expiry audit isolation').toEqual([])
-    expect(await events(actor.organizationId)).toHaveLength(1)
+    expect(
+      (
+        await sql<{
+          id: string
+        }>`SELECT id FROM audit_events WHERE actor_id=${actor.user.id} AND organization_id IS DISTINCT FROM ${actor.organizationId}`.execute(
+          db,
+        )
+      ).rows,
+      'foreign expiry audit isolation',
+    ).toEqual([])
+    expect((await events(actor.organizationId)).map((row) => row.action)).toEqual(
+      operation === 'create'
+        ? ['api_key.created']
+        : ['api_key.created', operation === 'update' ? 'api_key.updated' : 'api_key.revoked'],
+    )
   }
-  it('does not attribute expired foreign keys to a creating user', () => expiry(), 30000)
+  it.each(['create', 'update', 'delete'] as const)(
+    'does not attribute expired foreign keys to a user calling %s',
+    (operation) => expiry(createAuth, operation),
+    30000,
+  )
   it('kills a source copy that audits bulk expiry cleanup', async () => {
     const source = readFileSync(new URL('./audit.ts', import.meta.url), 'utf8')
     const start = source.indexOf("((path === '/api-key/create'")
@@ -186,6 +219,94 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     )
     await expect(expiry(factory)).rejects.toThrow(/foreign expiry audit isolation/)
   }, 30000)
+  it.each(['update', 'delete'] as const)(
+    'kills a source copy that audits expiry cleanup during key %s',
+    async (operation) => {
+      const source = readFileSync(new URL('./audit.ts', import.meta.url), 'utf8')
+      const start = source.indexOf("['update', 'delete'].includes(method) &&")
+      // Include the selector's own closing parenthesis.
+      const end = source.indexOf(')))) ||', start) + 1
+      expect(start > 0 && end > start, 'update/delete selector found').toBe(true)
+      // Drop the target-key selector and admit bulk deletion on the update/delete paths.
+      const factory = await sourceCopy(
+        './audit.ts',
+        source.slice(start, end),
+        "['update', 'delete', 'deleteMany'].includes(method)",
+      )
+      await expect(expiry(factory, operation)).rejects.toThrow(/foreign expiry audit isolation/)
+    },
+    30000,
+  )
+  async function spelledKeyIds(factory = createAuth) {
+    const auth = instance(factory),
+      actor = await account()
+    const created = await post(auth, '/api-key/create', { name: 'Spelled key' }, actor)
+    expect(created.status).toBe(200)
+    const key = (await created.json()) as { id: string }
+    expect(key.id).toBe(key.id.toLowerCase())
+    const mixed = [...key.id].map((c, i) => (i % 2 ? c.toUpperCase() : c)).join('')
+    expect(mixed).not.toBe(key.id)
+    const stored = () =>
+      db
+        .selectFrom('auth.apikey')
+        .select(['name', 'enabled'])
+        .where('id', '=', key.id)
+        .executeTakeFirst()
+    const steps: [string, Record<string, unknown>, string, unknown][] = [
+      [
+        '/api-key/update',
+        { keyId: key.id.toUpperCase(), name: 'Renamed spelled key' },
+        'api_key.updated',
+        { name: 'Renamed spelled key', enabled: true },
+      ],
+      [
+        '/api-key/update',
+        { keyId: mixed, enabled: false },
+        'api_key.revoked',
+        { name: 'Renamed spelled key', enabled: false },
+      ],
+      [
+        '/api-key/update',
+        { keyId: key.id.toUpperCase(), enabled: true },
+        'api_key.reenabled',
+        { name: 'Renamed spelled key', enabled: true },
+      ],
+      ['/api-key/delete', { keyId: mixed }, 'api_key.revoked', undefined],
+    ]
+    const expected = ['api_key.created']
+    for (const [path, body, action, state] of steps) {
+      expect((await post(auth, path, body, actor)).status).toBe(200)
+      expect(await stored()).toEqual(state)
+      expected.push(action)
+      const rows = await events(actor.organizationId)
+      expect(
+        rows.map((row) => row.action),
+        `spelled key id audit ${action}`,
+      ).toEqual(expected)
+      expect(rows.at(-1)).toMatchObject({
+        actor_type: 'user',
+        actor_id: actor.user.id,
+        credential_type: 'session',
+        credential_id: actor.sessionId,
+        target_type: 'apikey',
+        target_id: key.id,
+        details: {},
+      })
+    }
+  }
+  it('audits uppercase and mixed-case key ids on update, disable, re-enable and delete', () =>
+    spelledKeyIds())
+  it('kills a source copy that compares key ids by spelling', async () => {
+    await expect(
+      spelledKeyIds(
+        await sourceCopy(
+          './audit.ts',
+          'sameId(condition.value, endpoint?.body?.keyId)',
+          'condition.value === endpoint?.body?.keyId',
+        ),
+      ),
+    ).rejects.toThrow(/spelled key id audit/)
+  })
   async function reenable(factory = createAuth) {
     const auth = instance(factory),
       actor = await account()
@@ -282,6 +403,25 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
         .where('clientId', '=', clientId)
         .execute(),
     ).toEqual([])
+    // The disconnected grant no longer names an organization; the family event survives.
+    expect(
+      (
+        await sql<
+          Record<string, unknown>
+        >`SELECT * FROM audit_events WHERE action='oauth.token_revoked' AND oauth_client_id=${clientId}`.execute(
+          db,
+        )
+      ).rows,
+    ).toEqual([
+      expect.objectContaining({
+        organization_id: null,
+        actor_type: 'oauth_client',
+        actor_id: clientId,
+        oauth_grant_id: grant.id,
+        target_id: grant.id,
+        details: { familySize: 1 },
+      }),
+    ])
   }
   it('preserves native revoked-token status and family invalidation after disconnect', () =>
     disconnected())
@@ -290,11 +430,186 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       disconnected(
         await sourceCopy(
           './audit.ts',
-          'organizationId = grant?.organization_id ?? null',
-          "if (!grant) throw new Error('OAuth audit requires its organization grant'); organizationId = grant.organization_id",
+          'organizationId: grant?.organization_id ?? null,',
+          "organizationId: grant ? grant.organization_id : (() => { throw new Error('OAuth audit requires its organization grant') })(),",
         ),
       ),
     ).rejects.toThrow(/native revocation status after disconnect/)
+  })
+  async function family(factory = createAuth) {
+    const auth = instance(factory),
+      actor = await account(),
+      clientId = randomUUID()
+    const team = await db
+      .insertInto('auth.organization')
+      .values({ name: 'Family team', slug: randomUUID(), createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.oauthClient')
+      .values({
+        clientId,
+        redirectUris: JSON.stringify(['https://example.test/callback']),
+        tokenEndpointAuthMethod: 'none',
+      })
+      .execute()
+    const grants = []
+    for (const organizationId of [actor.organizationId, team.id])
+      grants.push(
+        await db
+          .insertInto('mcp_oauth_grants')
+          .values({ user_id: actor.user.id, organization_id: organizationId, client_id: clientId })
+          .returning(['id', 'organization_id'])
+          .executeTakeFirstOrThrow(),
+      )
+    const [presented, sibling] = grants as [(typeof grants)[number], (typeof grants)[number]]
+    const tokens = grants.map(() => randomBytes(32).toString('base64url'))
+    for (const [index, grant] of grants.entries())
+      await db
+        .insertInto('auth.oauthRefreshToken')
+        .values({
+          clientId,
+          userId: actor.user.id,
+          referenceId: grant.id,
+          token: createHash('sha256')
+            .update(tokens[index] as string)
+            .digest('base64url'),
+          scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 86400000),
+          // Presenting an already revoked refresh token is native reuse detection.
+          revoked: index === 0 ? new Date() : null,
+        })
+        .execute()
+    const response = await auth.handler(
+      new Request(`${origin}/api/auth/oauth2/revoke`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          token: tokens[0] as string,
+          token_type_hint: 'refresh_token',
+        }),
+      }),
+    )
+    expect(response.status).toBe(400)
+    expect(
+      await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select('id')
+        .where('clientId', '=', clientId)
+        .execute(),
+    ).toEqual([])
+    const revoked = async (organizationId: string) =>
+      (await events(organizationId)).filter((row) => row.action === 'oauth.token_revoked')
+    expect(await revoked(actor.organizationId), 'presented family audit').toEqual([
+      expect.objectContaining({
+        actor_type: 'oauth_client',
+        actor_id: clientId,
+        credential_type: 'oauth',
+        oauth_client_id: clientId,
+        oauth_grant_id: presented.id,
+        target_type: 'oauth_grant',
+        target_id: presented.id,
+        details: { familySize: 2 },
+      }),
+    ])
+    const other = await revoked(sibling.organization_id)
+    expect(other, 'sibling family audit').toEqual([
+      expect.objectContaining({
+        actor_type: 'oauth_client',
+        actor_id: clientId,
+        credential_type: 'none',
+        oauth_client_id: null,
+        oauth_grant_id: null,
+        target_type: 'oauth_grant',
+        target_id: sibling.id,
+        details: { familySize: 2 },
+      }),
+    ])
+    expect(JSON.stringify(other), 'sibling family audit').not.toContain(presented.id)
+  }
+  it('records refresh-family invalidation against the presented grant with its size', () =>
+    family())
+  it.each([
+    ['per-token family events', 'if (refreshFamily) {', 'if (false) {'],
+    [
+      'presenting grant in a sibling organization',
+      `credential:
+                      grantId === presentedGrant
+                        ? { type: 'oauth', clientId, grantId }
+                        : { type: 'none' },`,
+      "credential: { type: 'oauth', clientId, grantId: presentedGrant },",
+    ],
+  ])('kills a source copy with %s', async (_, before, after) => {
+    await expect(family(await sourceCopy('./audit.ts', before, after))).rejects.toThrow(
+      /family audit/,
+    )
+  })
+  async function rejection(factory = createAuth) {
+    const auth = instance(factory),
+      actor = await account(),
+      recipient = await account()
+    const created = await post(
+      auth,
+      '/organization/create',
+      { name: 'Rejected synthetic team', slug: randomUUID() },
+      actor,
+    )
+    expect(created.status).toBe(200)
+    const team = (await created.json()) as { id: string }
+    const invite = await post(
+      auth,
+      '/organization/invite-member',
+      { organizationId: team.id, email: recipient.user.email, role: 'member' },
+      { ...actor, organizationId: team.id },
+    )
+    expect(invite.status).toBe(200)
+    const invitation = (await invite.json()) as { id: string }
+    const rejected = await post(
+      auth,
+      '/organization/reject-invitation',
+      { invitationId: invitation.id },
+      recipient,
+    )
+    expect(rejected.status).toBe(200)
+    expect(
+      (
+        await db
+          .selectFrom('auth.invitation')
+          .select('status')
+          .where('id', '=', invitation.id)
+          .executeTakeFirstOrThrow()
+      ).status,
+    ).toBe('rejected')
+    const rows = await events(team.id)
+    expect(
+      rows.map((row) => row.action),
+      'rejection audit actions',
+    ).toEqual(['organization.created', 'membership.invited', 'membership.invitation_rejected'])
+    expect(rows[2]).toMatchObject({
+      actor_type: 'user',
+      actor_id: recipient.user.id,
+      credential_type: 'session',
+      credential_id: recipient.sessionId,
+      target_type: 'invitation',
+      target_id: invitation.id,
+      details: {},
+    })
+    expect(JSON.stringify(rows)).not.toContain(recipient.user.email)
+    expect(await events(recipient.organizationId)).toEqual([])
+  }
+  it('records an invitee rejecting an invitation in the inviting team', () => rejection())
+  it('kills a source copy without the rejection audit', async () => {
+    await expect(
+      rejection(
+        await sourceCopy(
+          './team-role-policy.ts',
+          "action: 'membership.invitation_rejected'",
+          "action: 'membership.invited'",
+        ),
+      ),
+    ).rejects.toThrow(/rejection audit actions/)
   })
   async function management(factory = createAuth) {
     const auth = instance(factory),

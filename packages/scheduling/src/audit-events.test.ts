@@ -80,10 +80,11 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
       if (action === 'updated') await updateEventType(ctx, event.id, { title: 'Private update' })
       if (action === 'visibility') await updateEventType(ctx, event.id, { isHidden: true })
       if (action === 'hosts') await updateEventType(ctx, event.id, { hosts: [{ userId: user.id }] })
+      // Writes accept any UUID spelling; the journal must name the stored id.
       if (action === 'notifications_updated')
-        await setEventTypeNotifications(ctx, event.id, DEFAULT_NOTIFICATIONS)
+        await setEventTypeNotifications(ctx, event.id.toUpperCase(), DEFAULT_NOTIFICATIONS)
       if (action === 'waitlist_updated')
-        await setEventTypeWaitlist(ctx, event.id, { enabled: true })
+        await setEventTypeWaitlist(ctx, event.id.toUpperCase(), { enabled: true })
       if (action === 'deleted') await deleteEventType(ctx, event.id.toUpperCase())
       if (action === 'round_robin_activated') await activateRoundRobin(ctx, event.id)
       const rows = await events(event.id)
@@ -297,6 +298,140 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
         credential_scope: 'bookings',
         details: {},
       })
+  })
+
+  it.each(['same', 'foreign', 'unresolved'] as const)(
+    'records a %s-organization OAuth booking without foreign identifiers',
+    async (kind) => {
+      const f = createFixtures(db)
+      const host = await f.host()
+      await f.schedule(host.userId)
+      await f.eventType(host.organizationId, host.userId, { slug: 'oauth-audit' })
+      const caller = kind === 'same' ? host : await f.host()
+      const clientId = 'https://client.test/metadata.json'
+      const grantId =
+        kind === 'unresolved'
+          ? randomUUID()
+          : (
+              await db
+                .insertInto('mcp_oauth_grants')
+                .values({
+                  user_id: caller.userId,
+                  organization_id: caller.organizationId,
+                  client_id: clientId,
+                })
+                .returning('id')
+                .executeTakeFirstOrThrow()
+            ).id
+      const principal: Principal = {
+        kind: 'oauth',
+        oauthConsentId: grantId,
+        clientId,
+        scopes: ['mcp:tools'],
+        user: { id: caller.userId, name: 'Caller', email: 'caller@example.com' },
+        organization: { id: caller.organizationId, name: 'Space', slug: 'space', personal: true },
+      }
+      // The MCP create_booking origin for "someone's event type".
+      const origin = {
+        source: 'mcp' as const,
+        apiKeyId: null,
+        oauthConsentId: grantId,
+        audit: auditActor(principal),
+        actorUserId: caller.userId,
+      }
+      const created = await createPublicBooking(
+        { db, now },
+        {
+          handle: host.handle,
+          slug: 'oauth-audit',
+          start: Temporal.Instant.from('2026-11-02T09:00:00Z'),
+          invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+          idempotencyKey: randomUUID(),
+        },
+        origin,
+      )
+      const rows = (
+        await sql<
+          Record<string, unknown>
+        >`SELECT * FROM audit_events WHERE target_id = ${created.booking.id}`.execute(db)
+      ).rows
+      expect(rows).toHaveLength(1)
+      if (kind === 'same') {
+        expect(rows[0]).toMatchObject({
+          organization_id: host.organizationId,
+          action: 'booking.created',
+          actor_type: 'user',
+          actor_id: caller.userId,
+          credential_type: 'oauth',
+          oauth_client_id: clientId,
+          oauth_grant_id: grantId,
+        })
+        return
+      }
+      expect(rows[0], 'foreign OAuth booking audit').toMatchObject({
+        organization_id: host.organizationId,
+        action: 'booking.created',
+        actor_type: 'external_oauth_client',
+        actor_id: null,
+        credential_type: 'none',
+        credential_id: null,
+        oauth_client_id: null,
+        oauth_grant_id: null,
+        details: {},
+      })
+      const serialized = JSON.stringify(rows)
+      for (const foreign of [caller.userId, grantId, clientId])
+        expect(serialized.includes(foreign), 'foreign OAuth booking audit').toBe(false)
+    },
+  )
+
+  it('compares API key organization metadata in canonical UUID form', async () => {
+    const f = createFixtures(db)
+    const host = await f.host()
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'key-spelling' })
+    const principal: Principal = {
+      kind: 'api_key',
+      apiKeyId: randomUUID(),
+      apiKeyScope: 'bookings',
+      user: { id: host.userId, name: 'Host', email: 'host@example.com' },
+      organization: { id: host.organizationId, name: 'Space', slug: 'space', personal: true },
+    }
+    await db
+      .insertInto('auth.apikey')
+      .values({
+        id: principal.apiKeyId,
+        referenceId: host.userId,
+        configId: 'default',
+        key: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        metadata: JSON.stringify({
+          organizationId: host.organizationId.toUpperCase(),
+          scope: 'bookings',
+        }),
+      })
+      .execute()
+    const created = await createPublicBooking(
+      { db, now },
+      {
+        handle: host.handle,
+        slug: 'key-spelling',
+        start: Temporal.Instant.from('2026-11-02T09:00:00Z'),
+        invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+        idempotencyKey: randomUUID(),
+      },
+      { source: 'mcp', apiKeyId: principal.apiKeyId, audit: auditActor(principal) },
+    )
+    expect(await events(created.booking.id)).toEqual([
+      expect.objectContaining({
+        action: 'booking.created',
+        actor_type: 'api_key',
+        actor_id: principal.apiKeyId,
+        credential_id: principal.apiKeyId,
+        credential_scope: 'bookings',
+      }),
+    ])
   })
 
   it.each(['create', 'reschedule', 'cancel'] as const)(

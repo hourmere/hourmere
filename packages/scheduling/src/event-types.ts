@@ -301,7 +301,7 @@ export async function setEventTypeNotifications(
         .where('id', '=', row.id)
         .execute()
     }
-    await auditEventType(ctx, trx, id, 'event_type.notifications_updated')
+    await auditEventType(ctx, trx, row.id, 'event_type.notifications_updated')
     return notifications
   })
 }
@@ -342,7 +342,7 @@ export async function setEventTypeWaitlist(
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await waitlistManager(trx, ctx, row)
     await writeWaitlistSettings(trx, row, settings)
-    await auditEventType(ctx, trx, id, 'event_type.waitlist_updated')
+    await auditEventType(ctx, trx, row.id, 'event_type.waitlist_updated')
     return settings
   })
 }

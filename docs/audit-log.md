@@ -18,14 +18,22 @@ sequence gaps are normal after rollback and IDs do not promise commit ordering.
 Indexes cover organization plus time, actor, or action, with ID tie breakers.
 
 Actors form a database-checked closed set: `user`, `api_key`, `oauth_client`,
-`system` (job/service name as ID), `external_api_key` and `anonymous` (both without IDs). Credentials are
+`system` (job/service name as ID), `external_api_key`, `external_oauth_client` and
+`anonymous` (the last three without IDs). Credentials are
 `session` (optional session ID), `api_key` (ID and actual scope), `oauth` (client
 and grant IDs), or `none`. Legacy internal calls without an authenticated
 principal may have a null API-key scope (unknown); HTTP and MCP authenticated
 requests preserve the actual scope. Unknown scope is never recorded as full. OAuth authorized actions retain the consenting user
 and client/grant; same-organization API-key actions retain the exact key used by the agent.
-A foreign organization key booking uses `external_api_key` with credential `none`,
-without the key ID, user ID or scope in the booked organization’s journal.
+A booking made with another organization's API key uses `external_api_key`, and one
+made through another organization's OAuth grant (for example MCP `create_booking` on a
+public booking page) uses `external_oauth_client`. Both have credential `none`: the
+booked organization's journal holds no foreign key, user, client or grant ID, or key
+scope. A credential that can no longer be resolved to the booked organization (a key
+or grant deleted while the request ran) is treated the same way. The database rejects
+any external actor with a credential other than `none`. Organization comparisons use
+the canonical UUID form, so a differently spelled organization ID in key metadata is
+still the same organization.
 Unauthenticated OAuth client registration has no organization and is instance-wide;
 a future organization reader must not infer access to these rows.
 
@@ -42,16 +50,17 @@ therefore incur these snapshot reads and one audit INSERT per affected entity.
 
 The application and database reject extra detail keys. Role changes allow only
 `oldRole` and `newRole`; API key creation and the reserved rotation action allow
-only `scope`; all webhook actions allow only `events` (the subscribed event list).
-Every other action requires an empty object. No key names, webhook URLs or secrets
+only `scope`; all webhook actions allow only `events` (the subscribed event list);
+OAuth token revocation allows only `familySize` (see below). Every other action
+requires an empty object. No key names, webhook URLs or secrets
 are recorded. New detail keys require deliberate schema and documentation review.
 
 | Area | Actions |
 | --- | --- |
-| Membership | `membership.invited`, `membership.accepted`, `membership.removed`, `membership.left`, `membership.role_changed`, `membership.invitation_cancelled` |
+| Membership | `membership.invited`, `membership.accepted`, `membership.invitation_rejected`, `membership.removed`, `membership.left`, `membership.role_changed`, `membership.invitation_cancelled` |
 | Organization | `organization.created`, `organization.updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
-| Webhooks | `webhook.created`, `webhook.updated`, `webhook.deleted`, `webhook.secret_rotated` |
+| Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled` |
@@ -73,9 +82,28 @@ the user and app session. Revoking a refresh family after its grant was already
 disconnected keeps native invalidation and response behavior; absent grants do not
 cause audit failure.
 
+Presenting an already revoked refresh token makes Better Auth invalidate the client's
+whole refresh-token family for that user, across every grant and organization. This
+is recorded as one `oauth.token_revoked` event per affected grant, each with
+`familySize` (the number of refresh tokens invalidated). The grant whose token was
+presented is the target and credential of its event, in its own organization (or
+with no organization once that grant was disconnected). Every other affected grant gets an event in its own
+organization with credential `none`, so the presenting grant's ID never reaches
+another tenant. Access tokens deleted with the family are covered by these events.
+
+API-key updates, disables, re-enables and deletes are matched to the requested key in
+canonical UUID form; the request may spell the key ID in any letter case. An invitee
+rejecting an invitation is recorded in the inviting team as
+`membership.invitation_rejected`, attributed to the invitee's session.
+
+Webhook updates that change the active state record `webhook.paused` or
+`webhook.resumed`. A change to the subscribed events, or an update that changes
+neither, records `webhook.updated`; one request that resumes and edits records both.
+
 An event-type update records visibility and host changes without copying the
-configuration. Target IDs identify the affected entity; removal events preserve
-those IDs after the entity disappears.
+configuration. Target IDs identify the affected entity by its stored ID, whatever UUID
+spelling the request used; removal events preserve those IDs after the entity
+disappears.
 
 ## Privacy, append-only behavior, and exclusions
 
@@ -106,6 +134,12 @@ automatic expiry/replacement cancellation are not separate management events
 (new replacement invitations retain their invitation event).
 Automatic API-key expiry cleanup is not a user management action and is not
 recorded, including cleanup triggered by another user’s key endpoint.
+Paid-booking holds (creating, confirming and cancelling a payment hold) are service
+functions that no route reaches yet; wiring them to a route must add booking audit
+events. Automatic payment-hold expiry and unpaid-hold personal-data erasure are system
+housekeeping and are not recorded. The operator [Cal.com import](calcom-import.md),
+a command-line tool with direct database access, is not recorded, like other
+operator database changes.
 
 This is a management journal, not an access log: reads, failed attempts, ordinary
 sign-ins and session refreshes, third-party provider internals, email contents,

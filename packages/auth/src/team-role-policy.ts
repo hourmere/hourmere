@@ -753,14 +753,22 @@ export function createTeamRolePolicy(
                 message: 'This invitation is no longer pending.',
               })
             }
-            return trx
+            const rejected = await trx
               .updateTable('auth.invitation')
               .set({ status: 'rejected' })
-              .where('id', '=', invitationId)
+              .where('id', '=', invitation.id)
               .where('organizationId', '=', organization.id)
               .where('status', '=', 'pending')
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            await writeAuditEvent(trx, {
+              organizationId: organization.id,
+              ...auditActor(actor),
+              action: 'membership.invitation_rejected',
+              targetType: 'invitation',
+              targetId: invitation.id,
+            })
+            return rejected as never
           })
         }
         if (

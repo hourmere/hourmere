@@ -40,6 +40,16 @@ export const withAuthAuditTransaction = <T>(
   })
 
 type Row = Record<string, unknown>
+type Condition = { field: string; operator?: string; value: unknown }
+
+/**
+ * Request validation accepts any UUID spelling and Postgres compares uuid values without
+ * case, while Better Auth writes with the stored lowercase id. Compare the canonical form.
+ */
+const sameId = (left: unknown, right: unknown) =>
+  typeof left === 'string' &&
+  typeof right === 'string' &&
+  left.toLowerCase() === right.toLowerCase()
 
 /** Audit native persistence, never a response hook: failures roll back the changed row. */
 export function authAuditRecords(): BetterAuthPlugin {
@@ -83,7 +93,26 @@ export function authAuditRecords(): BetterAuthPlugin {
       ],
     },
     init(ctx) {
+      // Revocation finds the presented refresh token before any family invalidation.
+      const presentedRefreshTokens = new WeakMap<object, Row>()
       const wrap = (adapter: DBTransactionAdapter, inTransaction: boolean) => {
+        // Synthetic adapters in unit harnesses may omit reads.
+        const findOne = adapter.findOne?.bind(adapter)
+        if (findOne)
+          adapter.findOne = (async (request: Parameters<DBTransactionAdapter['findOne']>[0]) => {
+            const found = await findOne<Row>(request)
+            const endpoint = tryGetCurrentAuthEndpointContext()
+            if (
+              found &&
+              endpoint?.path === '/oauth2/revoke' &&
+              request.model === 'oauthRefreshToken' &&
+              (request.where as Condition[] | undefined)?.some(
+                (condition) => condition.field === 'token',
+              )
+            )
+              presentedRefreshTokens.set(endpoint, found)
+            return found
+          }) as DBTransactionAdapter['findOne']
         for (const method of [
           'create',
           'update',
@@ -98,6 +127,21 @@ export function authAuditRecords(): BetterAuthPlugin {
           const wrapped = async (request: { model: string; [key: string]: unknown }) => {
             const endpoint = tryGetCurrentAuthEndpointContext()
             const path = endpoint?.path ?? ''
+            const where = (request.where as Condition[] | undefined) ?? []
+            // Revoking a reused refresh token invalidates the client's whole family for that
+            // user: first the family's access tokens, then its refresh tokens. One event,
+            // written with the refresh tokens, records the family.
+            const refreshFamily =
+              path === '/oauth2/revoke' &&
+              request.model === 'oauthRefreshToken' &&
+              method === 'deleteMany'
+            const familyAccessTokens =
+              path === '/oauth2/revoke' &&
+              request.model === 'oauthAccessToken' &&
+              method === 'deleteMany' &&
+              where.some(
+                (condition) => condition.field === 'refreshId' && condition.operator === 'in',
+              )
             // Native key endpoints also bulk-delete expired keys across the instance.
             // Expiry housekeeping is not a user management action; audit only the target.
             const relevant =
@@ -105,14 +149,15 @@ export function authAuditRecords(): BetterAuthPlugin {
                 ((path === '/api-key/create' && method === 'create') ||
                   (['/api-key/update', '/api-key/delete'].includes(path) &&
                     ['update', 'delete'].includes(method) &&
-                    (request.where as { field: string; value: unknown }[] | undefined)?.some(
+                    where.some(
                       (condition) =>
-                        condition.field === 'id' && condition.value === endpoint?.body?.keyId,
+                        condition.field === 'id' && sameId(condition.value, endpoint?.body?.keyId),
                     )))) ||
               (request.model === 'oauthClient' && method === 'create') ||
               (request.model === 'oauthConsent' && (method === 'create' || method === 'update')) ||
               (['oauthRefreshToken', 'oauthAccessToken'].includes(request.model) &&
-                path === '/oauth2/revoke') ||
+                path === '/oauth2/revoke' &&
+                !familyAccessTokens) ||
               (request.model === 'session' &&
                 ['delete', 'deleteMany', 'consumeOne'].includes(method) &&
                 [
@@ -177,6 +222,44 @@ export function authAuditRecords(): BetterAuthPlugin {
                       ],
                     }
               const result = await (original as (r: unknown) => Promise<unknown>)(actualRequest)
+              if (refreshFamily) {
+                if (!before.length) return result
+                const presented = endpoint ? presentedRefreshTokens.get(endpoint) : undefined
+                if (!presented) throw new Error('OAuth family audit requires the presented token')
+                const clientId = String(before[0]?.clientId)
+                const presentedGrant = String(presented.referenceId)
+                // The presented grant is the target and credential. Other grants of the same
+                // client and user lose their tokens too; their organizations get their own
+                // event without the presenting grant, because it may belong to another tenant.
+                const grants = [
+                  presentedGrant,
+                  ...new Set(
+                    before
+                      .map((row) => String(row.referenceId))
+                      .filter((grantId) => !sameId(grantId, presentedGrant)),
+                  ),
+                ]
+                for (const grantId of grants) {
+                  const grant = await trx
+                    .selectFrom('mcp_oauth_grants')
+                    .select('organization_id')
+                    .where('id', '=', grantId)
+                    .executeTakeFirst()
+                  await writeAuditEvent(trx, {
+                    organizationId: grant?.organization_id ?? null,
+                    actor: { type: 'oauth_client', id: clientId },
+                    credential:
+                      grantId === presentedGrant
+                        ? { type: 'oauth', clientId, grantId }
+                        : { type: 'none' },
+                    action: 'oauth.token_revoked',
+                    targetType: 'oauth_grant',
+                    targetId: grantId,
+                    details: { familySize: before.length },
+                  })
+                }
+                return result
+              }
               const rows = method === 'create' ? [result as Row] : before
               for (const row of rows) {
                 if (!row) continue

@@ -12,9 +12,10 @@ read APIs, export and retention settings are planned separately. No automatic
 retention cleanup runs yet.
 
 Events identify the organization, time, actor, credential used, action, target and
-request. Same-organization agent actions retain the API-key ID and scope. Foreign-key
-public bookings record an external actor without that key’s ID. OAuth actions retain the
-client and grant IDs. Events and the recorded change share a database transaction:
+request. Same-organization agent actions retain the API-key ID and scope, and OAuth
+actions retain the client and grant IDs. A booking made with another organization's API
+key or OAuth connection records an external actor, without that caller's key, user,
+client or grant IDs. Events and the recorded change share a database transaction:
 if the event cannot be written, the change fails too.
 
 The journal does not copy secrets, tokens, passwords, raw emails, invitee answers,

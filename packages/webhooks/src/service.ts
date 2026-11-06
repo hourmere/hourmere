@@ -276,7 +276,16 @@ export async function updateWebhook(
       .where('id', '=', row.id)
       .returning(visibleColumns)
       .executeTakeFirstOrThrow()
-    await auditWebhook(trx, ctx, 'webhook.updated', updated)
+    // Pausing and resuming are distinct from editing the subscribed events. A call that
+    // does both records both; a call that changes neither still records the update.
+    const activity = updated.is_active === row.is_active ? undefined : updated.is_active
+    if (activity !== undefined)
+      await auditWebhook(trx, ctx, activity ? 'webhook.resumed' : 'webhook.paused', updated)
+    if (
+      activity === undefined ||
+      [...updated.events].sort().join() !== [...row.events].sort().join()
+    )
+      await auditWebhook(trx, ctx, 'webhook.updated', updated)
     return view(updated)
   })
 }
