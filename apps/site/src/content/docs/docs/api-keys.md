@@ -125,9 +125,9 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Operation group | `full` | `read` | `bookings` |
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
+| Browser session operations | — | — | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
-| Browser session operations | — | — | — |
 | Account settings and configuration writes | Allowed | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
@@ -136,6 +136,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
+| `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
+| `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
+| `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
+| `DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}` | Browser session only | — |
 | `GET /api/v1/book/{token}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |

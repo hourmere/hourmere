@@ -68,6 +68,31 @@ function rest(
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
+  rest(
+    'GET',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens',
+    'session_only',
+    'session_only',
+  ),
+  rest(
+    'POST',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens',
+    'session_only',
+    'session_only',
+  ),
+  rest(
+    'POST',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'session_only',
+    'session_only',
+  ),
+  rest(
+    'DELETE',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
+    'session_only',
+    'session_only',
+  ),
+
   rest('GET', '/api/v1/book/{token}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/book/{token}/slots', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key'),

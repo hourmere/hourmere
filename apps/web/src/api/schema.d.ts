@@ -2207,6 +2207,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List provisioning token metadata
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        get: operations["listScimProvisioningTokens"];
+        put?: never;
+        /**
+         * Create a provisioning token
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        post: operations["createScimProvisioningToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Permanently revoke both token generations
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        delete: operations["revokeScimProvisioningToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a provisioning token with bounded overlap
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        post: operations["rotateScimProvisioningToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profile": {
         parameters: {
             query?: never;
@@ -4852,6 +4916,8 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
+            /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
+            scimProvisioningEnabled?: boolean;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -4866,6 +4932,10 @@ export interface components {
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
+        };
+        IssuedScimProvisioningToken: {
+            secret: string;
+            token: components["schemas"]["ScimProvisioningToken"];
         };
         /** @description Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. The personal event owner or authorized team owners/admins can see the submitted email, optional name and requested period. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention. */
         JoinWaitlist: {
@@ -5374,6 +5444,21 @@ export interface components {
              */
             timeZone?: string;
             weeklyHours?: components["schemas"]["WeeklyHoursInput"];
+        };
+        ScimProvisioningToken: {
+            createdAt: string;
+            createdByUserId: string | null;
+            expiresAt: string | null;
+            /** Format: uuid */
+            id: string;
+            lastUsedAt: string | null;
+            name: string;
+            /** Format: uuid */
+            organizationId: string;
+            previousValidUntil: string | null;
+            revokedAt: string | null;
+            rotatedAt: string | null;
+            rotatedByUserId: string | null;
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         SelfReadinessPage: {
@@ -8547,6 +8632,340 @@ export interface operations {
                 };
             };
             /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listScimProvisioningTokens: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Metadata only; never secrets or hashes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        nextCursor: string | null;
+                        tokens: components["schemas"]["ScimProvisioningToken"][];
+                    };
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Save this secret now; it cannot be retrieved again */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedScimProvisioningToken"];
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked metadata; revocation is idempotent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: components["schemas"]["ScimProvisioningToken"];
+                    };
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rotateScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @default 3600 */
+                    overlapSeconds?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description One-time replacement secret; previous secret accepted until previousValidUntil */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedScimProvisioningToken"];
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
