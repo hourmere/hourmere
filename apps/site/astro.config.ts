@@ -88,6 +88,7 @@ export default defineConfig({
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
             { label: 'One-time booking links', link: '/docs/one-time-links' },
+            { label: 'Open-time snippets', link: '/docs/open-time-snippets' },
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'Request another time', link: '/docs/request-reschedule' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },

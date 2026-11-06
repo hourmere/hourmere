@@ -168,6 +168,12 @@ export {
   revokeOneTimeBookingLink,
 } from './one-time-links.ts'
 export {
+  type GenerateOpenTimeSnippetInput,
+  generateOpenTimeSnippet,
+  MAX_OPEN_TIME_SNIPPET_RANGE_DAYS,
+  type OpenTimeSnippetOptions,
+} from './open-time-snippets.ts'
+export {
   getProfile,
   HANDLE_MAX_LENGTH,
   HANDLE_PATTERN,
