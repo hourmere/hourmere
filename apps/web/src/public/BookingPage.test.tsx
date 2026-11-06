@@ -1841,6 +1841,39 @@ it.each([false, true])(
 )
 
 describe('booking a chosen location', () => {
+  it.each([
+    ['zh-CN', '此地点暂时无法预约。请联系主持人安排预约。'],
+    [
+      'de',
+      'Dieser Treffpunkt ist nicht verfügbar. Wenden Sie sich für die Buchung an die gastgebende Person.',
+    ],
+  ])('translates an unavailable location when public slots load in %s', async (language, text) => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes(
+        {
+          ...EVENT,
+          locations: [
+            { id: 'video', kind: 'google_meet', isDefault: true },
+            { id: 'office', kind: 'in_person', label: 'Office' },
+          ],
+        },
+        DST_SLOTS,
+      ),
+      'GET /api/v1/public/ada/intro/slots': () =>
+        json(409, {
+          error: 'location_unavailable',
+          message: 'The chosen location is unavailable.',
+        }),
+    })
+    renderApp('/ada/intro')
+    await screen.findByRole('heading', { level: 1, name: 'Intro call' })
+    await selectPublicLanguage(user, language)
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(text))
+    expect(api.to('GET /api/v1/public/ada/intro/slots').length).toBeGreaterThan(0)
+    expect(document.body.textContent).not.toContain('The chosen location is unavailable.')
+  })
+
   it('sends the chosen option and phone, preserves the draft and retries the same request', async () => {
     const user = userEvent.setup()
     const requests: { body: unknown; key: string | null }[] = []
