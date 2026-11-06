@@ -93,11 +93,15 @@ export function WaitlistJoin({
     } catch (err) {
       // Never reflect service prose or any mailbox/entry-specific state.
       setError(
-        codeOf(err) === 'availability_changed' ||
-          codeOf(err)?.startsWith('waitlist_') ||
-          codeOf(err)?.startsWith('invalid_waitlist_')
-          ? UNAVAILABLE
-          : failureMessage(err),
+        codeOf(err) === 'waitlist_full'
+          ? 'This waitlist is full (100 entries). Please check available times later.'
+          : codeOf(err) === 'waitlist_smtp_not_configured'
+            ? 'Waitlist email is unavailable. Please contact the host.'
+            : codeOf(err) === 'availability_changed' ||
+                codeOf(err)?.startsWith('waitlist_') ||
+                codeOf(err)?.startsWith('invalid_waitlist_')
+              ? UNAVAILABLE
+              : failureMessage(err),
       )
     } finally {
       inFlight.current = false

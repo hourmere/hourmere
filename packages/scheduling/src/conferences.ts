@@ -5,6 +5,21 @@ import { DomainError } from './errors.ts'
 import { cancelGroupSlotConference, prepareGroupSlotConference } from './group-conferences.ts'
 import { cleanText } from './text.ts'
 
+/** Keep provider diagnostics only for the unchanged legacy singleton contract. */
+export async function withLocationAvailability<T>(
+  options: readonly { id: string }[] | null,
+  optionId: string | undefined,
+  check: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await check()
+  } catch (error) {
+    if (!(error instanceof DomainError)) throw error
+    if (options?.length === 1 && options[0]?.id === 'legacy' && optionId === undefined) throw error
+    throw new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
+  }
+}
+
 export const automaticMeet = (location: unknown): boolean =>
   typeof location === 'object' &&
   location !== null &&

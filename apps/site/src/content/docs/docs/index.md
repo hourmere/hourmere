@@ -17,12 +17,16 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
+  the editor, REST, MCP or CLI.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
   through the editor, REST, MCP or CLI, with the booking URL shown once.
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
   and optional host notes, with delivery limits and configuration examples.
+- [Open-time snippets for agents](/docs/open-time-snippets): draft an email with current
+  alternatives and direct booking links through REST, MCP or CLI.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
@@ -30,16 +34,25 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
+- [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
+  receive notification when a matching time opens; manage entries in the editor, REST,
+  MCP or CLI. Available in full to self-hosters.
+
 ## Known limitations
 
+- [Booking limits](/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
+- [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
+  single-host types at the default meeting length. Nothing is reserved; the first
+  successful ordinary booking wins, and email delivery is not guaranteed.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.
-
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
-  in process memory.
+  in process memory, except the additional durable booking-waitlist admission limits.
 - [Microsoft Calendar](/docs/microsoft-calendar) lists calendars only, without busy-time
   synchronization or event writes. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft)
   and calendar connections have not had real-account acceptance.
@@ -64,7 +77,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   [Bundled Caddy](/docs/self-hosting#prepare-the-host) additionally requires ports 80/443,
   an HTTPS host name without a port, and an IPv4-only ingress network.
 - [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
-  uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
+  uses in-process memory at the transport layer; multiple web replicas multiply the limits.
+  Waitlists additionally enforce durable mailbox, event and trusted-IP admission budgets. Run a single web process;
   a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
 - [Public booking pages and emails](/docs/interface-languages) support English,
   Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces support English and

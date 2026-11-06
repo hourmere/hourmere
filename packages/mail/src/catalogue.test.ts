@@ -4,6 +4,30 @@ import { mailCatalogueProblems, mailCatalogues, mailMessage } from './catalogue.
 import english from './catalogues/en.json' with { type: 'json' }
 
 describe('mail catalogue coverage', () => {
+  it('uses the established Chinese register and distinct German phone recipient roles', () => {
+    expect(mailMessage('zh-CN', 'phone.hostCallsYou', { number: '+14155550123' })).toBe(
+      '电话通话 — 主持人将拨打你的号码 +14155550123',
+    )
+    expect(mailMessage('zh-CN', 'phone.inviteeCallsYou', { number: '+14155550123' })).toBe(
+      '电话通话 — 受邀者将拨打你的号码 +14155550123',
+    )
+    expect(mailMessage('de', 'phone.hostCallsInvitee')).toBe(
+      'Telefonat — die gastgebende Person ruft die eingeladene Person an',
+    )
+    expect(mailMessage('de', 'phone.callInvitee', { number: '+14155550123' })).toBe(
+      'Telefonat — rufen Sie die eingeladene Person unter +14155550123 an',
+    )
+    expect(mailMessage('de', 'phone.hostCallsYou', { number: '+14155550123' })).toBe(
+      'Telefonat — die gastgebende Person ruft Sie unter +14155550123 an',
+    )
+    expect(mailMessage('de', 'phone.inviteeCallsYou', { number: '+14155550123' })).toBe(
+      'Telefonat — die eingeladene Person ruft Sie unter +14155550123 an',
+    )
+    expect(mailMessage('de', 'phone.callHost', { number: '+14155550123' })).toBe(
+      'Telefonat — rufen Sie die gastgebende Person unter +14155550123 an',
+    )
+  })
+
   for (const { code } of registeredLocales) {
     it(`${code} reports coverage and has valid placeholders`, () => {
       const catalogue = mailCatalogues[code] ?? {}

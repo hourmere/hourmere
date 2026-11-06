@@ -1,5 +1,7 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
 
@@ -1043,6 +1045,15 @@ export const admin = {
   Created: '创建时间',
   'Created “{0}”.': '已创建“{0}”。',
   'Creating…': '正在创建…',
+  'Weekly limit': '每周上限',
+  'Monthly limit': '每月上限',
+  'Bookings per week, {0}–{1}. Empty: no limit.': '每周的预约数量，{0}–{1}。留空表示不限。',
+  'Bookings per month, {0}–{1}. Empty: no limit.': '每月的预约数量，{0}–{1}。留空表示不限。',
+  'Weekly limit must be at least the daily limit.': '每周上限不得低于每日上限。',
+  'Monthly limit must be at least the weekly limit.': '每月上限不得低于每周上限。',
+  'Monthly limit must be at least the daily limit.': '每月上限不得低于每日上限。',
+  'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.':
+    '预约上限已在其他地方更改。请重新加载查看当前上限后再保存。你的更改尚未保存。',
   'Daily limit': '每日上限',
   Date: '日期',
   'Date overrides': '特定日期安排',

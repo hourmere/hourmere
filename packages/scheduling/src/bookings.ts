@@ -37,6 +37,7 @@ import {
   requireMeetDestination,
   requireZoomConnection,
   unresolvedLocation,
+  withLocationAvailability,
 } from './conferences.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -1344,7 +1345,9 @@ async function publicBooking(
         const available: string[] = []
         let stale = false
         const candidates = automaticMeet(chosenOption)
-          ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
+          ? await withLocationAvailability(current.locations, input.locationOptionId, () =>
+              eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet),
+            )
           : current.eligibleHostUserIds
         for (const hostUserId of candidates) {
           try {

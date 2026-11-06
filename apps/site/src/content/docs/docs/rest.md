@@ -111,6 +111,16 @@ An exact `Idempotency-Key` retry never creates a second link and returns
 `409 one_time_link_already_created` because the URL cannot be recovered.
 See [one-time booking links](/docs/one-time-links) for examples, permissions and limits.
 
+## Generate an email snippet
+
+`POST /api/v1/open-time-snippets` accepts exactly one of `eventTypeId` or `slug`,
+required `from`/`to` instants (at most 31 elapsed days), and optional `count` (1–10, default 3),
+`locale`, `displayTimeZone` and `durationMinutes`. It returns chosen `slots` with direct
+links plus `text` and `html`. Personal owners and team owners/admins can use `read`,
+`bookings` or `full` keys when `SLOT_SNIPPETS_ENABLED` is enabled. It reserves nothing.
+See [the agent guide](/docs/open-time-snippets) for a complete curl example, response
+fields, date boundaries and taken-time fallback.
+
 ## Find a time
 
 Choose a future UTC range within the event type's booking window, at most 62 days.
@@ -240,3 +250,21 @@ and choose `locationOptionId` for slot availability and booking. An invitee-phon
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
+
+## Configure booking limits
+
+Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`: whole numbers from 1 to 1000, or `null` for no ceiling.
+Omitted update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. Event-type reads return all three settings. API keys need `full` scope
+for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
+CLI examples, host schedule time zones, Monday-based weeks, calendar months and
+counting rules. Lowering a ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

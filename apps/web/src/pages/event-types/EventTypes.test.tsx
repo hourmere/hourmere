@@ -278,10 +278,16 @@ describe('creating an event type', () => {
       ['minimumNoticeMinutes', '会议至少需要提前多久预约。'],
       ['bufferBeforeMinutes', '每次会议前保留的空闲时间。'],
       ['bufferAfterMinutes', '每次会议后保留的空闲时间。'],
+      ['maxBookingsPerWeek', '每周的预约数量，1–1000。留空表示不限。'],
+      ['maxBookingsPerMonth', '每月的预约数量，1–1000。留空表示不限。'],
     ]) {
       expect(document.getElementById(`${id}-hint`)?.textContent).toContain(hint)
     }
-    expect(document.body.textContent).not.toMatch(/How far ahead|Free time kept/)
+    expect(screen.getByLabelText(/每周上限/)).toBeDefined()
+    expect(screen.getByLabelText(/每月上限/)).toBeDefined()
+    expect(document.body.textContent).not.toMatch(
+      /How far ahead|Free time kept|Weekly limit|Monthly limit/,
+    )
   })
 
   it('offers an optional random unlisted suffix on plain HTTP without changing the link until accepted', async () => {
@@ -357,6 +363,8 @@ describe('creating an event type', () => {
     await user.type(field('Minimum notice (minutes)'), '240')
     await user.type(field(/Booking window/), '60')
     await user.type(field(/Daily limit/), '4')
+    await user.type(field(/Weekly limit/), '8')
+    await user.type(field(/Monthly limit/), '20')
     await user.clear(field('Buffer before (minutes)'))
     await user.type(field('Buffer before (minutes)'), '5')
     await user.clear(field('Buffer after (minutes)'))
@@ -377,6 +385,8 @@ describe('creating an event type', () => {
         bufferAfterMinutes: 10,
         minimumNoticeMinutes: 240,
         maxBookingsPerDay: 4,
+        maxBookingsPerWeek: 8,
+        maxBookingsPerMonth: 20,
         bookingWindowDays: 60,
         location: { kind: 'phone', number: '+14155550123' },
         questions: [],
@@ -701,6 +711,8 @@ describe('editing an event type', () => {
     scheduleId: SCHEDULE_ID,
     minimumNoticeMinutes: 1440,
     maxBookingsPerDay: 3,
+    maxBookingsPerWeek: 5,
+    maxBookingsPerMonth: 10,
     questions: [
       { id: 'company', label: 'Company', type: 'short_text', required: true },
       { id: 'plan', label: 'Plan', type: 'select', required: false, options: ['Free', 'Pro'] },
@@ -712,6 +724,8 @@ describe('editing an event type', () => {
     const api = eventTypeServer([saved])
     await openExisting()
     expect(field('Title').value).toBe('Intro call')
+    expect(field(/Weekly limit/).value).toBe('5')
+    expect(field(/Monthly limit/).value).toBe('10')
     expect(field('Address').value).toBe('Unter den Linden 1')
     expect(field('Minimum notice (minutes)').value).toBe('1440')
     expect(screen.getByText(/= 1 day\./)).toBeDefined()
@@ -737,7 +751,6 @@ describe('editing an event type', () => {
         bufferBeforeMinutes: 0,
         bufferAfterMinutes: 0,
         minimumNoticeMinutes: 1440,
-        maxBookingsPerDay: 3,
         bookingWindowDays: null,
         // Saved questions keep their ids, so earlier answers stay attached.
         questions: [
@@ -758,6 +771,51 @@ describe('editing an event type', () => {
       },
     ])
   })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'explains a concurrent booking limit change in %s without discarding the draft',
+    async (language) => {
+      chooseLanguage(language)
+      const user = userEvent.setup()
+      let current = saved
+      const api = eventTypeServer([saved], {
+        [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: ({ body }) => {
+          const merged = { ...current, ...(body as Partial<EventType>) }
+          expect(merged.maxBookingsPerWeek).toBe(20)
+          expect(merged.maxBookingsPerMonth).toBe(12)
+          return json(400, {
+            error: 'invalid_event_type',
+            message: 'maxBookingsPerMonth must be at least maxBookingsPerWeek',
+          })
+        },
+      })
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const weekly = await screen.findByLabelText<HTMLInputElement>(
+        language === 'en' ? /Weekly limit/ : /每周上限/,
+      )
+      const monthly = field(language === 'en' ? /Monthly limit/ : /每月上限/)
+      expect(weekly.value).toBe('5')
+      current = { ...saved, maxBookingsPerWeek: 20, maxBookingsPerMonth: 30 }
+      await user.clear(monthly)
+      await user.type(monthly, '12')
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Save changes' : '保存更改' }),
+      )
+      const summary = await screen.findByRole('alert')
+      expect(summary.textContent).toContain(
+        language === 'en'
+          ? 'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.'
+          : '预约上限已在其他地方更改。请重新加载查看当前上限后再保存。你的更改尚未保存。',
+      )
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1)
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(
+        'maxBookingsPerWeek',
+      )
+      expect(weekly.value).toBe('5')
+      expect(monthly.value).toBe('12')
+      expect(monthly.getAttribute('aria-invalid')).toBe('true')
+    },
+  )
 
   it('saves metadata for an invitee-phone default without supplying a host number', async () => {
     const user = userEvent.setup()

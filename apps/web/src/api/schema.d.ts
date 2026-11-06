@@ -2188,6 +2188,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/open-time-snippets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate an open-time email snippet
+         * @description Read-only generation for personal owners and team owners/admins; read, bookings and full API keys are accepted. Requires SLOT_SNIPPETS_ENABLED. Chooses the earliest available alternatives, up to count, from a range of at most 31 elapsed days. Uses the ordinary slot engine and shared email formatter. Active hidden events are allowed; links can be forwarded. No booking, reservation or private capability is created. Taken links offer the ordinary booking page to choose another time. Omitted locale and displayTimeZone use profile preferences; duration defaults to the event length.
+         */
+        post: operations["generateOpenTimeSnippet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profile": {
         parameters: {
             query?: never;
@@ -2566,7 +2586,7 @@ export interface paths {
         put?: never;
         /**
          * Request to join a booking waitlist
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["joinPersonalWaitlist"];
         delete?: never;
@@ -2586,7 +2606,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly request another verification email
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendPersonalWaitlist"];
         delete?: never;
@@ -2802,7 +2822,7 @@ export interface paths {
         put?: never;
         /**
          * Request to join a booking waitlist
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["joinTeamWaitlist"];
         delete?: never;
@@ -2822,7 +2842,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly request another verification email
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendTeamWaitlist"];
         delete?: never;
@@ -4495,6 +4515,10 @@ export interface components {
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek: number | null;
             /** @description How far ahead a meeting must be booked */
             minimumNoticeMinutes: number;
             notifications: components["schemas"]["EventTypeNotifications"];
@@ -4674,6 +4698,10 @@ export interface components {
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth?: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek?: number | null;
             /**
              * @description How far ahead a meeting must be booked
              * @default 0
@@ -4905,6 +4933,10 @@ export interface components {
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth?: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek?: number | null;
             /** @description How far ahead a meeting must be booked */
             minimumNoticeMinutes?: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
@@ -4950,6 +4982,31 @@ export interface components {
             title?: string;
             waitlist?: components["schemas"]["WaitlistSettingsInput"];
             zoomConnectionId?: string | null;
+        };
+        GenerateOpenTimeSnippet: {
+            /** @default 3 */
+            count: number;
+            displayTimeZone?: string;
+            durationMinutes?: number;
+            /**
+             * Format: uuid
+             * @description Supply exactly one of eventTypeId or slug.
+             */
+            eventTypeId?: string;
+            /**
+             * Format: date-time
+             * @description Inclusive RFC 3339 instant with an offset.
+             */
+            from: string;
+            /** @enum {string} */
+            locale?: "en" | "zh-CN" | "de" | "fr" | "es" | "pt-BR";
+            /** @description A unique manageable event slug in the caller’s organization. Use its id if ambiguous. */
+            slug?: string;
+            /**
+             * Format: date-time
+             * @description Exclusive RFC 3339 instant; at most 31 elapsed days after from.
+             */
+            to: string;
         };
         Health: {
             /** @enum {string} */
@@ -5291,6 +5348,20 @@ export interface components {
                 /** @enum {boolean} */
                 enabled: true;
             };
+        };
+        OpenTimeSnippet: {
+            bookingUrl: string;
+            displayTimeZone: string;
+            durationMinutes: number;
+            html: string;
+            locale: string;
+            slots: {
+                end: string;
+                label: string;
+                start: string;
+                url: string;
+            }[];
+            text: string;
         };
         Profile: {
             /** Format: date-time */
@@ -8618,6 +8689,84 @@ export interface operations {
             };
         };
     };
+    generateOpenTimeSnippet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateOpenTimeSnippet"];
+            };
+        };
+        responses: {
+            /** @description Chosen open times with direct links and plain-text/HTML snippets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenTimeSnippet"];
+                };
+            };
+            /** @description invalid_request, invalid_event_type_selector, ambiguous_event_type_slug, invalid_slug, invalid_range, range_too_long, invalid_count, invalid_duration, invalid_locale, invalid_time_zone */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slot_snippets_disabled, event_type_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description no_available_slots, calendar_sync_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     updateProfile: {
         parameters: {
             query?: never;
@@ -8928,7 +9077,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9009,7 +9158,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9184,7 +9333,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9265,7 +9414,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;

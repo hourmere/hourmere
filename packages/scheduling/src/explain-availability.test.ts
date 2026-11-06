@@ -13,6 +13,7 @@ import { DomainError } from './errors.ts'
 import { activateRoundRobin, assertCanExplainEventType, createEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { LOCATION_KINDS } from './location-kinds.ts'
+import { selectLocationOption } from './location-options.ts'
 import { parseQuestions } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import {
@@ -56,6 +57,7 @@ function sourceCopy(
     publicAvatarImage,
     DomainError,
     LOCATION_KINDS,
+    selectLocationOption,
     assertHosts,
     hasValidHostShape,
     parseQuestions,
@@ -146,7 +148,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     ['individual', 'google_meet'],
     ['round_robin', 'google_meet'],
   ] as const)(
-    'keeps general %s explanation aligned with the office choice when default %s is unavailable',
+    'keeps %s explanation aligned with omitted-choice slots when default %s is unavailable',
     async (mode, kind) => {
       const s = await team(mode)
       await db
@@ -159,41 +161,27 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
         })
         .where('id', '=', s.event.id)
         .execute()
-      const ordinary = await listPublicTeamSlots(
-        { db, now },
-        {
-          handle: s.ctx.principal.organization.slug,
-          slug: s.event.slug,
-          start: range.rangeStart,
-          end: range.rangeEnd,
-          locationOptionId: 'office',
-        },
-      )
-      expect(ordinary.length).toBeGreaterThan(0)
-      const expected = ordinary.map((slot) => ({
-        start: instant(slot.start).toString(),
-        end: instant(slot.end).toString(),
-      }))
+      await expect(
+        listPublicTeamSlots(
+          { db, now },
+          {
+            handle: s.ctx.principal.organization.slug,
+            slug: s.event.slug,
+            start: range.rangeStart,
+            end: range.rangeEnd,
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'location_unavailable' })
       const verify = async (read: Explain) => {
-        await expect(
-          read(s.ctx, s.query).then((slots) =>
-            views(slots.filter((slot) => slot.status === 'available')),
-          ),
-        ).resolves.toEqual(expected)
+        await expect(read(s.ctx, s.query)).rejects.toMatchObject({ code: 'location_unavailable' })
       }
       await verify(explainEventAvailability)
       await verify(sourceCopy().explainEventAvailability)
-      const source = readFileSync('packages/scheduling/src/availability.ts', 'utf8')
-      const explanation = source.slice(
-        source.indexOf('export async function explainEventAvailability('),
-      )
-      const before = `(et.locations?.length ?? 0) <= 1 && ${kind === 'zoom' ? 'automaticZoom' : 'automaticMeet'}(et.location)`
-      expect(explanation).toContain(before)
       await expect(
         verify(
           sourceCopy([
-            explanation,
-            explanation.replace(before, before.replace('(et.locations?.length ?? 0) <= 1 && ', '')),
+            '  await requireLocationAvailability(ctx, et)\n',
+            '  // Mutation: skip the default location readiness check.\n',
           ]).explainEventAvailability,
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })

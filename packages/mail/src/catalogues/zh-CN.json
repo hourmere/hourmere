@@ -91,8 +91,8 @@
   "waitlist.notice.waiting": "如果时段已不可用，你仍会留在候补名单中，直到最初的到期时间。如果已通过其他途径预约，请使用下方链接退出候补。",
   "waitlist.notice.footer": "你收到此邮件，是因为你已验证了此会议的候补申请。",
   "phone.callInvitee": "电话通话 — 请拨打受邀者的号码 {number}",
-  "phone.hostCallsYou": "电话通话 — 主持人将拨打您的号码 {number}",
+  "phone.hostCallsYou": "电话通话 — 主持人将拨打你的号码 {number}",
   "phone.hostCallsInvitee": "电话通话 — 主持人将致电受邀者",
-  "phone.inviteeCallsYou": "电话通话 — 受邀者将拨打您的号码 {number}",
+  "phone.inviteeCallsYou": "电话通话 — 受邀者将拨打你的号码 {number}",
   "phone.callHost": "电话通话 — 请拨打主持人的号码 {number}"
 }

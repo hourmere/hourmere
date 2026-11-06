@@ -79,6 +79,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `get_schedule` | — | `schedule` | `full, read` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
+| `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
@@ -130,6 +131,18 @@ apply migrations and restart every role with the new code before allowing scoped
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
 
+## Generate open-time email snippets
+
+Call `generate_open_time_snippet` with exactly one of `eventTypeId` or `slug`, required
+`from` and `to` instants (at most 31 elapsed days), and optional `count` (1–10, default 3),
+`locale`, `displayTimeZone` and `durationMinutes`. The tool returns `slots` with direct
+booking links plus rendered `text` and `html`, using the same formatter as the admin picker.
+Use it to draft “three times next week”; it neither sends email nor reserves times.
+Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
+or an authorized `mcp:tools` OAuth connection. The instance must enable
+`SLOT_SNIPPETS_ENABLED`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for the full JSON example,
+profile defaults, empty-result handling, DST boundaries and taken-time fallback.
+
 ## Configure an after-booking redirect
 
 `get_event_type` returns `successRedirect`; `create_event_type` and `update_event_type`
@@ -157,3 +170,13 @@ and choose `locationOptionId` for slot availability and booking. An invitee-phon
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
+
+## Configure booking limits
+
+`create_event_type` and `update_event_type` accept nullable `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns the settings.
+Each ceiling is a whole number from 1 to 1000. Updates preserve omitted fields, and
+explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month apply
+whenever each pair is configured. The same REST permissions and validation apply.
+See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
+time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.

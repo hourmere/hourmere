@@ -101,6 +101,7 @@ notifications and trigger configured integrations.
 | `get_schedule` | — | `schedule` | `full, read` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
+| `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
@@ -130,6 +131,18 @@ When upgrading, stop every old web/all/worker and other old key-authenticating p
 apply migrations, then restart all roles with the new code before using scoped keys.
 **Do not run old and new servers side by side once scoped keys exist:** old code treats
 them as full access. Follow the supported backup/restore procedure for rollback.
+
+## Generate open-time email snippets
+
+Call `generate_open_time_snippet` with exactly one of `eventTypeId` or `slug`, required
+`from` and `to` instants (at most 31 elapsed days), and optional `count` (1–10, default 3),
+`locale`, `displayTimeZone` and `durationMinutes`. The tool returns `slots` with direct
+booking links plus rendered `text` and `html`, using the same formatter as the admin picker.
+Use it to draft “three times next week”; it neither sends email nor reserves times.
+Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
+or an authorized `mcp:tools` OAuth connection. The instance must enable
+`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
+profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 
 ## Configure an after-booking redirect
 
@@ -491,6 +504,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
+| `generate_open_time_snippet` | Earliest open alternatives with direct booking links and localized text/HTML for an email draft; owner/admin only, no reservation | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
@@ -672,3 +686,25 @@ and choose `locationOptionId` for slot availability and booking. An invitee-phon
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
+
+## Configure booking limits
+
+MCP `create_event_type` and `update_event_type` accept `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns all three
+settings. Updates take a flat object with `id` alongside changed fields.
+Configuration writes require a `full` API key and the usual ownership or team
+owner/admin permissions; MCP OAuth retains its organization and role checks.
+
+Each ceiling is a whole number from 1 to 1000, or `null` for no ceiling. Omitted
+update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
+time zones, Monday-based weeks, calendar months and counting rules. Lowering a
+ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

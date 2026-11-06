@@ -55,12 +55,8 @@ import {
 
 const L = EVENT_TYPE_LIMITS
 
-// Weekly/monthly limits remain service-only until their transport contracts are introduced.
-const eventTypeResponse = ({
-  maxBookingsPerWeek: _maxBookingsPerWeek,
-  maxBookingsPerMonth: _maxBookingsPerMonth,
-  ...eventType
-}: ServiceEventType) => eventType
+// Location choices and daily, weekly and monthly limits are public configuration.
+const eventTypeResponse = (eventType: ServiceEventType) => eventType
 
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
@@ -371,6 +367,14 @@ const fields = {
     'maxBookingsPerDay',
     "Bookings per host's day; null = no limit",
   ).nullable(),
+  maxBookingsPerWeek: rule(
+    'maxBookingsPerWeek',
+    "Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings.",
+  ).nullable(),
+  maxBookingsPerMonth: rule(
+    'maxBookingsPerMonth',
+    "Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged.",
+  ).nullable(),
   location: Location,
   locations: Locations,
   allowGuests: z.boolean().openapi({
@@ -433,6 +437,8 @@ export const EventTypeInput = z
     minimumNoticeMinutes: fields.minimumNoticeMinutes.optional().openapi({ default: 0 }),
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
+    maxBookingsPerWeek: fields.maxBookingsPerWeek.optional(),
+    maxBookingsPerMonth: fields.maxBookingsPerMonth.optional(),
     location: LocationInput.optional(),
     locations: LocationsInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
@@ -467,6 +473,8 @@ export const EventTypeUpdate = z
     minimumNoticeMinutes: fields.minimumNoticeMinutes.optional(),
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
+    maxBookingsPerWeek: fields.maxBookingsPerWeek.optional(),
+    maxBookingsPerMonth: fields.maxBookingsPerMonth.optional(),
     location: LocationInput.optional(),
     locations: LocationsInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),

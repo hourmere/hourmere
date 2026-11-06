@@ -46,6 +46,21 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  it('keeps the location editor notice in lazy admin catalogues', () => {
+    const key =
+      '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.'
+    for (const { code } of registeredLocales) {
+      expect(groups.common[`./catalogues/${code}/common.ts`], code).not.toHaveProperty(key)
+      expect(groups.admin[`./catalogues/${code}/admin.ts`]?.[key], code).toBeTruthy()
+    }
+  })
+
+  it('uses the existing Chinese register for collected phone numbers', () => {
+    expect(groups.common['./catalogues/zh-CN/common.ts']?.['Your phone number']).toBe(
+      '你的电话号码',
+    )
+  })
+
   it('translates location choice and phone collection in every public locale', () => {
     const keys = [
       'Meeting location',

@@ -1,12 +1,14 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
-  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
-    '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
   'Meeting location': 'Meeting location',
   'Your phone number': 'Your phone number',
   'Choose one of the available locations.': 'Choose one of the available locations.',
   'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
     'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
+  'This waitlist is full (100 entries). Please check available times later.':
+    'This waitlist is full (100 entries). Please check available times later.',
+  'Waitlist email is unavailable. Please contact the host.':
+    'Waitlist email is unavailable. Please contact the host.',
 
   'This imported booking is read-only and managed in the original system.':
     'This imported booking is read-only and managed in the original system.',

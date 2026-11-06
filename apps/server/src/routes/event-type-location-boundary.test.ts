@@ -500,6 +500,10 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
   async function verifyBoundary(schemas: Schemas = routes) {
     const s = await setup(schemas)
     const created = await s.create(options)
+    // Soft-deletion metadata is internal, unlike location choices and booking limits.
+    expect(schemas.EventType.parse({ ...created, deleted_at: null })).not.toHaveProperty(
+      'deleted_at',
+    )
     const notifications = { reminders: [], followUps: [] }
     const restCreated = await s.rest('POST', '/api/v1/event-types', {
       ...base,
@@ -527,26 +531,22 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
       expect(response.status).toBe(200)
       expect(response.isError).toBe(false)
       expect(response.body).toHaveProperty('locations')
-      expect(response.body).not.toHaveProperty('maxBookingsPerWeek')
+      expect(response.body).toHaveProperty('maxBookingsPerWeek', null)
+      expect(response.body).toHaveProperty('maxBookingsPerMonth', null)
+      expect(response.body).not.toHaveProperty('deleted_at')
       expect(response.body).toHaveProperty('successRedirect', null)
     }
     for (const item of list.body.data as unknown[]) expect(item).toHaveProperty('locations')
     expect(await s.stored(created.id)).toEqual({ locations: options })
   }
-  it('exposes options in REST and MCP responses without exposing internal limits', () =>
+  it('exposes options in REST and MCP responses and public limits without exposing internal metadata', () =>
     verifyBoundary())
   it('detects stripping location choices from REST responses', async () => {
     await verifyBoundary(await sourceCopy())
     const mutant = await sourceCopy([
-      '  maxBookingsPerWeek: _maxBookingsPerWeek,',
-      '  locations: _locations,\n  maxBookingsPerWeek: _maxBookingsPerWeek,',
+      '(eventType: ServiceEventType) => eventType',
+      '({ locations: _locations, ...eventType }: ServiceEventType) => eventType',
     ])
-    await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
-    await verifyBoundary(await sourceCopy())
-  })
-  it('detects removal of the REST internal limits projection', async () => {
-    await verifyBoundary(await sourceCopy())
-    const mutant = await sourceCopy(['  maxBookingsPerWeek: _maxBookingsPerWeek,\n', ''])
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())
   })
@@ -557,7 +557,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
       `return ({ app, caller }) => {
       app.use('/api/v1/event-types*', async (c, next) => {
         await next()
-        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), maxBookingsPerWeek: null })
+        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), deleted_at: null })
       })`,
     ])
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })

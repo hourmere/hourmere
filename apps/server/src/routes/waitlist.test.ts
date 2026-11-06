@@ -75,6 +75,7 @@ function publicProjection(before?: string, after?: string) {
     `${stripTypeScriptTypes(source)}; return publicEventType`,
   )(() => new Error('Missing event'), publicLocationOptions) as (
     record: Record<string, unknown>,
+    smtpConfigured?: boolean,
   ) => Record<string, unknown>
 }
 function assertPublicProjection(project = publicProjection()) {
@@ -98,8 +99,10 @@ function assertPublicProjection(project = publicProjection()) {
     hosts: [],
     waitlistEnabled: false,
   }
-  expect(project(record)).not.toHaveProperty('waitlist')
-  expect(project({ ...record, waitlistEnabled: true })).toHaveProperty('waitlist', {
+  expect(project(record, true)).not.toHaveProperty('waitlist')
+  expect(project({ ...record, waitlistEnabled: true })).not.toHaveProperty('waitlist')
+  expect(project({ ...record, waitlistEnabled: true }, false)).not.toHaveProperty('waitlist')
+  expect(project({ ...record, waitlistEnabled: true }, true)).toHaveProperty('waitlist', {
     enabled: true,
   })
   for (const change of [
@@ -108,13 +111,16 @@ function assertPublicProjection(project = publicProjection()) {
     { hostUserIds: ['a', 'b'] },
     { eligibleHostUserIds: [] },
   ])
-    expect(project({ ...record, waitlistEnabled: true, ...change })).not.toHaveProperty('waitlist')
+    expect(project({ ...record, waitlistEnabled: true, ...change }, true)).not.toHaveProperty(
+      'waitlist',
+    )
 }
 
 describe('public waitlist offer projection', () => {
   it('offers enrollment only for an enabled eligible single-host individual event', () =>
     assertPublicProjection())
   it.each([
+    'smtpConfigured &&',
     'et.waitlistEnabled &&',
     "et.schedulingType === 'individual' &&",
     'et.hostUserIds.length === 1 &&',
@@ -201,6 +207,7 @@ describe.skipIf(!bootstrap)('waitlist REST surfaces', () => {
       factory({
         db: t.db,
         waitlistSecret: secret,
+        smtpConfigured: true,
         publicUrl: 'http://localhost:3000',
         rateLimits: { page: plenty, slots: plenty, book: plenty },
       } as Parameters<typeof publicRoutes>[0]),

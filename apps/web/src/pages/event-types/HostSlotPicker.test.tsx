@@ -3,7 +3,7 @@ import * as snippet from '@hourmere/core/slot-snippet'
 import { formatSlotLabel } from '@hourmere/core/slot-snippet'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import * as zonePicker from '../../components/TimeZonePicker.tsx'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
@@ -21,6 +21,17 @@ afterEach(() => {
 })
 
 const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
+// Fixture slots sit on the Berlin date DAY. Tests that render another zone pin the clock to
+// 08:00 UTC on DAY, when UTC, Tokyo, Berlin and New York all show DAY (DST included);
+// otherwise Tokyo after 15:00 UTC, or UTC after Berlin midnight, is on a different day and the
+// slots are filtered out. Only Date is faked, so waitFor and userEvent keep real timers.
+function pinClock() {
+  onTestFinished(() => {
+    vi.useRealTimers()
+  })
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(Date.parse(`${DAY}T08:00:00.000Z`))
+}
 const slots = (count = 2, minutes = 30): Slot[] =>
   Array.from({ length: count }, (_, index) => {
     const start = Date.parse(`${DAY}T09:00:00.000Z`) + index * 30 * 60_000
@@ -176,6 +187,7 @@ describe('host open-time picker', () => {
   })
 
   it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
+    pinClock()
     const client = server()
     renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
@@ -200,6 +212,7 @@ describe('host open-time picker', () => {
   })
 
   it('uses English and UTC without a supported profile and warns before sharing hidden event types', async () => {
+    pinClock()
     server()
     renderPicker(
       props({
@@ -462,6 +475,7 @@ describe('host open-time picker', () => {
   })
 
   it('supports keyboard checkbox selection and descriptive rows with DST/cross-midnight labels', async () => {
+    pinClock()
     const user = userEvent.setup()
     const start = `${DAY}T23:30:00.000Z`
     const end = new Date(Date.parse(start) + 60 * 60_000).toISOString()
@@ -545,6 +559,8 @@ describe('host open-time picker', () => {
   )
 
   it('splits only an oversized start day into two bounded requests including full long intervals', async () => {
+    // Render in UTC: a Berlin DST transition day lasts 23 or 25 hours and changes the halves.
+    pinClock()
     const start = `${DAY}T10:00:00.000Z`
     const end = new Date(Date.parse(start) + 1440 * 60_000).toISOString()
     const client = fakeApi({
@@ -556,7 +572,12 @@ describe('host open-time picker', () => {
           : json(200, { data: [{ start, end }] })
       },
     })
-    renderPicker(props({ event: eventType({ durationMinutes: 1440, slotStepMinutes: 1 }) }))
+    renderPicker(
+      props({
+        event: eventType({ durationMinutes: 1440, slotStepMinutes: 1 }),
+        profile: { ...PROFILE, timeZone: 'UTC' },
+      }),
+    )
     await choose()
     expect(client.to(ROUTE)).toHaveLength(3)
     for (const call of client.to(ROUTE).slice(1)) {

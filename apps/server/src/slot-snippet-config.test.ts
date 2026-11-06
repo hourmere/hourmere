@@ -1,11 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { createDb, createPool } from '@hourmere/db'
-import { expect, it } from 'vitest'
+import { createDb, createPool, type Db } from '@hourmere/db'
+import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
+import { mcpEndpoint } from './mcp/endpoint.ts'
+import { runTool } from './mcp/tools.ts'
 import { instanceRoutes } from './routes/instance.ts'
-import { productRoutes } from './server.ts'
+import * as server from './server.ts'
+
+const { productRoutes } = server
 
 const base = {
   DATABASE_URL: 'postgres://slot-config@127.0.0.1:9/slot-config',
@@ -101,5 +107,125 @@ it('detects default-on configuration and public capabilities', async () => {
   await verifyPublic(control.instanceRoutes)
   await expect(verifyPublic(mutant.instanceRoutes)).rejects.toMatchObject({
     name: 'AssertionError',
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('production snippet route and tool flag wiring', () => {
+  let owned: TestDatabase
+  let db: Db
+  let user: Awaited<ReturnType<typeof createTestUser>>
+  let eventTypeId: string
+  beforeAll(async () => {
+    owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
+      tag: 'snippet_config',
+    })
+    db = createDb(owned.pool)
+    user = await createTestUser(db)
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: user.id,
+        handle: 'snippet-config',
+        time_zone: 'UTC',
+        locale: 'en',
+      })
+      .execute()
+    const fixtures = createFixtures(db)
+    await fixtures.schedule(user.id, { timeZone: 'UTC' })
+    eventTypeId = await fixtures.eventType(user.principal.organization.id, user.id)
+  })
+  afterAll(async () => {
+    await owned?.drop()
+  })
+
+  async function verifyProduction(factory = server, appFactory = createApp) {
+    if (user.principal.kind !== 'api_key') throw Error('Expected API key fixture')
+    const today = Temporal.Now.plainDateISO('UTC')
+    const day = today.add({ days: 7 + ((8 - today.dayOfWeek) % 7) })
+    const input = { eventTypeId, from: `${day}T00:00:00Z`, to: `${day.add({ days: 1 })}T00:00:00Z` }
+    for (const enabled of [undefined, false, true]) {
+      const options = {
+        db,
+        publicUrl: 'https://canonical.example',
+        ...(enabled !== undefined && { slotSnippetsEnabled: enabled }),
+      }
+      const tools = factory.productTools(options)
+      const app = appFactory({
+        publicUrl: options.publicUrl,
+        checkDb: async () => {},
+        authHandler: async () => new Response(null, { status: 404 }),
+        resolveCaller: async () => ({ ok: true, principal: user.principal, setCookie: [] }),
+        routes: factory.productRoutes({
+          ...options,
+          socialProviders: {},
+          invitationMailLimits: { secret: 'synthetic-slot-config-mail-secret' },
+        }),
+        mcp: mcpEndpoint({ tools }),
+      })
+      const response = await app.request('/api/v1/open-time-snippets', {
+        method: 'POST',
+        headers: { authorization: 'Bearer hm_test', 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      expect(response.status).toBe(enabled === true ? 200 : 404)
+      const result = await response.json()
+      if (enabled === true) expect(result).toHaveProperty('slots', expect.any(Array))
+      else expect(result).toHaveProperty('error', 'slot_snippets_disabled')
+      const discovery = await app.request('/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer hm_test',
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      })
+      expect(discovery.status).toBe(200)
+      const text = await discovery.text()
+      const data = text.split('\n').find((line) => line.startsWith('data: '))
+      const message = JSON.parse(data ? data.slice(6) : text)
+      const names = message.result.tools.map((tool: { name: string }) => tool.name)
+      expect(names.includes('generate_open_time_snippet')).toBe(enabled === true)
+      if (enabled === true) {
+        const tool = tools.find((tool) => tool.name === 'generate_open_time_snippet')
+        if (!tool) throw Error('Missing enabled snippet tool')
+        const response = await runTool(
+          tool,
+          input,
+          { caller: user.principal, rateLimit: () => {} },
+          () => {},
+        )
+        expect(response.isError).not.toBe(true)
+        expect(response.structuredContent).toEqual(result)
+      }
+    }
+  }
+  it('serves enabled snippets and keeps default/off REST unavailable and MCP undiscoverable', () =>
+    verifyProduction())
+  it('kills hard-coded REST and MCP flag wiring with real requests and discovery', async () => {
+    const control = await sourceCopy<typeof server>('./server.ts')
+    const nativeApp = await sourceCopy<typeof import('./app.ts')>('./app.ts')
+    await verifyProduction(control, nativeApp.createApp)
+    for (const replacement of [
+      [
+        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled,',
+        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled: true,',
+      ],
+      [
+        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled,',
+        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled: false,',
+      ],
+      ['...(slotSnippetsEnabled\n', '...(true\n'],
+      ['...(slotSnippetsEnabled\n', '...(false\n'],
+      [
+        'openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled,',
+        'openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled: false,',
+      ],
+    ] as [string, string][]) {
+      const mutant = await sourceCopy<typeof server>('./server.ts', replacement)
+      await expect(verifyProduction(mutant, nativeApp.createApp)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    }
   })
 })
