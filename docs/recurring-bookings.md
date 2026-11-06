@@ -132,6 +132,10 @@ The rule is provenance; materialized occurrences are authoritative after creatio
 
 Proposed future migration (allocate its number when implemented, not here):
 
+- Add nullable `event_types.recurrence` JSONB with validated pattern subset, IANA zone
+  and bounded maximum, plus a revision incremented on any admission-relevant setting
+  change. Null preserves disabled behavior for every predecessor event. Enforce shape
+  and numeric checks in the database; canonical zone validation belongs to the service.
 - `booking_series`: UUIDv7 `id`, `organization_id` FK with organization cascade,
   nullable `event_type_id` (deletion sets null), immutable original event UUID snapshot,
   rule version/validated rule columns, `time_zone`, initial local start, requested count,
