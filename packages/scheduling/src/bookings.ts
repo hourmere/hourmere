@@ -42,6 +42,7 @@ import {
   createNotificationSnapshot,
   type NotificationSnapshot,
   notificationSnapshot,
+  validateNotifications,
 } from './notification-settings.ts'
 import {
   claimOneTimeBookingLink,
@@ -74,6 +75,7 @@ export interface Attendee {
 
 export interface Booking {
   id: string
+  pendingReschedule?: { id: string; expiresAt: string; note: string | null }
   eventTypeId: string | null
   status: BookingStatus
   start: string
@@ -499,8 +501,30 @@ async function toBookings(
   db: Db,
   rows: readonly BookingRow[],
   host?: { userId: string; now: () => Temporal.Instant },
+  readNow?: Temporal.Instant,
 ): Promise<Booking[]> {
   if (!rows.length) return []
+  const requests = await db
+    .selectFrom('booking_reschedule_requests')
+    .selectAll()
+    .where(
+      'booking_id',
+      'in',
+      rows.map((r) => r.id),
+    )
+    .where('state', '=', 'pending')
+    .execute()
+  const effectiveNow = readNow ?? host?.now()
+  const pending = new Map(
+    requests
+      .filter(
+        (r) => !effectiveNow || Temporal.Instant.compare(toInstant(r.expires_at), effectiveNow) > 0,
+      )
+      .map((r) => [
+        r.booking_id,
+        { id: r.id, expiresAt: toIso(toInstant(r.expires_at)), note: r.note },
+      ]),
+  )
   const attendees = await db
     .selectFrom('booking_attendees')
     .select(['booking_id', 'name', 'email', 'time_zone', 'locale', 'is_booker'])
@@ -659,6 +683,9 @@ async function toBookings(
         : {}),
       attendees: byBooking.get(r.id) ?? [],
       ...(coHosts.has(r.id) ? { coHosts: coHosts.get(r.id) } : {}),
+      ...(r.status === 'confirmed' && pending.has(r.id)
+        ? { pendingReschedule: pending.get(r.id) }
+        : {}),
       rescheduledFromId: r.rescheduled_from_id,
       ...(host ? { rescheduledToId: successors.get(r.id) ?? null } : {}),
       cancelledAt: r.cancelled_at && toIso(toInstant(r.cancelled_at)),
@@ -672,13 +699,13 @@ async function toBookings(
   })
 }
 
-async function loadBooking(db: Db, id: string): Promise<Booking> {
+async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<Booking> {
   const row = await db
     .selectFrom('bookings as b')
     .select(BOOKING_COLUMNS)
     .where('b.id', '=', id)
     .executeTakeFirstOrThrow()
-  const [booking] = await toBookings(db, [row])
+  const [booking] = await toBookings(db, [row], undefined, now)
   return booking as Booking
 }
 
@@ -902,6 +929,7 @@ async function cancelLocked(
       occurred_at: now.toString(),
     })
     .execute()
+  await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
   // In this transaction: the cancellation email exists exactly when the cancellation does.
@@ -1310,14 +1338,17 @@ export async function getManagedBooking(
   const hash = manageTokenHash(token)
   const target = hash && (await resolveManagedTarget(ctx.db, hash))
   if (!target) throw bookingNotFound()
-  return loadBooking(ctx.db, target.id)
+  return loadBooking(ctx.db, target.id, ctx.now())
 }
 
 /** Cancels through a manage link: `booking_cancelled` if already cancelled, `booking_in_past` once started. */
 export async function cancelManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
-  { reason }: { reason?: string | undefined } = {},
+  {
+    reason,
+    rescheduleRequestId,
+  }: { reason?: string | undefined; rescheduleRequestId?: string | undefined } = {},
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<Booking> {
   const hash = manageTokenHash(token)
@@ -1336,6 +1367,15 @@ export async function cancelManagedBooking(
     await lockCancellationOrganization(trx, parent.organization_id)
     const row = await lockManagedBooking(trx, hash)
     if (!row) throw bookingNotFound()
+    if (rescheduleRequestId) {
+      const request = await managedRequest(trx, row.id, rescheduleRequestId)
+      if (request.state === 'cancelled') return loadBooking(trx, row.id)
+      if (
+        request.state !== 'pending' ||
+        Temporal.Instant.compare(toInstant(request.expires_at), ctx.now()) <= 0
+      )
+        throw requestChanged()
+    }
     return cancelLocked(
       trx,
       row,
@@ -1359,7 +1399,15 @@ export async function cancelManagedBooking(
 export async function rescheduleManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
-  { start, durationMinutes }: { start: Temporal.Instant; durationMinutes?: number | undefined },
+  {
+    start,
+    durationMinutes,
+    rescheduleRequestId,
+  }: {
+    start: Temporal.Instant
+    durationMinutes?: number | undefined
+    rescheduleRequestId?: string | undefined
+  },
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<BookingWithToken> {
   const hash = manageTokenHash(token)
@@ -1377,6 +1425,26 @@ export async function rescheduleManagedBooking(
     await lockOrganization(trx, parent.organization_id)
     const old = await lockManagedBooking(trx, hash)
     if (!old) throw bookingNotFound()
+    if (rescheduleRequestId) {
+      const request = await managedRequest(trx, old.id, rescheduleRequestId)
+      if (request.state === 'picked' && request.picked_booking_id) {
+        const booking = await loadBooking(trx, request.picked_booking_id)
+        if (
+          Temporal.Instant.compare(Temporal.Instant.from(booking.start), start) !== 0 ||
+          (durationMinutes !== undefined &&
+            Temporal.Instant.from(booking.end)
+              .since(Temporal.Instant.from(booking.start))
+              .total('minutes') !== durationMinutes)
+        )
+          throw requestChanged()
+        return { booking, manageToken: null }
+      }
+      if (
+        request.state !== 'pending' ||
+        Temporal.Instant.compare(toInstant(request.expires_at), ctx.now()) <= 0
+      )
+        throw requestChanged()
+    }
     return rescheduleLocked(ctx, trx, old, start, origin, false, durationMinutes)
   })
 }
@@ -1496,6 +1564,14 @@ async function rescheduleLocked(
       isBooker: a.is_booker,
     })),
   })
+  await resolveRescheduleRequest(trx, old.id, 'picked', now)
+  await trx
+    .updateTable('booking_reschedule_requests')
+    .set({ picked_booking_id: id })
+    .where('booking_id', '=', old.id)
+    .where('state', '=', 'picked')
+    .where('picked_booking_id', 'is', null)
+    .execute()
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
   // In this transaction: the new booking's emails. The old booking's queued ones find it
   // cancelled and replaced when they run, and send nothing.
@@ -1685,4 +1761,182 @@ export async function cancelTeamBookingInTransaction(
     BOOKING_PAGE,
     actor.userId,
   )
+}
+
+/** Requests expire after 48 hours, or at the original start, whichever comes first. */
+export const RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48
+
+async function resolveRescheduleRequest(
+  db: Db,
+  bookingId: string,
+  state: 'picked' | 'cancelled',
+  now: Temporal.Instant,
+) {
+  await db
+    .updateTable('booking_reschedule_requests')
+    .set({ state, resolved_at: now.toString() })
+    .where('booking_id', '=', bookingId)
+    .where('state', '=', 'pending')
+    .execute()
+}
+
+/** Host authorization and every lifecycle transition serialize on the original booking. */
+export async function requestReschedule(
+  ctx: ServiceContext,
+  id: string,
+  input: { idempotencyKey: string; note?: string | undefined },
+): Promise<Booking> {
+  if (!UUID.test(id)) throw bookingNotFound()
+  if (!UUID.test(input.idempotencyKey))
+    throw new DomainError('invalid', 'invalid_idempotency_key', 'Idempotency key must be a UUID')
+  const note =
+    input.note === undefined
+      ? null
+      : (validateNotifications({
+          reminders: [],
+          followUps: [
+            {
+              id: 'request',
+              offsetMinutes: 5,
+              recipients: { host: false, invitee: true, guests: false },
+              hostNote: input.note,
+            },
+          ],
+        })?.followUps[0]?.hostNote ?? null)
+  return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await trx
+      .selectFrom('bookings')
+      .selectAll()
+      .where('id', '=', id)
+      .where('organization_id', '=', ctx.principal.organization.id)
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('booking_hosts')
+            .select('booking_id')
+            .where((host) =>
+              host.or([
+                host('booking_hosts.booking_id', '=', host.ref('bookings.id')),
+                host('booking_hosts.group_slot_id', '=', host.ref('bookings.group_slot_id')),
+              ]),
+            )
+            .where('booking_hosts.user_id', '=', ctx.principal.user.id),
+        ),
+      )
+      .forUpdate()
+      .executeTakeFirst()
+    if (!row) throw bookingNotFound()
+    await assertBookingLocallyManaged(trx, id)
+    if (row.group_slot_id)
+      throw new DomainError(
+        'conflict',
+        'booking_group_seat_unsupported',
+        'Group-seat bookings do not support reschedule requests',
+      )
+    const previous = await trx
+      .selectFrom('booking_reschedule_requests')
+      .selectAll()
+      .where('booking_id', '=', id)
+      .where('idempotency_key', '=', input.idempotencyKey)
+      .executeTakeFirst()
+    if (previous) {
+      if (previous.note !== note)
+        throw new DomainError(
+          'conflict',
+          'idempotency_key_reused',
+          'This idempotency key was used for a different request',
+        )
+      return loadBooking(trx, id, ctx.now())
+    }
+    const now = ctx.now()
+    assertChangeable(row, now)
+    await trx
+      .updateTable('booking_reschedule_requests')
+      .set({ state: 'replaced', resolved_at: now.toString() })
+      .where('booking_id', '=', id)
+      .where('state', '=', 'pending')
+      .execute()
+    const deadline = now.add({ hours: RESCHEDULE_REQUEST_TIMEOUT_HOURS })
+    const expires =
+      Temporal.Instant.compare(deadline, toInstant(row.start_at)) < 0
+        ? deadline
+        : toInstant(row.start_at)
+    const request = await trx
+      .insertInto('booking_reschedule_requests')
+      .values({
+        booking_id: id,
+        idempotency_key: input.idempotencyKey,
+        note,
+        state: 'pending',
+        created_at: now.toString(),
+        expires_at: expires.toString(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await ctx.notify?.(
+      trx,
+      { type: 'reschedule_requested', bookingId: id, requestId: request.id },
+      now,
+    )
+    return loadBooking(trx, id, ctx.now())
+  })
+}
+
+/** Replayed, replaced and already resolved expiry jobs are harmless. */
+export async function expireRescheduleRequest(
+  ctx: Pick<PublicContext, 'db' | 'now' | 'notify'>,
+  requestId: string,
+): Promise<void> {
+  await ctx.db.transaction().execute(async (trx) => {
+    const request = await trx
+      .selectFrom('booking_reschedule_requests')
+      .selectAll()
+      .where('id', '=', requestId)
+      .executeTakeFirst()
+    if (!request) return
+    await trx
+      .selectFrom('bookings')
+      .select('id')
+      .where('id', '=', request.booking_id)
+      .forUpdate()
+      .executeTakeFirst()
+    const now = ctx.now()
+    const expired = await trx
+      .updateTable('booking_reschedule_requests')
+      .set({ state: 'expired', resolved_at: now.toString() })
+      .where('id', '=', requestId)
+      .where('state', '=', 'pending')
+      .where('expires_at', '<=', new Date(now.epochMilliseconds))
+      .returning('id')
+      .executeTakeFirst()
+    if (expired)
+      await ctx.notify?.(
+        trx,
+        { type: 'reschedule_request_expired', bookingId: request.booking_id, requestId },
+        now,
+      )
+  })
+}
+
+function requestChanged() {
+  return new DomainError(
+    'conflict',
+    'reschedule_request_changed',
+    'This reschedule request has already been resolved or replaced',
+  )
+}
+async function managedRequest(trx: Db, bookingId: string, requestId: string) {
+  if (!UUID.test(requestId)) throw requestChanged()
+  const request = await trx
+    .selectFrom('booking_reschedule_requests')
+    .selectAll()
+    .where('id', '=', requestId)
+    .where((eb) =>
+      eb.or([eb('booking_id', '=', bookingId), eb('picked_booking_id', '=', bookingId)]),
+    )
+    .executeTakeFirst()
+  if (!request) throw requestChanged()
+  return request
 }

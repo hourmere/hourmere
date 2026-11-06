@@ -365,6 +365,18 @@ export interface BookingNotifications {
   suppression_reason: string | null;
 }
 
+export interface BookingRescheduleRequests {
+  booking_id: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  idempotency_key: string;
+  note: string | null;
+  picked_booking_id: string | null;
+  resolved_at: Timestamp | null;
+  state: Generated<string>;
+}
+
 export interface Bookings {
   api_key_id: string | null;
   cancel_reason: string | null;
@@ -920,6 +932,7 @@ export interface WebhookDeliveries {
   last_error: string | null;
   organization_id: string;
   payload: string;
+  request_id: string | null;
   status: Generated<string>;
   webhook_id: string;
 }
@@ -960,6 +973,7 @@ export interface DB {
   booking_conferences: BookingConferences;
   booking_hosts: BookingHosts;
   booking_notifications: BookingNotifications;
+  booking_reschedule_requests: BookingRescheduleRequests;
   booking_scheduled_messages: BookingScheduledMessages;
   bookings: Bookings;
   calendar_busy: CalendarBusy;

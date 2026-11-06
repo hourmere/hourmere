@@ -59,6 +59,7 @@ const classes = {
     'POST /api/v1/bookings/{id}/cancel',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
+    'POST /api/v1/bookings/{id}/request-reschedule',
     'POST /api/v1/bookings/manage/cancel',
     'POST /api/v1/bookings/manage/reschedule',
     'POST /api/v1/public/{handle}/{slug}/bookings',
@@ -349,6 +350,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .execute()
         headers['x-manage-token'] = token
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
+        if (template.endsWith('/request-reschedule')) payload = { idempotencyKey: randomUUID() }
         if (template.endsWith('/reschedule')) payload = { start: `${date}T10:00:00Z` }
         if (template.endsWith('/retry')) {
           await db
@@ -610,14 +612,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
+    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(99)
-      expect(new Set(ids).size).toBe(99)
+      expect(ids).toHaveLength(100)
+      expect(new Set(ids).size).toBe(100)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(297)
+      expect(cases).toHaveLength(300)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

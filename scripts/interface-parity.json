@@ -95,6 +95,10 @@
     "mcp": "remove_waitlist_entry",
     "cli": "remove-waitlist-entry"
   },
+  "requestReschedule": {
+    "mcp": "request_reschedule",
+    "cli": "request-reschedule"
+  },
   "rescheduleHostBooking": {
     "mcp": "reschedule_booking",
     "cli": "reschedule"

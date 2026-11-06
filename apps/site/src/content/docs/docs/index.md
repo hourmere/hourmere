@@ -32,6 +32,10 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Requests to choose another time](/docs/request-reschedule) retain the original booking
+  until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
+  bookings do not support requests.
+
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

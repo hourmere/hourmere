@@ -1,4 +1,8 @@
 export const common = {
+  'This request has expired or changed. Reload your booking to choose what to do next.':
+    'Esta solicitud ha caducado o ha cambiado. Vuelve a cargar tu reserva para elegir qué hacer.',
+  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
+    'Tu anfitrión te pide que elijas otra hora. La reserva original se mantiene hasta que la cambies o canceles.',
   'This imported booking is read-only and managed in the original system.':
     'Esta reserva importada es de solo lectura y se gestiona en el sistema original.',
   'This location is unavailable. Contact the host to book.':

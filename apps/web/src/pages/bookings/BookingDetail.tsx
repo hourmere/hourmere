@@ -33,6 +33,7 @@ import {
   SOURCE_LABELS,
 } from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
+import { RequestReschedule } from './RequestReschedule.tsx'
 import { RescheduleBooking } from './RescheduleBooking.tsx'
 
 type Question = Schemas['Question']
@@ -326,6 +327,14 @@ function BookingView({
           booking={booking}
           timeZone={timeZone}
           expectedOrganizationId={expectedOrganizationId}
+        />
+      )}
+
+      {!readOnly && booking.status === 'confirmed' && !started && (
+        <RequestReschedule
+          booking={booking}
+          expectedOrganizationId={expectedOrganizationId}
+          onChange={updateBooking}
         />
       )}
 
