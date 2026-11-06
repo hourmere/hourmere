@@ -42,7 +42,6 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [SCIM](/docs/scim) provides disabled-by-default provisioning-token administration only.
   Users, Groups, discovery and IdP synchronization are not available yet.
-
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
