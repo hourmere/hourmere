@@ -58,7 +58,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 ## Meeting polls (proposal)
 
 [Meeting polls: data model and flow design](meeting-polls.md) proposes scoped polls,
-candidate slots, voters and votes, with atomic finalisation through the booking service.
+candidate slots, voters and votes, with atomic finalization through the booking service.
 These tables and interfaces are not implemented; the document defines the later tasks
 and their acceptance checks.
 

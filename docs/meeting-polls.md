@@ -15,7 +15,7 @@ participants, disallows adding times after publication and changing submitted vo
 and does not support workflows or rescheduling. The host chooses a time and can add
 non-voters before booking. Voting closes on booking, deletion, or when all times pass.
 Other voters are visible only with “Show votes on page” enabled. External conflicts are
-flagged but can be booked over; Calendly booking conflicts cannot. Buffers can be overridden.
+flagged, but the time remains visible; Calendly booking conflicts cannot be booked over. Buffers can be overridden.
 The [setup guide](https://calendly.com/help/how-to-set-up-a-meeting-poll) describes choosing
 zone, duration and additional hosts, showing invitees their own zone, sharing a unique
 link, and sending calendar invitations after the host books.
@@ -51,8 +51,8 @@ Session writes require the existing same-origin and `X-Expected-Organization-Id`
 API keys remain bound to their organization. Use existing authorization lock ordering for
 session/team changes. Unknown readiness stays neutral, never “configure your calendar”.
 
-Proposed key classification: `full` or `bookings` for create, invite, close, cancel,
-finalise and public vote writes; `full`, `read` or `bookings` for private list/detail/results, as with existing
+Proposed key classification: `full` or `bookings` for create, invite, resend, remove voter, delete, close, cancel,
+finalize and public vote writes; `full`, `read` or `bookings` for private list/detail/results, as with existing
 booking reads.
 No scope bypasses owner/admin checks. `read` cannot vote or mint capabilities. MCP OAuth
 keeps its existing `mcp:tools` grant and organization authority. Public capability access
@@ -62,56 +62,85 @@ alone cannot impersonate voters or recover their edit tokens.
 
 Reuse event duration, location and booking questions. Snapshot the title, duration,
 location configuration, questions, scheduling mode, host IDs and guest policy when creating
-for stable voter disclosure. Store a canonical hash of these relevant settings. Finalise
+for stable voter disclosure. Store a canonical hash of these relevant settings. Finalize
 compares it with current settings; a mismatch requires a new poll (`poll_event_changed`),
 not silent reinterpretation of old consent. Availability, buffers, notice, booking windows,
 limits and calendar freshness always use current policy. Notification policy is snapshotted
 by the booking service when booking. Disabling/deleting the event or losing eligible hosts
-prevents finalisation. Do not expose private connection IDs in the public snapshot.
+prevents finalization. Do not expose private connection IDs in the public snapshot.
 
 ## Voters, visibility and booking participants
 
 Two fixed admission modes: `public_link` and `invited`. Public means no Hourmere login,
 not anonymous data: name and email are required, with mailbox verification before the
-ballot becomes counted or eligible for mail. A high-entropy per-poll link allows enrollment;
+ballot becomes counted. Unverified public-link enrollees receive only verification mail;
+host invitees may also receive the reminder and outcome notices defined below. A high-entropy per-poll link allows enrollment;
 invited mode permits only host-added addresses and sends separate per-voter capabilities.
 Opening a link with GET never votes or confirms anything. Possession of an emailed voter
 capability proves mailbox access for this poll, not an account identity. Use one normalized
 (trimmed, lowercase) mailbox per poll, without provider-specific alias folding.
 
 Public enrollment answers uniformly whether the mailbox exists, is pending, or has voted;
-it neither returns an existing token nor overwrites that person's ballot. Verification
-sends a protected edit link to that address, under mail budgets. Invitations and pending
-public enrollments count toward the voter cap to bound storage and fan-out. A voter confirms mailbox possession with an explicit POST using the emailed capability;
-merely reading the page does not verify or submit consent. A verified
-voter can replace their complete ballot or withdraw with their own token while voting is
-open. Withdrawal removes the ballot from counts, clears answers and opts out of further
-poll mail; retain a minimal mailbox key/tombstone for uniqueness until poll deletion.
-Reactivation before closing requires that same capability and renewed consent. Name/zone/
-locale may be edited before closing; changing email requires a new verified enrollment.
-Lost links use rate-limited mailbox recovery with uniform responses, never a host read.
+it neither returns an existing token nor overwrites that person's ballot. When enrollment
+capacity is full, every enrollment request instead returns 409 `poll_full`, independent
+of mailbox state, without sending mail; recovery remains a separate uniform 202 operation.
+Verification sends a protected edit link under mail budgets. Count verified active voters
+and unexpired pending reservations toward the enrollment cap, independently of booking
+capacity. Every unverified pending reservation expires one elapsed hour after admission,
+or at the deadline if earlier. Resending never extends it. Derive expiry under the poll
+lock before checking capacity, without depending on a cleanup worker; expired capabilities
+cannot verify. A host invitation's address/eligibility remains until withdrawal, removal,
+deadline or deletion even after its pending reservation expires, so nonresponders can
+still receive the deadline reminder. A fresh invitation/verification generation must
+reacquire capacity atomically before verification; if full return `poll_full`. Expired
+public enrollees must enroll again. Neither expired reservations nor withdrawn/removed
+voters count toward capacity.
+
+A voter confirms mailbox possession with an explicit POST using the emailed capability;
+merely reading the page does not verify or submit consent. A verified voter can replace
+their complete ballot or withdraw while voting is open. Withdrawal removes the ballot
+from counts, clears answers and opts out of further poll mail; retain a minimal mailbox
+key/tombstone for uniqueness until poll deletion. Reactivation before closing requires
+that same capability, renewed consent and an atomic capacity check. Name/zone/locale may
+be edited before closing; changing email requires a new verified enrollment. Lost links
+use rate-limited mailbox recovery with uniform responses, never a host read.
+
+Managers can remove a voter or revoke a pending enrollment while open or closed. Removal
+revokes capabilities and queued mail, erases answers/ballot/contact data, frees capacity
+and retains only a mailbox digest to block self-reenrollment until poll deletion. No
+removal email is sent. Scheduled polls require booking lifecycle operations for attendee
+changes. Managers can close voting early, cancel an unscheduled poll, or delete a poll in
+any state; deleting a scheduled poll erases poll history without cancelling its booking.
+Deletion revokes all poll links and pending deliveries and follows the privacy cascade
+below. These operations use current authority, expectedRevision and the common poll lock.
 
 Privacy default is `private`: voters see only their own choices and the candidate list,
 not other names, email addresses, answers or totals. A host can choose `aggregate` at
 creation, exposing only per-candidate yes/conditional/no counts after verification.
+With two or three voters, totals minus one's own ballot can reveal another person's
+choices; aggregates are not anonymity. Mitigate this with private-by-default visibility
+and explicit creation-time and voter disclosures before opting into aggregate sharing.
 This setting is immutable after publication; no named-vote sharing option in this version.
 Host/admin views show the roster, ballots and verification/withdrawal state. Unverified
 public-link readers receive neither counts nor roster. Host-only question answers never
 appear in voter views. Public outcome contains the chosen time/status, not booking IDs,
 roster, answers, management capabilities or conference links.
 
-Finalisation explicitly supplies `bookerVoterId` and `attendeeVoterIds`. All must be verified,
+Finalization explicitly supplies `bookerVoterId` and `attendeeVoterIds`. All must be verified,
 non-withdrawn voters with yes or conditional votes for the chosen slot and consent to join.
 There must be a booker included in that set; no/no-response voters cannot be silently added.
 The host may select a subset and must acknowledge conditional votes in the confirmation
-payload. Persist the chosen booker/guest role on each selected voter in the finalisation transaction
+payload. Persist the chosen booker/guest role on each selected voter in the finalization transaction
 for outcome delivery and later lifecycle updates. All remaining active voters receive a time-selected notice saying they were not
 included, without a join link or calendar invitation. Voting UI explains this selection
 policy and that the designated booker can manage the whole meeting.
 
 Map the booker to the existing invitee and other selected voters to guests of a single
 ordinary booking. Require `allowGuests` for multiple attendees and preserve the existing
-guest cap. Collect the event questions from each voter with the ballot; finalisation
+guest cap: selected attendees must number 1 through `MAX_GUESTS + 1` (currently 11),
+including the booker. Enforce this at finalize against exported `MAX_GUESTS = 10` in
+[`bookings.ts`](../packages/scheduling/src/bookings.ts), with `too_many_guests` for excess
+guests, even though up to 40 people may enroll. Collect the event questions from each voter with the ballot; finalization
 passes only the designated booker's validated answers into the booking. Other answers
 remain private poll data until retention cleanup. Do not merge answers. The host cannot
 invent missing required answers. Poll mail uses each voter's saved zone/locale; ordinary
@@ -131,10 +160,10 @@ camelCase API fields, CHECK-constrained text states, and organization-scoped que
 |---|---|---|
 | `meeting_polls` | `id`, `event_type_id`, nullable `created_by_user_id`, source/API-key attribution, `title`, `duration_minutes`, `display_time_zone`, `settings_snapshot jsonb`, `settings_fingerprint`, `admission_mode`, `visibility`, `deadline_at`, `status`, `closed_at`, `cancelled_at`, `scheduled_at`, nullable `chosen_slot_id`, `booking_id`, `public_token_digest`, `revision` | PK id; UNIQUE `(organization_id,id)`; scoped event FK; unique token digest; status CHECK open/closed/scheduled/cancelled; positive duration; deadline after creation; chosen slot and booking both present iff scheduled; unique non-null booking ID; `(organization_id,created_at,id)` pagination; partial `(deadline_at,id)` for open polls |
 | `meeting_poll_slots` | `id`, `poll_id`, `start_at`, `end_at`, `position` | scoped poll FK; UNIQUE `(organization_id,poll_id,id)` and `(poll_id,start_at,end_at)`; unique `(poll_id,position)`; end > start; trigger/service enforce exact poll duration and immutable slots; `(poll_id,start_at)` |
-| `meeting_poll_voters` | `id`, `poll_id`, `name`, `email`, `email_key`, `verified_at`, `withdrawn_at`, `token_digest`, `token_generation`, `time_zone`, `locale`, `responses jsonb`, `join_consent_at`, `ballot_revision`, nullable `selected_booking_role` (booker/guest) | scoped poll FK; UNIQUE `(organization_id,poll_id,id)`, `(poll_id,email_key)`, token digest; `(poll_id,verified_at)` for roster; only verified active ballots count |
+| `meeting_poll_voters` | `id`, `poll_id`, `name`, `email`, `email_key`, `verified_at`, `pending_expires_at`, `invited_at`, `withdrawn_at`, `removed_at`, `reminder_opted_out_at`, `ballot_submitted_at`, `token_digest`, `token_generation`, `time_zone`, `locale`, `responses jsonb`, `join_consent_at`, `ballot_revision`, nullable `selected_booking_role` (booker/guest) | scoped poll FK; UNIQUE `(organization_id,poll_id,id)`, `(poll_id,email_key)`, token digest; `(poll_id,verified_at)` for roster; only verified active ballots count; pending expiry ≤ admission + 1 hour and ≤ deadline; `(poll_id,pending_expires_at)` for expiry |
 | `meeting_poll_votes` | `id`, `poll_id`, `voter_id`, `slot_id`, `value` | UNIQUE `(poll_id,voter_id,slot_id)`; composite organization/poll/voter and organization/poll/slot FKs prevent cross-poll/tenant votes; value CHECK yes/if_need_be/no; `(poll_id,slot_id,value)` tally index |
 | `meeting_poll_operations` | `id`, nullable `poll_id`, `operation`, `actor_scope_digest`, `idempotency_key_digest`, `request_fingerprint`, nullable `booking_id`, minimal result metadata | UNIQUE `(organization_id,operation,actor_scope_digest,idempotency_key_digest)`; scoped poll/booking FKs; no raw request, token, roster or response cache |
-| `meeting_poll_deliveries` | `id`, `poll_id`, `voter_id`, `kind`, `generation`, `due_at`, `state`, `attempts`, `lease_id`, `lease_until`, nullable purpose-bound `capability_ciphertext`, safe error class | scoped voter FK; UNIQUE `(poll_id,voter_id,kind,generation)`; partial due index for pending rows and expired claims; bounded retries and terminal sent/suppressed/skipped outcomes |
+| `meeting_poll_deliveries` | `id`, `poll_id`, nullable `voter_id`, nullable `host_user_id`, `kind`, `generation`, `due_at`, `state`, `attempts`, `lease_id`, `lease_until`, nullable purpose-bound `capability_ciphertext`, safe error class | exactly one recipient: scoped voter FK or host user FK; separate partial UNIQUE `(poll_id,voter_id,kind,generation)` and `(poll_id,host_user_id,kind,generation)`; partial due index for pending rows and expired claims; bounded retries and terminal sent/suppressed/skipped outcomes |
 
 Add a composite chosen-slot FK `(organization_id,id,chosen_slot_id)` to slots' scoped
 identity, and a scoped booking FK `(organization_id,booking_id)` to a matching unique
@@ -142,7 +171,7 @@ booking key. Add supporting unique indexes in the future migration if absent tod
 A deferred constraint trigger verifies that the scheduled booking belongs to the poll's
 event and selected UTC interval when first linked, and enforces the scheduled pair.
 Cancellation/rescheduling later does not invalidate that historical link. Trigger/service
-checks enforce candidate and voter caps under the poll lock; CHECK cannot count child rows.
+checks enforce candidate and enrollment caps under the poll lock; CHECK cannot count child rows.
 The service, not user input, controls lifecycle timestamps/revisions and token digests.
 
 Organization deletion cascades poll data; event soft deletion leaves history but blocks
@@ -154,7 +183,7 @@ implementation must document an explicit cleanup schedule, including abandoned o
 Booking retention is independent. Deleting a linked booking must first clear/delete the
 poll's personal history consistently, rather than leave a broken scheduled-pair invariant.
 
-## Availability and atomic finalisation
+## Availability and atomic finalization
 
 Validate every proposed interval against the existing availability engine at creation,
 including duration, schedule, current busy data, minimum notice, window, limits and buffers.
@@ -166,7 +195,7 @@ booking limits. Clearly describe candidates as proposals, not reservations.
 
 Recheck availability when viewing host results, but treat it as advisory. Busy candidates
 remain visible with ballots preserved; no automatic vote migration. Unknown/stale calendar
-state is unavailable to finalise and neutrally labelled. Finalisation strictly revalidates
+state is unavailable to finalize and neutrally labelled. Finalization strictly revalidates
 current availability; no buffer or external-busy override. A conflict leaves the poll and
 all votes intact so the host can choose another candidate or cancel and create a new poll.
 Local exclusion constraints cannot stop a new external calendar event after the last sync;
@@ -174,17 +203,19 @@ existing freshness safeguards and eventual provider reconciliation still apply.
 
 The existing `createPublicBooking` path in
 [`bookings.ts`](../packages/scheduling/src/bookings.ts) owns its transaction. Calling it
-and then updating the poll would permit an orphan booking. The storage/service task must
+and then updating the poll would permit an orphan booking. Implementation step C1 must
 extract a transaction-taking internal booking core, keeping existing entry points and
-protections, and compose finalisation in that same transaction:
+protections, and compose finalization in that same transaction:
 
 1. Validate caller, scope and expected organization; acquire the existing authority locks.
    Lock poll before its voter/slot rows; all poll writes share this order. Preserve the existing order: organization SHARE, sorted full-host advisory locks,
    event SHARE, users SHARE, members SHARE, then round-robin state. The poll lock fits
    after organization authority and before the host phase.
    Audit deletion/cascade paths for reverse acquisition and test them before release.
-2. Check scoped idempotency receipt, lifecycle, relevant event fingerprint, selected slot,
-   roster, ballot revisions, consent and required answers. Finalise accepts open or closed
+2. Check scoped idempotency receipt and lifecycle. Take the core's sorted host advisory
+   locks, then event `FOR SHARE`, and read the locked `current` event row before comparing
+   its settings fingerprint. Never compare against an unlocked pre-read. Check selected
+   slot, roster, attendee cap, ballot revisions, consent and required answers. Finalize accepts open or closed
    polls with future eligible slots; it freezes voting atomically, even before the deadline.
 3. Reuse the core's current availability, per-host serialization, buffer/limit checks,
    membership checks, host selection and database exclusion constraint. Insert booking,
@@ -194,13 +225,20 @@ protections, and compose finalisation in that same transaction:
    receipt and per-voter outcome delivery intents. Commit everything or nothing. Outbox
    workers run after commit, with existing conference readiness gates.
 
+Host finalize responses, including exact replay through REST, MCP and CLI, whitelist safe
+booking metadata and never contain the booker's `manageToken` or manage URL. Only normal
+booker confirmation mail conveys management authority. Preserve existing `bookings.source`
+values from the finalizing transport: `web` for host UI, `api` for direct REST/API-key
+clients, and `mcp` for MCP and the CLI that calls MCP. Preserve API-key/OAuth attribution;
+there is no new `poll` enum value. The poll-to-booking FK identifies poll origin.
+
 | Event mode | Proposed behaviour |
 |---|---|
 | Personal or team individual | One configured host; ordinary booker plus permitted guests |
 | Collective | All current pinned hosts must pass validation; one booking consumes each host's availability; any conflict rolls everything back |
-| Round-robin | Create validates that at least one eligible pool host offers each candidate; finalise selects through current fairness state, not a voter-specified host; advance fairness only on commit; changed pool fingerprint requires a new poll |
+| Round-robin | Create validates that at least one eligible pool host offers each candidate; finalize selects through current fairness state, not a voter-specified host; advance fairness only on commit; changed pool fingerprint requires a new poll |
 | Group seats | Reject with `poll_event_unsupported` in this version. Independent seats have separate answers, capabilities and capacity; neither multiple ordinary bookings nor silently turning voters into seats is correct. Later seat support needs all-or-nothing capacity admission and explicit per-seat lifecycle/notifications |
-| One-time links | Not accepted as poll input or finalisation authority; reject token-bearing payloads. Polls reference event IDs under host authority and neither reserve nor consume a one-time link. Future integration must consume exactly once in the booking transaction, never at proposal/vote time |
+| One-time links | Not accepted as poll input or finalization authority; reject token-bearing payloads. Polls reference event IDs under host authority and neither reserve nor consume a one-time link. Future integration must consume exactly once in the booking transaction, never at proposal/vote time |
 
 A scheduled poll is immutable history. Reschedule/cancel the resulting booking through the
 existing booking services, not by reopening the poll. Retain the original booking link and
@@ -214,12 +252,12 @@ and direct an authorized host to the booking lifecycle operation.
 ## Deadline, concurrency and replay
 
 Transitions: `open → closed` by host or deadline; `open|closed → scheduled` by successful
-finalisation; `open|closed → cancelled` by host. No reopening and no deadline extensions in
+finalization; `open|closed → cancelled` by host. No reopening and no deadline extensions in
 this version. Expiry closes voting, not booking selection; if all times have passed the
 host can only cancel. A worker persists closed status, but reads derive effective closed
 state whenever the database clock reaches the deadline, even if that worker is late.
 
-Enrollment, verification, invitations, votes, replacements, withdrawals, close, cancel and finalise serialize on the poll row.
+Enrollment, verification, invitations, votes, replacements, withdrawals, expiry, reactivation, resend, removal, deletion, close, cancel and finalize serialize on the poll row.
 After acquiring it, capture `clock_timestamp()` once; accept voting iff status is open
 and that instant is strictly before `deadline_at`; admission and verification use the same
 check. Repeated verification returns current own state without reopening or extending access. Equality is closed. Request arrival time
@@ -228,16 +266,16 @@ commit after the wall-clock deadline; it linearized before it. A waiter checked 
 deadline fails. Require `expectedBallotRevision` for edits and `expectedRevision` for host
 writes; stale forms get `poll_changed`, never overwrite a concurrent decision. Every
 admission, verification, ballot/profile edit and withdrawal increments poll revision as
-well as any affected ballot revision; finalisation expectedRevision therefore protects
+well as any affected ballot revision; finalization expectedRevision therefore protects
 the complete results/attendee snapshot, not only host edits.
 
-Create and finalise require retained random `Idempotency-Key` (MCP/CLI `idempotencyKey`).
+Create and finalize require retained random `Idempotency-Key` (MCP/CLI `idempotencyKey`).
 Scope includes organization, operation and actor identity (session user, API key or OAuth
 grant), with normalized input fingerprint and the same precision as stored timestamps.
-An exact finalise retry returns the original booking's current lifecycle without creating
+An exact finalize retry returns the original booking's current lifecycle without creating
 mail/booking/fairness changes. A changed payload under the same key is
 `idempotency_key_reused`. Authorization precedes replay; a receipt is not a capability.
-Two finalisers with different keys serialize: only the winner creates a booking, the loser
+Two finalizers with different keys serialize: only the winner creates a booking, the loser
 gets `poll_already_scheduled` with safe poll metadata. Matching retry is checked before
 stale expected revisions so a successful lost response remains recoverable.
 
@@ -252,20 +290,52 @@ cannot promise deduplication. Clients must not reuse keys for new intent.
 
 Use durable transactional delivery intents for invitations/verification, a deadline
 reminder, time-selected outcomes and cancellation. Schedule the reminder at deadline minus
-the lead time below, only when that instant is after creation; send to verified active
-voters while still open, including responders who may edit. No overdue catch-up reminder
-after closure. Cancellation invalidates pending invitations/reminders. Workers recheck
-state, recipient consent and generation, deduplicate per recipient, obey existing instance
-and recipient mail budgets, and recover expired claims without resetting attempts. SMTP
-is outside transactions; the existing acceptance/failed-receipt duplicate window remains.
-Store temporary delivery capabilities encrypted with purpose binding, delete after terminal
+24 hours, only when that instant is after creation. Send at most one deadline reminder per
+poll/mailbox, while voting is open, to every non-withdrawn, non-removed host invitee with
+no submitted ballot, including invitees who never verified, plus verified public-link
+voters with no submitted ballot. Never remind people who already voted or unverified
+public-link enrollees. Recheck `ballot_submitted_at`, withdrawal, removal and opt-out just
+before sending; no overdue catch-up after closure. Each invitation and reminder contains
+a purpose-limited opt-out link: explicit POST records `reminder_opted_out_at` without
+requiring login or verification, never grants ballot access, and suppresses further
+reminders. Withdrawal additionally opts out of all poll mail. Resend/recovery never
+clears opt-out or resets the once-per-poll/mailbox reminder receipt.
+
+Host resend invitation is an explicit operation for a retained, nonremoved,
+nonwithdrawn invitee while open: at most one accepted resend per mailbox per 15 minutes
+and three per poll/mailbox, plus existing actor/organization/IP/recipient mail budgets.
+Persist these counters across expiry/removal/recreation. It rotates the emailed capability,
+invalidates the old generation and queues a new durable intent; an expired reservation
+must first reacquire capacity. A retained idempotency key makes retry mail-free. Requests
+beyond cooldown/budgets return 429 `rate_limited` with Retry-After when known; no resend
+extends a pending reservation or the poll deadline. Reminder delivery is never conditional on free enrollment capacity: an otherwise eligible
+invitee receives it even when the poll is full. The message links to recovery using the
+poll link and mailbox, without requiring a still-valid expired voter capability. Recovery
+always gives uniform 202; only a fresh verification reservation/attempt reacquires capacity
+and can return `poll_full`. An expired invitation page offers this same recovery flow.
+The reminder cannot extend an expired reservation for free or bypass the capacity check.
+
+Cancellation invalidates pending invitations/reminders. Workers recheck state, recipient
+consent and generation, deduplicate per recipient, obey existing instance and recipient
+mail budgets, and recover expired claims without resetting attempts. SMTP is outside
+transactions; the existing acceptance/failed-receipt duplicate window remains. Store
+temporary delivery capabilities encrypted with purpose binding, delete after terminal
 delivery, and never put raw capabilities in logs, job metadata, analytics or replay records.
 
-All active verified voters receive the chosen-time outcome; selected attendees receive
-it through the normal booking confirmation path rather than a duplicate calendar invite.
-Non-selected voters get a plain informational message, no ICS, join URL or manage link.
-Preserve the ordinary conference gate so pending logistics never produce a premature join
-link. Invitations and cancellations before scheduling carry no ICS because no booking exists.
+Every retained non-withdrawn, non-removed voter receives the chosen-time outcome, including
+unverified host invitees; unverified public-link enrollees receive no outcome mail. Selected
+attendees receive it through normal booking confirmation rather than a duplicate calendar
+invite. Non-selected voters get plain informational mail, no ICS, join URL or manage link.
+Preserve ordinary conference gates. Invitations and pre-booking cancellations carry no ICS.
+
+Host mail: on deadline closure, enqueue one `deadline_closed` notice for the creator if
+still authorized; never fan out to all team admins or transfer it after departure. It
+contains title, deadline in the profile zone, response count and an authenticated results
+link, no roster, answers or voter capabilities. Recheck current authority before send;
+skip after cancellation, scheduling or deletion. Explicit early closure does not send it.
+There are no per-vote host emails. A successful booking uses existing normal host
+confirmation/lifecycle mail, without an extra poll-selected host message. Delivery storage
+supports a host recipient separately from a voter; dedupe host deadline mail once per poll.
 Use the shared locale registry in `packages/core/src/locales.ts`: invitation language
 chosen by host then instance fallback, subsequent poll mail in voter's saved locale, host
 mail in current profile locale. Add complete natural public translations in every shipped
@@ -284,8 +354,8 @@ redact them from request diagnostics. Use domain-separated digests, constant-tim
 verification, explicit rotation and revocation. No raw capabilities in list/results APIs.
 Rate-limit by trusted client IP, poll, organization and normalized mailbox digest, with
 bounded payloads, enrollment and mail work. Reuse existing email budgets; do not deliver
-arbitrary host HTML or bulk unverified reminders. Configure shared rate-limit enforcement
-for multiple processes; per-process limits alone are insufficient. Numeric request budgets
+arbitrary host HTML or reminders to unverified public-link enrollees. Configure shared rate-limit enforcement
+for multiple processes; per-process limits alone are insufficient. Additional numeric request budgets
 and retention schedules must be selected and documented in the service task using existing
 abuse-control policy; they are not new constants pinned here. Forwarded public links and
 mailbox aliases can still admit unwanted voters; invited mode is recommended for sensitive
@@ -299,14 +369,20 @@ pins this table. Boundary validation belongs in the service and API tests later.
 | Limit | Value | Reason |
 |---|---|---|
 | Candidates per poll | 2–20 | A genuine choice, with a bounded mobile ballot and tally cost |
-| Voters per poll | 1–11 | Finalisation requires at least one selected voter; an open poll can have zero enrollments. Maximum enrollment matches one booker plus the existing ten-guest booking cap; includes pending and withdrawn identities until cleanup |
+| Enrollments per poll | 0–40 | Supports a small team/channel with a bounded 800-cell maximum ballot matrix (40 × 20); counts active verified voters and unexpired pending reservations, not withdrawn, removed or expired ones |
+| Attendees per booking | 1–11 | Finalize selects one booker and at most `MAX_GUESTS` guests; `MAX_GUESTS = 10` in `packages/scheduling/src/bookings.ts`, checked by the doc-fact test |
+| Pending enrollment expiry | 1 hour | Unverified reservations release capacity promptly; deadline may shorten this interval |
 | Deadline after creation | 1 hour–30 days | Gives time to respond without indefinite open state; both bounds inclusive, measured as elapsed time |
 | Reminder lead time | 24 hours | One predictable reminder; skip if its due instant is not after creation |
+| Invitation resend cooldown | 15 minutes | Bound repeat mail requests for a lost invitation |
+| Invitation resend cap | 3 per poll/mailbox | Bound total explicit resends even across expired reservations |
 
 Deadline must also satisfy the candidate/notice rule above, so short-notice events can
 have no valid deadline. Existing duration, field length, question and guest constraints
-remain in force; the smaller applicable limit wins. The voter minimum applies at finalisation, not creation; enrollment count ranges from zero
-to the maximum including pending/withdrawn identities. Caps apply equally to self-hosting,
+remain in force; the smaller applicable limit wins. The attendee minimum applies at finalization, not creation; enrollment can be zero.
+The enrollment cap does not raise booking capacity. Expiry and host removal bound recovery
+from public-link saturation; per-IP/poll/organization/mailbox admission budgets bound refill
+and retained tombstone growth, and link rotation lets the host stop further leaked-link joins. Caps apply equally to self-hosting,
 REST, MCP, CLI and UI. Expanding them requires reviewing booking capacity and mail budgets.
 
 ## Proposed REST, MCP and CLI contract
@@ -322,13 +398,17 @@ and future response states. Services throw `DomainError`; no tool-specific busin
 | GET `/meeting-polls`, GET `/meeting-polls/{id}` | `list_meeting_polls`, `get_meeting_poll` | `list`, `get` | Manager; organization-scoped cursor pagination, lifecycle and safe metadata |
 | GET `/meeting-polls/{id}/results` | `get_meeting_poll_results` | `results` | Manager; ballots, roster, separate counts, advisory availability and revisions |
 | POST `/meeting-polls/{id}/invitations` | `invite_meeting_poll_voters` | `invite` | Manager; bounded name/email/locale list, idempotency key; 202 durable intent, no voter secrets |
+| POST `/meeting-polls/{id}/invitations/{voterId}/resend` | `resend_meeting_poll_invitation` | `resend-invitation` | Manager; expectedRevision + idempotency key; 202 intent under resend limits, no secrets |
+| DELETE `/meeting-polls/{id}/voters/{voterId}` | `remove_meeting_poll_voter` | `remove-voter` | Manager; expectedRevision; 200 removed state, revoke capabilities and release capacity |
+| DELETE `/meeting-polls/{id}` | `delete_meeting_poll` | `delete` | Manager; expectedRevision; 204 privacy deletion, linked booking preserved |
 | POST `/meeting-polls/{id}/close`, `/cancel` | `close_meeting_poll`, `cancel_meeting_poll` | `close`, `cancel` | Manager; expectedRevision; 200 current state, matching repeated intent has no extra mail |
-| POST `/meeting-polls/{id}/finalise` | `finalise_meeting_poll` | `finalise` | Manager; slotId, bookerVoterId, attendeeVoterIds, conditional acknowledgement, expectedRevision, idempotency key; 201 booking metadata, 200 exact replay |
+| POST `/meeting-polls/{id}/finalize` | `finalize_meeting_poll` | `finalize` | Manager; slotId, bookerVoterId, attendeeVoterIds, conditional acknowledgement, expectedRevision, idempotency key; 201 safe booking metadata, 200 exact replay; never manageToken or manage URL |
 | POST `/meeting-polls/{id}/rotate-link` | `rotate_meeting_poll_link` | `rotate-link` | Manager; expectedRevision + idempotency key; one-time new public link, matching replay returns safe conflict |
 | POST `/public/meeting-polls/read` | `read_meeting_poll` | `view` | Poll/voter capability; public projection, own ballot only, effective deadline and visibility |
-| POST `/public/meeting-polls/enroll`, `/recover` | `enroll_meeting_poll_voter`, `recover_meeting_poll_voter` | `join`, `recover` | Public poll capability; name/email/zone/locale, 202 uniform verification response |
+| POST `/public/meeting-polls/enroll`, `/recover` | `enroll_meeting_poll_voter`, `recover_meeting_poll_voter` | `join`, `recover` | Public poll capability; name/email/zone/locale, 202 uniform verification response; enroll returns 409 poll_full for every mailbox when full |
 | POST `/public/meeting-polls/verify` | `verify_meeting_poll_voter` | `verify` | Emailed voter capability; explicit confirmation while voting is open, idempotent verification, no implicit ballot |
 | POST `/public/meeting-polls/vote` | `submit_meeting_poll_vote` | `vote` | Voter capability; full slot/value array, consent, responses, expectedBallotRevision; 200 own ballot/revision |
+| POST `/public/meeting-polls/reminder-opt-out` | `opt_out_meeting_poll_reminder` | `reminder-opt-out` | Purpose-limited mail capability; 200 opted-out state, no verification required |
 | POST `/public/meeting-polls/withdraw` | `withdraw_meeting_poll_vote` | `withdraw` | Voter capability + revision; 200 withdrawn state |
 
 Capability read is POST to avoid secrets in paths/query logs. Browser route proposal:
@@ -337,8 +417,8 @@ same capability fields; CLI accepts secrets through stdin/protected files, not c
 arguments or diagnostics. Classify every operation in the shared scope registry and keep
 MCP discovery, direct-call insufficient-scope behaviour and CLI help in sync. Invitation
 and rotation replay receipts use the operation table; changed input conflicts and lost
-responses never resend mail or recover raw secrets. Enrollment/recovery retain uniform
-responses while enforcing cooldown/budget and active token generation.
+responses never resend mail or recover raw secrets. Enrollment uses a uniform poll-level full response and otherwise uniform 202; recovery
+always retains uniform 202 while enforcing cooldown/budget and active token generation.
 
 | Status/code | Meaning |
 |---|---|
@@ -346,7 +426,8 @@ responses while enforcing cooldown/budget and active token generation.
 | 400 `invalid_poll`, `poll_limit_exceeded`, `poll_event_unsupported` | Invalid instants/deadline/choices, bounded resource limit, or unsupported group/one-time-link mode; safe field hints |
 | 401 `unauthorized`; 403 `insufficient_scope` | Existing bearer/session rules; never downgrade a supplied bad bearer |
 | 403 `team_management_access_denied`; 409 `organization_context_changed` | Existing management/context boundary |
-| 404 `poll_unavailable` | Unknown/inaccessible poll or invalid capability, without disclosing existence |
+| 404 `poll_not_found` | Unknown/inaccessible poll or invalid capability, without disclosing existence |
+| 409 `poll_full` | Enrollment/reactivation capacity reached; no mailbox membership disclosure |
 | 409 `poll_closed`, `poll_cancelled`, `poll_changed` | Deadline/state/revision refused the write |
 | 409 `poll_already_created`, `poll_already_scheduled`, `poll_link_already_rotated`, `idempotency_key_reused` | Explicit replay/conflicting intent outcomes |
 | 409 `poll_event_changed`, `slot_taken`, `calendar_sync_unavailable` | Refresh or choose another time; no partial booking or token consumption |
@@ -358,18 +439,41 @@ renaming them; list those in the later OpenAPI operation. A public closed read r
 
 ## Implementation plan and acceptance checks
 
-| Later task | Deliverable and acceptance |
-|---|---|
-| Storage and service layer | New migrations/types, constraints, scoped access and transactional booking-core extraction. Upgrade populated predecessor schema, preserve data, fresh install/no-op migration. Test tenant isolation, owner/admin loss, current bearer scopes, all numeric boundaries, invite/public verification and privacy deletion. Race vote/deadline, vote/finalise, two finalisers, ordinary booking/finalise, limits/buffers, collective rollback and round-robin fairness; inject failure after booking insert to prove poll/booking/outbox atomicity. Test changed and exact create/finalise replay, token rotation and lost responses; assert rejected group/one-time-link paths leave seats/links untouched. Keep pools bounded under CI's default connection limit and close every pool. |
-| Public voting page | No login; own ballot and explicit consent, verification/recovery, edit/withdraw, read-only deadline and outcomes. Accessible keyboard/screen-reader choices and usable stacked candidates at 320px without page overflow. Test all shipped locales, neutral loading/403/errors, private/aggregate projections, DST and midnight crossings, changed zone retaining IDs, duplicate submit and stale revision. jsdom locally, browser checks through approved escalation/CI. |
-| Host UI | Personal/team creation, invitation, results, conditional-attendee confirmation, close/cancel and booking link. en/zh-CN, full-width Chinese punctuation. Test role changes, stale organization forms, lost responses, unavailable candidates and immutable published settings. Preserve the team weekly-hours hint and neutral unknown readiness. |
-| REST/MCP/CLI | Same service operations and error/replay semantics, OpenAPI/generated types, scope registry/discovery and CLI help/stdin capabilities. Contract tests for every operation, public vote without login through REST and capability vote with MCP/CLI, invalid supplied bearer, cross-tenant IDs, pagination and secret redaction. Publish public product guides and known limitations with the implemented surfaces, without claiming design-only routes exist. |
-| Notifications | Durable recipient jobs, encrypted temporary capabilities, invitation/verification, deadline reminder, selected/non-selected outcome and cancellation/update mail. Fake mail/providers only; test locale/zone, withdrawal, closure, replay dedupe, retry exhaustion, expired leases, deletion, budget suppression, conference gates and the SMTP duplicate window. Selected booking reschedule/cancel uses existing UID/sequence and manage-token protections; other voters never get that capability. |
+The five stages below run in A → B → C → D → E order. Each named sub-step is
+approximately one working day, independently reviewable with its own tests. Dependencies
+are explicit; no page depends on an endpoint or mail kind assigned to a later stage.
+B2 owns public transport parity; D owns complete host/agent access and UX.
+Stage C can exercise host selection through the service until stage D exposes host APIs/UI.
+
+| Stage / day-sized sub-step | Depends on | Deliverable and acceptance |
+|---|---|---|
+| A1 Storage and service: schema | None | Poll, candidates, voters, votes, operation receipts and recipient delivery storage/types. Test scoped FKs, lifecycle pairs and caps; populated predecessor preservation, fresh install and no-op migration. Choose remaining numeric abuse budgets and cleanup schedule before service admission lands. |
+| A2 Storage and service: host lifecycle | A1 | Create/read/results, authority, close/cancel, remove voter/delete and link rotation services. Test tenant/role/context loss, no holds, immutable settings, idempotent receipts, privacy cascades and retained abuse accounting. |
+| A3 Storage and service: voting | A2 | Enrollment/invitation/verification/recovery, full ballots, edits/withdrawal and opt-out. Test 40-person capacity, expiry freeing slots, full 409 uniformity, reactivation, revisions, no expired capability reuse and exact database-clock deadline equality/waits; ballots read-only after deadline. |
+| A4 Storage and service: cleanup | A3 | Bounded terminal cleanup and pending expiry, retained invitation eligibility, removal/rejoin blocks and deletion races. Test delayed workers never retain capacity, no lost opt-outs or reset budgets, and consistent booking-history deletion. Audit shared lock order. |
+| B1 Public voting page: verification mail foundation | A4 | Invitation/verification/recovery/resend durable delivery, encrypted capabilities and finite leases/retries, using the existing outbox machinery. Test expired-link recovery, budgets, generation rotation, terminal suppression and the SMTP duplicate window with fakes. |
+| B2 Public voting page: public transports | B1 | Own all public REST operations (including opt-out), OpenAPI/generated types and no-login checks; ship minimal matching MCP/CLI adapters and scope classification together. Test service parity, invalid bearer, secret redaction, full-capacity responses and no-valid-token recovery entry. |
+| B3 Public voting page: ballot UI | B2 | No login; verification/recovery, consent, ballots/edit/withdraw, timezone selection and read-only closure. Keyboard/screen-reader access and usable 320px stacked layout without overflow; all shipped locales, private/aggregate disclosures, neutral loading/403/errors, duplicate/stale submit, DST and midnight zone changes preserving slot IDs. Browser checks only through approved escalation/CI. |
+| B4 Public voting page: reminder and host deadline mail | B3 | Deadline jobs and mail/opt-out UI. Assert unverified nonresponding invitees receive one reminder even when capacity is full, voted/withdrawn/removed/opted-out people and unverified public enrollees receive none; timing, no overdue catch-up, budget suppression and durable once-only receipts. Test authorized creator deadline notice and departed creator suppression. |
+| C1 Host picks a time: booking-core extraction | B4 | Behavior-preserving transaction-taking internal booking core, ordinary entry points unchanged. Existing booking tests remain green; demonstrate rollback and organization → sorted hosts → event → users → members → round-robin lock ordering, with no provider I/O inside locks. |
+| C2a Host picks a time: atomic finalize | C1 | Service selects eligible booker/attendees and commits booking, poll, receipts and delivery intents together. Test MAX_GUESTS + 1, locked event settings, guest permission/answers, conditional consent, strict availability/limits/buffers, safe projection and exact/changed replay. Inject failure after booking insertion and assert complete rollback. |
+| C2b Host picks a time: concurrency and scheduling modes | C2a | Harden and test vote/finalize, two-finalizer and ordinary-booking collisions; collective rollback and round-robin fairness; group/one-time-link rejection without seat/link mutation. This is a required integration gate before exposing finalize. |
+| C3 Host picks a time: outcomes | C2b | Notifications to all eligible retained voters and ordinary selected-attendee/host booking mail. Test unverified invited recipient, locale/zone, cancellation/update, conference readiness, deletion/withdrawal and replay dedupe. No nonselected ICS/join/manage capability; host finalize projection never includes manageToken; source is the finalizing transport. |
+| D1 Agent and host access: creation/results transports | C3 | Host create/list/read/results/invite through REST plus matching thin MCP/CLI adapters in the same step, OpenAPI/generated types and scope registry. Test session context, key scopes, invalid bearer, pagination, tenant boundaries and secret-free metadata. |
+| D2 Agent and host access: lifecycle transports | D1 | Host resend/remove/close/cancel/delete/finalize/rotate through REST and matching thin MCP/CLI adapters together. Test conditional selection, mutation authority, replay/error parity and no returned manage capabilities; regenerate OpenAPI/types. |
+| D3 Agent and host access: agent UX and contracts | D2 | Complete CLI help/stdin inputs, MCP discovery and end-to-end contract coverage for host and public adapters already shipped. Exercise create, results and finalize across surfaces, insufficient scopes, public capability access and redacted diagnostics. |
+| D4 Agent and host access: host UI | D3 | Personal/team create/invite/resend/remove/results, conditional selection/finalize, close/cancel/delete and booking link, using landed REST. en/zh-CN, stale forms/lost responses and unavailable slots; preserve weekly-hours hint and neutral unknown readiness; explain enrollment versus attendee caps and aggregate inference. |
+| E1 Docs and independent acceptance: docs | D4 | Publish implemented REST/MCP/CLI/UI guides, privacy/limits/mail/retention and self-hosting behavior; check examples against schemas and no design-only route claims. Record remaining limitations and owner steps. |
+| E2 Docs and independent acceptance: acceptance | E1 | Independent acceptance across multiple time zones and all surfaces, using fake providers. Verify complete vote-to-booking flow, guest limit, notification audiences, no-login 320px page, scopes, source and token privacy, concurrency/replay and the time cases below. Record mutation evidence and unresolved release blockers. |
+
+Keep every pool bounded and close it; individual files must stay well below CI's default
+100 connections. Each sub-step includes targeted regression and source-copy mutation checks;
+release gates and independent acceptance run against the complete implementation.
 
 Required time tests across these tasks: spring-forward gaps, both fall-back offsets,
 non-hour transitions, zones on opposite sides of midnight, host all-day busy intervals,
 UTC deadline equality and a transaction waiting across it, database fractional-second
-rounding, elapsed duration across DST, reschedule/cancel after finalisation, and replay
+rounding, elapsed duration across DST, reschedule/cancel after finalization, and replay
 after each lifecycle change. Every new protection needs a source-copy negative/mutation
 check demonstrating a real assertion fails when removed, then restoration.
 
@@ -384,7 +488,7 @@ to the whole ordinary booking; guest-localized booking mail and independent atte
 cancellation are not supplied by this design. A changed event snapshot requires restarting
 a poll; the host should choose the final settings before sharing.
 
-Project-lead acceptance should confirm the ordinary booker/guest mapping and its voter cap,
+Project-lead acceptance should confirm the ordinary booker/guest mapping and separate enrollment/attendee caps,
 aggregate-only sharing option, no-hold policy and explicit unsupported modes before storage
 work starts. Cal.com's host-created multi-voter poll premise needs an official source if
 it is to appear in future competitive claims. Later storage work must finalize numeric

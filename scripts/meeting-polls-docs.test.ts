@@ -1,11 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
 
 const document = readFileSync(new URL('../docs/meeting-polls.md', import.meta.url), 'utf8')
 
 const limits = [
   ['Candidates per poll', '2–20'],
-  ['Voters per poll', '1–11'],
+  ['Enrollments per poll', '0–40'],
+  ['Attendees per booking', '1–11'],
+  ['Pending enrollment expiry', '1 hour'],
+  ['Invitation resend cooldown', '15 minutes'],
+  ['Invitation resend cap', '3 per poll/mailbox'],
   ['Deadline after creation', '1 hour–30 days'],
   ['Reminder lead time', '24 hours'],
 ] as const
@@ -30,6 +35,10 @@ function verifyLimits(source: string) {
 }
 
 describe('meeting poll design numeric limits', () => {
+  it('ties the attendee cap to the booking service guest limit plus the booker', () => {
+    verifyLimit(document, 'Attendees per booking', `1–${MAX_GUESTS + 1}`)
+  })
+
   it.each(limits)('pins %s to %s', (label, value) => {
     verifyLimit(document, label, value)
   })
@@ -37,8 +46,13 @@ describe('meeting poll design numeric limits', () => {
   it.each([
     ['candidate minimum', 'Candidates per poll', '2–20', '1–20'],
     ['candidate maximum', 'Candidates per poll', '2–20', '2–21'],
-    ['voter minimum', 'Voters per poll', '1–11', '0–11'],
-    ['voter maximum', 'Voters per poll', '1–11', '1–12'],
+    ['enrollment minimum', 'Enrollments per poll', '0–40', '1–40'],
+    ['enrollment maximum', 'Enrollments per poll', '0–40', '0–41'],
+    ['attendee minimum', 'Attendees per booking', '1–11', '0–11'],
+    ['attendee maximum', 'Attendees per booking', '1–11', '1–12'],
+    ['pending enrollment expiry', 'Pending enrollment expiry', '1 hour', '2 hours'],
+    ['invitation resend cooldown', 'Invitation resend cooldown', '15 minutes', '1 minute'],
+    ['invitation resend cap', 'Invitation resend cap', '3 per poll/mailbox', '4 per poll/mailbox'],
     ['deadline minimum', 'Deadline after creation', '1 hour–30 days', '2 hours–30 days'],
     ['deadline maximum', 'Deadline after creation', '1 hour–30 days', '1 hour–31 days'],
     ['reminder lead time', 'Reminder lead time', '24 hours', '48 hours'],
