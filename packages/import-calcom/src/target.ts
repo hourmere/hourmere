@@ -170,7 +170,9 @@ export async function readTargetState(
   const bookings = await rows<TargetRow>(
     client,
     `SELECT b.id,b.organization_id,b.event_type_id,
-    b.status,b.start_at,b.end_at,b.title,b.location,b.responses,b.import_questions,b.source,
+    b.status,b.payment_hold_expires_at,
+    (b.payment_hold_expires_at>clock_timestamp()) AS payment_hold_active,
+    b.start_at,b.end_at,b.title,b.location,b.responses,b.import_questions,b.source,
     b.rescheduled_from_id,b.hosts_use_default_schedule,b.required_host_user_ids,
     b.notification_snapshot,b.success_redirect,
     coalesce(et.buffer_before_minutes,0) AS event_buffer_before,
@@ -267,7 +269,12 @@ export function parserContext(
       .filter((e) => e.deleted_at == null && !mappedEvents.has(e.id))
       .map((e) => ({ organizationId: e.organization_id as string, slug: e.slug as string })),
     busy: state.bookings
-      .filter((b) => b.status !== 'cancelled' && !mappedBookings.has(b.id))
+      .filter(
+        (b) =>
+          (b.status === 'confirmed' ||
+            (b.status === 'pending_payment' && b.payment_hold_active === true)) &&
+          !mappedBookings.has(b.id),
+      )
       .flatMap((b) =>
         (b.hosts as { user_id: string }[]).map((h) => ({
           targetUserId: h.user_id,

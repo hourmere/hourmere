@@ -4,6 +4,7 @@ import { findSlots, type PublicEventTypeRecord, parseLocation } from './availabi
 import { canonicalJson } from './bookings.ts'
 import { DomainError } from './errors.ts'
 import { createNotificationSnapshot, type NotificationSnapshot } from './notification-settings.ts'
+import { expirePaymentHolds } from './payment-expiry.ts'
 
 export const groupUnavailable = () =>
   new DomainError('conflict', 'slot_unavailable', 'This time is not available')
@@ -151,6 +152,7 @@ export async function admitGroupSlot(
     ...(slot ? [slot.id] : []),
     ...(source?.state === 'retired' ? [source.id] : []),
   ]
+  await expirePaymentHolds({ db, hostUserId: hostId })
   const offered = await findSlots(db, {
     eventTypeId: config.id,
     hostUserId: hostId,
