@@ -702,8 +702,11 @@ async function loadBooking(db: Db, id: string): Promise<Booking> {
 
 // --- Writing bookings -------------------------------------------------------------------
 
-/** Resolve only against the locked configuration and the actual assigned hosts. */
-async function resolveBookingLocation(
+/**
+ * Resolve only against the locked configuration and the actual assigned hosts. Payment holds
+ * share it so a hold stores the chosen option exactly as its confirmed booking would.
+ */
+export async function resolveBookingLocation(
   ctx: PublicContext,
   db: Db,
   event: PublicEventTypeRecord,
