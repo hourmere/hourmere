@@ -1,7 +1,9 @@
 import '../../i18n/admin.ts'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import * as snippet from '@hourmere/core/slot-snippet'
 import { formatSlotLabel } from '@hourmere/core/slot-snippet'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as zonePicker from '../../components/TimeZonePicker.tsx'
@@ -21,14 +23,16 @@ afterEach(() => {
 })
 
 const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
-const slots = (count = 2, minutes = 30): Slot[] =>
+const slots = (count = 2, minutes = 30, day = DAY): Slot[] =>
   Array.from({ length: count }, (_, index) => {
-    const start = Date.parse(`${DAY}T09:00:00.000Z`) + index * 30 * 60_000
+    const start = Date.parse(`${day}T09:00:00.000Z`) + index * 30 * 60_000
     return {
       start: new Date(start).toISOString(),
       end: new Date(start + minutes * 60_000).toISOString(),
     }
   })
+// The picker starts on its profile's local day; Tokyo advances before the default Berlin fixture.
+const tokyoSlots = () => slots(2, 30, dateKeyIn(Date.now(), 'Asia/Tokyo'))
 const publicEvent = (overrides = {}) => ({
   title: 'Intro call',
   handle: 'ada',
@@ -175,29 +179,38 @@ describe('host open-time picker', () => {
     ).toBe('60')
   })
 
-  it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
-    const client = server()
-    renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
-      'fr',
-    )
-    await choose([1, 0])
-    await preview()
-    const urls = textPreview().value.match(/https:\/\/\S+/g)
-    fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
-      target: { value: 'zh-CN' },
-    })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Display time zone' }), {
-      target: { value: 'America/New_York' },
-    })
-    expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
-    expect(textPreview().value).toContain('America/New_York')
-    expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
-    await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
-    expect(
-      screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
-    ).toHaveLength(6)
-  })
+  it.each(['2030-11-06T14:59:00Z', '2030-11-06T15:01:00Z'])(
+    'keeps selected instants and URLs when display settings change and reloads the new zone day at %s',
+    async (now) => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(now))
+      try {
+        const client = server(tokyoSlots())
+        renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
+        expect(
+          screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value,
+        ).toBe('fr')
+        await choose([1, 0])
+        await preview()
+        const urls = textPreview().value.match(/https:\/\/\S+/g)
+        fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
+          target: { value: 'zh-CN' },
+        })
+        fireEvent.change(screen.getByRole('combobox', { name: 'Display time zone' }), {
+          target: { value: 'America/New_York' },
+        })
+        expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
+        expect(textPreview().value).toContain('America/New_York')
+        expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
+        await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
+        expect(
+          screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
+        ).toHaveLength(6)
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
 
   it('uses English and UTC without a supported profile and warns before sharing hidden event types', async () => {
     server()
@@ -813,4 +826,39 @@ describe('host open-time picker', () => {
     expect((await screen.findByRole('alert')).textContent).toBe(message)
     expect(screen.queryByText('Email preview ready.')).toBeNull()
   })
+})
+
+it('detects restoring the original picker fixture day after Tokyo midnight', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-11-06T15:01:00Z'))
+  try {
+    const source = readFileSync('apps/web/src/pages/event-types/HostSlotPicker.test.tsx', 'utf8')
+    const fixture = source.slice(
+      source.indexOf('const DAY ='),
+      source.indexOf('const publicEvent ='),
+    )
+    const before = "slots(2, 30, dateKeyIn(Date.now(), 'Asia/Tokyo'))"
+    expect(fixture.split(before)).toHaveLength(2)
+    const assertSelectable = async (code: string) => {
+      const compiled = stripTypeScriptTypes(code)
+      const offered = new Function('dateKeyIn', 'PROFILE', `${compiled}; return tokyoSlots()`)(
+        dateKeyIn,
+        PROFILE,
+      ) as Slot[]
+      server(offered)
+      renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
+      try {
+        await waitFor(() => expect(available().queryAllByRole('checkbox')).toHaveLength(2))
+      } finally {
+        cleanup()
+      }
+    }
+    await assertSelectable(fixture)
+    await expect(assertSelectable(fixture.replace(before, 'slots()'))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await assertSelectable(fixture)
+  } finally {
+    vi.useRealTimers()
+  }
 })
