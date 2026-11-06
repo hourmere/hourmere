@@ -17,7 +17,7 @@ import {
 } from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
-import { bookingHostIds } from './hosts.ts'
+import { bookingHostIds, resolvedBookingHosts } from './hosts.ts'
 
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
@@ -43,7 +43,7 @@ export async function getManagedBookingDetails(
           .where('deleted_at', 'is', null)
           .executeTakeFirst(),
     ctx.db
-      .selectFrom('booking_hosts as bh')
+      .selectFrom(resolvedBookingHosts(ctx.db).as('bh'))
       .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
       .leftJoin('profiles as p', 'p.user_id', 'bh.user_id')
       .select(['u.name', 'p.handle'])

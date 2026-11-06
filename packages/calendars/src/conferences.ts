@@ -18,6 +18,7 @@ import {
   googleMeetUrl,
   safeGoogleEventId,
 } from './google-events.ts'
+import { writeGroupSlotConference } from './group-conferences.ts'
 import type { CalendarDeps } from './index.ts'
 import { useGoogleConnection } from './sync.ts'
 
@@ -28,7 +29,7 @@ const clock = (deps: CalendarDeps) => new Date((deps.now ?? Date.now)())
 interface ConferenceQueue {
   enqueue(
     name: typeof CONFERENCE_JOB,
-    payload: { rootBookingId: string },
+    payload: { rootBookingId: string } | { groupSlotId: string },
     options?: EnqueueOptions,
   ): Promise<string | null>
 }
@@ -36,6 +37,25 @@ export function conferenceBookingNotifier(queue: ConferenceQueue) {
   return async (trx: Db, event: { bookingId: string }) => {
     if (!trx.isTransaction) throw Error('Conference jobs require the booking transaction')
     if (await isImportedBooking(trx, event.bookingId)) return
+    const seat = await trx
+      .selectFrom('bookings')
+      .select('group_slot_id')
+      .where('id', '=', event.bookingId)
+      .executeTakeFirst()
+    if (seat?.group_slot_id) {
+      const intent = await trx
+        .selectFrom('group_slot_conferences')
+        .select('group_slot_id')
+        .where('group_slot_id', '=', seat.group_slot_id)
+        .executeTakeFirst()
+      if (intent)
+        await queue.enqueue(
+          CONFERENCE_JOB,
+          { groupSlotId: seat.group_slot_id },
+          { transaction: trx, singletonKey: `group:${seat.group_slot_id}` },
+        )
+      return
+    }
     const root = await conferenceRoot(trx, event.bookingId)
     if (
       root &&
@@ -55,22 +75,31 @@ export function conferenceBookingNotifier(queue: ConferenceQueue) {
 export function bookingConferenceJob(deps: CalendarDeps) {
   return defineJob({
     name: CONFERENCE_JOB,
-    payload: z.strictObject({ rootBookingId: z.uuid() }),
+    payload: z.union([
+      z.strictObject({ rootBookingId: z.uuid() }),
+      z.strictObject({ groupSlotId: z.uuid() }),
+    ]),
     policy: 'stately',
     concurrency: 2,
     retry: { limit: 5, delaySeconds: 30, backoff: true, maxDelaySeconds: 120 },
     expireInSeconds: 180,
-    handler: ({ rootBookingId }, { signal }) =>
-      writeBookingConference(
-        deps,
-        rootBookingId,
-        AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
-      ),
+    handler: (payload, { signal }) =>
+      'groupSlotId' in payload
+        ? writeGroupSlotConference(
+            deps,
+            payload.groupSlotId,
+            AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+          )
+        : writeBookingConference(
+            deps,
+            payload.rootBookingId,
+            AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+          ),
   })
 }
 export function conferenceDispatchJob(
   deps: CalendarDeps,
-  enqueue: (id: string) => Promise<unknown>,
+  enqueue: (id: string, group?: boolean) => Promise<unknown>,
 ) {
   return defineJob({
     name: 'conference-dispatch',
@@ -93,6 +122,16 @@ export function conferenceDispatchJob(
         .limit(100)
         .execute()
       for (const row of due) await enqueue(row.root_booking_id)
+      const slots = await deps.db
+        .selectFrom('group_slot_conferences')
+        .select('group_slot_id')
+        .where('state', '=', 'pending')
+        .where('next_attempt_at', '<=', clock(deps))
+        .where((eb) => eb.or([eb('lease_until', 'is', null), eb('lease_until', '<=', clock(deps))]))
+        .orderBy('next_attempt_at')
+        .limit(100)
+        .execute()
+      for (const slot of slots) await enqueue(slot.group_slot_id, true)
     },
   })
 }
@@ -136,21 +175,44 @@ async function claim(deps: CalendarDeps, root: string) {
     return { ...c, booking, lease, create, attempts: c.attempts + 1 }
   })
 }
-type Claim = NonNullable<Awaited<ReturnType<typeof claim>>>
-type Outcome = ConferenceResult & {
+export interface ConferenceProviderClaim {
+  resourceId: string
+  calendarUid: string
+  seatCount?: number
+  organizer_user_id: string
+  organization_id: string
+  invitation_organizer_email: string | null
+  provider: string
+  zoom_connection_id: string | null
+  zoom_user_id: string | null
+  zoom_meeting_id: string | null
+  create: boolean
+  create_started: boolean
+  external_event_id: string | null
+  connection_id: string | null
+  calendar_id: string | null
+  request_id: string
+  conference_patch_request_id: string | null
+  revision: number
+  booking: { title: string; start_at: Date; end_at: Date; status: string }
+}
+export type ConferenceProviderOutcome = ConferenceResult & {
   event?: GoogleEvent
   conferencePatchRequestId?: string
 }
-const valueFor = (c: Claim): GoogleEventWrite => ({
-  iCalUID: `${c.root_booking_id}@hourmere`,
+const valueFor = (c: ConferenceProviderClaim): GoogleEventWrite => ({
+  iCalUID: c.calendarUid,
   summary: c.booking.title,
+  ...(c.seatCount === undefined
+    ? {}
+    : { description: String(c.seatCount), visibility: 'private' as const }),
   start: { dateTime: c.booking.start_at.toISOString() },
   end: { dateTime: c.booking.end_at.toISOString() },
   sequence: c.revision,
   status: c.booking.status === 'confirmed' ? 'confirmed' : 'cancelled',
   transparency: 'opaque',
 })
-const sameTimes = (event: GoogleEvent, c: Claim) => {
+const sameTimes = (event: GoogleEvent, c: ConferenceProviderClaim) => {
   try {
     return (
       Temporal.Instant.from(event.start?.dateTime ?? '').equals(
@@ -164,11 +226,11 @@ const sameTimes = (event: GoogleEvent, c: Claim) => {
     return false
   }
 }
-function interpretation(event: GoogleEvent, c: Claim): Outcome {
+function interpretation(event: GoogleEvent, c: ConferenceProviderClaim): ConferenceProviderOutcome {
   if (
     !safeGoogleEventId(event.id) ||
     (c.external_event_id && c.external_event_id !== event.id) ||
-    event.iCalUID !== `${c.root_booking_id}@hourmere`
+    event.iCalUID !== c.calendarUid
   )
     return { error: 'invalid_response' }
   if (c.booking.status === 'cancelled')
@@ -191,14 +253,18 @@ function interpretation(event: GoogleEvent, c: Claim): Outcome {
     return { event, url }
   return { event, error: 'invalid_response' }
 }
-async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): Promise<Outcome> {
+export async function runConferenceProviderWork(
+  deps: CalendarDeps,
+  c: ConferenceProviderClaim,
+  signal: AbortSignal,
+): Promise<ConferenceProviderOutcome> {
   if (c.booking.status === 'confirmed' && !(await conferenceOrganizerAvailable(deps.db, c)))
     return { error: 'organizer_unavailable', knownNoCreate: c.create }
   if (c.provider === 'zoom')
     return deps.zoomConferenceWork
       ? deps.zoomConferenceWork(
           {
-            rootBookingId: c.root_booking_id,
+            rootBookingId: c.resourceId,
             organizerUserId: c.organizer_user_id,
             connectionId: c.zoom_connection_id,
             externalUserId: c.zoom_user_id,
@@ -221,7 +287,7 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
   const remember = (event: GoogleEvent) => {
     if (
       !safeGoogleEventId(event.id) ||
-      event.iCalUID !== `${c.root_booking_id}@hourmere` ||
+      event.iCalUID !== c.calendarUid ||
       (c.external_event_id && c.external_event_id !== event.id) ||
       (knownEvent && knownEvent.id !== event.id)
     )
@@ -234,7 +300,7 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
       deps,
       c.connection_id,
       signal,
-      async (trx, token, userId): Promise<Outcome> => {
+      async (trx, token, userId): Promise<ConferenceProviderOutcome> => {
         const calendar = await trx
           .selectFrom('calendars')
           .select(['external_id', 'access_role', 'supports_google_meet'])
@@ -384,10 +450,14 @@ export async function writeBookingConference(
 ) {
   const c = await claim(deps, root)
   if (!c) return
-  let outcome: Outcome =
+  let outcome: ConferenceProviderOutcome =
     c.booking.status === 'confirmed' && c.booking.start_at <= clock(deps)
       ? { error: 'meeting_started', knownNoCreate: c.create }
-      : await providerWork(deps, c, signal)
+      : await runConferenceProviderWork(
+          deps,
+          { ...c, resourceId: c.root_booking_id, calendarUid: `${c.root_booking_id}@hourmere` },
+          signal,
+        )
   if (
     outcome.url &&
     !conferenceJoinUrl(c.provider, outcome.url, outcome.meetingId ?? c.zoom_meeting_id)

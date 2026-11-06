@@ -32,6 +32,10 @@ import {
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import { enqueueGroupHostMail } from './group-host-mail.ts'
+
+export { groupHostMailJob } from './group-host-mail.ts'
+
 import {
   lockNotificationEmailBudget,
   type NotificationMailLimits,
@@ -191,6 +195,7 @@ export async function enqueueBookingNotifications(
     )
     return
   }
+  await enqueueGroupHostMail(transaction as Db, event.bookingId, now)
   const send = (kind: NotificationKind, startAfter?: Temporal.Instant) =>
     queue.enqueue(
       BOOKING_NOTIFICATION_JOB,
@@ -318,6 +323,7 @@ export interface NotificationData {
   booking: {
     id: string
     organizationId: string
+    groupSlotId?: string | null
     status: string
     start: Temporal.Instant
     end: Temporal.Instant
@@ -379,14 +385,18 @@ export function loadNotificationData(
     const b = await conn
       .selectFrom('bookings as b')
       .leftJoin('event_types as et', 'et.id', 'b.event_type_id')
+      .leftJoin('group_slots as gs', 'gs.id', 'b.group_slot_id')
       .select([
         'b.id',
         'b.organization_id',
+        'b.group_slot_id',
         'b.status',
         'b.start_at',
         'b.end_at',
         'b.title',
-        'b.location',
+        sql<Json | null>`CASE WHEN b.group_slot_id IS NULL THEN b.location ELSE gs.location END`.as(
+          'location',
+        ),
         'b.responses',
         'b.cancel_reason',
         'b.rescheduled_from_id',
@@ -415,7 +425,11 @@ export function loadNotificationData(
         'p.locale as profile_locale',
         's.time_zone as schedule_zone',
       ])
-      .where('bh.booking_id', '=', bookingId)
+      .where((eb) =>
+        b.group_slot_id
+          ? eb('bh.group_slot_id', '=', b.group_slot_id)
+          : eb('bh.booking_id', '=', bookingId),
+      )
       // Only addresses their owner proved. Accounts start verified; should one not be, it
       // gets nothing and is not named as organizer or attendee.
       .where('u.emailVerified', '=', true)
@@ -453,18 +467,23 @@ export function loadNotificationData(
       )
       .execute()
     const conference = await conn
-      .selectFrom('booking_conferences')
+      .selectFrom('booking_notification_conference_context')
       .selectAll()
       .where('booking_id', '=', bookingId)
       .executeTakeFirst()
-    const conferenceIdentity = conference
-      ? {
-          organizerId: conference.organizer_user_id,
-          name: conference.invitation_organizer_name,
-          email: conference.invitation_organizer_email,
-          available: await conferenceOrganizerAvailable(conn, conference),
-        }
-      : undefined
+    const conferenceIdentity =
+      conference?.organizer_user_id && conference.organization_id
+        ? {
+            organizerId: conference.organizer_user_id,
+            name: conference.invitation_organizer_name,
+            email: conference.invitation_organizer_email,
+            available: await conferenceOrganizerAvailable(conn, {
+              ...conference,
+              organizer_user_id: conference.organizer_user_id,
+              organization_id: conference.organization_id,
+            }),
+          }
+        : undefined
     const previous = b.rescheduled_from_id
       ? await conn
           .selectFrom('bookings')
@@ -480,15 +499,25 @@ export function loadNotificationData(
 
     return {
       conferenceIdentity,
-      conferenceRevision: conference?.revision,
+      conferenceRevision: conference?.revision ?? undefined,
       booking: {
         id: b.id,
         organizationId: b.organization_id,
+        groupSlotId: b.group_slot_id,
         status: b.status,
         start: instant(b.start_at),
         end: instant(b.end_at),
         eventName: b.event_title ?? b.title,
-        location: meetingLocation(b.location),
+        location:
+          b.group_slot_id && conference
+            ? b.status === 'confirmed' &&
+              conference.state === 'ready' &&
+              conference.applied_revision === conference.revision &&
+              conference.join_url &&
+              isRecord(b.location)
+              ? meetingLocation({ ...b.location, url: conference.join_url })
+              : null
+            : meetingLocation(b.location),
         questions: b.questions,
         responses: b.responses,
         cancelReason: b.cancel_reason,
@@ -514,7 +543,9 @@ export function loadNotificationData(
       root,
       calendarCopyHosts: new Set([
         ...copyHosts.map((h) => h.user_id),
-        ...(conference?.provider === 'google_meet' && conference.calendar_id
+        ...(conference?.provider === 'google_meet' &&
+        conference.calendar_id &&
+        conference.organizer_user_id
           ? [conference.organizer_user_id]
           : []),
       ]),
@@ -647,7 +678,7 @@ export async function sendOnce(
       // that cancel.
       const current = await trx
         .selectFrom('bookings as b')
-        .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+        .leftJoin('booking_notification_conference_context as c', 'c.booking_id', 'b.id')
         .select(['b.status', 'b.start_at', 'c.revision as conference_revision'])
         .where('b.id', '=', key.bookingId)
         .executeTakeFirst()
@@ -882,7 +913,8 @@ async function deliverBookingNotification(
     kind === 'reminder' ||
     kind === 'conference_failed' ||
     !calendarOrganizer ||
-    (modern && hostId !== undefined && data.calendarCopyHosts.has(hostId))
+    (hostId !== undefined &&
+      (Boolean(booking.groupSlotId) || (modern && data.calendarCopyHosts.has(hostId))))
       ? undefined
       : icsAttachment({
           method: kind === 'cancelled' ? 'CANCEL' : 'REQUEST',
@@ -975,40 +1007,42 @@ async function deliverBookingNotification(
   // Hosts first (verified addresses, and they most need to know), then the invitee, then
   // guests: a guest address that is slow to answer must not hold up the others.
   const recipients = [
-    ...hosts.map((host) => ({
-      key: `host:${host.id}`,
-      email: host.email,
-      verifiedHost: { id: host.id, email: host.email },
-      withLinks: false,
-      message: () =>
-        email(
-          kind,
-          meeting,
-          {
-            role: 'host',
-            email: host.email,
-            timeZone: host.timeZone,
-            locale: host.locale,
-            coHostNames: hosts
-              .filter((other) => other.id !== host.id)
-              .map((other) => other.displayName),
-            answers: answersOf(
-              booking.questions,
-              booking.responses,
-              interfaceLanguage(host.locale) ?? 'en',
-            ),
-          },
-          {
-            bookingUrl: hostBookingUrl(deps.publicUrl, bookingId),
-            attachment: invitation(
-              invitee.name,
-              interfaceLanguage(host.locale) ?? 'en',
-              'host',
-              host.id,
-            ),
-          },
-        ),
-    })),
+    ...hosts
+      .filter(() => !booking.groupSlotId || kind !== 'reminder')
+      .map((host) => ({
+        key: `host:${host.id}`,
+        email: host.email,
+        verifiedHost: { id: host.id, email: host.email },
+        withLinks: false,
+        message: () =>
+          email(
+            kind,
+            meeting,
+            {
+              role: 'host',
+              email: host.email,
+              timeZone: host.timeZone,
+              locale: host.locale,
+              coHostNames: hosts
+                .filter((other) => other.id !== host.id)
+                .map((other) => other.displayName),
+              answers: answersOf(
+                booking.questions,
+                booking.responses,
+                interfaceLanguage(host.locale) ?? 'en',
+              ),
+            },
+            {
+              bookingUrl: hostBookingUrl(deps.publicUrl, bookingId),
+              attachment: invitation(
+                invitee.name,
+                interfaceLanguage(host.locale) ?? 'en',
+                'host',
+                host.id,
+              ),
+            },
+          ),
+      })),
     toAttendee(invitee),
     ...guests.map(toAttendee),
   ]
@@ -1105,17 +1139,24 @@ export async function conferenceNotificationAllowed(
   if (kind === 'cancelled') return true
   const row = await db
     .selectFrom('bookings as b')
-    .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    .leftJoin('booking_notification_conference_context as c', 'c.booking_id', 'b.id')
+    .leftJoin('group_slots as gs', 'gs.id', 'b.group_slot_id')
     .select([
-      'b.location',
+      sql<Json | null>`CASE WHEN b.group_slot_id IS NULL THEN b.location ELSE gs.location END`.as(
+        'location',
+      ),
+      'b.status',
       'b.notification_snapshot',
       'c.state',
       'c.revision',
       'c.applied_revision',
+      'c.join_url',
+      'gs.state as slot_state',
     ])
     .where('b.id', '=', bookingId)
     .executeTakeFirst()
-  if (!row) return false
+  if (row?.status !== 'confirmed' || (row.slot_state !== null && row.slot_state !== 'open'))
+    return false
   if (
     !configurable &&
     kind === 'reminder' &&
@@ -1130,7 +1171,7 @@ export async function conferenceNotificationAllowed(
     row.state === 'ready' &&
     row.applied_revision === row.revision &&
     isRecord(row.location) &&
-    typeof row.location.url === 'string'
+    (typeof row.location.url === 'string' || typeof row.join_url === 'string')
   )
 }
 
@@ -1160,7 +1201,7 @@ async function claimConferenceNotification(
     let query = trx
       .selectFrom('booking_conference_notifications as n')
       .innerJoin('bookings as b', 'b.id', 'n.booking_id')
-      .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+      .innerJoin('booking_notification_conference_context as c', 'c.booking_id', 'b.id')
       .select(['n.booking_id', 'n.kind', 'n.attempts'])
       .where('n.delivered', '=', false)
       .where((eb) => eb.not(importedBookingCondition(eb.ref('n.booking_id'))))
@@ -1228,7 +1269,7 @@ export async function dispatchConferenceNotifications(
     WITH obsolete AS (
       SELECT n.booking_id,n.kind FROM booking_conference_notifications AS n
       JOIN bookings AS b ON b.id=n.booking_id
-      LEFT JOIN booking_conferences AS c ON c.booking_id=b.id
+      LEFT JOIN booking_notification_conference_context AS c ON c.booking_id=b.id
       WHERE NOT n.delivered AND n.skipped_at IS NULL AND n.exhausted_at IS NULL
         AND (n.lease_until IS NULL OR n.lease_until <= ${expiredAt})
         AND (b.status <> 'confirmed'
@@ -1325,7 +1366,7 @@ async function requireConferenceInvitationIdentity(
 ) {
   if (kind === 'cancelled' || kind === 'conference_failed') return
   const c = await db
-    .selectFrom('booking_conferences')
+    .selectFrom('booking_notification_conference_context')
     .selectAll()
     .where('booking_id', '=', bookingId)
     .executeTakeFirst()
