@@ -739,7 +739,7 @@ row; they do not move private seat data onto shared slots or attendee rosters.
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and isolated mail budgets. It is
+email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget. It is
 design only: no workflow tables, migration, API or runtime enablement exist yet.
 
 | When | Change |
