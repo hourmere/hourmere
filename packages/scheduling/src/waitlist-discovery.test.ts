@@ -27,6 +27,7 @@ import {
 } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
 import { cleanupWaitlistSignals, scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
+import * as policy from './waitlist-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const instant = (value: string) => Temporal.Instant.from(value)
@@ -62,7 +63,7 @@ function sourceCopy(
     /\bexport /g,
     '',
   )
-  const bindings = { sql, ...availability, ...waitlist }
+  const bindings = { sql, ...availability, ...waitlist, ...policy }
   return new Function(
     ...Object.keys(bindings),
     `${source}; return ${file === 'waitlist-discovery' ? '{ cleanupWaitlistSignals, scanWaitlistEvent, scanWaitlists }' : '{ attributeWaitlistBooking }'}`,

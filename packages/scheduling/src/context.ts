@@ -49,6 +49,8 @@ export interface ServiceContext {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
+  smtpConfigured?: boolean | undefined
   db: Db
   /** Server-generated correlation ID; never a raw header value. */
   requestId?: string | undefined

@@ -145,6 +145,11 @@ function isWaitlistAdmissionPath(path: string): boolean {
   return admission.test(path) || admission.test(decoded)
 }
 
+/** Management queries and deletes can expose retained contacts in driver errors. */
+function isWaitlistEntryPath(path: string): boolean {
+  return /^\/api\/v1\/event-types\/[^/]+\/waitlist\/entries(?:\/[^/]+)?\/?$/i.test(path)
+}
+
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
@@ -351,7 +356,10 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
-    const text = isWaitlistAdmissionPath(c.req.path) ? 'private waitlist request failed' : detail
+    const text =
+      isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
+        ? 'private waitlist request failed'
+        : detail
     const path = isOneTimeCapabilityPath(c.req.path)
       ? '/book/[redacted]'
       : isOneTimeLinkPath(c.req.path)

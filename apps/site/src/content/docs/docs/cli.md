@@ -333,3 +333,10 @@ with no validated ID remains ambiguous: retry does not issue another POST or ado
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
 requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.
