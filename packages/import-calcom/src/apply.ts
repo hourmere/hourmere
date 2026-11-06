@@ -200,7 +200,7 @@ export async function applyExtractedImport(
     if (fresh.targetVersionFingerprint !== saved.targetVersionFingerprint)
       throw new TargetRefusal('IMPORT_SCHEMA_CHANGED')
     if (fresh.blocked) throw new TargetRefusal('IMPORT_TARGET_CHANGED')
-    // Lost-response replay checks both the complete durable ledger and post-commit business hash.
+    // Lost-response replay verifies the complete durable ledger and each mapped entity.
     if (
       allMappingsUnchanged(fresh, state) ||
       (fresh.targetFingerprint === saved.targetFingerprint &&

@@ -12,6 +12,7 @@ import { checkSourceMutation, required } from './mutation-testing.ts'
 import { renderPreview } from './operator-cli.ts'
 import { fingerprint } from './plan.ts'
 import {
+  allMappingsUnchanged,
   buildPreview,
   extractForPreview,
   previewImport,
@@ -517,7 +518,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       /postgres:|NEVER_READ|"credentials":|oneTimePassword|meetingPassword/,
     )
   })
-  it('runs the default preview and apply CLI with protected plan/report outputs and no credential logs', async () => {
+  it('runs the explicit preview and apply CLI with protected plan/report outputs and no credential logs', async () => {
     const f = await setup(),
       directory = await mkdtemp(join(tmpdir(), 'calcom-operator-'))
     const config = join(directory, 'config.json'),
@@ -529,7 +530,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     try {
       await writeFile(config, JSON.stringify(options), { mode: 0o600 })
       expect(
-        await runCli(['--config', config, '--out', plan, '--report', report], env, (s) =>
+        await runCli(['preview', '--config', config, '--out', plan, '--report', report], env, (s) =>
           output.push(s),
         ),
       ).toBe(0)
@@ -602,7 +603,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       expect(
         (await applyExtractedImport(target.pool, plan, next, async () => snapshot)).status,
       ).toBe('applied')
-      expect((await apply(f)).status).toBe('failed')
+      expect(await apply(f)).toMatchObject({ status: 'noop', committed: true })
       f.plan = await repreview(f)
       expect(f.plan.entities.every((e) => e.disposition === 'noop')).toBe(true)
       expect((await apply(f)).status).toBe('noop')
@@ -648,6 +649,71 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       )
     }
   })
+  it.each(['schedule edit', 'unrelated sign-up'] as const)(
+    'acknowledges a committed lost-response replay after %s',
+    async (change) => {
+      const f = await setup()
+      const schedule = (
+        await target.pool.query(
+          "INSERT INTO schedules(user_id,name,time_zone,weekly_hours,is_default) VALUES($1,'Existing','UTC','{}',true) RETURNING id",
+          [f.user.id],
+        )
+      ).rows[0]?.id
+      f.plan = await repreview(f)
+      expect(await apply(f)).toMatchObject({ status: 'applied', committed: true })
+      const counts = await businessCounts(f.user.id)
+      if (change === 'schedule edit') {
+        await target.pool.query("UPDATE schedules SET name='Edited hours' WHERE id=$1", [schedule])
+      } else {
+        const other = await createTestUser(createDb(target.pool))
+        users.push(other.id)
+        await target.pool.query(
+          "INSERT INTO profiles(user_id,handle,time_zone) VALUES($1,'unrelated-signup','UTC')",
+          [other.id],
+        )
+      }
+      const state = await readTargetState(
+        target.pool,
+        f.input.sourceId,
+        f.input.authorization,
+        f.snapshot.cutoff,
+      )
+      const { connectionString: _connectionString, ...options } = f.input
+      const preview = buildPreview(f.snapshot, state, options)
+      expect(allMappingsUnchanged(preview, state)).toBe(true)
+      expect(await apply(f)).toMatchObject({
+        status: 'noop',
+        code: 'IMPORT_NOOP',
+        committed: true,
+        created: [],
+        failures: [],
+        users: [{ status: 'noop', code: 'IMPORT_NOOP', created: [] }],
+      })
+      expect(await businessCounts(f.user.id)).toEqual(counts)
+      await checkSourceMutation(
+        new URL('./preview.ts', import.meta.url),
+        'users.length === preview.options.authorization.owners.length',
+        `users.length === preview.options.authorization.owners.length &&
+          users.every((i) => i.question_crosswalk.postTargetFingerprint ===
+            fingerprint((({ items: _items, ...business }) => business)(state)))`,
+        (m) => m.allMappingsUnchanged as typeof allMappingsUnchanged,
+        (unchanged) => expect(unchanged(preview, state)).toBe(true),
+      )
+      await checkSourceMutation(
+        new URL('./apply.ts', import.meta.url),
+        'allMappingsUnchanged(fresh, state)',
+        'false',
+        (m) => m.applyExtractedImport as typeof applyExtractedImport,
+        async (mutant) => {
+          expect(await mutant(target.pool, f.plan, f.input, async () => f.snapshot)).toMatchObject({
+            status: 'noop',
+            code: 'IMPORT_NOOP',
+            committed: true,
+          })
+        },
+      )
+    },
+  )
   it('keeps a committed lost-response replay a no-op after its start', async () => {
     const start = Temporal.Now.instant()
       .add({ seconds: 1 })

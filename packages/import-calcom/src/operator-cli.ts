@@ -43,7 +43,7 @@ export function operatorRefusalCode(error: unknown): string {
 
 export const applyMessages = {
   en: {
-    help: 'Usage: import-calcom [preview|apply|register-source] --config <private-file> [--out <new-plan>] [--report <new-private-report>] [--plan <private-plan>] [--lang en|zh-CN]. Preview is the default. Connections belong in protected files or CALCOM_IMPORT_SOURCE_URL / CALCOM_IMPORT_TARGET_URL, never in arguments.',
+    help: 'Usage: import-calcom <preview|apply|register-source> --config <private-file> [--out <new-plan>] [--report <new-private-report>] [--plan <private-plan>] [--lang en|zh-CN]. Choose an explicit subcommand. Connections belong in protected files or CALCOM_IMPORT_SOURCE_URL / CALCOM_IMPORT_TARGET_URL, never in arguments.',
     preview: 'Preview complete. No source or target rows were written.',
     registered:
       'Source namespace registered. Reuse this identifier for the same real source instance and its backups. No business data was imported.',
@@ -68,7 +68,7 @@ export const applyMessages = {
     exclusions: 'Explicit exclusions and accepted dependency losses',
   },
   'zh-CN': {
-    help: '用法：import-calcom [preview|apply|register-source] --config <私有配置> [--out <新计划>] [--report <新私有报告>] [--plan <私有计划>] [--lang en|zh-CN]。默认执行预览。连接仅通过受保护文件或 CALCOM_IMPORT_SOURCE_URL／CALCOM_IMPORT_TARGET_URL 提供，请勿放入参数。',
+    help: '用法：import-calcom <preview|apply|register-source> --config <私有配置> [--out <新计划>] [--report <新私有报告>] [--plan <私有计划>] [--lang en|zh-CN]。请明确指定子命令。连接仅通过受保护文件或 CALCOM_IMPORT_SOURCE_URL／CALCOM_IMPORT_TARGET_URL 提供，请勿放入参数。',
     preview: '预览完成，未向源库或目标库写入任何行。',
     registered: '来源命名空间已登记。同一真实来源实例及其备份必须复用此标识。未导入业务数据。',
     refused: '操作已拒绝。请根据稳定代码解决原因，再重新预览。输出不包含凭据或数据库驱动详情。',

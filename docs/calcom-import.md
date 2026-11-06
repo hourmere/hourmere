@@ -1,7 +1,7 @@
 # Cal.com / cal.diy import
 
 The local operator CLI previews real source and target state and applies the exact reviewed
-plan. Preview is the default and writes no source, business or import-metadata rows.
+plan. The explicit `preview` command writes no source, business or import-metadata rows.
 There is no import web UI. Use `register-source` once to create a persistent random source
 namespace before previewing. Database administration access alone is not owner consent.
 Supported source versions are cal.diy `a5ee96f77edd644439e7de8c3255ccb2eb2c5941`
@@ -175,8 +175,8 @@ one for a different instance. Namespace identity, schema fingerprint and version
 
 ```sh
 npm run import-calcom --workspace @hourmere/import-calcom -- preview --config /private/import.json --out /private/reviewed-plan.json --report /private/reviewed-report.txt
-# Equivalent default preview, with Chinese operator headings:
-npm run import-calcom --workspace @hourmere/import-calcom -- --config /private/import.json --out /private/another-plan.json --lang zh-CN
+# Preview with Chinese operator headings:
+npm run import-calcom --workspace @hourmere/import-calcom -- preview --config /private/import.json --out /private/another-plan.json --lang zh-CN
 npm run import-calcom --workspace @hourmere/import-calcom -- apply --config /private/import.json --plan /private/reviewed-plan.json
 ```
 
@@ -219,9 +219,11 @@ slug/attribution uniqueness constraints remain the final concurrency checks.
 
 First writes and immutable `import_items` mappings commit together. An unchanged rerun is a
 no-op; changed source or mapped target hashes produce conflicts for a new preview and manual
-resolution. After a lost response, retry the same plan: the ledger and the saved post-commit
-business hash establish a no-op without making external calls. If other relevant target
-configuration changed, create a new preview first. Deleted or soft-deleted targets leave
+resolution. After a lost response, retry the same plan: the complete ledger and each mapped
+entity’s source and target hashes establish a no-op without making external calls. Changes
+to an existing non-imported schedule or an unrelated account’s sign-up/profile do not change
+this committed result. The broad target snapshot still protects an uncommitted plan; changes
+before its first apply require a new preview. Deleted or soft-deleted targets leave
 minimal numeric-source tombstones with no answers, labels, emails, fingerprints or target UUID;
 a rerun cannot recreate them. Account deletion still erases its personal business data.
 
@@ -230,7 +232,12 @@ entity/source key and stable safe codes. A crash before commit rolls back every 
 connection during commit can make the response uncertain, so rerun the same plan to discover
 the committed ledger. Driver text, causes, paths and credentials are never reported.
 Exit `0` means successful preview/apply/no-op; `2` means preview blockers; `1` means refusal or
-failed apply. Stable codes include `IMPORT_SOURCE_CHANGED`, `IMPORT_TARGET_CHANGED`,
+failed apply. `IMPORT_APPLIED` means `applied` with `committed: true`.
+`IMPORT_NOOP` means the complete unchanged mapping was already committed: `noop` with
+`committed: true`, no newly created entities and no external effects, including after unrelated
+target changes. `IMPORT_PARTIAL_MAPPING` means only part of the batch is mapped and the
+attempt failed with `committed: false`; it does not describe a complete unchanged import.
+Stable refusal codes include `IMPORT_SOURCE_CHANGED`, `IMPORT_TARGET_CHANGED`,
 `IMPORT_PLAN_EXPIRED`, `IMPORT_BOOKING_OVERLAP` and `IMPORT_CONCURRENT_CHANGE`.
 
 Rollback is deliberately not automatic. A separately reviewed local cleanup must preview

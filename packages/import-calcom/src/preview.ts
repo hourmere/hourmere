@@ -3,7 +3,6 @@ import { fingerprint, type ImportPlan, parseImportPlan } from './plan.ts'
 import { extractSource } from './source.ts'
 import {
   assertAuthorization,
-  businessFingerprint,
   type EntityKind,
   entityState,
   type ImportAuthorization,
@@ -630,6 +629,8 @@ export function verifyPlanFingerprint(plan: PreviewPlan): boolean {
   const { planFingerprint, ...value } = plan
   return fingerprint(value) === planFingerprint
 }
+// Per-entity hashes prove the committed batch. Unrelated schedules and global handle
+// reservations may change afterwards without changing any imported entity.
 export function allMappingsUnchanged(preview: PreviewPlan, state: TargetState): boolean {
   const users = state.items.filter(
     (i) =>
@@ -639,7 +640,6 @@ export function allMappingsUnchanged(preview: PreviewPlan, state: TargetState): 
   return (
     preview.entities.length > 0 &&
     preview.entities.every((e) => e.disposition === 'noop') &&
-    users.length === preview.options.authorization.owners.length &&
-    users.every((i) => i.question_crosswalk.postTargetFingerprint === businessFingerprint(state))
+    users.length === preview.options.authorization.owners.length
   )
 }

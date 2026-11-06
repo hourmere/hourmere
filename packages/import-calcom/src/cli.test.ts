@@ -5,9 +5,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SourceSnapshot } from './types.ts'
 
 vi.mock('./source.ts', () => ({ extractSource: vi.fn() }))
+vi.mock('./operator-cli.ts', () => ({ runDatabaseCli: vi.fn() }))
 
-import { operatorMessages, readProtectedFile, runParseCli as runCli } from './cli.ts'
+import {
+  operatorMessages,
+  readProtectedFile,
+  runParseCli as runCli,
+  runCli as runEntryCli,
+} from './cli.ts'
 import { checkSourceMutation, required } from './mutation-testing.ts'
+import { runDatabaseCli } from './operator-cli.ts'
 import { SourceRefusal } from './schema.ts'
 import { extractSource } from './source.ts'
 
@@ -262,4 +269,63 @@ it('kills source-copy refusal-code omission and arbitrary-code output mutations'
       expect(await check(run)).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
     },
   )
+})
+
+describe('CLI subcommand dispatch', () => {
+  it.each(['preview', 'apply', 'register-source'])(
+    'dispatches explicit %s to the database CLI',
+    async (command) => {
+      const argv = [command, '--config', '/private/config.json']
+      const env = {}
+      const write = vi.fn()
+      vi.mocked(runDatabaseCli).mockResolvedValue(2)
+      expect(await runEntryCli(argv, env, write)).toBe(2)
+      expect(runDatabaseCli).toHaveBeenCalledWith(argv, env, write)
+    },
+  )
+
+  it('preserves legacy dry-run arguments and the explicit parse alias', async () => {
+    const path = await protectedFile(JSON.stringify(config()))
+    vi.mocked(extractSource).mockResolvedValue(snapshot)
+    for (const prefix of [[], ['parse']]) {
+      const output: string[] = []
+      expect(
+        await runEntryCli(
+          [...prefix, '--config', path],
+          { CALCOM_IMPORT_SOURCE_URL: 'private-dsn-secret' },
+          (s) => output.push(s),
+        ),
+      ).toBe(2)
+      expect(output[0]).toBe(operatorMessages.en.complete)
+    }
+    expect(runDatabaseCli).not.toHaveBeenCalled()
+  })
+
+  it.each([[], ['unknown'], ['--unknown'], ['--config', 'missing', '--out', 'report']])(
+    'refuses unsupported arguments %j without dispatching to the database CLI',
+    async (...args) => {
+      const argv = args as string[]
+      const output: string[] = []
+      expect(await runEntryCli(argv, {}, (s) => output.push(s))).toBe(1)
+      expect(output).toEqual([`[IMPORT_REFUSED] ${operatorMessages.en.refused}`])
+      expect(runDatabaseCli).not.toHaveBeenCalled()
+    },
+  )
+
+  it('preserves legacy help and kills broad database dispatch', async () => {
+    const check = async (run: typeof runEntryCli) => {
+      const output: string[] = []
+      expect(await run(['--help'], {}, (s) => output.push(s))).toBe(0)
+      expect(output).toEqual([operatorMessages.en.help])
+      expect(runDatabaseCli).not.toHaveBeenCalled()
+    }
+    await check(runEntryCli)
+    await checkSourceMutation(
+      new URL('./cli.ts', import.meta.url),
+      "if (['preview', 'apply', 'register-source'].includes(argv[0] ?? ''))",
+      'if (true)',
+      (m) => m.runCli as typeof runEntryCli,
+      check,
+    )
+  })
 })
