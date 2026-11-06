@@ -41,6 +41,9 @@ const UnsavedChangesContext = createContext<UnsavedChanges | null>(null)
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const dirty = useRef(new Set<symbol>())
+  // useBlocker is stable, but only works inside a data router. React Router has
+  // no stable data-router detection API; keep declarative component harnesses
+  // supported and pin this export in unsaved-history.test.tsx on upgrades.
   const dataRouter = useContext(UNSAFE_DataRouterContext)
 
   const set = useCallback((key: symbol, isDirty: boolean) => {

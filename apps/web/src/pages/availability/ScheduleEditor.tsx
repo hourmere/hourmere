@@ -38,6 +38,7 @@ import {
   type ScheduleDraft,
   scheduleLabels,
   scheduleServerErrors,
+  summarize,
   toScheduleBody,
   validateSchedule,
   WEEKDAYS,
@@ -133,7 +134,7 @@ function ScheduleForm({
   schedules,
   defaultTimeZone,
 }: Loaded) {
-  const { t, text, ui, uiText } = useI18n()
+  const { t, text, ui, uiText, locale, formatLocale } = useI18n()
 
   const navigate = useNavigate()
   const message = useFlash()
@@ -142,6 +143,13 @@ function ScheduleForm({
     schedule ? draftFromSchedule(schedule) : newScheduleDraft(defaultTimeZone),
   )
   const [draft, setDraft] = useState(baseline)
+  const [conflict, setConflict] = useState(false)
+  const [latest, setLatest] = useState<{
+    schedule: Schedule
+    overrides: Override[]
+    version: string
+  } | null>(null)
+  const [reviewing, setReviewing] = useState(false)
   const [version, setVersion] = useState(initialVersion)
   const [overrideBaseline, setOverrideBaseline] = useState(() => overrides.map(overrideDraft))
   const [overrideDrafts, setOverrideDrafts] = useState(overrideBaseline)
@@ -210,6 +218,8 @@ function ScheduleForm({
         setOverrideDrafts(nextOverrides)
         setBaseline(next)
         setDraft(next)
+        setConflict(false)
+        setLatest(null)
         setStatus('Saved.')
         statusRef.current?.focus()
       } else {
@@ -232,12 +242,16 @@ function ScheduleForm({
     } catch (err) {
       if (!mounted.current) return
       setStatus('')
+      if (err instanceof RequestError && err.code === 'schedule_conflict') {
+        setConflict(true)
+        setLatest(null)
+      }
       const mapped =
         err instanceof RequestError && err.code === 'schedule_conflict'
           ? {
               fields: {},
               message: msg(
-                'This schedule changed in another tab. Your changes are still here. Reload the page and review the latest hours before saving again.',
+                'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.',
               ),
             }
           : scheduleServerErrors(err)
@@ -250,6 +264,22 @@ function ScheduleForm({
       setAttempt((n) => n + 1)
     }
     setSaving(false)
+  }
+
+  async function reviewLatest() {
+    if (!saved || reviewing) return
+    setReviewing(true)
+    try {
+      const snapshot = await unwrap(
+        api.GET('/api/v1/schedules/{id}/availability', { params: { path: { id: saved.id } } }),
+      )
+      if (mounted.current) setLatest(snapshot)
+    } catch (err) {
+      if (mounted.current)
+        setFormError(msg('Could not load the latest version. {0}', { '0': errorMessage(err) }))
+    } finally {
+      if (mounted.current) setReviewing(false)
+    }
   }
 
   async function remove() {
@@ -291,6 +321,65 @@ function ScheduleForm({
           message={formError}
           attempt={attempt}
         />
+        {conflict && (
+          <section className="panel availability-conflict" aria-label={t('Latest saved version')}>
+            <button
+              type="button"
+              className="button"
+              disabled={reviewing || saving}
+              onClick={reviewLatest}
+            >
+              {t('Review latest version')}
+            </button>
+            {latest && (
+              <>
+                <h2>{t('Latest saved version')}</h2>
+                <p>
+                  {latest.schedule.name} · {latest.schedule.timeZone}
+                </p>
+                <p>{summarize(latest.schedule.weeklyHours, locale)}</p>
+                <ul>
+                  {latest.overrides.map((o) => (
+                    <li key={o.date}>
+                      {new Intl.DateTimeFormat(formatLocale, {
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        timeZone: 'UTC',
+                      }).format(new Date(`${o.date}T00:00:00Z`))}
+                      :{' '}
+                      {o.intervals.length
+                        ? o.intervals.map((i) => `${i.start}–${i.end}`).join(', ')
+                        : t('Unavailable all day')}
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  {t(
+                    'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.',
+                  )}
+                </p>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={saving}
+                  onClick={() => {
+                    setVersion(latest.version)
+                    setSaved(latest.schedule)
+                    setBaseline(draftFromSchedule(latest.schedule))
+                    setOverrideBaseline(latest.overrides.map(overrideDraft))
+                    setConflict(false)
+                    setLatest(null)
+                    setFormError(null)
+                  }}
+                >
+                  {t('Apply my draft to this version')}
+                </button>
+              </>
+            )}
+          </section>
+        )}
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="schedule-heading">
             <h2 id="schedule-heading">{t('Name and time zone')}</h2>
@@ -396,6 +485,7 @@ function ScheduleForm({
           </section>
           {saved && (
             <Overrides
+              timeZone={draft.timeZone}
               drafts={overrideDrafts}
               onChange={(next) => {
                 setOverrideDrafts(next)

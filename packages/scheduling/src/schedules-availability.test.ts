@@ -5,6 +5,7 @@ import {
   createSchedule,
   deleteScheduleOverride,
   getScheduleAvailability,
+  MAX_SCHEDULE_OVERRIDES,
   putScheduleOverride,
   type ScheduleAvailability,
   type ScheduleAvailabilityInput,
@@ -64,6 +65,28 @@ describe.skipIf(!serverUrl)('combined availability', () => {
     expect(await getScheduleAvailability(ctx, id)).toEqual(saved)
     const empty = await saveScheduleAvailability(ctx, id, edit(saved, { overrides: [] }))
     expect(empty.overrides).toEqual([])
+  })
+
+  it('accepts the maximum override count and rejects one more before database work', async () => {
+    const { ctx, id, snapshot } = await setup()
+    const overrides = Array.from({ length: MAX_SCHEDULE_OVERRIDES }, (_, days) => ({
+      date: Temporal.PlainDate.from('2030-01-01').add({ days }).toString(),
+      intervals: [],
+    }))
+    const saved = await saveScheduleAvailability(ctx, id, edit(snapshot, { overrides }))
+    expect(saved.overrides).toEqual(overrides)
+    // A database that cannot be touched proves rejection happens before a transaction/read.
+    const noDatabase = { ...ctx, db: {} as Db }
+    await expect(
+      saveScheduleAvailability(
+        noDatabase,
+        id,
+        edit(saved, {
+          overrides: [...overrides, { date: '2099-01-01', intervals: [] }],
+        }),
+      ),
+    ).rejects.toMatchObject({ kind: 'invalid', code: 'too_many_overrides' })
+    expect(await getScheduleAvailability(ctx, id)).toEqual(saved)
   })
 
   it('rolls back the first part and removed overrides when the second part fails in PostgreSQL', async () => {

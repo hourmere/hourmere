@@ -1,6 +1,12 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
-import { createMemoryRouter, RouterProvider, useRoutes } from 'react-router'
+import {
+  createMemoryRouter,
+  RouterProvider,
+  UNSAFE_DataRouterContext,
+  useBlocker,
+  useRoutes,
+} from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { UnsavedChangesProvider, useUnsavedChanges } from './unsaved-changes.tsx'
 
@@ -38,6 +44,28 @@ function setup() {
 }
 
 describe('unsaved browser history navigation', () => {
+  it('keeps the router exports required by history protection on dependency upgrades', () => {
+    // useBlocker is stable but requires a data router. The installed router exposes
+    // no stable data-router detection hook for our declarative component harnesses.
+    expect(typeof useBlocker).toBe('function')
+    expect(UNSAFE_DataRouterContext).toBeDefined()
+    expect(UNSAFE_DataRouterContext.Provider).toBeDefined()
+  })
+
+  it('also keeps a dirty editor when forward navigation is dismissed', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const router = createMemoryRouter([{ path: '*', element: <TestRoutes /> }], {
+      initialEntries: ['/edit', '/before'],
+      initialIndex: 0,
+    })
+    render(<RouterProvider router={router} />)
+    await act(() => screen.getByRole('button', { name: 'Edit' }).click())
+    await act(() => router.navigate(1))
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+    expect(router.state.location.pathname).toBe('/edit')
+    expect(screen.getByRole('button', { name: 'Revert' })).toBeDefined()
+  })
+
   it('keeps the dirty editor when dismissed, then allows a confirmed back navigation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const router = setup()

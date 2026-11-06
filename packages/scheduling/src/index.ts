@@ -226,6 +226,7 @@ export {
   listScheduleCatalog,
   listScheduleOverrides,
   listSchedules,
+  MAX_SCHEDULE_OVERRIDES,
   putScheduleOverride,
   SCHEDULE_NAME_MAX_LENGTH,
   type Schedule,

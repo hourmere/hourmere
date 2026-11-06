@@ -3089,7 +3089,7 @@ export interface paths {
         get: operations["getScheduleAvailability"];
         /**
          * Save weekly hours and replace all date overrides atomically
-         * @description Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB.
+         * @description Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB and 10,000 overrides (including past dates), checked before saving.
          */
         put: operations["saveScheduleAvailability"];
         post?: never;
@@ -5355,6 +5355,7 @@ export interface components {
             /** @description Make it the default (the previous default stops being one). The user's first schedule is always the default. */
             isDefault?: boolean;
             name: string;
+            /** @description Complete replacement, at most 10,000 overrides; excess returns too_many_overrides */
             overrides: {
                 /**
                  * Format: date
@@ -9547,7 +9548,7 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleAvailability"];
                 };
             };
-            /** @description invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version or invalid_schedule_overrides */
+            /** @description invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version, invalid_schedule_overrides or too_many_overrides */
             400: {
                 headers: {
                     [name: string]: unknown;

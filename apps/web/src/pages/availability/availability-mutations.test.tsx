@@ -181,7 +181,7 @@ describe('availability source-copy mutations', () => {
         renderForm(source)
         await userEvent
           .setup()
-          .click(screen.getByRole('button', { name: 'Remove override: 2030-12-24' }))
+          .click(screen.getByRole('button', { name: 'Remove override: Tue, Dec 24, 2030' }))
         const unload = new Event('beforeunload', { cancelable: true })
         window.dispatchEvent(unload)
         expect(unload.defaultPrevented).toBe(true)

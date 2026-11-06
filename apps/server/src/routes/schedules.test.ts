@@ -1,4 +1,6 @@
+import '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
+import { MAX_SCHEDULE_OVERRIDES } from '@hourmere/scheduling'
 import { createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SCHEDULE_BODY_LIMIT, SCHEDULE_OVERRIDE_BODY_LIMIT } from './schedules.ts'
@@ -119,6 +121,32 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
       status: 400,
       body: { error: 'invalid_request' },
     })
+  })
+
+  it('enforces count and exact body-size boundaries before changing availability', async () => {
+    const client = api(await createTestUser(t.db))
+    const { id } = (await client.post('/api/v1/schedules', body())).body as { id: string }
+    const path = `/api/v1/schedules/${id}/availability`
+    const initial = (await client.get(path)).body as { version: string }
+    const input = { ...body(), overrides: [], expectedVersion: initial.version }
+    expect(
+      await client.put(path, {
+        ...input,
+        overrides: Array.from({ length: MAX_SCHEDULE_OVERRIDES + 1 }, () => ({
+          date: '2030-01-01',
+          intervals: [],
+        })),
+      }),
+    ).toMatchObject({ status: 400, body: { error: 'too_many_overrides' } })
+    expect((await client.get(path)).body).toEqual(initial)
+    const json = JSON.stringify(input)
+    const atLimit = json + ' '.repeat(SCHEDULE_BODY_LIMIT - Buffer.byteLength(json))
+    expect(await client.raw('PUT', path, `${atLimit} `)).toMatchObject({
+      status: 413,
+      body: { error: 'payload_too_large' },
+    })
+    expect((await client.get(path)).body).toEqual(initial)
+    expect(await client.raw('PUT', path, atLimit)).toMatchObject({ status: 200 })
   })
 
   it('requires a caller', async () => {

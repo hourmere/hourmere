@@ -53,9 +53,11 @@ test('copies midnight hours and saves the week and date overrides together', asy
 })
 
 test('two tabs preserve the winner and retain the conflicting draft', async ({ page, app }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   await openAuditPage(page, app, 'availability-editor')
   const second = await page.context().newPage()
   try {
+    await second.setViewportSize({ width: 320, height: 800 })
     await second.goto(page.url())
     await expect(second.getByLabel('Name', { exact: true })).toHaveValue('Synthetic working hours')
     await page.getByLabel('Name', { exact: true }).fill('Saved by first tab')
@@ -63,10 +65,25 @@ test('two tabs preserve the winner and retain the conflicting draft', async ({ p
     await expect(page.getByText('Saved.', { exact: true })).toBeVisible()
     await second.getByLabel('Name', { exact: true }).fill('Second tab draft')
     await second.getByRole('button', { name: 'Save changes', exact: true }).click()
-    await expect(second.getByRole('alert')).toContainText('This schedule changed in another tab.')
+    await expect(second.getByRole('alert')).toContainText(
+      'This schedule changed in another tab or from an API, MCP or CLI client.',
+    )
     await expect(second.getByLabel('Name', { exact: true })).toHaveValue('Second tab draft')
+    await second.getByRole('button', { name: 'Review latest version', exact: true }).click()
+    const apply = second.getByRole('button', {
+      name: 'Apply my draft to this version',
+      exact: true,
+    })
+    await expect(apply).toBeVisible()
+    expect(
+      await second.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await apply.click()
+    await expect(second.getByLabel('Name', { exact: true })).toHaveValue('Second tab draft')
+    await second.getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect(second.getByText('Saved.', { exact: true })).toBeVisible()
     await page.reload()
-    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Saved by first tab')
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Second tab draft')
   } finally {
     await second.close()
   }
@@ -95,3 +112,42 @@ for (const language of ['en', 'zh-CN'] as const) {
     expect(result.violations.map(({ id, impact }) => ({ id, impact }))).toEqual([])
   })
 }
+
+test('keeps adding dates near the top with extensive history at 320px', async ({ page, app }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  await openAuditPage(page, app, 'availability-editor')
+  const { scheduleId } = await app.auditState()
+  const endpoint = `${app.url}/api/v1/schedules/${scheduleId}/availability`
+  const snapshot = await (await page.request.get(endpoint)).json()
+  const past = Array.from({ length: 90 }, (_, index) => ({
+    date: new Date(Date.UTC(2029, 0, index + 1)).toISOString().slice(0, 10),
+    intervals: [],
+  }))
+  const response = await page.request.put(endpoint, {
+    headers: { Origin: app.url },
+    data: {
+      name: snapshot.schedule.name,
+      timeZone: snapshot.schedule.timeZone,
+      weeklyHours: snapshot.schedule.weeklyHours,
+      expectedVersion: snapshot.version,
+      overrides: [...past, { date: '2030-12-24', intervals: [] }],
+    },
+  })
+  expect(response.status()).toBe(200)
+  await page.reload()
+  const heading = page.getByRole('heading', { name: 'Date overrides', exact: true })
+  await heading.scrollIntoViewIfNeeded()
+  const add = page.getByRole('button', { name: 'Add a date override', exact: true })
+  await expect(add).toBeInViewport()
+  const history = page.locator('details').filter({ hasText: 'Past date overrides' })
+  await expect(history).toHaveCount(1)
+  await expect(history).not.toHaveAttribute('open')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  await add.click()
+  await expect(page.locator('input[type="date"]')).toHaveCount(2)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+})

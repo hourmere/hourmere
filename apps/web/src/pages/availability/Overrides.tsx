@@ -7,6 +7,7 @@ import {
   type IntervalDraft,
   intervalDraft,
   intervalField,
+  todayIn,
   toIntervals,
   validateIntervals,
 } from './weekly-hours.ts'
@@ -15,12 +16,14 @@ export type Override = { date: string; intervals: { start: string; end: string }
 export type OverrideDraft = {
   key: string
   date: string
+  originalDate: string
   intervals: IntervalDraft[]
   removed: boolean
 }
 export const overrideDraft = (value: Override): OverrideDraft => ({
   key: intervalDraft().key,
   date: value.date,
+  originalDate: value.date,
   intervals: value.intervals.map((i) => intervalDraft(i.start, i.end)),
   removed: false,
 })
@@ -68,12 +71,31 @@ export function Overrides({
   drafts,
   onChange,
   errors,
+  timeZone,
 }: {
   drafts: OverrideDraft[]
   onChange: (drafts: OverrideDraft[]) => void
   errors: FieldErrors
+  timeZone: string
 }) {
-  const { t } = useI18n()
+  const { t, formatLocale } = useI18n()
+  const today = todayIn(timeZone)
+  const isPast = (d: OverrideDraft) => !!d.originalDate && d.originalDate < today
+  const past = drafts.filter(isPast)
+  const upcoming = drafts.filter((d) => !isPast(d)).sort((a, b) => a.date.localeCompare(b.date))
+  const dateLabel = (date: string) => {
+    const parsed = new Date(`${date}T00:00:00Z`)
+    // Native date inputs can supply years beyond the supported four-digit range.
+    // Keep the draft renderable so ordinary field validation can explain the error.
+    if (Number.isNaN(parsed.getTime())) return date
+    return new Intl.DateTimeFormat(formatLocale, {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(parsed)
+  }
   const [focus, setFocus] = useState<string | null>(null)
   const add = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -93,13 +115,26 @@ export function Overrides({
           'Date overrides replace weekly hours on that date. Save changes applies every change on this page.',
         )}
       </p>
+      <p className="hint">{t('Times are in {0}.', { '0': timeZone })}</p>
+      <button
+        ref={add}
+        type="button"
+        className="button"
+        onClick={() => {
+          const d = overrideDraft({ date: '', intervals: [] })
+          onChange([...drafts, d])
+          setFocus(`override-${d.key}-date`)
+        }}
+      >
+        {t('Add a date override')}
+      </button>
       {drafts.length === 0 && <p>{t('No date overrides.')}</p>}
-      {drafts.map((d, n) => (
+      {upcoming.map((d, n) => (
         <fieldset key={d.key} id={`override-${d.key}`} tabIndex={-1} className="override-form">
           <legend>{t('Date override {0}', { '0': n + 1 })}</legend>
           {d.removed ? (
             <p>
-              {d.date} — {t('Removal pending save')}
+              {dateLabel(d.date)} — {t('Removal pending save')}
             </p>
           ) : (
             <>
@@ -112,6 +147,7 @@ export function Overrides({
                   <input
                     {...props}
                     type="date"
+                    min={today}
                     value={d.date}
                     onChange={(e) => change(d.key, { date: e.target.value })}
                   />
@@ -146,7 +182,7 @@ export function Overrides({
             type="button"
             className="button button-small"
             aria-label={t(d.removed ? 'Undo removal: {0}' : 'Remove override: {0}', {
-              '0': d.date || n + 1,
+              '0': dateLabel(d.date) || n + 1,
             })}
             onClick={() => change(d.key, { removed: !d.removed })}
           >
@@ -154,18 +190,21 @@ export function Overrides({
           </button>
         </fieldset>
       ))}
-      <button
-        ref={add}
-        type="button"
-        className="button"
-        onClick={() => {
-          const d = overrideDraft({ date: '', intervals: [] })
-          onChange([...drafts, d])
-          setFocus(`override-${d.key}-date`)
-        }}
-      >
-        {t('Add a date override')}
-      </button>
+      {past.length > 0 && (
+        <details className="past-overrides">
+          <summary>{t('Past date overrides ({0})', { '0': past.length })}</summary>
+          <ul>
+            {past.map((d) => (
+              <li key={d.key}>
+                {dateLabel(d.date)} —{' '}
+                {d.intervals.length
+                  ? d.intervals.map((i) => `${i.start}–${i.end}`).join(', ')
+                  : t('Unavailable all day')}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   )
 }

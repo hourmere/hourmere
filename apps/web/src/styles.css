@@ -2228,6 +2228,28 @@ input[type="radio"] {
   border-top: 1px solid var(--border);
 }
 
+.availability-conflict {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.availability-conflict .button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.past-overrides {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin-top: var(--space-4);
+}
+
+.override-form input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .override-form h3 {
   margin: 0;
   font-size: var(--text-md);

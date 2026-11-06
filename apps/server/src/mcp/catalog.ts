@@ -162,10 +162,10 @@ export function catalogTools({
       name: 'save_schedule_availability',
       title: 'Save complete availability',
       description:
-        'Atomically saves your schedule and replaces all date overrides. Supply id, name, timeZone, weeklyHours, overrides and expectedVersion from get_schedule_availability; isDefault is optional. Empty override intervals make that date unavailable; omitted dates resume weekly hours. Stale versions return schedule_conflict without changes; reread and reconcile before retrying. Requires full API key scope or authorized MCP OAuth.',
+        'Atomically saves your schedule and replaces all date overrides. Supply id, name, timeZone, weeklyHours, overrides and expectedVersion from get_schedule_availability; isDefault is optional. Empty override intervals make that date unavailable; omitted overrides are removed and those dates resume weekly hours. Confirm with the user before removing overrides. At most 10,000 overrides; excess returns too_many_overrides. Stale versions return schedule_conflict without changes; reread and reconcile before retrying. Requires full API key scope or authorized MCP OAuth.',
       input: ScheduleAvailabilityInput.extend(IdInput.shape),
       output: ScheduleAvailability,
-      annotations: { ...annotations, readOnlyHint: false },
+      annotations: { ...annotations, readOnlyHint: false, destructiveHint: true },
       async run({ id, ...input }, call) {
         return ScheduleAvailability.parse(
           await saveScheduleAvailability(context(call.caller), id, input),

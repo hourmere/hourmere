@@ -9,6 +9,7 @@ import {
   getScheduleAvailability,
   listScheduleOverrides,
   listSchedules,
+  MAX_SCHEDULE_OVERRIDES,
   putScheduleOverride,
   SCHEDULE_NAME_MAX_LENGTH,
   saveScheduleAvailability,
@@ -146,7 +147,13 @@ export const ScheduleAvailability = z
 export const ScheduleAvailabilityInput = z
   .strictObject({
     ...ScheduleInput.shape,
-    overrides: z.array(z.strictObject({ date, intervals: z.array(WallClockIntervalInput) })),
+    overrides: z
+      .array(z.strictObject({ date, intervals: z.array(WallClockIntervalInput) }))
+      .openapi({
+        maxItems: MAX_SCHEDULE_OVERRIDES,
+        description:
+          'Complete replacement, at most 10,000 overrides; excess returns too_many_overrides',
+      }),
     expectedVersion: z.string().openapi({
       description: 'Version from getScheduleAvailability; stale revisions return schedule_conflict',
     }),
@@ -316,7 +323,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         operationId: 'saveScheduleAvailability',
         summary: 'Save weekly hours and replace all date overrides atomically',
         description:
-          'Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB.',
+          'Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB and 10,000 overrides (including past dates), checked before saving.',
         request: {
           params: IdParams,
           body: { content: json(ScheduleAvailabilityInput), required: true },
@@ -328,7 +335,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
           },
           413: { description: 'payload_too_large', content: json(ErrorBody) },
           ...errorResponses({
-            400: 'invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version or invalid_schedule_overrides',
+            400: 'invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version, invalid_schedule_overrides or too_many_overrides',
             403: CROSS_ORIGIN_WRITE,
             404: notFound,
             409: 'schedule_conflict: availability changed since it was read; schedule_is_default: cannot unset the default',

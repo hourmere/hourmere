@@ -8,6 +8,7 @@ import {
   DEFAULT_NOTIFICATIONS,
   listEventTypeCatalog,
   listScheduleCatalog,
+  MAX_SCHEDULE_OVERRIDES,
   putProfile,
 } from '@hourmere/scheduling'
 import {
@@ -202,10 +203,14 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
           readOnlyHint: !['set_event_type_notifications', 'save_schedule_availability'].includes(
             tool.name,
           ),
-          destructiveHint: false,
+          destructiveHint: tool.name === 'save_schedule_availability',
           idempotentHint: true,
           openWorldHint: false,
         })
+        if (tool.name === 'save_schedule_availability') {
+          expect(tool.description).toContain('omitted overrides are removed')
+          expect(tool.description).toContain('Confirm with the user before removing overrides')
+        }
         if (tool.name.startsWith('list_')) {
           expect(tool.outputSchema).toMatchObject({ properties: { data: { maxItems: 100 } } })
           expect(tool.inputSchema.properties?.limit).toMatchObject({ minimum: 1, maximum: 100 })
@@ -234,6 +239,15 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
       overrides: [{ date: '2026-12-31', intervals: [] }],
       expectedVersion: snapshot.version,
     }
+    expect(
+      error(
+        await call('save_schedule_availability', {
+          ...input,
+          overrides: Array.from({ length: MAX_SCHEDULE_OVERRIDES + 1 }, () => input.overrides[0]),
+        }),
+      ).error,
+    ).toBe('too_many_overrides')
+    expect(ok(await call('get_schedule_availability', { id: scheduleId }))).toEqual(snapshot)
     const saved = ok(await call('save_schedule_availability', input))
     expect(saved).toEqual(await rest(`schedules/${scheduleId}/availability`))
     expect(error(await call('save_schedule_availability', input)).error).toBe('schedule_conflict')

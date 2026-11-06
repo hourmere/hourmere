@@ -76,12 +76,18 @@ export async function getScheduleAvailability(
   })
 }
 
+// Keep the three-parameter-per-row insert safely below PostgreSQL’s bind limit.
+export const MAX_SCHEDULE_OVERRIDES = 10_000
+
 /** Save the entire editor in one transaction, refusing stale or replayed snapshots. */
 export async function saveScheduleAvailability(
   ctx: ServiceContext,
   id: string,
   input: ScheduleAvailabilityInput,
 ): Promise<ScheduleAvailability> {
+  if (Array.isArray(input.overrides) && input.overrides.length > MAX_SCHEDULE_OVERRIDES) {
+    throw new DomainError('invalid', 'too_many_overrides')
+  }
   const name = validName(input.name)
   const timeZone = validTimeZone(input.timeZone)
   const weeklyHours = validWeeklyHours(input.weeklyHours)
