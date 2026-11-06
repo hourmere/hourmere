@@ -147,6 +147,8 @@ export const AVAILABILITY_REASON_CODES = [
   'buffer_before',
   'buffer_after',
   'daily_limit',
+  'weekly_limit',
+  'monthly_limit',
   'host_conflict',
   'collective_member_unavailable',
   'no_eligible_round_robin_host',
@@ -172,7 +174,7 @@ export interface ExplainedSlot extends Slot {
 }
 
 export interface ExplainAvailabilityInput extends AvailabilityInput {
-  /** Bookings that block this host but do not count toward this event's daily limit. */
+  /** Bookings that block this host but do not count toward this event's booking limits. */
   readonly blockingBookings?: readonly ExistingBooking[]
   /** Additional starts to evaluate, e.g. another team member's interval grid. */
   readonly candidateStarts?: readonly Temporal.Instant[]

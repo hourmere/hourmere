@@ -8,7 +8,6 @@ import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { LOCATION_KINDS } from './availability.ts'
 import {
   type CatalogPage,
   type CatalogPageInput,
@@ -34,6 +33,7 @@ import {
   SQLSTATE,
   timestamp,
 } from './internal.ts'
+import { LOCATION_KINDS } from './location-kinds.ts'
 import {
   applyLegacyLocation,
   compatLocation,

@@ -10,8 +10,8 @@ availability continues to use its existing fast path.
 `ExplainedSlot`, `AvailabilityReason` and the ordered
 `AVAILABILITY_REASON_CODES`. It is pure: schedules, intervals, event rules,
 range and `now` are inputs; there is no I/O or clock read. `blockingBookings`
-retains conflicts from other event types without counting them toward the daily
-limit. `candidateStarts` lets the team service evaluate another host's grid.
+retains conflicts from other event types without counting them toward booking
+limits. `candidateStarts` lets the team service evaluate another host's grid.
 
 `@hourmere/scheduling` exports
 `explainEventAvailability(context, ExplainEventAvailabilityQuery)`. The query
@@ -64,6 +64,8 @@ and end (team results first break ties by authorized host ID).
 | `buffer_before` | A before-buffer on the candidate or an existing booking contributes a conflict. |
 | `buffer_after` | An after-buffer on the candidate or an existing booking contributes a conflict. |
 | `daily_limit` | This event type has reached its booking count on the host-local start date. |
+| `weekly_limit` | This event type has reached its booking count in the host-local ISO week (Monday through Sunday). |
+| `monthly_limit` | This event type has reached its booking count in the host-local calendar month. |
 | `host_conflict` | The meeting itself overlaps another active booking, in any organization or event type. |
 | `collective_member_unavailable` | A required collective host cannot offer the candidate. |
 | `no_eligible_round_robin_host` | No eligible pool member can offer the candidate. |
@@ -100,11 +102,11 @@ busy event. Explanations do not refresh providers or make external requests.
 
 ## Extension points
 
-Weekly and monthly booking limits are not present on the implementation's base
-revision. When those limits land, extend the typed reason order, period counting
-and scheduling input mapping together. Period counters must load the complete
-host-local week/month containing a candidate, including bookings outside the
-requested range; the current daily-limit query window alone is insufficient.
+Daily, weekly and monthly counters use booking starts in the host's schedule time
+zone, with the same boundaries as ordinary availability. The scheduling input loads
+the complete local weeks and months containing candidates, including bookings
+outside the requested range. Future booking rules must extend the typed reason
+order, explained-rules inventory and parity generator together.
 
 The next transport task should add REST, MCP, CLI and administration consumers
 using the same typed service result and authorization boundary. Localized display

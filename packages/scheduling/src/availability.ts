@@ -35,6 +35,7 @@ import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertCanExplainEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
+import { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
@@ -78,8 +79,7 @@ const earlier = (a: Temporal.Instant, b: Temporal.Instant) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-export const LOCATION_KINDS = ['google_meet', 'zoom', 'phone', 'in_person', 'link'] as const
-export type LocationKind = (typeof LOCATION_KINDS)[number]
+export { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
 
 /**
  * Where a meeting happens: `event_types.location` as configured, `bookings.location` as
@@ -949,32 +949,25 @@ async function buildAvailabilityInputForMode(
   // time on the original short window; only this event type needs complete periods.
   // Like the engine, include one local date on each side for zones that have moved
   // backwards across midnight. Calendar arithmetic preserves DST and month lengths.
-  const firstDate = rangeStart
-    .toZonedDateTimeISO(schedule.time_zone)
-    .toPlainDate()
-    .subtract({ days: 1 })
-  const lastDate = rangeEnd.toZonedDateTimeISO(schedule.time_zone).toPlainDate().add({ days: 1 })
+  const firstDate = rangeStart.toZonedDateTimeISO(timeZone).toPlainDate().subtract({ days: 1 })
+  const lastDate = rangeEnd.toZonedDateTimeISO(timeZone).toPlainDate().add({ days: 1 })
   const periodWindows: { start: Temporal.Instant; end: Temporal.Instant }[] = []
   if (eventType.max_bookings_per_week !== null) {
     periodWindows.push({
       start: firstDate
         .subtract({ days: firstDate.dayOfWeek - 1 })
-        .toZonedDateTime(schedule.time_zone)
+        .toZonedDateTime(timeZone)
         .toInstant(),
       end: lastDate
         .add({ days: 8 - lastDate.dayOfWeek })
-        .toZonedDateTime(schedule.time_zone)
+        .toZonedDateTime(timeZone)
         .toInstant(),
     })
   }
   if (eventType.max_bookings_per_month !== null) {
     periodWindows.push({
-      start: firstDate.with({ day: 1 }).toZonedDateTime(schedule.time_zone).toInstant(),
-      end: lastDate
-        .with({ day: 1 })
-        .add({ months: 1 })
-        .toZonedDateTime(schedule.time_zone)
-        .toInstant(),
+      start: firstDate.with({ day: 1 }).toZonedDateTime(timeZone).toInstant(),
+      end: lastDate.with({ day: 1 }).add({ months: 1 }).toZonedDateTime(timeZone).toInstant(),
     })
   }
   const bookingWindow = periodWindows.reduce(

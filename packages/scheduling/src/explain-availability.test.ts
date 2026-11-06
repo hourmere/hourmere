@@ -12,6 +12,7 @@ import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { activateRoundRobin, assertCanExplainEventType, createEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
+import { LOCATION_KINDS } from './location-kinds.ts'
 import { parseQuestions } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import {
@@ -44,10 +45,9 @@ function sourceCopy(
     expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
     source = source.replace(...replacement)
   }
-  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
-    /\bexport /g,
-    '',
-  )
+  source = stripTypeScriptTypes(
+    source.replace(/^(?:import|export \{)[\s\S]*?from '[^']+'\n/gm, ''),
+  ).replace(/\bexport /g, '')
   const bindings = {
     ...core,
     ...conferences,
@@ -55,6 +55,7 @@ function sourceCopy(
     sql,
     publicAvatarImage,
     DomainError,
+    LOCATION_KINDS,
     assertHosts,
     hasValidHostShape,
     parseQuestions,
@@ -165,8 +166,92 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     )
   })
 
-  it('returns unoffered duration and missing-schedule reasons without changing normal validation', async () => {
+  it.each([
+    ['weekly_limit', 'max_bookings_per_week', '2026-11-02T04:00Z', '2026-11-08T04:00Z'],
+    ['monthly_limit', 'max_bookings_per_month', '2026-11-01T03:00Z', '2026-11-29T04:00Z'],
+  ] as const)(
+    'counts the full host-local period for %s',
+    async (reason, field, outside, inside) => {
+      const s = await personal()
+      await db
+        .updateTable('event_types')
+        .set({ [field]: 1 })
+        .where('id', '=', s.eventTypeId)
+        .execute()
+      await db
+        .updateTable('schedules')
+        .set({
+          time_zone: 'America/New_York',
+          weekly_hours: JSON.stringify({ wednesday: [{ start: '09:00', end: '10:00' }] }),
+        })
+        .where('user_id', '=', s.host.userId)
+        .execute()
+      const query = {
+        eventTypeId: s.eventTypeId,
+        rangeStart: instant('2026-11-04T14:00Z'),
+        rangeEnd: instant('2026-11-04T15:00Z'),
+      }
+      const book = (start: string) =>
+        f.booking(
+          s.host.organizationId,
+          [s.host.userId],
+          start,
+          instant(start).add({ minutes: 30 }).toString(),
+          { eventTypeId: s.eventTypeId },
+        )
+      await book(outside)
+      expect(
+        (await explainEventAvailability(s.ctx, query)).every((slot) => slot.status === 'available'),
+      ).toBe(true)
+      expect(
+        (await findSlots(db, { ...query, hostUserId: s.host.userId, now: now() })).length,
+      ).toBeGreaterThan(0)
+      // These bookings are beyond the short busy-time window but inside the host's period.
+      await book(inside)
+      expect(await findSlots(db, { ...query, hostUserId: s.host.userId, now: now() })).toEqual([])
+      const verify = async (read: Explain) => {
+        const slots = await read(s.ctx, query)
+        expect(slots.length).toBeGreaterThan(0)
+        expect(slots.every((slot) => slot.status === 'unavailable')).toBe(true)
+        expect(slots.every((slot) => codes(slot)?.includes(reason))).toBe(true)
+      }
+      await verify(explainEventAvailability)
+      await expect(
+        verify(
+          sourceCopy([`if (eventType.${field} !== null) {`, 'if (false) {'])
+            .explainEventAvailability,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await verify(explainEventAvailability)
+    },
+  )
+
+  it('authorizes before validating a malformed explanation range', async () => {
     const s = await personal()
+    const invalid = { ...s.query, rangeEnd: s.query.rangeStart }
+    const unauthorized = { db, now } as PublicContext as ServiceContext
+    const verify = async (read: Explain) => {
+      await expect(read(unauthorized, invalid)).rejects.toMatchObject({
+        code: 'event_type_not_found',
+      })
+    }
+    await verify(explainEventAvailability)
+    await expect(explainEventAvailability(s.ctx, invalid)).rejects.toMatchObject({
+      code: 'invalid_range',
+    })
+    await expect(
+      verify(
+        sourceCopy([
+          '  await assertCanExplainEventType(ctx, query.eventTypeId)\n  checkSlotRange(query.rangeStart, query.rangeEnd)',
+          '  checkSlotRange(query.rangeStart, query.rangeEnd)\n  await assertCanExplainEventType(ctx, query.eventTypeId)',
+        ]).explainEventAvailability,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(explainEventAvailability)
+  })
+
+  it('returns unoffered duration and missing-schedule reasons without changing normal validation', async () => {
+    const s = await personal({ maxBookingsPerWeek: 1, maxBookingsPerMonth: 1 })
     const slots = await explainEventAvailability(s.ctx, { ...s.query, durationMinutes: 45 })
     expect(slots.length).toBeGreaterThan(0)
     expect(slots.every((slot) => codes(slot)?.includes('duration_not_offered'))).toBe(true)
@@ -185,6 +270,22 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
         sourceCopy(["schedule?.time_zone ?? 'UTC'", 'schedule.time_zone']).explainEventAvailability,
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
+    // Guard every newly merged period calculation against absent schedules.
+    const source = readFileSync('packages/scheduling/src/availability.ts', 'utf8')
+    const periodSource = source.slice(
+      source.indexOf('  const firstDate = rangeStart'),
+      source.indexOf('  const bookingWindow ='),
+    )
+    expect(periodSource.match(/\btimeZone\b/g)).toHaveLength(6)
+    for (let target = 0; target < 6; target++) {
+      let index = 0
+      const mutant = periodSource.replace(/\btimeZone\b/g, (value) =>
+        index++ === target ? 'schedule.time_zone' : value,
+      )
+      await expect(
+        verifyMissingSchedule(sourceCopy([periodSource, mutant]).explainEventAvailability),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    }
     await verifyMissingSchedule(explainEventAvailability)
     const missing = await explainEventAvailability(s.ctx, s.query)
     expect(missing.length).toBeGreaterThan(0)
@@ -517,6 +618,8 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
             buffer_after_minutes: random(3) * 10,
             minimum_notice_minutes: random(3) * 30,
             max_bookings_per_day: random(3) === 0 ? 1 : null,
+            max_bookings_per_week: random(3) === 0 ? 1 : null,
+            max_bookings_per_month: random(3) === 0 ? 1 : null,
             booking_window_days: random(2) === 0 ? 1 : null,
           })
           .where('id', '=', s.event.id)

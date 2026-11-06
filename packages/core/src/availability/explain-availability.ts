@@ -29,6 +29,8 @@ const EXPLAINED_RULES = {
   bufferAfterMinutes: true,
   minimumNoticeMinutes: true,
   maxBookingsPerDay: true,
+  maxBookingsPerWeek: true,
+  maxBookingsPerMonth: true,
   bookingWindowDays: true,
 } satisfies Record<keyof EventTypeRules, true>
 // Keep this compile-time checklist local to diagnostics, with no normal-path allocation.
@@ -49,8 +51,8 @@ interface NsInterval {
  * intervals beginning at e.g. 09:15 with a thirty-minute step.
  *
  * A well-formed but unoffered duration produces reasons. Invalid inputs still
- * throw AvailabilityInputError. Weekly/monthly limits can extend this result
- * once the normal engine supports those rules; they are not inferred here.
+ * throw AvailabilityInputError. Counts include every supplied booking in the
+ * host-local day, Monday–Sunday week and calendar month, including outside the range.
  */
 export function explainAvailability(input: ExplainAvailabilityInput): ExplainedSlot[] {
   // Validate the real offered rules before admitting an unoffered selected length.
@@ -78,9 +80,17 @@ export function explainAvailability(input: ExplainAvailabilityInput): ExplainedS
     input.maximumCandidates,
   )
   const bookingsPerDay = new Map<string, number>()
+  const bookingsPerWeek = new Map<string, number>()
+  const bookingsPerMonth = new Map<string, number>()
   for (const booking of q.bookings) {
-    const date = booking.start.toZonedDateTimeISO(q.timeZone).toPlainDate().toString()
-    bookingsPerDay.set(date, (bookingsPerDay.get(date) ?? 0) + 1)
+    const date = booking.start.toZonedDateTimeISO(q.timeZone).toPlainDate()
+    for (const [counts, key] of [
+      [bookingsPerDay, date.toString()],
+      [bookingsPerWeek, weekKey(date)],
+      [bookingsPerMonth, monthKey(date)],
+    ] as const) {
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
   }
   const notice = q.now.add({ minutes: q.minimumNoticeMinutes }).epochNanoseconds
   const windowEnd =
@@ -166,12 +176,24 @@ export function explainAvailability(input: ExplainAvailabilityInput): ExplainedS
         })
       }
     }
-    const date = slot.start.toZonedDateTimeISO(q.timeZone).toPlainDate().toString()
+    const date = slot.start.toZonedDateTimeISO(q.timeZone).toPlainDate()
     if (
       q.maxBookingsPerDay !== undefined &&
-      (bookingsPerDay.get(date) ?? 0) >= q.maxBookingsPerDay
+      (bookingsPerDay.get(date.toString()) ?? 0) >= q.maxBookingsPerDay
     ) {
       add('daily_limit')
+    }
+    if (
+      q.maxBookingsPerWeek !== undefined &&
+      (bookingsPerWeek.get(weekKey(date)) ?? 0) >= q.maxBookingsPerWeek
+    ) {
+      add('weekly_limit')
+    }
+    if (
+      q.maxBookingsPerMonth !== undefined &&
+      (bookingsPerMonth.get(monthKey(date)) ?? 0) >= q.maxBookingsPerMonth
+    ) {
+      add('monthly_limit')
     }
 
     const ordered = sortReasons(reasons)
@@ -328,4 +350,12 @@ function min(a: bigint, b: bigint) {
 
 function max(a: bigint, b: bigint) {
   return a > b ? a : b
+}
+
+function weekKey(date: Temporal.PlainDate): string {
+  return `${date.yearOfWeek}-${date.weekOfYear}`
+}
+
+function monthKey(date: Temporal.PlainDate): string {
+  return `${date.year}-${date.month}`
 }

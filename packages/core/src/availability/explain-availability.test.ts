@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { explainSourceCopy } from './explain-source-copy.test-helper.ts'
 import {
   AVAILABILITY_REASON_CODES,
   AvailabilityInputError,
@@ -186,14 +187,19 @@ describe('explainAvailability', () => {
     expect(codes({ ...base, blockingBookings: [booking, earlier] })).toEqual([])
   })
 
-  it('does not count calendars or other-event bookings toward this event daily limit', () => {
+  it('does not count calendars or other-event bookings toward this event booking limits', () => {
     const remote = interval('2026-11-02T06:00Z', '2026-11-02T07:00Z')
     expect(
       codes({
         ...base,
         busy: [remote],
         blockingBookings: [remote],
-        eventType: { durationMinutes: 30, maxBookingsPerDay: 1 },
+        eventType: {
+          durationMinutes: 30,
+          maxBookingsPerDay: 1,
+          maxBookingsPerWeek: 1,
+          maxBookingsPerMonth: 1,
+        },
       }),
     ).toEqual([])
   })
@@ -397,11 +403,13 @@ describe('explainAvailability', () => {
     )
   })
 
-  it('has exact normal-path parity over seeded schedules, rules, overrides and DST transitions', () => {
+  function verifySeededParity(
+    explainAvailability: typeof import('./explain-availability.ts').explainAvailability,
+  ) {
     let seed = 0x5eed1234
     const random = (max: number) => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-      return seed % max
+      return Math.floor((seed / 0x1_0000_0000) * max)
     }
     const clock = (minute: number) =>
       `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
@@ -423,8 +431,8 @@ describe('explainAvailability', () => {
             ]
       const overridden = random(3) === 0 ? [] : working
       const durationMinutes = [15, 30, 45, 60][random(4)] ?? 30
-      const bookings = Array.from({ length: random(4) }, () => {
-        const start = rangeStart.add({ minutes: random(48 * 60) })
+      const bookings = Array.from({ length: random(8) }, () => {
+        const start = rangeStart.add({ minutes: random(14 * 24 * 60) - 7 * 24 * 60 })
         return {
           start,
           end: start.add({ minutes: random(90) + 1 }),
@@ -455,6 +463,8 @@ describe('explainAvailability', () => {
           minimumNoticeMinutes: random(24 * 60),
           bookingWindowDays: random(2) + 1,
           maxBookingsPerDay: random(3) + 1,
+          maxBookingsPerWeek: random(3) + 3,
+          maxBookingsPerMonth: 5,
         } satisfies Required<EventTypeRules>,
         rangeStart,
         rangeEnd,
@@ -481,5 +491,25 @@ describe('explainAvailability', () => {
         }
       }
     }
+  }
+
+  it('has exact normal-path parity over seeded schedules, rules, overrides and DST transitions', () => {
+    verifySeededParity(explainAvailability)
+  })
+
+  it.each(['Week', 'Month'] as const)('seeded parity detects removed %s explanations', (period) => {
+    const copy = explainSourceCopy([
+      `q.maxBookingsPer${period} !== undefined &&`,
+      `false && q.maxBookingsPer${period} !== undefined &&`,
+    ])
+    let failure: unknown
+    try {
+      verifySeededParity(copy)
+    } catch (error) {
+      failure = error
+    }
+    expect(failure, 'seeded parity must fail a real assertion').toMatchObject({
+      name: 'AssertionError',
+    })
   })
 })
