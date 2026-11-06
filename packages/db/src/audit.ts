@@ -34,6 +34,7 @@ export const auditDetails = {
   'booking.created': [],
   'booking.rescheduled': [],
   'booking.cancelled': [],
+  'booking.reschedule_requested': [],
   'event_type.created': [],
   'event_type.updated': [],
   'event_type.deleted': [],

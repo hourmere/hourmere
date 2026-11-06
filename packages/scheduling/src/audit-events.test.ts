@@ -9,6 +9,7 @@ import {
   cancelHostBooking,
   cancelTeamBookingInTransaction,
   createPublicBooking,
+  requestReschedule,
   rescheduleHostBooking,
 } from './bookings.ts'
 import {
@@ -384,6 +385,71 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
         expect(serialized.includes(foreign), 'foreign OAuth booking audit').toBe(false)
     },
   )
+
+  it('records a host reschedule request once, inside its transaction', async () => {
+    const f = createFixtures(db)
+    const host = await f.host()
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'request-audit' })
+    const principal: Principal = {
+      kind: 'session',
+      sessionId: randomUUID(),
+      user: { id: host.userId, name: 'Host', email: 'host@example.com' },
+      organization: { id: host.organizationId, name: 'Space', slug: 'space', personal: true },
+    }
+    const ctx = { db, now, principal, requestId: randomUUID() }
+    const book = (hour: string) =>
+      createPublicBooking(
+        { db, now },
+        {
+          handle: host.handle,
+          slug: 'request-audit',
+          start: Temporal.Instant.from(`2026-11-02T${hour}:00:00Z`),
+          invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+          idempotencyKey: randomUUID(),
+        },
+      )
+    const created = await book('09')
+    const request = { idempotencyKey: randomUUID(), note: 'Private request note' }
+    await requestReschedule(ctx, created.booking.id.toUpperCase(), request)
+    await requestReschedule(ctx, created.booking.id, request)
+    const rows = (await events(created.booking.id)).filter(
+      (row) => row.action === 'booking.reschedule_requested',
+    )
+    expect(rows, 'reschedule request audit').toEqual([
+      expect.objectContaining({
+        actor_type: 'user',
+        actor_id: host.userId,
+        credential_type: 'session',
+        credential_id: principal.sessionId,
+        details: {},
+        request_id: ctx.requestId,
+      }),
+    ])
+    expect(JSON.stringify(rows)).not.toContain('Private request note')
+    const other = await book('10')
+    await sql`CREATE FUNCTION reject_request_audit_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'request audit unavailable'; END $$`.execute(
+      db,
+    )
+    await sql`CREATE TRIGGER reject_request_audit_test BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_request_audit_test()`.execute(
+      db,
+    )
+    try {
+      await expect(
+        requestReschedule(ctx, other.booking.id, { idempotencyKey: randomUUID() }),
+      ).rejects.toThrow('request audit unavailable')
+    } finally {
+      await sql`DROP TRIGGER reject_request_audit_test ON audit_events`.execute(db)
+      await sql`DROP FUNCTION reject_request_audit_test()`.execute(db)
+    }
+    expect(
+      await db
+        .selectFrom('booking_reschedule_requests')
+        .select('id')
+        .where('booking_id', '=', other.booking.id)
+        .execute(),
+    ).toEqual([])
+  })
 
   it('compares API key organization metadata in canonical UUID form', async () => {
     const f = createFixtures(db)

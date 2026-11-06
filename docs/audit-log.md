@@ -63,7 +63,7 @@ are recorded. New detail keys require deliberate schema and documentation review
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
-| Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled` |
+| Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
@@ -95,6 +95,12 @@ API-key updates, disables, re-enables and deletes are matched to the requested k
 canonical UUID form; the request may spell the key ID in any letter case. An invitee
 rejecting an invitation is recorded in the inviting team as
 `membership.invitation_rejected`, attributed to the invitee's session.
+
+A host asking the invitee to pick a new time records `booking.reschedule_requested`
+on the booking, attributed to the host's credential; an idempotent replay records
+nothing. The invitee's response is the ordinary `booking.rescheduled` or
+`booking.cancelled` through the manage link. A request that times out is resolved by
+the system and not recorded.
 
 Webhook updates that change the active state record `webhook.paused` or
 `webhook.resumed`. A change to the subscribed events, or an update that changes
@@ -143,6 +149,6 @@ operator database changes.
 
 This is a management journal, not an access log: reads, failed attempts, ordinary
 sign-ins and session refreshes, third-party provider internals, email contents,
-and database changes made directly by an operator are not recorded. No-show,
-reschedule-request, and branding features absent from the current main branch are
-not introduced by this work. Existing booking provenance columns remain intact.
+and database changes made directly by an operator are not recorded. No-show and
+branding features absent from the current main branch are not introduced by this
+work. Existing booking provenance columns remain intact.

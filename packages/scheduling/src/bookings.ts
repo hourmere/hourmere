@@ -2267,7 +2267,11 @@ async function auditBooking(
   trx: Db,
   organizationId: string,
   targetId: string,
-  action: 'booking.created' | 'booking.rescheduled' | 'booking.cancelled',
+  action:
+    | 'booking.created'
+    | 'booking.rescheduled'
+    | 'booking.cancelled'
+    | 'booking.reschedule_requested',
   origin: BookingOrigin,
 ) {
   const auditKeyId =
@@ -2496,6 +2500,14 @@ export async function requestReschedule(
       })
       .returning('id')
       .executeTakeFirstOrThrow()
+    await auditBooking(trx, row.organization_id, row.id, 'booking.reschedule_requested', {
+      source:
+        ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
+      apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+      oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      audit: auditActor(ctx.principal),
+      requestId: ctx.requestId,
+    })
     await ctx.notify?.(
       trx,
       { type: 'reschedule_requested', bookingId: id, requestId: request.id },
