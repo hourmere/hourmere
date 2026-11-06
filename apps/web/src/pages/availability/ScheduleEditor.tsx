@@ -347,6 +347,7 @@ function ScheduleForm({
                         month: 'short',
                         day: 'numeric',
                         timeZone: 'UTC',
+                        calendar: 'gregory',
                       }).format(new Date(`${o.date}T00:00:00Z`))}
                       :{' '}
                       {o.intervals.length

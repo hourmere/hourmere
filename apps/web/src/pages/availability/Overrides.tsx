@@ -94,6 +94,7 @@ export function Overrides({
       month: 'short',
       day: 'numeric',
       timeZone: 'UTC',
+      calendar: 'gregory',
     }).format(parsed)
   }
   const [focus, setFocus] = useState<string | null>(null)

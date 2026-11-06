@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schedule } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { browserLocale } from '../../test/browser-locale.ts'
 import {
   fakeApi,
   json,
@@ -509,6 +510,29 @@ it('keeps the schedule editor inside the app shell while its skeleton loads', as
   expect(answered).not.toHaveBeenCalled()
   await loading.answer(json(200, { schedule: schedule(), overrides: [], version: '0' }))
   expect(screen.getByRole('heading', { name: 'Edit “Working hours”', level: 1 })).toBeDefined()
+})
+
+describe('override date labels', () => {
+  it.each(['fa-IR', 'th-TH'])(
+    'uses Gregorian override labels for browser locale %s',
+    async (locale) => {
+      browserLocale(locale)
+      scheduleServer([schedule()], { overrides: [{ date: '2030-12-24', intervals: [] }] })
+      renderApp(`/app/availability/${SCHEDULE_ID}`)
+      const date = new Intl.DateTimeFormat(locale, {
+        calendar: 'gregory',
+        timeZone: 'UTC',
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(new Date('2030-12-24T00:00:00Z'))
+      const section = await screen.findByRole('region', { name: 'Date overrides' })
+      expect(
+        await within(section).findByRole('button', { name: `Remove override: ${date}` }),
+      ).toBeDefined()
+    },
+  )
 })
 
 describe('one availability save', () => {

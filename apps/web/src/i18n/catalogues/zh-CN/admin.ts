@@ -1244,7 +1244,7 @@ export const admin = {
   Remove: '移除',
   'Remove {0}': '移除{0}',
   'Remove option {0}{1}, of question {2}': '移除问题{2}的选项{0}{1}',
-  'Remove override: {0}': '移除日期安排：{0}',
+  'Remove override: {0}': '移除特定日期安排：{0}',
   'Remove question': '移除问题',
   'Remove question: {0}': '移除问题：{0}',
   'Remove special control characters (tabs and line breaks are fine).':
