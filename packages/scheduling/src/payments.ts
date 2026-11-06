@@ -48,6 +48,7 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       .where('idempotency_key', '=', key)
       .where('api_key_id', 'is', null)
       .where('oauth_consent_id', 'is', null)
+      .forUpdate()
       .executeTakeFirst()
     if (existing) {
       if (
@@ -55,9 +56,22 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
         !existing.idempotency_fingerprint?.equals(fingerprint)
       )
         throw new DomainError('conflict', 'idempotency_key_reused')
+      // The bounded sweep can skip this row while another transaction holds it.
+      // Decide its deadline again after acquiring the replay row lock.
+      const expiredReplay =
+        existing.status === 'pending_payment'
+          ? await trx
+              .updateTable('bookings')
+              .set({ status: 'expired' })
+              .where('id', '=', existing.id)
+              .where('status', '=', 'pending_payment')
+              .where('payment_hold_expires_at', '<=', sql<Date>`clock_timestamp()`)
+              .returning('status')
+              .executeTakeFirst()
+          : undefined
       return {
         id: existing.id,
-        status: existing.status,
+        status: expiredReplay?.status ?? existing.status,
         expiresAt: existing.payment_hold_expires_at?.toISOString(),
       }
     }

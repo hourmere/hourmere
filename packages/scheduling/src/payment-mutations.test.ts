@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { findPublicEventType, findSlots } from './availability.ts'
-import { insertBooking, lockHosts, requireOfferedSlot } from './bookings.ts'
+import { canonicalJson, insertBooking, lockHosts, requireOfferedSlot } from './bookings.ts'
 import { admitGroupSlot } from './group-seat-admission.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { confirmPaymentHold, createPaymentHold } from './payments.ts'
@@ -229,6 +231,71 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     )
     await expect(
       notificationPolicy(mutant.createPaymentHold as typeof createPaymentHold),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function lockedReplay(api = createPaymentHold) {
+    const { ctx, input, q } = await fixture(true)
+    const fingerprint = createHash('sha256')
+      .update(canonicalJson({ ...input, start: input.start.toString() }))
+      .digest()
+    const row = await db
+      .updateTable('bookings')
+      .set({
+        idempotency_key: `payment:${input.idempotencyKey}`,
+        idempotency_fingerprint: fingerprint,
+      })
+      .where('event_type_id', '=', q.eventTypeId)
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    let ready: () => void = () => {}
+    const locked = new Promise<void>((resolve) => {
+      ready = resolve
+    })
+    let release: () => void = () => {}
+    const releaseLock = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let blockerPid = 0
+    const blocker = db.transaction().execute(async (trx) => {
+      await trx.selectFrom('bookings').select('id').where('id', '=', row.id).forUpdate().execute()
+      const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
+      blockerPid = (rows[0] as { pid: number }).pid
+      ready()
+      await releaseLock
+    })
+    await locked
+    const replay = api(ctx, input)
+    let waited = false
+    try {
+      for (let attempt = 0; attempt < 500; attempt++) {
+        const { rows } = await sql<{
+          waited: boolean
+        }>`SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname=current_database() AND ${blockerPid} = ANY(pg_blocking_pids(pid))) AS waited`.execute(
+          db,
+        )
+        if (rows[0]?.waited) {
+          waited = true
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    } finally {
+      release()
+      await blocker
+    }
+    expect(waited).toBe(true)
+    expect(await replay).toMatchObject({ id: row.id, status: 'expired' })
+  }
+  it('expires a locked replay target skipped by the cleanup batch', async () => {
+    await lockedReplay()
+    const mutant = await copy(
+      './payments.ts',
+      'createPaymentHold',
+      "existing.status === 'pending_payment'",
+      'false',
+    )
+    await expect(
+      lockedReplay(mutant.createPaymentHold as typeof createPaymentHold),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects disabled flag removal in an isolated source copy', async () => {
