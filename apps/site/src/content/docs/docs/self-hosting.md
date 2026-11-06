@@ -122,6 +122,22 @@ Any required sensitive-scope verification is your responsibility as the self-hos
 your own project. Follow the [Google Calendar publishing guide](/docs/google-calendar#publishing-status-and-verification)
 for verification requirements, exceptions and reconnecting expired grants.
 
+## CalDAV foundation
+
+CalDAV connections are not available in the app yet. The
+[design and foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
+provides encrypted credentials and guarded discovery for later integration, with no
+busy-time synchronization or booking writes.
+
+Future CalDAV workers will need outbound DNS and verified HTTPS to the calendar server;
+no new inbound port is needed. For private Nextcloud installations, the internal
+interface accepts trusted operator host/port or private-network exceptions. These are
+not application settings yet, and `WEBHOOK_PRIVATE_TARGETS` remains webhook-specific.
+Private exceptions do not bypass TLS verification, allow cloud metadata/link-local
+addresses, or authorize sending passwords to another origin. Use a certificate trusted
+by the process; there is no “ignore certificate errors” option. Apply narrow egress
+rules and, when configuration is introduced, keep web and worker policy consistent.
+
 ## Proxy behavior and an existing proxy
 
 The HTTPS override publishes TCP **80 and 443** and UDP **443** (HTTP/3), on Caddy's `proxy` service. Neither
