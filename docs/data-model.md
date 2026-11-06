@@ -389,9 +389,10 @@ members receive a null label, rendered as a neutral unknown member in the editor
 `event_types.max_bookings_per_day`, `max_bookings_per_week` and
 `max_bookings_per_month` are independent optional integer ceilings from 1 to 1000;
 NULL means that period has no limit. Migration 0057 adds the weekly and monthly
-columns as NULL without changing existing event types or bookings. Weekly and monthly
-writes are internal service configuration in this slice; REST, MCP, CLI and editor
-controls follow separately.
+columns as NULL without changing existing event types or bookings. The editor, REST,
+MCP and CLI expose all three ceilings as `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`. Omitted update fields preserve saved values; explicit null
+removes a ceiling. See [booking limits](https://hourmere.com/docs/booking-limits).
 
 Configured ceilings must not descend as periods get longer: day ≤ week, week ≤ month,
 and day ≤ month whenever each pair is set. The last rule also applies when week is
