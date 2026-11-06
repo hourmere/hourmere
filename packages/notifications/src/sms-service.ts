@@ -35,13 +35,13 @@ function digest(secret: string, purpose: string, value: string): Buffer {
   return createHmac('sha256', secret).update(`hourmere/sms/${purpose}/v1\0`).update(value).digest()
 }
 
-/** Retain only a non-reversible job key and timestamps after 30 days. Never delete tombstones. */
+/** Retain only a non-reversible job key and timestamps after 720 elapsed hours. Never delete tombstones. */
 export async function purgeSmsDeliveryDetails(db: Db) {
   await sql`UPDATE sms_deliveries SET request_hash=NULL,recipient_hash=NULL,
     recipient_mask=NULL,organization_id=NULL,provider_message_id=NULL,status='expired',
     updated_at=clock_timestamp()
     WHERE key_hash IN (SELECT key_hash FROM sms_deliveries
-      WHERE status <> 'expired' AND created_at < clock_timestamp()-interval '30 days'
+      WHERE status <> 'expired' AND created_at < clock_timestamp()-interval '720 hours'
       ORDER BY created_at LIMIT 1000 FOR UPDATE SKIP LOCKED)`.execute(db)
 }
 
@@ -110,7 +110,7 @@ export function createSmsService(deps: {
           count(*) FILTER (WHERE recipient_hash=${recipient} AND created_at > clock_timestamp()-interval '1 hour')::int AS recipient_hour,
           count(*) FILTER (WHERE recipient_hash=${recipient})::int AS recipient_day,
           count(*) FILTER (WHERE organization_id=${input.organizationId}::uuid)::int AS organization_day
-          FROM sms_deliveries WHERE status <> 'expired' AND created_at > clock_timestamp()-interval '1 day'`.execute(
+          FROM sms_deliveries WHERE status <> 'expired' AND created_at > clock_timestamp()-interval '24 hours'`.execute(
           tx,
         )
         const count = counts.rows[0]

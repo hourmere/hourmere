@@ -220,6 +220,117 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
     expect(sendSms).not.toHaveBeenCalled()
     expect(await db.selectFrom('sms_deliveries').selectAll().execute()).toEqual([])
   })
+  it('keeps daily budgets at 24 elapsed hours across both DST changes and kills calendar-day mutations', async () => {
+    const source = await readFile(new URL('./sms-service.ts', import.meta.url), 'utf8')
+    for (const example of [
+      { now: '2026-03-08T16:00:00Z', ageHours: 23.5, limited: true },
+      { now: '2026-11-01T17:00:00Z', ageHours: 24.5, limited: false },
+    ]) {
+      for (const field of ['recipientPerDay', 'organizationPerDay'] as const) {
+        await db.connection().execute(async (connection) => {
+          await sql`SET TIME ZONE 'America/New_York'`.execute(connection)
+          try {
+            for (const mutated of [false, true, false]) {
+              await connection.deleteFrom('sms_deliveries').execute()
+              const input = request()
+              await createSmsService({
+                db: connection,
+                hashSecret: secret,
+                limits: roomy,
+                provider: { sendSms: async () => ({ providerMessageId: 'SMsynthetic' }) },
+              }).sendSms(input)
+              await connection
+                .updateTable('sms_deliveries')
+                .set({
+                  created_at: new Date(Date.parse(example.now) - example.ageHours * 3_600_000),
+                })
+                .execute()
+              const fixed = source.replaceAll('clock_timestamp()', `TIMESTAMPTZ '${example.now}'`)
+              const file = new URL(`./sms-service.mutation-${randomUUID()}.ts`, import.meta.url)
+              try {
+                await writeFile(
+                  file,
+                  mutated ? fixed.replace("interval '24 hours'", "interval '1 day'") : fixed,
+                )
+                const module: typeof import('./sms-service.ts') = await import(file.href)
+                const service = module.createSmsService({
+                  db: connection,
+                  hashSecret: secret,
+                  limits: { ...roomy, [field]: 1 },
+                  provider: { sendSms: async () => ({ providerMessageId: 'SMsynthetic' }) },
+                })
+                const verify = async () => {
+                  const sending = service.sendSms({ ...input, idempotencyKey: randomUUID() })
+                  if (example.limited)
+                    await expect(sending).rejects.toMatchObject({ code: 'sms_rate_limited' })
+                  else await expect(sending).resolves.toEqual({ providerMessageId: 'SMsynthetic' })
+                }
+                if (mutated)
+                  await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
+                else await verify()
+              } finally {
+                await unlink(file)
+              }
+            }
+          } finally {
+            await sql`RESET TIME ZONE`.execute(connection)
+          }
+        })
+      }
+    }
+  })
+  it('retains details for exactly 720 elapsed hours across DST and kills calendar-month-span mutations', async () => {
+    const source = await readFile(new URL('./sms-service.ts', import.meta.url), 'utf8')
+    for (const example of [
+      { now: '2026-03-20T16:00:00Z', ageHours: 719.5, status: 'accepted' },
+      { now: '2026-11-20T17:00:00Z', ageHours: 720.5, status: 'expired' },
+    ]) {
+      await db.connection().execute(async (connection) => {
+        await sql`SET TIME ZONE 'America/New_York'`.execute(connection)
+        try {
+          for (const mutated of [false, true, false]) {
+            await connection.deleteFrom('sms_deliveries').execute()
+            await createSmsService({
+              db: connection,
+              hashSecret: secret,
+              limits: roomy,
+              provider: { sendSms: async () => ({ providerMessageId: 'SMsynthetic' }) },
+            }).sendSms(request())
+            await connection
+              .updateTable('sms_deliveries')
+              .set({ created_at: new Date(Date.parse(example.now) - example.ageHours * 3_600_000) })
+              .execute()
+            const fixed = source.replaceAll('clock_timestamp()', `TIMESTAMPTZ '${example.now}'`)
+            const file = new URL(`./sms-service.mutation-${randomUUID()}.ts`, import.meta.url)
+            try {
+              await writeFile(
+                file,
+                mutated ? fixed.replace("interval '720 hours'", "interval '30 days'") : fixed,
+              )
+              const module: typeof import('./sms-service.ts') = await import(file.href)
+              const verify = async () => {
+                await module.purgeSmsDeliveryDetails(connection)
+                expect(
+                  (
+                    await connection
+                      .selectFrom('sms_deliveries')
+                      .select('status')
+                      .executeTakeFirstOrThrow()
+                  ).status,
+                ).toBe(example.status)
+              }
+              if (mutated) await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
+              else await verify()
+            } finally {
+              await unlink(file)
+            }
+          }
+        } finally {
+          await sql`RESET TIME ZONE`.execute(connection)
+        }
+      })
+    }
+  })
   it('kills source-copy mutations of each durable protection and passes restored controls', async () => {
     const source = await readFile(new URL('./sms-service.ts', import.meta.url), 'utf8')
     type ServiceModule = typeof import('./sms-service.ts')
@@ -349,8 +460,8 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
         },
       ],
       [
-        "interval '30 days'",
-        "interval '300 days'",
+        "interval '720 hours'",
+        "interval '7200 hours'",
         async (module) => {
           const service = make(module)
           await service.sendSms(request())
@@ -383,7 +494,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
     expect(purgeStatement).toBeDefined()
     mutations.push([
       purgeStatement as string,
-      "await sql`DELETE FROM sms_deliveries WHERE created_at < clock_timestamp()-interval '30 days'`.execute(db)",
+      "await sql`DELETE FROM sms_deliveries WHERE created_at < clock_timestamp()-interval '720 hours'`.execute(db)",
       async (module) => {
         const service = make(module)
         const input = request()

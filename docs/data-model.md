@@ -1602,7 +1602,7 @@ stable because rotation resets recipient accounting, and protect its backup.
 Organization IDs deliberately have no cascading foreign key: organization deletion
 must never reopen a consumed job key.
 
-After 30 days, hourly maintenance (registered only when SMS is configured) and
+After 720 elapsed hours (30 days), hourly maintenance (registered only when SMS is configured) and
 opportunistic maintenance erase all delivery details in batches of at most 1,000.
 Only the job-key digest, timestamps and `expired` status remain indefinitely. These
 small tombstones prevent old job retries from sending after detail retention ends.
