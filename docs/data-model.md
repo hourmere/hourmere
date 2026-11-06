@@ -150,7 +150,14 @@ calendar-list access.
 | `import_sources` | instance | Persistent random identity of a real Cal.com/cal.diy source, audited schema/version and creating operator |
 | `import_items` | source + owner | Immutable source/target hashes, policy, question/option crosswalk and minimal deletion tombstones |
 | `organization_operations` | organization | Minimal actual-actor records for cancellation, member removal/leave and role changes; identifiers, origin, role transition and time only |
-| `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
+| `booking_hosts` | organization | Hosts of an ordinary booking or shared group slot; carries the anti-double-booking constraint |
+| `group_slots` | organization | Shared single-host interval, capacity, logistics snapshots and database-owned active-seat count |
+| `group_booking_move_receipts` | organization | Authority-scoped immutable seat move/no-op replay results |
+| `group_slot_cancel_receipts` | organization | Authority-scoped immutable whole-slot cancellation replay results |
+| `group_slot_calendar_events` | group slot | One pinned host calendar event identity and applied count revision |
+| `group_slot_conferences` | group slot + organization | Shared pinned conference identity, ready join URL, logistics revision and bounded provider lease/attempt state |
+| `group_slot_host_messages` | group slot | Independent host scheduled policy execution and coalesced calendar messages |
+| `group_slot_host_mail_receipts` | slot host message | Revision-scoped sent or suppressed delivery receipts |
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
 | `booking_notifications` | organization | Each email sent about a booking (kind, recipient), refused for good, or suppressed by abuse controls, so a retried job never sends it twice; the SHA-256 of the manage-link secret a sent invitee email carried |
@@ -170,8 +177,9 @@ reschedule chains. Deletion clears all mapping payloads into non-personal tombst
 reruns cannot restore erased targets. See the [0060 rollout note](../packages/db/migrations/0060_calcom_import_state.md).
 
 - **No double-booking.** `booking_hosts` has
-  `EXCLUDE USING gist (user_id WITH =, period WITH &&) WHERE (active)`. Two invitees
-  submitting the same slot at the same moment cannot both succeed. Back-to-back meetings
+  `EXCLUDE USING gist (user_id WITH =, period WITH &&) WHERE (active)`. Two distinct
+  occupied meetings for the same host cannot overlap. Group seats share one slot occupancy;
+  their separate database capacity guard permits enrollment up to the pinned capacity. Back-to-back meetings
   are allowed (ranges are half-open). `period` and `active` are never trusted from the
   application: a `BEFORE INSERT OR UPDATE` trigger derives them from the booking (locking
   it `FOR SHARE` against a concurrent reschedule), and a trigger on `bookings` re-derives
@@ -743,6 +751,9 @@ The ready message carries only that
 capability; no redirect URL or personal data is added to the embed completion message.
 Canceling from the confirmation removes the continuation link.
 
+Group seats retain `manage_token_hash` and `responses` on each independent `bookings`
+row; they do not move private seat data onto shared slots or attendee rosters.
+
 ## Planned additions (each a new migration)
 
 | When | Change |
@@ -751,7 +762,6 @@ Canceling from the confirmation removes the continuation link.
 | Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor` |
-| Group events (seats) | Move `manage_token_hash` and `responses` from bookings to attendees |
 | Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
 
 Background jobs (notification emails, reminders, calendar synchronization and webhook
@@ -1482,3 +1492,88 @@ always read the reschedule-chain root's fields. A new root atomically pins its c
 sending mailbox before its first SMTP invitation; later versions reuse that identity.
 See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
 legacy compatibility, recipient policy and reply limitations.
+
+## Group slots and independent seats
+
+A group event is a single-host event with `booking_mode = 'group'` and a capacity
+of 2–100. A `group_slots` row owns one exact UTC interval, its pinned host, capacity,
+location, buffers, calendar destination and notification policy. Each seat is a separate
+`bookings` row with `group_slot_id`, one booker and private answers, management capability,
+idempotency scope and reschedule chain. Guests and multiple-seat purchases are unsupported.
+Group booking is an internal service capability. Application configuration, public
+enablement, editor controls and REST/MCP/CLI group configuration are not yet available.
+
+`booking_hosts` has a surrogate primary key and exactly one parent: an ordinary
+`booking_id` or a `group_slot_id`. A group slot has one exclusion-bearing host row,
+regardless of enrollment. `resolvedBookingHosts` expands this host relation when reading
+seat bookings, including cancelled history; it does not grant permission. Host and team
+reads retain organization/current-membership checks. Managed reads include only the
+selected seat and permitted host details, never sibling seats or their answers.
+
+`bookings.group_booker_key` stores the normalized trimmed, lowercase booker mailbox.
+The partial unique index permits only one confirmed seat per mailbox per slot. It is
+internal, is not an authentication credential and must not be returned as a public field.
+Database triggers serialize capacity updates and enforce one matching booker and the
+surviving pinned host at commit. `group_slots_open_tuple` allows only one open generation
+for the exact organization, original event, host and start/end tuple. Cancelling the last
+seat retires the generation and frees host occupancy; a later booking may create a new
+generation. Explicit host cancellation retains its terminal tombstone.
+
+Daily, weekly and monthly event limits count one occupied slot, regardless of its seat
+count. Joining an already occupied slot does not consume another limit unit. Different
+meeting lengths share these limits. Every seat in a slot uses that slot's one shared
+location option and immutable logistics snapshot; seats cannot select different locations.
+Moving one seat cancels its predecessor and creates a successor in the same transaction,
+so capacity is released/taken atomically and surviving source seats retain their resources.
+
+`group_booking_move_receipts` records scoped authority/fingerprint digests and source/result
+seat and slot identities, including no-op moves. `group_slot_cancel_receipts` records scoped
+whole-slot cancellation results. Neither table stores raw capabilities or attendee rosters.
+A request key grants no authority: services revalidate the caller before returning a receipt.
+Matching replay returns the original result with its current lifecycle and no new seat,
+notification or recovered raw manage token.
+
+### Group communications contract
+
+Lifecycle confirmations, reschedules and cancellations are per seat and recipient. Host
+signup/exit notices may also be per seat; resource cleanup must not send another set of
+seat cancellations. Every invitee message and ICS contains only that seat's booker and
+permitted organizer identity, never sibling names, mailboxes, answers or capabilities.
+The invitee calendar UID follows its own seat chain through moves and cancellations.
+Webhooks retain the existing minimal per-seat immutable whitelist, without contacts,
+answers, management links or provider identities. Activity counts remain per seat: two
+seats are two creations, and one move is one reschedule without a second cancellation.
+
+The host has one private calendar event per slot with safe title, time and seat count;
+it has no provider attendee list or invitee data. With a pinned provider destination, host lifecycle
+mail does not attach another calendar invitation, including while that provider copy is
+pending or needs repair; failure does not create a second fallback calendar item. Otherwise host ICS uses the slot UID
+and monotonically increasing slot revision, never a seat UID. Final exit cancels only
+that generation's host item; a non-final exit preserves the shared event.
+
+Invitee reminder/follow-up policy is snapshotted per seat root and inherited by a successor.
+Host reminder/follow-up policy is snapshotted when the first seat materializes the slot,
+then scheduled once per slot, stable rule and host, using separate slot receipts and
+leases. Later seats or policy edits cannot replace it. Host recipients are excluded from
+per-seat scheduled fan-out. Retirement invalidates slot scheduled work; cancellation of
+one seat invalidates only that seat's work. Existing mail budgets and finite retries apply.
+Count-only updates cannot release invitations again or close a ready conference gate.
+A shared conference link cannot selectively revoke access already copied by an attendee,
+and provider participant lists/chat may reveal people during the meeting.
+
+`group_slot_host_messages` owns scheduled host reminders/follow-ups and a coalesced host
+calendar update per slot. Its bounded attempt count, random claim and expiring lease are
+independent of all seat bookings. `group_slot_host_mail_receipts` deduplicates each message
+revision and records terminal suppression under the existing instance mail budget. The
+minute dispatcher recovers pending and expired claims directly from durable due rows.
+It rechecks slot lifecycle, host membership and conference readiness after budget waits;
+SMTP never holds slot or booking row locks. Host calendar organizer name/mailbox are
+pinned on the slot before the first host ICS. A host reminder contains title, time and
+current seat count only; follow-ups contain no capabilities, join links or calendar files.
+
+Migration 0061 adds the shared location-option snapshot, slot-owned calendar/conference
+resources and host mail tables. `booking_notification_conference_context` is a read-only
+UNION view that resolves ordinary booking resources or a seat's shared slot resource for
+the existing recipient worker; it never transfers ownership to a seat. Logistics readiness
+uses the conference's matching applied revision and ready URL, independently of calendar
+count writeback. Count failures therefore cannot revoke a ready URL or resend invitations.

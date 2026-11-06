@@ -111,7 +111,12 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     '/**\n * The times',
     change,
   )
-  return new Function('getManagedBooking', `${copy}; return getManagedBookingDetails`)(
+  return new Function(
+    'resolvedBookingHosts',
+    'getManagedBooking',
+    `${copy}; return getManagedBookingDetails`,
+  )(
+    () => ({ as: () => 'booking_hosts' }),
     async () => ({
       id: 'synthetic-booking',
       eventTypeId: 'synthetic-event',

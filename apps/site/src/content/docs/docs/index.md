@@ -34,6 +34,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Branding settings](/docs/branding) store a logo and primary colour per space; public
   booking pages and emails do not apply them yet.
+- Group seats currently have internal storage and service support only. Public booking
+  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
+  this limitation applies equally to self-hosted installations.
 
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per

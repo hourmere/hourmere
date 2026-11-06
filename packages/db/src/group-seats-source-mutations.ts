@@ -42,6 +42,19 @@ const protection = (name: string) => groupProtections[name] as Protection['check
 const receipt = (name: string) => receiptProtections[name] as Protection['check']
 
 export const groupSourceProtections: Record<string, Protection> = {
+  'one open exact slot generation': {
+    check: async (f) => {
+      await occupiedSlot(f)
+      await transaction(f.pool, async (client) => {
+        await expect(insertSlot(client, f)).rejects.toMatchObject({
+          code: '23505',
+          constraint: 'group_slots_open_tuple',
+        })
+      })
+    },
+    break: (s) => `${s}\nDROP INDEX group_slots_open_tuple;`,
+  },
+
   'ordinary booking admission fences event mode conversion': {
     check: assertGroupModeFence,
     break: (s) =>

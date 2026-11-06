@@ -1,0 +1,62 @@
+# Booking query inventory for the seat-service task
+
+Storage-baseline inventory checked against final head `01534b3c6b86dd8fe4513162009675f9ec051e0a`; main merges through `58dae014f963cb0c31fabddeee9b401f9f625e37` add no further direct booking SQL. Function names and approximate line references identify this task's source tree. This storage task adds the host relation foundation; the following readers/writers still need the service or integration task before group mode can be enabled. Do not create a direct host row for each seat.
+
+| Source and queries | Required seat adaptation |
+| --- | --- |
+| `packages/scheduling/src/hosts.ts`: `resolvedBookingHosts`, `bookingHostIds` | Implemented foundation: ordinary hosts UNION seat → slot → surviving slot host. Preserve historical lifecycle and current verification/membership checks; this relation grants no authorization. |
+| `packages/scheduling/src/availability.ts`: `buildAvailabilityInput` original-duration read (883), provider-copy exclusion/ancestor query (986–1015), active occupancy join (1022); `findSlots`, `intersectSlots`, `unionRoundRobinSlots` | Load slot occupancy exactly once with snapshotted buffers; count occupied slots once for this event's daily, weekly and monthly limits; join an existing slot by excluding only that exact slot/copy; evaluate current eligibility and explicit duration. Never expand occupancy per seat or ignore all simultaneous provider events. |
+| `packages/scheduling/src/bookings.ts`: `resolveManagedTarget` (266), `latestInChain` (291), `inviteeRescheduleCount` (308), `lockManagedBooking` (367), `findReplay` (410) | Preserve per-seat capabilities and chains; probe authorized original creation/move/no-op receipts before terminal/full checks; extend fingerprints while preserving old ones. |
+| `packages/scheduling/src/bookings.ts`: `toBookings` attendee read (492), co-host join (518), successor visibility join (543), assigned-host join (571), `loadBooking` (653) | Resolve slot hosts without exposing sibling seats; hydrate current slot logistics while keeping each seat's lifecycle, private responses and token chain. |
+| `packages/scheduling/src/bookings.ts`: `insertBooking` (739/772), `publicBooking`, `createOneTimeBooking`, `cancelLocked` (824), `skipScheduledMessages`, `rescheduleLocked` (1338/1352) | Add common host/slot/seat lock order and exact-generation admission; DB trigger owns count. Transactionally dispatch one slot resource and per-seat outboxes; final release retires slot, non-final release preserves survivors. Rollback claims and outboxes together. |
+| `packages/scheduling/src/bookings.ts`: `listHostBookings` (1479), `getHostBooking` (1502), `rescheduleHostBooking` authorization EXISTS (1542), `cancelHostBooking` (1582), `cancelTeamBookingInTransaction` (1624) | Replace direct seat-host membership joins with resolved host membership while retaining organization/actor scope and restricted team projection. Per-booking cancellation remains one seat. |
+| `packages/scheduling/src/booking-page.ts`: `bookingPageQuery` (102) | Continue paging seat bookings by exact start/id; slot lists/rosters use separate scoped queries. No synthetic slot booking. |
+| `packages/scheduling/src/manage.ts`: `getManagedBookingDetails` host projection (45), `listBookingSlots` snapshot (148), `bookingHostIds` call | Use resolved hosts and slot snapshots; preserve original required host failure, own-seat projections, duration and capability boundaries. |
+| `packages/scheduling/src/booking-organization.ts`: `resolveBookingOrganization` (14/28) | Authorize seat → slot host in the same organization; knowing a slot ID grants no organization/roster access. |
+| `packages/scheduling/src/team-bookings.ts`: `pageParticipants` (108/117), `enrichTeamBookings` (177/196/214/220), filter's assigned-host EXISTS (300), `countTeamBookings`, `readTeamBookingPage` | Seat-aware hosts/filters/departed-host snapshots; keep current session-only manager access, safe fields and per-seat counts. |
+| `packages/scheduling/src/member-departure-impact.ts`: `readImpact` booking-host join (163) | Count unfinished seat bookings and occupied slots via shared hosts; preserve event deactivation and member-removal/leave transaction boundaries. `member-removal.ts`, `member-leave.ts`, auth departure/removal adapters consume this result. |
+| `packages/scheduling/src/conferences.ts`: `conferenceRoot` (126), `prepareBookingConference` (275/283/317), `cancelBookingConference`, `bookingConferenceViews` (442/443/461) | Branch group seats to slot-owned resources; never anchor on the first invitee, transfer a shared resource with one seat, or cancel survivors' resource. Keep count and logistics revisions separate. |
+| `packages/scheduling/src/one-time-links.ts`: `claimOneTimeBookingLink` booking validation (412), `oneTimeBookingReplayTarget` | Keep claim and fresh seat in the same top-level transaction; replay scope includes capability identity and precedes used-state/fullness checks. |
+| `packages/scheduling/src/analytics.ts`: `getBookingActivity` booking root/cancel/successor SQL (102/107/111) | Existing row basis already counts seats. Verify two seats = two creates; seat move = one reschedule, no predecessor cancel; slot resource/count updates = zero events. |
+| `packages/notifications/src/index.ts`: `loadNotificationData` (353/373/398), root ICS chain (406–413), targets/mirrors/conference (417/422/429), replacement/lifecycle reads (443/449) | Resolve shared host identity and slot resources; independent booker/UID/mail capability per seat, no sibling attendees. Host gets one slot calendar item, never per-seat scheduled ICS. |
+| `packages/notifications/src/index.ts`: `sendOnce` authorization/lifecycle (580/612/613/645), organizer root update (834), `conferenceNotificationAllowed` (1072), `claimConferenceNotification` (1126), dispatch SQL (1194), `requireConferenceInvitationIdentity` (1292) | Gate by active seat + current slot logistics; slot count-only failures must not revoke readiness or release invitations again. Keep per-seat receipts and existing shared mail budgets. |
+| `packages/notifications/src/scheduled.ts`: `enqueueScheduledBookingEmails` (95), `currentRow` (177/178), conference gate (253), host/member join (264) | Per-seat invitee immutable policy plus separate once-per-slot host policy and durable receipts. Cancellation fences only affected work; current seat/slot checked after budget waits. |
+| `packages/calendars/src/booking-events.ts`: `rootOf` (24), `recordBookingDestinations` (56), `recoverBookingCalendarPage` (108–141), `calendarBookingNotifier` (164), `writeBookingCalendar` conference/root/target/event/host reads (189–275) | Add explicit slot-owned calendar target/event dispatch and recovery; safe title/count, no provider attendees. Preserve one pinned target and exact provider-copy mapping per generation. |
+| `packages/calendars/src/conferences.ts`: notifier/job/dispatch (42/83), `claim` (100/109), `writeBookingConference` (394/400/603), `retryBookingConference` (666/672/692) | Add slot claim/revision/lease and host-ownership paths; one initial intent, bounded stale-generation cleanup, no per-seat provider create/delete. |
+| `packages/calendars/src/conference-mirrors.ts`: dispatch (31–33), `claim` (60/76/82), `apply` (249/255/261), write (390), `retryConferenceMirror` (425/431/438) | Slot-owned mirror recovery and explicit repair authority; separate count revision from conference logistics and terminal generation fences. |
+| `packages/webhooks/src/delivery.ts`: `webhookBookingNotifier` (36) | Continue per-seat minimal immutable snapshots; optional group slot ID only, no roster, links, credentials or provider identities. Whole-slot cancel creates N seat cancellations; replay creates none. |
+| `packages/scheduling/src/waitlist.ts`, `waitlist-discovery.ts`, `waitlist-booking.ts`; `packages/notifications/src/waitlist.ts` | These consume availability/booking services rather than direct host joins. Add all-duration capacity-aware eligibility, committed release signals and final send checks. Keep event/mailbox/exact-interval tombstones independent of slot generation. |
+| `packages/db/migrations/0051_waitlist.sql`: host-change signal trigger; `0053_one_time_booking_links.sql`: claim-booking validation; `0041_organization_operations.sql`: booking attribution FK | Published SQL remains untouched. New migration extends append-only signals for slot seat count/lifecycle and adds slot attribution; later service must use receipts/attribution inside its booking transaction. |
+
+Transport callers (`apps/server/src/routes/{public,one-time-bookings,bookings,team-bookings,member-departure-impact,member-removal,member-leave,analytics}.ts`, MCP booking/catalog handlers and CLI commands) call these shared services and contain no direct booking SQL requiring a join rewrite. Their DTO/scope/parity changes belong to later tasks.
+
+Test/support SQL also needs eventual group scenarios: `packages/scheduling/src/testing.ts`, `tools/e2e/screenshot-data.ts` (ordinary screenshot seed bookings; must not fabricate group seat host rows), `tools/e2e/fixtures.ts` (978/999), `tools/e2e/{automatic-zoom-fixtures,reminder-fixtures}.ts`, and `scripts/webhook-reconciliation-benchmark.ts` (234). Existing fixtures remain ordinary bookings. `packages/import-calcom/src/{bookings,source}.ts` reads source-system bookings into an import plan only, and does not query target booking storage; group import remains excluded. Core availability consumes supplied intervals without database joins; its adapter must supply slots once.
+
+## Seat-service audit additions
+
+Weekly/monthly limit reads in `buildAvailabilityInput` use the same occupied-slot basis
+as daily limits. Remaining seats in an already occupied slot do not consume another
+limit unit. `group-seat-admission.ts` owns single-slot location selection and admission.
+`booking-organization.ts`, `manage.ts`, `team-bookings.ts` and
+`member-departure-impact.ts` resolve seat hosts through `resolvedBookingHosts`; team
+counts remain seat counts. Attendee reads retain own-seat attendee predicates.
+`analytics.ts` counts booking roots and successor transitions, so no slot count mutation
+creates an activity event. `webhooks/src/delivery.ts` serializes its explicit contact-free
+booking whitelist, without joining attendee tables or slot rosters. Neither needs a
+new public payload field for group support.
+
+The limit query loads complete host-local weeks/months when enabled; occupied slot
+buffers come from immutable snapshots. `AvailabilityQuery.excludeGroupSlotIds` is an
+internal exact-generation exclusion for a validated join/final-seat move, covering both
+slot occupancy and precisely mapped provider copies. Unrelated simultaneous events remain
+blocking. `event_types.locations` and `bookings.location_option` retain the configured and
+chosen option snapshots; group admission enforces one shared location choice per slot.
+
+`availability.ts` also serves the manager-only `explainEventAvailability` path through
+`buildAvailabilityInputForMode`. It shares the same once-per-slot occupancy query and
+period windows. The explanation branch keeps other event types' slot intervals and
+snapshotted buffers in `blockingBookings`, rather than folding them into provider busy
+time; this preserves booking-conflict provenance without reading any seat contact data.
+Missing schedules use the explanation's empty-hours fallback while ordinary availability
+still returns no offered slots. These diagnostics do not provide a capacity-aware public
+slot picker or attendee roster.
