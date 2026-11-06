@@ -1,3 +1,7 @@
+import { sendRescheduleRequestNotification } from './reschedule-request.ts'
+
+export { rescheduleRequestExpiryJob } from './reschedule-request.ts'
+
 // Booking notifications (https://hourmere.com/docs/notifications): the job that emails attendees and hosts
 // when a booking is confirmed, rescheduled or cancelled and before it starts, and the helper
 // the booking services call inside their transactions to queue those jobs.
@@ -98,10 +102,17 @@ export const CALENDAR_UID_DOMAIN = 'hourmere'
  * The job's payload: which booking and what happened. Nothing else, and never a secret:
  * the job loads the booking when it runs and mints the invitee's link secret itself.
  */
-export const BookingNotificationPayload = z.strictObject({
-  bookingId: z.uuid(),
-  kind: z.enum(NOTIFICATION_KINDS),
-})
+export const BookingNotificationPayload = z.union([
+  z.strictObject({
+    bookingId: z.uuid(),
+    kind: z.enum(NOTIFICATION_KINDS),
+  }),
+  z.strictObject({
+    bookingId: z.uuid(),
+    requestId: z.uuid(),
+    kind: z.enum(['reschedule_requested', 'reschedule_request_expired']),
+  }),
+])
 
 export interface NotificationDeps extends NotificationMailLimits {
   db: Db
@@ -129,8 +140,10 @@ export function bookingNotificationJob(deps: NotificationDeps) {
     retry: { limit: 12, delaySeconds: 60, backoff: true, maxDelaySeconds: 3600 },
     expireInSeconds: 300,
     concurrency: 2,
-    handler: ({ bookingId, kind }, { signal }) =>
-      sendBookingNotification(deps, bookingId, kind, { signal }),
+    handler: (payload, { signal }) =>
+      'requestId' in payload
+        ? sendRescheduleRequestNotification(deps, payload, signal)
+        : sendBookingNotification(deps, payload.bookingId, payload.kind, { signal }),
   })
 }
 
@@ -141,6 +154,11 @@ export type BookingEvent =
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string }
+  | {
+      type: 'reschedule_requested' | 'reschedule_request_expired'
+      bookingId: string
+      requestId: string
+    }
 
 /** What enqueueBookingNotifications needs of a Jobs instance. */
 export interface NotificationQueue {
@@ -169,6 +187,14 @@ export async function enqueueBookingNotifications(
     throw new Error('enqueueBookingNotifications needs the transaction that writes the booking')
   }
   if (await isImportedBooking(transaction as Db, event.bookingId)) return
+  if ('requestId' in event) {
+    await queue.enqueue(
+      BOOKING_NOTIFICATION_JOB,
+      { bookingId: event.bookingId, requestId: event.requestId, kind: event.type },
+      { transaction, singletonKey: `${event.requestId}:${event.type}` },
+    )
+    return
+  }
   await enqueueGroupHostMail(transaction as Db, event.bookingId, now)
   const send = (kind: NotificationKind, startAfter?: Temporal.Instant) =>
     queue.enqueue(
@@ -556,7 +582,7 @@ function stillApplies(kind: NotificationKind, data: NotificationData, now: Tempo
 }
 
 /** Thrown inside a send transaction to roll it back when the booking changed meanwhile. */
-class Overtaken extends Error {}
+export class Overtaken extends Error {}
 /** An obsolete host recipient must not suppress the original invitee's failure notice. */
 class RecipientUnavailable extends Error {}
 
@@ -578,7 +604,7 @@ export async function sendOnce(
   deps: NotificationDeps,
   key: {
     bookingId: string
-    kind: NotificationKind | 'follow_up'
+    kind: NotificationKind | 'follow_up' | 'reschedule_requested' | 'reschedule_request_expired'
     messageKey?: string
     finalCheck?: (db: Db) => Promise<void>
     recipient: string
@@ -592,6 +618,10 @@ export async function sendOnce(
   signal: AbortSignal | undefined,
   conferenceClaim: ConferenceNotificationClaim | undefined,
 ): Promise<'sent' | 'sent before' | 'overtaken' | 'recipient unavailable' | 'suppressed'> {
+  const informational =
+    key.kind === 'follow_up' ||
+    key.kind === 'reschedule_requested' ||
+    key.kind === 'reschedule_request_expired'
   let suppression: { reason: SuppressionReason; recipientHash: string } | undefined
   try {
     const outcome = await deps.db.transaction().execute(async (trx) => {
@@ -635,8 +665,13 @@ export async function sendOnce(
       if (!claimed) return 'sent before'
       // Identity/member locks can wait behind an account edit after the host send. Read
       // the lifecycle only after those waits, without holding a booking lock over SMTP.
-      if (key.kind !== 'follow_up')
-        await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
+      if (!informational)
+        await requireConferenceInvitationIdentity(
+          trx,
+          key.bookingId,
+          key.kind as NotificationKind,
+          true,
+        )
       await lockNotificationEmailBudget(trx)
       // Read the booking and the clock again: it may have been cancelled, or have started,
       // while an earlier recipient's email went out. Without a lock, which would hold up
@@ -649,27 +684,24 @@ export async function sendOnce(
         .executeTakeFirst()
       if (
         !current ||
-        (key.kind === 'follow_up'
+        (informational
           ? current.status !== 'confirmed'
           : !stillTrue(
-              key.kind,
+              key.kind as NotificationKind,
               { status: current.status, start: instant(current.start_at) },
               clock(),
             ))
       ) {
         throw new Overtaken()
       }
-      if (
-        key.kind !== 'follow_up' &&
-        (current.conference_revision ?? undefined) !== key.conferenceRevision
-      )
+      if (!informational && (current.conference_revision ?? undefined) !== key.conferenceRevision)
         throw new NotificationRetryError(
           'The meeting changed before delivery; retry with its current details',
         )
       if (
         !key.finalCheck &&
-        key.kind !== 'follow_up' &&
-        !(await conferenceNotificationAllowed(trx, key.bookingId, key.kind))
+        !informational &&
+        !(await conferenceNotificationAllowed(trx, key.bookingId, key.kind as NotificationKind))
       )
         throw new Overtaken()
       if (
