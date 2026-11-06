@@ -6,6 +6,7 @@ import { z } from '@hono/zod-openapi'
 import * as auth from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as scheduling from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
@@ -79,6 +80,7 @@ function frameworkCopy(change?: Change) {
     '',
   )
   const bindings = {
+    auditActor,
     z,
     inspect,
     ...auth,
@@ -518,6 +520,7 @@ describe('MCP waitlist adapter protections', () => {
     )
     const create = vi.fn(async (..._input: unknown[]) => ({ replayed: false }))
     const dependencies = {
+      auditActor,
       z,
       ...calendars,
       ...scheduling,

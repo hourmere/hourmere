@@ -28,6 +28,8 @@ export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Insta
  */
 export interface ServiceContext {
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
@@ -48,6 +50,8 @@ export interface ServiceContext {
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Shared waitlist attribution and enrollment secret, supplied only by trusted transports. */
   waitlistSecret?: string | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined

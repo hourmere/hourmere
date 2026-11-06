@@ -21,9 +21,9 @@ afterEach(() => {
 })
 
 const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
-const slots = (count = 2, minutes = 30): Slot[] =>
+const slots = (count = 2, minutes = 30, day = DAY): Slot[] =>
   Array.from({ length: count }, (_, index) => {
-    const start = Date.parse(`${DAY}T09:00:00.000Z`) + index * 30 * 60_000
+    const start = Date.parse(`${day}T09:00:00.000Z`) + index * 30 * 60_000
     return {
       start: new Date(start).toISOString(),
       end: new Date(start + minutes * 60_000).toISOString(),
@@ -176,7 +176,8 @@ describe('host open-time picker', () => {
   })
 
   it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
-    const client = server()
+    // Tokyo may already be on a different calendar day than the default profile.
+    const client = server(slots(2, 30, dateKeyIn(Date.now(), 'Asia/Tokyo')))
     renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
       'fr',

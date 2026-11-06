@@ -736,7 +736,7 @@ row; they do not move private seat data onto shared slots or attendee rosters.
 | Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor` |
-| Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
+| Year 2 (enterprise) | Better Auth `sso` |
 
 Background jobs (notification emails, reminders, calendar synchronization and webhook
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
@@ -1551,3 +1551,9 @@ UNION view that resolves ordinary booking resources or a seat's shared slot reso
 the existing recipient worker; it never transfers ownership to a seat. Logistics readiness
 uses the conference's matching applied revision and ready URL, independently of calendar
 count writeback. Count failures therefore cannot revoke a ready URL or resend invitations.
+
+## Audit events
+
+`audit_events` is the append-only management journal available to every instance.
+See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
+boundaries, indexes and future retention. Events are recorded but not yet viewable.

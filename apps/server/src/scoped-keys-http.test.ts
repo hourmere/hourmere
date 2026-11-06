@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import {
   type ApiKeyScope,
   type Auth,
@@ -277,6 +279,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         const created = await request(path, 'POST', value, {
           ...headers('team', scope),
           'idempotency-key': idempotencyKey,
+          'x-request-id': 'untrusted-personal-data',
         })
         expect(created.status).toBe(201)
         const result = (await created.json()) as { booking: { id: string }; manageToken: string }
@@ -290,6 +293,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
           api_key_id: null,
           organization_id: outsider.organizationId,
         })
+        const audit = await db
+          .selectFrom('audit_events')
+          .selectAll()
+          .where('target_id', '=', result.booking.id)
+          .where('action', '=', 'booking.created')
+          .executeTakeFirstOrThrow()
+        expect(audit).toMatchObject({
+          organization_id: outsider.organizationId,
+          actor_type: 'api_key',
+          actor_id: keyFor('team', scope).id,
+          credential_type: 'api_key',
+          credential_id: keyFor('team', scope).id,
+          credential_scope: scope,
+          details: {},
+        })
+        expect(audit.request_id).toMatch(/^[0-9a-f-]{36}$/)
         const replay = await request(path, 'POST', value, { 'idempotency-key': idempotencyKey })
         expect(replay.status).toBe(200)
         expect(((await replay.json()) as { booking: { id: string } }).booking.id).toBe(
@@ -303,7 +322,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           { ...headers('team', scope), 'x-manage-token': result.manageToken },
         )
         expect(moved.status).toBe(200)
-        const next = (await moved.json()) as { manageToken: string }
+        const next = (await moved.json()) as { booking: { id: string }; manageToken: string }
         const cancelled = await request(
           '/api/v1/bookings/manage/cancel',
           'POST',
@@ -311,6 +330,88 @@ describe.skipIf(!process.env.DATABASE_URL)(
           { ...headers('team', scope), 'x-manage-token': next.manageToken },
         )
         expect(cancelled.status).toBe(200)
+        const events = await db
+          .selectFrom('audit_events')
+          .selectAll()
+          .where('target_id', 'in', [result.booking.id, next.booking.id])
+          .orderBy('id')
+          .execute()
+        expect(events.map((event) => event.action).sort()).toEqual([
+          'booking.cancelled',
+          'booking.created',
+          'booking.rescheduled',
+        ])
+        for (const event of events) {
+          expect(event).toMatchObject({
+            organization_id: outsider.organizationId,
+            actor_type: 'api_key',
+            actor_id: keyFor('team', scope).id,
+            credential_type: 'api_key',
+            credential_id: keyFor('team', scope).id,
+            credential_scope: scope,
+            details: {},
+          })
+          expect(event.request_id).toMatch(/^[0-9a-f-]{36}$/)
+        }
+        expect(new Set(events.map((event) => event.request_id)).size).toBe(3)
+      },
+    )
+
+    it.each(['origin', 'request'] as const)(
+      'detects removed transport audit %s in a source copy',
+      async (protection) => {
+        const location = new URL(
+          protection === 'origin' ? './routes/public.ts' : './app.ts',
+          import.meta.url,
+        )
+        const original = readFileSync(location, 'utf8')
+        const before =
+          protection === 'origin'
+            ? "publicBookingAuditOrigin(c, body.source ?? 'web')"
+            : 'withAuditRequest(randomUUID(), next)'
+        expect(original.includes(before)).toBe(true)
+        const replacement =
+          protection === 'origin' ? "{ source: body.source ?? 'web', apiKeyId: null }" : 'next()'
+        const source = stripTypeScriptTypes(original.replace(before, replacement)).replace(
+          /from '([^']+)'/g,
+          (_, specifier: string) =>
+            `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+        )
+        const changed = await import(
+          `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+        )
+        const mutatedApp = (protection === 'request' ? changed.createApp : createApp)({
+          checkDb: async () => {},
+          authHandler: auth.handler,
+          resolveCaller: createCallerResolver({ auth, db }),
+          publicUrl: 'http://localhost',
+          routes: [
+            (protection === 'origin' ? changed.publicRoutes : publicRoutes)({ db, now: () => NOW }),
+          ],
+        })
+        const response = await mutatedApp.request('/api/v1/public/scope-other/intro/bookings', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...headers('team', 'bookings'),
+            'x-request-id': 'untrusted-personal-data',
+          },
+          body: JSON.stringify(
+            body(protection === 'origin' ? '2026-11-06T09:00:00Z' : '2026-11-06T10:00:00Z'),
+          ),
+        })
+        expect(response.status).toBe(201)
+        const result = (await response.json()) as { booking: { id: string } }
+        const audit = await db
+          .selectFrom('audit_events')
+          .selectAll()
+          .where('target_id', '=', result.booking.id)
+          .executeTakeFirstOrThrow()
+        if (protection === 'origin') {
+          expect(() => expect(audit.actor_id).toBe(keyFor('team', 'bookings').id)).toThrowError()
+        } else {
+          expect(() => expect(audit.request_id).toMatch(/^[0-9a-f-]{36}$/)).toThrowError()
+        }
       },
     )
 

@@ -1,8 +1,10 @@
 import * as Crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import * as HourmereAuth from '@hourmere/auth'
 import * as HourmereDb from '@hourmere/db'
 import { createDb, type Db } from '@hourmere/db'
+import * as Audit from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -32,6 +34,8 @@ const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
   '@hourmere/db': HourmereDb,
+  '@hourmere/auth': HourmereAuth,
+  '@hourmere/db/audit': Audit,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
   './conferences.ts': Conferences,

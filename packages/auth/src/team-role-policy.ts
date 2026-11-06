@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database, Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { DBTransactionAdapter, Where } from 'better-auth/adapters'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { type Insertable, sql, type Transaction } from 'kysely'
@@ -647,12 +648,22 @@ export function createTeamRolePolicy(
               logo?: string | null
               metadata?: string | null
             }
-            return trx
+            const updated = await trx
               .updateTable('auth.organization')
               .set(patch)
               .where('id', '=', facts.organizationId)
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            const actor = await principal(ctx)
+            if (!actor) throw teamRoleDenied()
+            await writeAuditEvent(trx, {
+              organizationId: facts.organizationId,
+              ...auditActor(actor),
+              action: 'organization.updated',
+              targetType: 'organization',
+              targetId: facts.organizationId,
+            })
+            return updated as never
           })
         }
         if (ctx?.path === changeRole && request.model === 'member') {
@@ -669,6 +680,17 @@ export function createTeamRolePolicy(
               .returningAll()
               .executeTakeFirstOrThrow()
             await recordTeamRoleChange(trx, target, facts.userId, role)
+            if (target.role !== role) {
+              const actor = await principal(ctx)
+              if (!actor) throw teamRoleDenied()
+              await writeAuditEvent(trx, {
+                organizationId: facts.organizationId,
+                ...auditActor(actor),
+                action: 'membership.role_changed',
+                targetType: 'user',
+                targetId: target.userId,
+              })
+            }
             return updated as never
           })
         }
@@ -747,6 +769,15 @@ export function createTeamRolePolicy(
             throw teamRoleDenied()
           }
           const stored = await acceptance(ctx, trx)
+          const actor = await principal(ctx)
+          if (!actor) throw teamRoleDenied()
+          await writeAuditEvent(trx, {
+            organizationId: stored.organizationId,
+            ...auditActor(actor),
+            action: 'membership.accepted',
+            targetType: 'invitation',
+            targetId: stored.id,
+          })
           // The native endpoint's enclosing transaction also owns the member/session
           // writes, so neither an exception nor process death can publish this alone.
           return trx

@@ -18,6 +18,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
@@ -757,6 +758,132 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       missingResult.status >= 400 ||
         new URL(missingResult.headers.get('location') as string, BASE).searchParams.has('error'),
     ).toBe(true)
+  })
+  it('records consent and native token revocation with their exact credentials', async () => {
+    const s = await session(),
+      tokens = await connected(s)
+    const grant = await db
+      .selectFrom('mcp_oauth_grants')
+      .select('id')
+      .where('user_id', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    const consent = (
+      await sql<
+        Record<string, unknown>
+      >`SELECT * FROM audit_events WHERE action='oauth.consent_granted' AND target_id=${grant.id}`.execute(
+        db,
+      )
+    ).rows
+    expect(consent).toHaveLength(1)
+    expect(consent[0]).toMatchObject({
+      organization_id: s.user.principal.organization.id,
+      actor_type: 'user',
+      actor_id: s.user.id,
+      credential_type: 'session',
+      credential_id: s.sessionId,
+      details: {},
+    })
+    const revoked = await request('/api/auth/oauth2/revoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: CLIENT,
+        token: tokens.refresh_token,
+        token_type_hint: 'refresh_token',
+      }),
+    })
+    expect(revoked.status).toBe(200)
+    const rows = (
+      await sql<
+        Record<string, unknown>
+      >`SELECT * FROM audit_events WHERE action='oauth.token_revoked' AND target_id=${grant.id}`.execute(
+        db,
+      )
+    ).rows
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      organization_id: s.user.principal.organization.id,
+      actor_type: 'oauth_client',
+      actor_id: CLIENT,
+      credential_type: 'oauth',
+      oauth_client_id: CLIENT,
+      oauth_grant_id: grant.id,
+      details: {},
+    })
+    expect(JSON.stringify(rows)).not.toContain(tokens.refresh_token)
+  })
+  it('rolls back native token revocation when its audit fails', async () => {
+    const s = await session(),
+      tokens = await connected(s)
+    await sql`CREATE FUNCTION reject_oauth_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action='oauth.token_revoked' THEN RAISE EXCEPTION 'synthetic OAuth audit failure'; END IF;
+      RETURN NEW; END $$`.execute(db)
+    await sql`CREATE TRIGGER reject_oauth_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_oauth_audit()`.execute(
+      db,
+    )
+    try {
+      let refused = false
+      try {
+        const response = await request('/api/auth/oauth2/revoke', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: CLIENT,
+            token: tokens.refresh_token,
+            token_type_hint: 'refresh_token',
+          }),
+        })
+        refused = response.status >= 400
+      } catch {
+        refused = true
+      }
+      expect(refused).toBe(true)
+      const stored = await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select('revoked')
+        .where('userId', '=', s.user.id)
+        .execute()
+      expect(stored.length).toBeGreaterThan(0)
+      expect(stored.every((row) => row.revoked === null)).toBe(true)
+      expect(
+        (
+          await sql`SELECT id FROM audit_events WHERE action='oauth.token_revoked' AND organization_id=${s.user.principal.organization.id}`.execute(
+            db,
+          )
+        ).rows,
+      ).toEqual([])
+    } finally {
+      await sql`DROP TRIGGER reject_oauth_audit ON audit_events`.execute(db)
+      await sql`DROP FUNCTION reject_oauth_audit()`.execute(db)
+    }
+  })
+  it('records browser OAuth disconnection in the same grant transaction', async () => {
+    const s = await session()
+    await connected(s)
+    const grant = await db
+      .selectFrom('mcp_oauth_grants')
+      .select('id')
+      .where('user_id', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    const connections = await api('connections', s, undefined, 'GET')
+    const data = (await connections.json()) as { data: { id: string }[] }
+    expect((await api(`connections/${data.data[0]?.id}`, s, undefined, 'DELETE')).status).toBe(200)
+    const rows = (
+      await sql<
+        Record<string, unknown>
+      >`SELECT * FROM audit_events WHERE action='oauth.token_revoked' AND target_id=${grant.id}`.execute(
+        db,
+      )
+    ).rows
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      organization_id: s.user.principal.organization.id,
+      actor_type: 'user',
+      actor_id: s.user.id,
+      credential_type: 'session',
+      credential_id: s.sessionId,
+      details: {},
+    })
   })
   it('uses native OAuth callers on MCP only, then rejects revoked tokens and old codes even after reconnecting', async () => {
     const s = await session(),

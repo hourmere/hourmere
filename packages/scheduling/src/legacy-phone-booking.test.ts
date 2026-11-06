@@ -124,6 +124,8 @@ function copiedBooking(change?: readonly [string, string]) {
     toIso: (value: Temporal.Instant) => value.toString(),
     insertBooking: async () => ({ id: 'synthetic-booking', manageToken: null }),
     prepareBookingConference: noop,
+    // This isolated guard fixture stubs all persistence; real audit writes are covered separately.
+    auditBooking: noop,
     admitGroupSlot: noop,
     loadBooking: async () => ({}),
     pgError: () => ({}),

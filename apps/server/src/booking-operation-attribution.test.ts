@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { BookingNotifier } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
@@ -242,6 +243,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
   it('leaves anonymous link identity unknown and records an authenticated link caller independently of the host', async () => {
     for (const authenticated of [false, true]) {
       const s = await fixture()
+      const grantId = randomUUID()
       await bookings.cancelManagedBooking(
         { db, now },
         s.token,
@@ -250,8 +252,14 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
           ? {
               source: 'mcp',
               apiKeyId: null,
-              oauthConsentId: randomUUID(),
+              oauthConsentId: grantId,
               actorUserId: s.outsider.id,
+              audit: auditActor({
+                ...s.outsider.principal,
+                kind: 'oauth',
+                oauthConsentId: grantId,
+                clientId: 'https://synthetic.test',
+              }),
             }
           : undefined,
       )

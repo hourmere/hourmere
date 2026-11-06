@@ -93,6 +93,7 @@ export default defineConfig({
             { label: 'After-booking redirects', link: '/docs/after-booking' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },
+            { label: 'Audit log', link: '/docs/audit-log' },
             { label: 'Interface languages', link: '/docs/interface-languages' },
           ],
         },

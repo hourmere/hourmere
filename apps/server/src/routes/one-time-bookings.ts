@@ -8,6 +8,7 @@ import {
 import { routeBodyLimit } from '../body-limit.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, rateLimit } from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import { Instant, SelectedDurationMinutes, Slot } from './bookings.ts'
 import {
   BOOKING_BODY_LIMIT,
@@ -145,15 +146,19 @@ export function oneTimeBookingRoutes({
       }),
       async (c) => {
         const body = c.req.valid('json')
-        const { replayed, ...result } = await createOneTimeBooking(ctx, {
-          token: c.req.valid('param').token,
-          start: Temporal.Instant.from(body.start),
-          durationMinutes: body.durationMinutes,
-          invitee: body.invitee,
-          guests: body.guests,
-          responses: body.responses,
-          idempotencyKey: c.req.valid('header')['idempotency-key'],
-        })
+        const { replayed, ...result } = await createOneTimeBooking(
+          ctx,
+          {
+            token: c.req.valid('param').token,
+            start: Temporal.Instant.from(body.start),
+            durationMinutes: body.durationMinutes,
+            invitee: body.invitee,
+            guests: body.guests,
+            responses: body.responses,
+            idempotencyKey: c.req.valid('header')['idempotency-key'],
+          },
+          publicBookingAuditOrigin(c),
+        )
         return replayed ? c.json(result, 200) : c.json(result, 201)
       },
     )

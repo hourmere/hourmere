@@ -3,6 +3,7 @@
 import { z } from '@hono/zod-openapi'
 import { retryBookingConference, retryConferenceMirror } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import {
   type BookingNotifier,
   type BookingOrigin,
@@ -249,6 +250,7 @@ export function bookingTools({
   })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
+    audit: auditActor(caller),
     apiKeyId: caller.kind === 'api_key' ? caller.apiKeyId : null,
     oauthConsentId: caller.kind === 'oauth' ? caller.oauthConsentId : null,
     actorUserId: caller.user.id,

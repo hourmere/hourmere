@@ -34,6 +34,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Audit events](/docs/audit-log) are recorded for management changes, but the
+  audit viewer, read APIs, export and retention controls are not available yet.
+
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.

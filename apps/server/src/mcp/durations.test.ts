@@ -5,6 +5,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { z } from '@hono/zod-openapi'
 import * as calendars from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as scheduling from '@hourmere/scheduling'
 import { createFixtures, type Fixtures, weekdays } from '@hourmere/scheduling/testing'
@@ -34,6 +35,7 @@ function sourceCopy(change?: Change): Factory {
     '',
   )
   const bindings = {
+    auditActor,
     z,
     ...calendars,
     ...scheduling,
