@@ -8,10 +8,11 @@ import {
   NodeConnectionTypes,
   NodeOperationError,
 } from 'n8n-workflow'
-import { HourmereApiError, hourmereRequest } from '../../shared/http'
+import { HourmereApiError, hourmereRequest, testHourmereCredential } from '../../shared/http'
 import { claimEvent, EVENTS, verifiedEvent } from './signature'
 
 function clearRegistration(data: IDataObject) {
+  claimEvent.clear(data)
   delete data.webhookId
   delete data.webhookSecret
   delete data.receipts
@@ -46,6 +47,15 @@ async function removeRegistration(context: IHookFunctions, data: IDataObject) {
   clearRegistration(data)
 }
 
+function normalizedWebhookUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  try {
+    return new URL(value).href
+  } catch {
+    return undefined
+  }
+}
+
 export class HourmereTrigger implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Hourmere Trigger',
@@ -58,7 +68,7 @@ export class HourmereTrigger implements INodeType {
     defaults: { name: 'Hourmere Trigger' },
     inputs: [],
     outputs: [NodeConnectionTypes.Main],
-    credentials: [{ name: 'hourmereApi', required: true }],
+    credentials: [{ name: 'hourmereApi', required: true, testedBy: 'testHourmereCredential' }],
     webhooks: [
       { name: 'default', httpMethod: 'POST', responseMode: 'onReceived', path: 'webhook' },
     ],
@@ -86,6 +96,8 @@ export class HourmereTrigger implements INodeType {
     ],
   }
 
+  methods = { credentialTest: { testHourmereCredential } }
+
   webhookMethods = {
     default: {
       async checkExists(this: IHookFunctions): Promise<boolean> {
@@ -103,7 +115,9 @@ export class HourmereTrigger implements INodeType {
         const events = this.getNodeParameter('events') as string[]
         return (
           found.isActive === true &&
-          found.url === this.getNodeWebhookUrl('default') &&
+          normalizedWebhookUrl(found.url) !== undefined &&
+          normalizedWebhookUrl(found.url) ===
+            normalizedWebhookUrl(this.getNodeWebhookUrl('default')) &&
           Array.isArray(found.events) &&
           found.events.length === events.length &&
           events.every((event) => (found.events as string[]).includes(event))
@@ -147,8 +161,18 @@ export class HourmereTrigger implements INodeType {
         return true
       },
       async delete(this: IHookFunctions): Promise<boolean> {
-        await removeRegistration(this, this.getWorkflowStaticData('node'))
-        return true
+        const data = this.getWorkflowStaticData('node')
+        claimEvent.clear(data)
+        try {
+          await removeRegistration(this, data)
+          return true
+        } catch {
+          // Preserve the endpoint identity for recovery; let n8n finish local deactivation.
+          this.logger.warn(
+            'Hourmere webhook deletion failed. Remove the endpoint in Hourmere webhook settings.',
+          )
+          return false
+        }
       },
     },
   }

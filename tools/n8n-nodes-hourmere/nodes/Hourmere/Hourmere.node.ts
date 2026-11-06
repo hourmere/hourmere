@@ -8,7 +8,7 @@ import {
   NodeConnectionTypes,
   NodeOperationError,
 } from 'n8n-workflow'
-import { hourmereRequest } from '../../shared/http'
+import { hourmereRequest, testHourmereCredential } from '../../shared/http'
 
 const field = (
   name: string,
@@ -45,7 +45,7 @@ export class Hourmere implements INodeType {
     defaults: { name: 'Hourmere' },
     inputs: [NodeConnectionTypes.Main],
     outputs: [NodeConnectionTypes.Main],
-    credentials: [{ name: 'hourmereApi', required: true }],
+    credentials: [{ name: 'hourmereApi', required: true, testedBy: 'testHourmereCredential' }],
     properties: [
       {
         displayName: 'Operation',
@@ -83,7 +83,8 @@ export class Hourmere implements INodeType {
       field('email', 'Invitee Email', ['createBooking']),
       {
         ...field('idempotencyKey', 'Idempotency Key', ['createBooking']),
-        description: 'Retain the same unique key and identical inputs when retrying this booking',
+        description:
+          'Generate a random key (such as UUIDv4) per booking attempt, never from request data; retain it with identical inputs for retries',
       },
       field('bookingId', 'Booking ID', ['getBooking', 'cancelBooking', 'rescheduleBooking']),
       field('reason', 'Cancellation Reason', ['cancelBooking'], false),
@@ -119,6 +120,25 @@ export class Hourmere implements INodeType {
             description: 'Array of name and email objects; used only for booking creation',
           },
         ],
+      },
+      {
+        displayName: 'Return All',
+        name: 'returnAll',
+        type: 'boolean',
+        default: false,
+        description: 'Whether to return all results or only up to a given limit',
+        displayOptions: { show: { operation: ['listEventTypes', 'listBookings'] } },
+      },
+      {
+        displayName: 'Limit',
+        name: 'limit',
+        type: 'number',
+        default: 50,
+        description: 'Max number of results to return',
+        typeOptions: { minValue: 1, maxValue: 100000 },
+        displayOptions: {
+          show: { operation: ['listEventTypes', 'listBookings'], returnAll: [false] },
+        },
       },
       {
         displayName: 'Filters',
@@ -162,18 +182,11 @@ export class Hourmere implements INodeType {
               { name: 'Descending', value: 'desc' },
             ],
           },
-          {
-            displayName: 'Limit',
-            description: 'Max number of results to return',
-            name: 'limit',
-            type: 'number',
-            default: 50,
-            typeOptions: { minValue: 1, maxValue: 100 },
-          },
         ],
       },
     ],
   }
+  methods = { credentialTest: { testHourmereCredential } }
   async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
     const output: INodeExecutionData[] = []
     for (let i = 0; i < this.getInputData().length; i++) {
@@ -187,17 +200,52 @@ export class Hourmere implements INodeType {
           extra.durationMinutes === undefined ? {} : { durationMinutes: extra.durationMinutes }
         const id = encodeURIComponent(text('bookingId'))
         let result: IDataObject
-        if (operation === 'listEventTypes')
-          result = await hourmereRequest.call(this, 'GET', '/event-types')
-        else if (operation === 'listBookings')
-          result = await hourmereRequest.call(
-            this,
-            'GET',
-            '/bookings',
-            undefined,
-            get('filters', {}) as IDataObject,
-          )
-        else if (operation === 'getBooking')
+        if (operation === 'listEventTypes' || operation === 'listBookings') {
+          const returnAll = Boolean(get('returnAll', false))
+          const filters = get('filters', {}) as IDataObject
+          const limit = Number(get('limit', filters.limit ?? 50))
+          if (!returnAll && (!Number.isInteger(limit) || limit < 1 || limit > 100000))
+            throw new NodeOperationError(
+              this.getNode(),
+              'Limit must be an integer between 1 and 100000',
+            )
+          const records: IDataObject[] = []
+          let cursor = filters.cursor
+          const seen = new Set<unknown>()
+          for (let page = 0; ; page++) {
+            if (page >= 1000 || (cursor && seen.has(cursor)))
+              throw new NodeOperationError(
+                this.getNode(),
+                'Hourmere pagination exceeded its safety limit; narrow the filters',
+              )
+            if (cursor) seen.add(cursor)
+            const response = await hourmereRequest.call(
+              this,
+              'GET',
+              operation === 'listBookings' ? '/bookings' : '/event-types',
+              undefined,
+              operation === 'listBookings'
+                ? {
+                    ...filters,
+                    cursor,
+                    limit: returnAll ? 100 : Math.min(100, limit - records.length),
+                  }
+                : undefined,
+            )
+            const data = response.data as IDataObject[]
+            records.push(...(returnAll ? data : data.slice(0, limit - records.length)))
+            cursor = response.nextCursor
+            if (
+              operation === 'listEventTypes' ||
+              !cursor ||
+              (!returnAll && records.length >= limit)
+            )
+              break
+          }
+          output.push(...records.map((json) => ({ json, pairedItem: { item: i } })))
+          continue
+        }
+        if (operation === 'getBooking')
           result = await hourmereRequest.call(this, 'GET', `/bookings/${id}`)
         else if (operation === 'cancelBooking')
           result = await hourmereRequest.call(this, 'POST', `/bookings/${id}/cancel`, {

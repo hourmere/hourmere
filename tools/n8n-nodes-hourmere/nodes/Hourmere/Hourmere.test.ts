@@ -1,8 +1,7 @@
-import { runInNewContext } from 'node:vm'
-import type { IExecuteFunctions } from 'n8n-workflow'
+import type { ICredentialTestFunctions, IExecuteFunctions } from 'n8n-workflow'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HourmereApi } from '../../credentials/HourmereApi.credentials'
-import { baseUrl, hourmereRequest } from '../../shared/http'
+import { baseUrl, hourmereRequest, testHourmereCredential } from '../../shared/http'
 import { Hourmere } from './Hourmere.node'
 
 function fixture(params: Record<string, unknown> = {}, response: unknown = { id: 'result' }) {
@@ -61,7 +60,12 @@ describe('Hourmere actions', () => {
       },
     ],
   ])('%s maps the existing REST operation', async (operation, method, path, params) => {
-    const f = fixture({ operation, ...params })
+    const f = fixture(
+      { operation, ...params },
+      operation.startsWith('list')
+        ? { data: [{ id: 'result' }], nextCursor: null }
+        : { id: 'result' },
+    )
     const result = await f.execute()
     expect(f.http).toHaveBeenCalledWith(
       'hourmereApi',
@@ -81,6 +85,84 @@ describe('Hourmere actions', () => {
         durationMinutes: 60,
       })
   })
+  it('returns all booking pages as paired items and preserves filters', async () => {
+    const f = fixture({
+      operation: 'listBookings',
+      returnAll: true,
+      filters: { status: 'confirmed' },
+    })
+    f.http
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        body: { data: [{ id: 'one' }], nextCursor: 'next' },
+      })
+      .mockResolvedValueOnce({ statusCode: 200, body: { data: [{ id: 'two' }], nextCursor: null } })
+    expect(await f.execute()).toEqual([
+      [
+        { json: { id: 'one' }, pairedItem: { item: 0 } },
+        { json: { id: 'two' }, pairedItem: { item: 0 } },
+      ],
+    ])
+    expect(f.http.mock.calls[1]![1].qs).toEqual({ status: 'confirmed', limit: 100, cursor: 'next' })
+  })
+  it('limits across booking pages and stops requesting at the limit', async () => {
+    const f = fixture({ operation: 'listBookings', returnAll: false, limit: 101 })
+    f.http
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        body: { data: Array.from({ length: 100 }, (_, id) => ({ id })), nextCursor: 'next' },
+      })
+      .mockResolvedValueOnce({ statusCode: 200, body: { data: [{ id: 100 }], nextCursor: 'more' } })
+    expect((await f.execute())[0]).toHaveLength(101)
+    expect(f.http).toHaveBeenCalledTimes(2)
+    expect(f.http.mock.calls[1]![1].qs).toEqual({ limit: 1, cursor: 'next' })
+  })
+  it('limits event types and emits empty lists without placeholder items', async () => {
+    const f = fixture(
+      { operation: 'listEventTypes', limit: 1 },
+      { data: [{ id: 'one' }, { id: 'two' }] },
+    )
+    expect((await f.execute())[0]).toEqual([{ json: { id: 'one' }, pairedItem: { item: 0 } }])
+    expect(
+      await fixture({ operation: 'listBookings' }, { data: [], nextCursor: null }).execute(),
+    ).toEqual([[]])
+  })
+  it('preserves source pairing for multiple input items', async () => {
+    const f = fixture(
+      { operation: 'listEventTypes', returnAll: true },
+      { data: [{ id: 'one' }, { id: 'two' }] },
+    )
+    f.context.getInputData = () => [{ json: {} }, { json: {} }]
+    expect((await f.execute())[0]?.map((item) => item.pairedItem)).toEqual([
+      { item: 0 },
+      { item: 0 },
+      { item: 1 },
+      { item: 1 },
+    ])
+  })
+  it('rejects repeated cursors and bounds unique cursor pages', async () => {
+    const f = fixture(
+      { operation: 'listBookings', returnAll: true },
+      { data: [], nextCursor: 'same' },
+    )
+    await expect(f.execute()).rejects.toThrow('pagination exceeded')
+    expect(f.http).toHaveBeenCalledTimes(2)
+    let cursor = 0
+    f.http.mockClear().mockImplementation(async () => ({
+      statusCode: 200,
+      body: { data: [], nextCursor: String(++cursor) },
+    }))
+    await expect(f.execute()).rejects.toThrow('pagination exceeded')
+    expect(f.http).toHaveBeenCalledTimes(1000)
+  })
+  it.each([0, -1, 1.5, 100001])(
+    'rejects invalid list limit %s before network activity',
+    async (limit) => {
+      const f = fixture({ operation: 'listBookings', limit })
+      await expect(f.execute()).rejects.toThrow('Limit must')
+      expect(f.http).not.toHaveBeenCalled()
+    },
+  )
   it.each(['personal', 'team'])(
     'creates %s bookings with retained idempotency key and answers',
     async (pageType) => {
@@ -164,35 +246,73 @@ describe('HTTP protections and credentials', () => {
     const c = new HourmereApi()
     expect(c.properties.find((p) => p.name === 'apiKey')?.typeOptions?.password).toBe(true)
     expect(c.authenticate.properties.headers?.Authorization).toBe('=Bearer {{$credentials.apiKey}}')
-    expect(c.test.request).toMatchObject({ method: 'GET', url: '/api/v1/profile' })
-    const http = vi.fn().mockResolvedValue({ id: 'profile' })
-    for (const baseUrl of ['https://hourmere.example', 'https://hourmere.example/']) {
-      const expression = String(c.test.request.baseURL).slice(3, -2)
-      const origin = runInNewContext(expression, { $credentials: { baseUrl } })
-      await http({
-        ...c.test.request,
-        baseURL: origin,
-        headers: { Authorization: 'Bearer test-private-key' },
-      })
-      expect(http).toHaveBeenLastCalledWith(
+    expect(new Hourmere().description.credentials?.[0]?.testedBy).toBe('testHourmereCredential')
+    expect(new Hourmere().methods.credentialTest.testHourmereCredential).toBe(
+      testHourmereCredential,
+    )
+    const request = vi.fn().mockResolvedValue({ statusCode: 200 })
+    const context = { helpers: { request } } as unknown as ICredentialTestFunctions
+    for (const url of ['https://hourmere.example', 'https://hourmere.example/']) {
+      await expect(
+        testHourmereCredential.call(context, {
+          id: 'test',
+          name: 'test',
+          data: { baseUrl: url, apiKey: 'test-private-key' },
+        }),
+      ).resolves.toMatchObject({ status: 'OK' })
+      expect(request).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          baseURL: 'https://hourmere.example',
-          url: '/api/v1/profile',
+          uri: 'https://hourmere.example/api/v1/profile',
           method: 'GET',
-          disableFollowRedirect: true,
-          skipSslCertificateValidation: false,
+          followRedirect: false,
+          followAllRedirects: false,
+          rejectUnauthorized: true,
           headers: { Authorization: 'Bearer test-private-key' },
         }),
       )
     }
+    request.mockResolvedValue({ statusCode: 302 })
+    await expect(
+      testHourmereCredential.call(context, {
+        id: 'test',
+        name: 'test',
+        data: { baseUrl: 'https://hourmere.example' },
+      }),
+    ).resolves.toMatchObject({ status: 'Error' })
   })
-  it('rejects credential-bearing and non-HTTP base URLs', () => {
-    for (const url of [
-      'file:///private',
-      'https://user:pass@example.test',
-      'https://example.test?key=private',
-    ])
+  it.each([
+    'file:///private',
+    'https://user:pass@example.test',
+    'https://example.test?key=private',
+    'https://example.test/#fragment',
+    'http://example.test',
+    'http://localhost.example.test',
+    'http://192.168.1.1',
+  ])(
+    'rejects unsafe base URL %s in execution and credential test before network activity',
+    async (url) => {
       expect(() => baseUrl(url)).toThrow()
+      const f = fixture({ operation: 'getBooking' })
+      vi.mocked(f.context.getCredentials).mockResolvedValue({ baseUrl: url })
+      await expect(f.execute()).rejects.toThrow()
+      expect(f.http).not.toHaveBeenCalled()
+      const request = vi.fn()
+      await expect(
+        testHourmereCredential.call(
+          { helpers: { request } } as unknown as ICredentialTestFunctions,
+          { id: 'test', name: 'test', data: { baseUrl: url } },
+        ),
+      ).resolves.toMatchObject({ status: 'Error' })
+      expect(request).not.toHaveBeenCalled()
+    },
+  )
+  it.each([
+    'http://localhost:4000',
+    'http://127.0.0.1:4000',
+    'http://[::1]:4000',
+    'https://example.test',
+  ])('allows safe base URL %s', (url) => {
+    expect(baseUrl(url)).toBe(url)
   })
   it('redacts driver details and arbitrary server bodies while retaining API codes', async () => {
     const f = fixture()

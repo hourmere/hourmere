@@ -1,4 +1,5 @@
 import {
+  type ICredentialTestFunction,
   type IDataObject,
   type IExecuteFunctions,
   type IHookFunctions,
@@ -13,13 +14,16 @@ type Context = IExecuteFunctions | IHookFunctions | IWebhookFunctions
 export function baseUrl(value: unknown): string {
   const url = new URL(String(value))
   if (
-    !['https:', 'http:'].includes(url.protocol) ||
+    (url.protocol !== 'https:' &&
+      !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) ||
     url.username ||
     url.password ||
     url.search ||
     url.hash
   ) {
-    throw new Error('Enter an HTTP(S) base URL without credentials, query, or fragment')
+    throw new Error(
+      'Enter an HTTPS base URL without credentials, query, or fragment (HTTP is allowed only for loopback)',
+    )
   }
   return url.href.replace(/\/$/, '')
 }
@@ -94,5 +98,39 @@ export async function hourmereRequest(
       `Hourmere API ${response.statusCode} (${code}).${retry}`,
       response.statusCode,
     )
+  }
+}
+
+export const testHourmereCredential: ICredentialTestFunction = async function (credential) {
+  let origin: string
+  try {
+    origin = baseUrl(credential.data?.baseUrl)
+  } catch {
+    return {
+      status: 'Error',
+      message:
+        'Enter a valid HTTPS base URL; HTTP is allowed only for localhost, 127.0.0.1 or [::1].',
+    }
+  }
+  try {
+    // The pinned n8n ICredentialTestFunctions exposes request, not httpRequest.
+    // eslint-disable-next-line @n8n/community-nodes/no-deprecated-workflow-functions
+    const response = await this.helpers.request({
+      method: 'GET',
+      uri: `${origin}/api/v1/profile`,
+      headers: { Authorization: `Bearer ${credential.data?.apiKey}` },
+      json: true,
+      followRedirect: false,
+      followAllRedirects: false,
+      rejectUnauthorized: true,
+      resolveWithFullResponse: true,
+    })
+    if (response.statusCode < 200 || response.statusCode >= 300) throw new Error('Request failed')
+    return { status: 'OK', message: 'Connection successful' }
+  } catch {
+    return {
+      status: 'Error',
+      message: 'Hourmere credential test failed. Check the API key, base URL and connectivity.',
+    }
   }
 }

@@ -26,7 +26,8 @@
     "lint": "n8n-node lint",
     "typecheck": "tsc --noEmit",
     "test:contract": "vitest run --root ../.. tools/n8n-nodes-hourmere/contract.test.ts --maxWorkers=2 --no-fsModuleCache",
-    "pack:smoke": "node scripts/pack-smoke.mjs"
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepublishOnly": "node -e \"if (process.env.HOURMERE_N8N_PUBLISH !== '1') { console.error('Publishing requires separate approval and HOURMERE_N8N_PUBLISH=1'); process.exit(1); }\""
   },
   "n8n": {
     "n8nNodesApiVersion": 1,
@@ -40,7 +41,7 @@
     ]
   },
   "peerDependencies": {
-    "n8n-workflow": "2.45.1"
+    "n8n-workflow": "*"
   },
   "devDependencies": {
     "@n8n/node-cli": "0.54.2",

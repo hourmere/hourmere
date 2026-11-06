@@ -9,6 +9,7 @@ import {
   MAX_RECEIPT_SCOPES,
   MAX_RECEIPTS,
   RECEIPT_RETENTION_MS,
+  TIMESTAMP_TOLERANCE_SECONDS,
   verifiedEvent,
 } from './signature'
 
@@ -44,11 +45,13 @@ function hook(data: IDataObject = {}) {
   return {
     data,
     request,
+    http,
     context: {
       getWorkflowStaticData: () => data,
       getNodeParameter: () => ['booking.created'],
       getNodeWebhookUrl: () => 'https://automation.example.com/webhook/unique',
       getNode: () => ({ name: 'Hourmere Trigger' }),
+      logger: { warn: vi.fn() },
       getCredentials: async () => ({
         baseUrl: 'https://hourmere.example.com',
         apiKey: 'synthetic-unit-test-key',
@@ -181,6 +184,67 @@ describe('Hourmere trigger lifecycle', () => {
     expect(await node.webhookMethods.default.checkExists.call(h.context)).toBe(false)
     expect(h.data).toEqual({})
   })
+  it('reuses normalized callback URLs without rotating the registration', async () => {
+    const h = hook({ webhookId, webhookSecret: secret })
+    h.context.getNodeWebhookUrl = () => 'https://AUTOMATION.example.com:443/webhook/unique'
+    h.request.mockResolvedValue([
+      {
+        id: webhookId,
+        url: 'https://automation.example.com/webhook/unique',
+        isActive: true,
+        events: ['booking.created'],
+      },
+    ])
+    expect(await node.webhookMethods.default.checkExists.call(h.context)).toBe(true)
+    expect(h.data).toEqual({ webhookId, webhookSecret: secret })
+  })
+  it.each([false, true])(
+    'clears only the deactivated receipt scope even if unreachable: %s',
+    async (unreachable) => {
+      const registration = { webhookId: randomUUID(), webhookSecret: secret }
+      const other = { webhookId: randomUUID(), webhookSecret: secret }
+      const h = hook({ ...registration })
+      expect(claimEvent(h.data, id)).toBe('new')
+      expect(claimEvent({ ...other }, id)).toBe('new')
+      if (unreachable) h.request.mockRejectedValue(new Error('unreachable'))
+      else h.request.mockResolvedValue(undefined)
+      expect(await node.webhookMethods.default.delete.call(h.context)).toBe(!unreachable)
+      expect(h.data.receipts).toBeUndefined()
+      expect(claimEvent({ ...registration }, id)).toBe('new')
+      expect(claimEvent({ ...other }, id)).toBe('duplicate')
+      if (unreachable) expect(h.data).toEqual(registration)
+    },
+  )
+  it.each(['replace', 'missing', 'already deleted'])(
+    'clears stale registration receipts on %s',
+    async (operation) => {
+      const registration = { webhookId: randomUUID(), webhookSecret: secret }
+      const h = hook({ ...registration })
+      expect(claimEvent(h.data, id)).toBe('new')
+      if (operation === 'replace') {
+        h.request
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce({ webhook: { id: randomUUID() }, secret })
+        expect(await node.webhookMethods.default.create.call(h.context)).toBe(true)
+      } else if (operation === 'missing') {
+        h.request.mockResolvedValue([])
+        expect(await node.webhookMethods.default.checkExists.call(h.context)).toBe(false)
+        expect(h.data).toEqual({})
+      } else {
+        h.http.mockResolvedValue({ statusCode: 404, headers: {}, body: { error: 'not_found' } })
+        expect(await node.webhookMethods.default.delete.call(h.context)).toBe(true)
+        expect(h.data).toEqual({})
+      }
+      expect(claimEvent({ ...registration }, id)).toBe('new')
+    },
+  )
+  it('refuses replacement when remote cleanup fails', async () => {
+    const h = hook({ webhookId, webhookSecret: secret })
+    h.request.mockRejectedValue(new Error('unreachable'))
+    await expect(node.webhookMethods.default.create.call(h.context)).rejects.toThrow()
+    expect(h.request).toHaveBeenCalledOnce()
+    expect(h.data).toEqual({ webhookId, webhookSecret: secret })
+  })
   it('deletes on deactivation and clears private static data only after success', async () => {
     const h = hook({ webhookId, webhookSecret: secret, receipts: { [id]: Date.now() } })
     h.request.mockResolvedValue(undefined)
@@ -197,8 +261,11 @@ describe('Hourmere trigger lifecycle', () => {
   it('preserves registration when deletion fails', async () => {
     const h = hook({ webhookId, webhookSecret: secret })
     h.request.mockRejectedValue({ statusCode: 403, message: 'forbidden' })
-    await expect(node.webhookMethods.default.delete.call(h.context)).rejects.toThrow()
+    expect(await node.webhookMethods.default.delete.call(h.context)).toBe(false)
     expect(h.data.webhookId).toBe(webhookId)
+    expect(h.context.logger.warn).toHaveBeenCalledWith(
+      'Hourmere webhook deletion failed. Remove the endpoint in Hourmere webhook settings.',
+    )
   })
   it('replaces mismatched registration without leaving the old endpoint', async () => {
     const h = hook({ webhookId, webhookSecret: secret })
@@ -259,7 +326,7 @@ describe('Hourmere trigger delivery and replay', () => {
     d.request.headers['webhook-signature'] = valid
     expect((await node.webhook.call(d.context)).workflowData).toBeDefined()
   })
-  it('prunes expired receipts but never evicts unexpired receipts at capacity', async () => {
+  it('evicts receipts outside the replay window but retains recent receipts at capacity', async () => {
     const receipts = Object.fromEntries(
       Array.from({ length: MAX_RECEIPTS }, (_, index) => [String(index), Date.now()]),
     )
@@ -267,7 +334,7 @@ describe('Hourmere trigger delivery and replay', () => {
     expect(await node.webhook.call(d.context)).toEqual({ noWebhookResponse: true })
     expect(d.response.status).toHaveBeenCalledWith(503)
     expect(Object.keys(receipts)).toHaveLength(MAX_RECEIPTS)
-    receipts['0'] = Date.now() - RECEIPT_RETENTION_MS
+    receipts['0'] = Date.now() - RECEIPT_RETENTION_MS - 1
     const pruned = delivery({ webhookId: randomUUID(), webhookSecret: secret, receipts })
     expect((await node.webhook.call(pruned.context)).workflowData).toBeDefined()
     expect(Object.keys(pruned.data.receipts as IDataObject)).toHaveLength(MAX_RECEIPTS)
@@ -314,9 +381,48 @@ describe('Process receipt coordination for n8n request snapshots', () => {
     expect(claim({ ...initial, receipts: { [id]: now } }, id, now)).toBe('duplicate')
     expect(claim({ ...initial, webhookId: id }, id, now)).toBe('new')
     expect(claim({ ...initial, webhookSecret: 'rotated-test-key' }, id, now)).toBe('new')
-    expect(claim({ ...initial }, id, now + RECEIPT_RETENTION_MS)).toBe('new')
+    expect(claim({ ...initial }, id, now + RECEIPT_RETENTION_MS + 1)).toBe('new')
   })
 
+  it('retains replay protection through the entire inclusive future-signature window', () => {
+    const claim = createReceiptCoordinator()
+    const now = 1_800_000_000_000
+    const initial = { webhookId, webhookSecret: secret }
+    const time = String(now / 1000 + TIMESTAMP_TOLERANCE_SECONDS)
+    const raw = Buffer.from(JSON.stringify(payload()))
+    const replayWindow = 2 * TIMESTAMP_TOLERANCE_SECONDS * 1000
+    expect(verifiedEvent(raw, time, sign(raw, time), secret, now)).toBeDefined()
+    expect(claim({ ...initial }, id, now)).toBe('new')
+    expect(verifiedEvent(raw, time, sign(raw, time), secret, now + replayWindow)).toBeDefined()
+    expect(claim({ ...initial }, id, now + replayWindow)).toBe('duplicate')
+    expect(claim({ ...initial }, id, now + replayWindow + 1)).toBe('new')
+  })
+  it('reclaims old process capacity for other triggers without evicting recent claims', () => {
+    const claim = createReceiptCoordinator()
+    const now = Date.now()
+    const snapshot = Object.fromEntries(
+      Array.from({ length: MAX_RECEIPTS }, (_, i) => [String(i), now]),
+    )
+    for (let i = 0; i < MAX_PROCESS_RECEIPTS / MAX_RECEIPTS; i++) {
+      expect(
+        claim({ webhookId: String(i), webhookSecret: secret, receipts: snapshot }, '0', now),
+      ).toBe('duplicate')
+    }
+    const later = now + RECEIPT_RETENTION_MS + 1
+    expect(claim({ webhookId: 'new-trigger', webhookSecret: secret }, id, later)).toBe('new')
+    expect(claim({ webhookId: 'another-trigger', webhookSecret: secret }, id, later)).toBe('new')
+    expect(claim({ webhookId: 'new-trigger', webhookSecret: secret }, id, later)).toBe('duplicate')
+  })
+  it('releases scope capacity on explicit cleanup', () => {
+    const claim = createReceiptCoordinator()
+    const now = Date.now()
+    for (let i = 0; i < MAX_RECEIPT_SCOPES; i++) {
+      expect(claim({ webhookId: String(i), webhookSecret: secret }, id, now)).toBe('new')
+    }
+    claim.clear({ webhookId: '0', webhookSecret: secret })
+    expect(claim({ webhookId: 'new-trigger', webhookSecret: secret }, id, now)).toBe('new')
+    expect(claim({ webhookId: '1', webhookSecret: secret }, id, now)).toBe('duplicate')
+  })
   it('fails closed at the process receipt limit without evicting existing claims', () => {
     const claim = createReceiptCoordinator()
     const now = Date.now()
@@ -341,7 +447,7 @@ describe('Process receipt coordination for n8n request snapshots', () => {
     expect(claim({ webhookId: 'overflow', webhookSecret: secret }, id, now)).toBe('full')
     expect(claim({ webhookId: '0', webhookSecret: secret }, id, now)).toBe('duplicate')
     expect(
-      claim({ webhookId: 'overflow', webhookSecret: secret }, id, now + RECEIPT_RETENTION_MS),
+      claim({ webhookId: 'overflow', webhookSecret: secret }, id, now + RECEIPT_RETENTION_MS + 1),
     ).toBe('new')
   })
 })

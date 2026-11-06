@@ -25,8 +25,6 @@ export default [
     rules: {
       // This repository's code is AGPL-3.0-only; publishing cannot relicense it to MIT.
       'n8n-nodes-base/community-package-json-license-not-default': 'off',
-      // The integration brief requires an exact, aged workflow peer and dev release.
-      '@n8n/community-nodes/valid-peer-dependencies': 'off',
     },
   },
 ]

@@ -57,7 +57,7 @@ try {
   )
   const installed = join(hostModules, 'n8n-nodes-hourmere')
   const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
-  assert.equal(manifest.peerDependencies['n8n-workflow'], '2.45.1')
+  assert.equal(manifest.peerDependencies['n8n-workflow'], '*')
   const script = `
     const assert = require('node:assert/strict');
     const fs = require('node:fs');

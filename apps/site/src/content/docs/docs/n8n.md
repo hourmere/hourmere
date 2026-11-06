@@ -17,7 +17,7 @@ an Hourmere instance you already have access to, not the marketing website.
 From an Hourmere source checkout, using the repository's required Node.js version:
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run build --workspace n8n-nodes-hourmere
 npm pack --workspace n8n-nodes-hourmere --pack-destination /tmp
 ```
@@ -48,7 +48,8 @@ Create an API key in Hourmere at **API keys** (`/app/api-keys`) in the intended 
 or team space. In n8n, create an **Hourmere API** credential with:
 
 - **Base URL:** your instance origin, for example `https://hourmere.example.com`, without
-  `/api/v1`. Use HTTPS outside a trusted local network.
+  `/api/v1`. HTTPS is required except for `localhost`, `127.0.0.1` and `[::1]`.
+  Actions, triggers and the credential test share the same URL validation.
 - **API Key:** the key shown once by Hourmere. This is an n8n password field, sent as a
   Bearer credential. Keep it out of workflow expressions, examples and logs.
 
@@ -71,8 +72,12 @@ See [API key scopes](/docs/api-keys).
 
 The **Hourmere** node can list event types, find available slots, create a booking, get a
 booking, cancel it, reschedule it and list bookings with filters. Use IDs returned by
-Hourmere instead of display titles. Lists are bounded; use the exposed pagination fields
-when following later pages.
+Hourmere instead of display titles. List operations emit one n8n item per result, linked
+to the input item. Enable **Return All** to follow booking pagination automatically, or
+disable it and set **Limit**. Booking pagination stops with an error after 1,000 pages
+or a repeated cursor;
+narrow the filters if this limit is reached. Event types are fetched as one server list
+and split into items.
 
 For availability, enter the personal handle or team slug, event type slug and a bounded `start`/`end` range. Supply instants
 with an explicit UTC offset and an IANA time zone such as `America/Los_Angeles`. Keep the
@@ -80,12 +85,18 @@ returned slot instant when booking: a local wall-clock time can be repeated or a
 a daylight-saving transition. Availability does not reserve a slot; a concurrent booking
 can take it before your create request.
 
-For create, retain one idempotency key per intended operation. Reuse that
+For create, generate and retain one random idempotency key (for example UUIDv4) per
+intended booking attempt. Never derive it from request data such as email and start time. Reuse that
 key and the same input after a timeout or retry; use a new key for a different operation.
 Do not generate a new key on each retry. Rescheduling returns a successor booking ID;
 use that ID for later host actions. Reschedule has no node-level idempotency key; after an
 ambiguous response, read the booking state before deciding to retry. Cancellation and rescheduling use Hourmere's existing
 authorization and lifecycle rules.
+
+Create booking returns `manageToken`, a private capability for managing the booking.
+n8n stores this output in execution history. Restrict execution-data access and retention,
+or drop the field before retaining or forwarding results. Dropping it in a later node does not erase the create node’s
+saved output; restrict or disable execution-data storage as appropriate.
 
 API errors include the HTTP status and Hourmere error code, such as `insufficient_scope`
 or `slot_unavailable`. On HTTP 429, the node waits once for a valid `Retry-After` of up to
@@ -103,7 +114,11 @@ HTTPS; private self-hosted destinations need the operator's explicit
 
 Add **Hourmere Trigger**, select its credential and one or more events, then activate the
 workflow. The node registers its callback and stores the returned webhook ID and signing
-secret in workflow static data. Deactivation deletes that endpoint. Each active trigger
+secret in workflow static data. Deactivation attempts to delete that endpoint. If Hourmere
+is unreachable, it returns false and keeps the registration details for recovery. Remove
+a leftover endpoint in Hourmere’s webhook settings or through `DELETE /api/v1/webhooks/{id}`;
+it still occupies a webhook slot until removed. Reactivation can reuse or replace the
+retained registration once Hourmere is reachable. Each active trigger
 uses one of Hourmere's ten webhook endpoints per organization. Supported events are:
 
 - `booking.created`
@@ -117,10 +132,13 @@ Hourmere refreshes the timestamp and signature when retrying an old event, so ev
 alone does not cause rejection.
 
 The node suppresses redeliveries using the **signed payload's event ID**, retaining receipts
-for thirty days. A process-level coordinator merges separate request snapshots to suppress
+for ten minutes (twice the signature timestamp tolerance). A process-level coordinator
+merges separate request snapshots to suppress
 concurrent redelivery within one n8n process. Limits are 10,000 receipts per registration,
-100,000 receipts and 1,000 registrations per process; reaching a limit returns 503 instead
-of forgetting unexpired receipts. These safeguards are best-effort: n8n workflow static
+100,000 receipts and 1,000 registrations per process. Receipts older than the window
+are evicted; only a flood of receipts still within that window returns 503. Deletion
+or deactivation clears the registration’s local receipt scope. Late redeliveries can
+therefore execute again. These safeguards are best-effort: n8n workflow static
 data is not a transactional receipt store across workers, process crashes or restarts.
 For durable effects, make the downstream operation idempotent using the event `id` in a
 persistent store with a unique constraint. Do not assume exactly-once workflow execution.
@@ -144,12 +162,13 @@ reschedule, link the successor to `data.rescheduledFromId`. Reconcile the latest
 state before applying an older event.
 
 **Book from a request:** use a `bookings` credential to list event types, find a slot and
-create a booking with the request's retained idempotency key and invitee data. Store the
+create a booking with invitee data and a random key generated once for that attempt.
+Retain the key for retries. Store the
 returned booking ID. If the slot was taken, fetch availability again and ask for another
 time instead of blindly retrying the same occupied slot.
 
 **Daily report:** use a separate `read` credential with a Schedule Trigger and Hourmere's
-list-bookings operation. Set date/status filters and follow pagination. Limit who can
+list-bookings operation. Set date/status filters and enable **Return All**. Limit who can
 view execution history because booking responses can contain attendee details.
 
 ## Development and limitations
@@ -164,6 +183,13 @@ The package is not yet published to npm or verified for n8n Cloud. It covers boo
 workflows, not all Hourmere configuration endpoints. There is no historical-event backfill,
 manual replay or exactly-once delivery guarantee. Protect and retain downstream receipts
 when effects must survive retries, concurrent workers or restarts.
+
+Publishing remains a separate owner-approved step. `prepublishOnly` refuses to publish
+unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; packing does not publish. The workflow
+peer range is `*`, with an exact development pin for builds/tests. Contributors must
+install with `npm install --ignore-scripts` or `npm ci --ignore-scripts`, as CI and Docker
+do. The official CLI requires a lint plugin whose preinstall fetches an unpinned
+`only-allow`; the toolchain’s native install scripts are also unnecessary here.
 
 ### Interface language
 

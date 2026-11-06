@@ -19,10 +19,16 @@ for the development database.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up          # Postgres 18 on localhost:5432 (docker-compose.dev.yml)
 npm run dev            # API on :3000, web app on http://localhost:5173
 ```
+
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The official n8n development CLI requires `eslint-plugin-n8n-nodes-base`, whose
+preinstall would otherwise fetch and execute an unpinned `only-allow` package.
+The n8n toolchain also includes native dependency install scripts; none is needed
+for the Hourmere community node build or tests.
 
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.

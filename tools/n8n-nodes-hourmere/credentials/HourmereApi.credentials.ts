@@ -1,10 +1,4 @@
-import type {
-  IAuthenticateGeneric,
-  ICredentialTestRequest,
-  ICredentialType,
-  Icon,
-  INodeProperties,
-} from 'n8n-workflow'
+import type { IAuthenticateGeneric, ICredentialType, Icon, INodeProperties } from 'n8n-workflow'
 
 export class HourmereApi implements ICredentialType {
   icon: Icon = {
@@ -22,7 +16,8 @@ export class HourmereApi implements ICredentialType {
       default: '',
       required: true,
       placeholder: 'https://hourmere.example.com',
-      description: 'Your Hourmere instance URL, without /api/v1',
+      description:
+        'Your Hourmere HTTPS instance URL, without /api/v1; HTTP is allowed only for localhost, 127.0.0.1 or [::1]',
     },
     {
       displayName: 'API Key',
@@ -37,15 +32,5 @@ export class HourmereApi implements ICredentialType {
   authenticate: IAuthenticateGeneric = {
     type: 'generic',
     properties: { headers: { Authorization: '=Bearer {{$credentials.apiKey}}' } },
-  }
-  test: ICredentialTestRequest = {
-    request: {
-      baseURL:
-        '={{$credentials.baseUrl.endsWith("/") ? $credentials.baseUrl.slice(0, -1) : $credentials.baseUrl}}',
-      url: '/api/v1/profile',
-      method: 'GET',
-      skipSslCertificateValidation: false,
-      disableFollowRedirect: true,
-    },
   }
 }

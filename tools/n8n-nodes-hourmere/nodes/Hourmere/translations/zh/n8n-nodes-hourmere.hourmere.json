@@ -62,7 +62,7 @@
     },
     "idempotencyKey": {
       "displayName": "幂等键",
-      "description": "重试同一预约时，保留相同的唯一键和完全相同的输入。"
+      "description": "每次预约尝试生成随机键（如 UUIDv4），不要从请求数据推导；重试时保留同一个键和相同输入"
     },
     "bookingId": {
       "displayName": "预约 ID"
@@ -133,6 +133,14 @@
           "description": "最多返回的结果条数。"
         }
       }
+    },
+    "returnAll": {
+      "displayName": "返回全部",
+      "description": "是否返回全部结果（最多 1,000 页预约）"
+    },
+    "limit": {
+      "displayName": "数量上限",
+      "description": "最多返回的结果数量"
     }
   }
 }

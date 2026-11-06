@@ -3,7 +3,7 @@ import type { IDataObject } from 'n8n-workflow'
 
 export const EVENTS = ['booking.created', 'booking.cancelled', 'booking.rescheduled'] as const
 export const TIMESTAMP_TOLERANCE_SECONDS = 300
-export const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+export const RECEIPT_RETENTION_MS = 2 * TIMESTAMP_TOLERANCE_SECONDS * 1000
 export const MAX_RECEIPTS = 10_000
 
 /** Authenticate bytes before parsing; never trust the unsigned delivery/event ID headers. */
@@ -49,25 +49,25 @@ export function verifiedEvent(
 export const MAX_PROCESS_RECEIPTS = 100_000
 export const MAX_RECEIPT_SCOPES = 1_000
 
+function receiptScope(data: IDataObject) {
+  return createHash('sha256')
+    .update(JSON.stringify([data.webhookId, data.webhookSecret]))
+    .digest('hex')
+}
+
 /** n8n creates distinct Workflow/static-data snapshots per delivery. Coordinate claims across
  * those snapshots synchronously in this process, then merge receipts back for persistence.
  * This is not a cross-worker transaction; consumers must also deduplicate durable effects.
  */
 export function createReceiptCoordinator() {
   const scopes = new Map<string, Map<string, number>>()
-  return function claim(
-    data: IDataObject,
-    id: string,
-    now = Date.now(),
-  ): 'new' | 'duplicate' | 'full' {
+  function claim(data: IDataObject, id: string, now = Date.now()): 'new' | 'duplicate' | 'full' {
     if (typeof data.webhookId !== 'string' || typeof data.webhookSecret !== 'string') return 'full'
-    const scope = createHash('sha256')
-      .update(JSON.stringify([data.webhookId, data.webhookSecret]))
-      .digest('hex')
+    const scope = receiptScope(data)
     let total = 0
     for (const [key, receipts] of scopes) {
       for (const [eventId, receivedAt] of receipts) {
-        if (receivedAt <= now - RECEIPT_RETENTION_MS) receipts.delete(eventId)
+        if (receivedAt < now - RECEIPT_RETENTION_MS) receipts.delete(eventId)
       }
       if (!receipts.size) scopes.delete(key)
       total += receipts.size
@@ -81,7 +81,7 @@ export function createReceiptCoordinator() {
     // Merge older snapshots without letting them overwrite newer receipt times or erase claims.
     const snapshot = (data.receipts ?? {}) as Record<string, number>
     for (const [eventId, receivedAt] of Object.entries(snapshot)) {
-      if (!Number.isFinite(receivedAt) || receivedAt <= now - RECEIPT_RETENTION_MS) continue
+      if (!Number.isFinite(receivedAt) || receivedAt < now - RECEIPT_RETENTION_MS) continue
       const prior = receipts.get(eventId)
       if (prior !== undefined) {
         receipts.set(eventId, Math.max(prior, Math.min(receivedAt, now)))
@@ -93,12 +93,18 @@ export function createReceiptCoordinator() {
     }
     data.receipts = Object.fromEntries(receipts)
     if (receipts.has(id)) return 'duplicate'
-    // Never evict unexpired receipts and thereby silently re-enable authenticated replay.
+    // Only a flood inside the signature window may exhaust capacity; older claims were pruned.
     if (receipts.size >= MAX_RECEIPTS || total >= MAX_PROCESS_RECEIPTS) return 'full'
     receipts.set(id, now)
     data.receipts = Object.fromEntries(receipts)
     return 'new'
   }
+  return Object.assign(claim, {
+    clear(data: IDataObject) {
+      scopes.delete(receiptScope(data))
+      delete data.receipts
+    },
+  })
 }
 
 export const claimEvent = createReceiptCoordinator()
