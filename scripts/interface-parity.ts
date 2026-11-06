@@ -90,7 +90,11 @@ export async function loadInterfaceInventory(): Promise<InterfaceInventory> {
   // Neither constructing the tool registry nor ending this pool opens a connection.
   const db = createDb(createPool('postgres://interface-parity@127.0.0.1:9/interface-parity'))
   try {
-    return { rest, mcp: productTools({ db }).map((tool) => tool.name), cli: COMMANDS }
+    return {
+      rest,
+      mcp: productTools({ db, slotSnippetsEnabled: true }).map((tool) => tool.name),
+      cli: COMMANDS,
+    }
   } finally {
     await db.destroy()
   }

@@ -79,6 +79,10 @@ public availability again before every copy; no time is reserved. Hidden event l
 can be forwarded. Enable this setting only after public direct-slot booking pages are
 deployed on the same instance. Email language and display zone affect labels only;
 the booking page keeps the invitee’s own preferences.
+Agents can generate the same text/HTML with `POST /api/v1/open-time-snippets`, MCP
+`generate_open_time_snippet` or CLI `open-time-snippet --json`. A `read` key suffices
+with owner/admin permission; see [the agent guide](https://hourmere.com/docs/open-time-snippets)
+for bounded ranges, examples and taken-time fallback.
 
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 

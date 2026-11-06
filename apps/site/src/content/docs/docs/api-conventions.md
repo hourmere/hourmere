@@ -9,11 +9,21 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
 ## CSV booking export
 
 `GET /api/v1/bookings/export.csv` adds an authenticated UTF-8 CSV download. Personal
-owners and current team owners/admins can export; API keys need `read` or `full` scope.
-The existing team booking list keeps its narrower projection. This separate export
-explicitly includes saved answers and source attribution for reporting. Errors before
+owners can export their own bookings; API keys need `read` or `full` scope. Team
+exports require a browser session and current owner/admin membership, and retain the
+existing team-admin booking data boundary (including no custom answers or free-text titles). Errors before
 streaming use the ordinary JSON error envelope; an interrupted stream must be discarded.
 See [CSV booking export](/docs/booking-export) for columns, limits, privacy and MCP/CLI.
+
+## Open-time snippet generation
+
+`POST /api/v1/open-time-snippets` reads current availability and returns direct links with
+plain-text and HTML snippets. It is explicitly classified for `read`, `bookings` and `full`
+API keys: it creates no booking, reserved time or one-time capability and changes no
+configuration. Personal-owner or team-owner/admin permission is still required.
+`SLOT_SNIPPETS_ENABLED` gates generation as it gates the admin picker; hidden active
+events remain eligible. The [agent guide](/docs/open-time-snippets#request-and-response-reference)
+defines its input, response, 31-elapsed-day maximum, defaults, and known limitations.
 
 ## Imported local bookings
 
@@ -315,6 +325,14 @@ to `bookings` for AI agents; `read` suits analytics/reporting, and **Full accoun
 (`full`) also permits account configuration changes. Existing roles, ownership and host
 visibility still apply. Neither `read` nor `bookings` removes existing visible attendee
 details or meeting links, and `bookings` can manage previously created bookings you host.
+
+`POST /api/v1/open-time-snippets` is explicitly classified as a booking read: `read`,
+`bookings` and `full` keys may call it with personal-owner or team-owner/admin permission.
+It reads availability and formats ordinary reusable public links without minting a
+capability, reserving a time or changing configuration. The shared service also serves
+MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
+[request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
+for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
 
 Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
 `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
