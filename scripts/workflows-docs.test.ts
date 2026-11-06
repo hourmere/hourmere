@@ -1,0 +1,571 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { parseEnv } from 'node:util'
+import type { Db } from '@hourmere/db'
+import { describe, expect, it } from 'vitest'
+import { loadConfig } from '../apps/server/src/config.ts'
+import {
+  bookingNotificationJob,
+  type NotificationDeps,
+} from '../packages/notifications/src/index.ts'
+import {
+  notificationEmailBudget,
+  notificationSuppressionReason,
+  signInEmailBudget,
+} from '../packages/notifications/src/mail-limits.ts'
+import { REMINDER_MIN_GAP } from '../packages/notifications/src/scheduled.ts'
+import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
+import { hasValidHostShape } from '../packages/scheduling/src/hosts.ts'
+import {
+  DEFAULT_NOTIFICATIONS,
+  validateNotifications,
+} from '../packages/scheduling/src/notification-settings.ts'
+import { type WebhookDeps, webhookDeliveryJob } from '../packages/webhooks/src/delivery.ts'
+import { WEBHOOK_EVENTS } from '../packages/webhooks/src/service.ts'
+
+const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+const document = read('docs/workflows.md')
+/** The document with line wrapping removed, for checks on sentences that span lines. */
+const text = document.replace(/\s+/g, ' ')
+const code = (values: readonly string[]) => values.map((value) => `\`${value}\``)
+const prose = (values: readonly string[]) =>
+  values.length < 2 ? values.join('') : `${values.slice(0, -1).join(', ')} and ${values.at(-1)}`
+const numberWords = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
+
+/** Every migration in order, so the last match of a constraint is the one main installs. */
+const migrations = readdirSync(new URL('../packages/db/migrations/', import.meta.url))
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => ({
+    number: name.slice(0, 4),
+    sql: read(`packages/db/migrations/${name}`),
+  }))
+function latest(pattern: RegExp) {
+  const found = migrations.flatMap(({ number, sql }) =>
+    [...sql.matchAll(pattern)].map((match) => ({ number, match })),
+  )
+  expect(found.length, `a migration matches ${pattern}`).toBeGreaterThan(0)
+  return found.at(-1) as { number: string; match: RegExpMatchArray }
+}
+const quoted = (list: string | undefined) =>
+  [...(list ?? '').matchAll(/'([^']+)'/g)].map((match) => match[1])
+const planRows = () => [
+  ...document.matchAll(/^\| (\d+[a-z]?)\. ([^|]+)\| ([^|]+)\| ([^|]+)\| ([^|]+)\| ([^|]+)\|$/gm),
+]
+const dependencies = (row: RegExpMatchArray | undefined) =>
+  (row?.[3] ?? '')
+    .trim()
+    .split(',')
+    .map((value) => value.trim())
+function number(name: string): number {
+  const rows = [...document.matchAll(new RegExp(`^\\| \\x60${name}\\x60 \\| (\\d+) \\|`, 'gm'))]
+  expect(rows, `one numeric contract row for ${name}`).toHaveLength(1)
+  return Number(rows[0]?.[1])
+}
+
+const config = loadConfig({
+  DATABASE_URL: 'postgres://localhost/workflows_docs_unused',
+  BETTER_AUTH_SECRET: 'workflows-docs-synthetic-secret-32-characters',
+})
+const env = parseEnv(read('.env.example'))
+const mailKeys = [
+  'MAIL_RECIPIENT_MAX_PER_HOUR',
+  'MAIL_RECIPIENT_MAX_PER_DAY',
+  'SIGN_IN_MAIL_MAX_PER_HOUR',
+  'SIGN_IN_MAIL_MAX_PER_DAY',
+  'MAIL_MAX_PER_HOUR',
+] as const
+
+type Suppress = typeof notificationSuppressionReason
+function verifyMailDefaults(suppress: Suppress) {
+  const cap = number('MAIL_MAX_PER_HOUR')
+  const hostCap = Math.floor((cap * number('MAIL_HOST_RESERVE_PERCENT')) / 100)
+  for (const [invitee, ceiling] of [
+    [true, cap],
+    [false, hostCap],
+  ] as const) {
+    expect(
+      suppress({}, { instanceHour: ceiling - 1, recipientHour: 0, recipientDay: 0 }, invitee),
+    ).toBeUndefined()
+    expect(
+      suppress({}, { instanceHour: ceiling, recipientHour: 0, recipientDay: 0 }, invitee),
+    ).toBe('instance_hourly_limit')
+  }
+  const hourly = number('MAIL_RECIPIENT_MAX_PER_HOUR')
+  const daily = number('MAIL_RECIPIENT_MAX_PER_DAY')
+  expect(
+    suppress({}, { instanceHour: 0, recipientHour: hourly - 1, recipientDay: daily - 1 }, true),
+  ).toBeUndefined()
+  expect(suppress({}, { instanceHour: 0, recipientHour: hourly, recipientDay: 0 }, true)).toBe(
+    'recipient_hourly_limit',
+  )
+  expect(suppress({}, { instanceHour: 0, recipientHour: 0, recipientDay: daily }, true)).toBe(
+    'recipient_daily_limit',
+  )
+  expect(
+    suppress(
+      { mailMaxPerHour: 0 },
+      { instanceHour: cap * 10, recipientHour: 0, recipientDay: 0 },
+      true,
+    ),
+  ).toBeUndefined()
+}
+
+const designLimits = {
+  WORKFLOW_MAX_DEFINITIONS_PER_OWNER: 100,
+  WORKFLOW_NAME_MAX_BYTES: 200,
+  WORKFLOW_SUBJECT_MAX_BYTES: 200,
+  WORKFLOW_BODY_MAX_BYTES: 8000,
+  WORKFLOW_RENDERED_MAX_BYTES: 16000,
+  WORKFLOW_MAX_ENABLED_PER_EVENT: 5,
+  WORKFLOW_MAX_ACTIONS: 1,
+  WORKFLOW_MAX_CONDITIONS: 5,
+  WORKFLOW_MIN_TIMER_OFFSET_MINUTES: 5,
+  WORKFLOW_MAX_OFFSET_MINUTES: 43200,
+  WORKFLOW_MAX_LATE_MINUTES: 60,
+  WORKFLOW_MAIL_MAX_PER_HOUR: 20,
+  WORKFLOW_INSTANCE_MAIL_CAP_DIVISOR: 5,
+  WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: 5,
+  WORKFLOW_RECIPIENT_EMAILS_PER_HOUR: 1,
+  WORKFLOW_RECIPIENT_EMAILS_PER_DAY: 3,
+  WORKFLOW_HISTORY_DAYS: 30,
+} as const
+
+function rules(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `rule-${index}`,
+    offsetMinutes: 5 + index,
+    recipients: { invitee: true, guests: true, host: true },
+  }))
+}
+
+describe('workflow design numeric contracts', () => {
+  it('binds documented mail defaults to server parsing and the example environment', () => {
+    for (const key of mailKeys) {
+      expect(number(key), key).toBe(config[key])
+      expect(number(key), key).toBe(Number(env[key]))
+    }
+    verifyMailDefaults(notificationSuppressionReason)
+  })
+
+  it('binds the separate sign-in defaults and reserve to the real budget function without a database', async () => {
+    const counts = { count: '0', day: '0', hour: '0' }
+    const query = {
+      select: () => query,
+      where: () => query,
+      executeTakeFirstOrThrow: async () => counts,
+    }
+    const db = { selectFrom: () => query } as unknown as Db
+    const reason = () =>
+      signInEmailBudget(db, {}, Buffer.alloc(32), new Date('2026-01-01T00:00:00Z'))
+    counts.hour = String(number('SIGN_IN_MAIL_MAX_PER_HOUR') - 1)
+    counts.day = String(number('SIGN_IN_MAIL_MAX_PER_DAY') - 1)
+    expect(await reason()).toBeUndefined()
+    counts.hour = String(number('SIGN_IN_MAIL_MAX_PER_HOUR'))
+    expect(await reason()).toBe('recipient_hourly_limit')
+    counts.hour = '0'
+    counts.day = String(number('SIGN_IN_MAIL_MAX_PER_DAY'))
+    expect(await reason()).toBe('recipient_daily_limit')
+    counts.day = '0'
+    counts.count = String(
+      Math.floor((number('MAIL_MAX_PER_HOUR') * number('MAIL_HOST_RESERVE_PERCENT')) / 100) - 1,
+    )
+    expect(await reason()).toBeUndefined()
+    counts.count = String(Number(counts.count) + 1)
+    expect(await reason()).toBe('instance_hourly_limit')
+  })
+
+  it('binds guest, host and reminder constraints to existing runtime policy', () => {
+    expect(number('MAX_GUESTS')).toBe(MAX_GUESTS)
+    const hosts = Array.from({ length: number('MAX_HOSTS') }, (_, index) => `host-${index}`)
+    expect(hasValidHostShape('collective', hosts)).toBe(true)
+    expect(hasValidHostShape('collective', [...hosts, 'extra'])).toBe(false)
+    expect(number('REMINDER_MIN_GAP_HOURS')).toBe(REMINDER_MIN_GAP.hours)
+    expect(number('DEFAULT_REMINDER_OFFSET_MINUTES')).toBe(
+      DEFAULT_NOTIFICATIONS.reminders[0]?.offsetMinutes,
+    )
+    for (const [category, key] of [
+      ['reminders', 'REMINDER_MAX_RULES'],
+      ['followUps', 'FOLLOW_UP_MAX_RULES'],
+    ] as const) {
+      expect(() =>
+        validateNotifications({ reminders: [], followUps: [], [category]: rules(number(key)) }),
+      ).not.toThrow()
+      expect(() =>
+        validateNotifications({ reminders: [], followUps: [], [category]: rules(number(key) + 1) }),
+      ).toThrow()
+    }
+    for (const category of ['reminders', 'followUps'] as const) {
+      for (const [key, delta] of [
+        ['NOTIFICATION_MIN_OFFSET_MINUTES', -1],
+        ['NOTIFICATION_MAX_OFFSET_MINUTES', 1],
+      ] as const) {
+        const rule = rules(1)[0]
+        const settings = {
+          reminders: [],
+          followUps: [],
+          [category]: [{ ...rule, offsetMinutes: number(key) }],
+        }
+        expect(() => validateNotifications(settings)).not.toThrow()
+        expect(() =>
+          validateNotifications({
+            ...settings,
+            [category]: [{ ...rule, offsetMinutes: number(key) + delta }],
+          }),
+        ).toThrow()
+      }
+    }
+  })
+
+  it('pins the design limits separately from existing product limits', () => {
+    for (const [key, expected] of Object.entries(designLimits))
+      expect(number(key), key).toBe(expected)
+  })
+
+  it('binds worst-case demand and the shared allowance formula to documented limits', () => {
+    const guests = number('MAX_GUESTS')
+    const hosts = number('MAX_HOSTS')
+    const recipients = 1 + guests + hosts
+    const workflows = number('WORKFLOW_MAX_ENABLED_PER_EVENT')
+    const reminders = number('REMINDER_MAX_RULES')
+    const followUps = number('FOLLOW_UP_MAX_RULES')
+    const busyHourBookings = 10 // Scenario assumption, not an admission rate guarantee.
+    expect(document).toContain(`1 + ${guests} + ${hosts} = ${recipients}`)
+    expect(document).toContain(
+      `${busyHourBookings} * ${workflows} * ${recipients} = ${busyHourBookings * workflows * recipients}`,
+    )
+    expect(document).toContain(
+      `${busyHourBookings} * (${reminders} + ${followUps}) * ${recipients} = ${busyHourBookings * (reminders + followUps) * recipients}`,
+    )
+    expect(document).toContain(
+      `min(${number('WORKFLOW_MAIL_MAX_PER_HOUR')}, floor(MAIL_MAX_PER_HOUR / ${number('WORKFLOW_INSTANCE_MAIL_CAP_DIVISOR')}))`,
+    )
+    const cap = number('MAIL_MAX_PER_HOUR')
+    const combined = Math.floor((cap * number('MAIL_HOST_RESERVE_PERCENT')) / 100)
+    const workflowCap = Math.min(
+      number('WORKFLOW_MAIL_MAX_PER_HOUR'),
+      Math.floor(cap / number('WORKFLOW_INSTANCE_MAIL_CAP_DIVISOR')),
+    )
+    expect(document).toContain(`base ceiling ${cap}`)
+    expect(document).toContain(`combined ceiling ${combined}`)
+    expect(document).toContain(`${cap} - ${workflowCap} = ${cap - workflowCap}`)
+    expect(document).toContain(`owner ${number('WORKFLOW_OWNER_MAIL_MAX_PER_HOUR')}/h`)
+    expect(document).toContain(
+      `recipient ${number('WORKFLOW_RECIPIENT_EMAILS_PER_HOUR')}/h and ${number('WORKFLOW_RECIPIENT_EMAILS_PER_DAY')}/day`,
+    )
+  })
+
+  it('binds the shared ledger and recipient windows to the actual budget queries', async () => {
+    const now = new Date('2026-01-02T12:00:00Z')
+    const predicates: unknown[][] = []
+    const tables: string[] = []
+    const aggregate = {
+      as: () => aggregate,
+      filterWhere: (...args: unknown[]) => {
+        predicates.push(args)
+        return aggregate
+      },
+    }
+    const query = {
+      select: (selection: (eb: unknown) => unknown) => {
+        selection({ fn: { countAll: () => aggregate } })
+        return query
+      },
+      where: (...args: unknown[]) => {
+        predicates.push(args)
+        return query
+      },
+      executeTakeFirstOrThrow: async () => ({ count: '0', day: '0', hour: '0' }),
+    }
+    const db = {
+      selectFrom: (table: string) => {
+        tables.push(table)
+        return query
+      },
+    } as unknown as Db
+    const hash = Buffer.alloc(32)
+    for (const budget of [
+      () => notificationEmailBudget(db, {}, hash, true, now),
+      () => signInEmailBudget(db, {}, hash, now),
+    ]) {
+      predicates.length = 0
+      tables.length = 0
+      expect(await budget()).toBeUndefined()
+      expect(tables).toEqual(['notification_email_sends', 'notification_email_sends'])
+      expect(predicates).toEqual([
+        ['sent_at', '>', new Date(now.getTime() - number('MAIL_LEDGER_WINDOW_HOURS') * 3_600_000)],
+        ['sent_at', '>', new Date(now.getTime() - number('MAIL_LEDGER_WINDOW_HOURS') * 3_600_000)],
+        ['recipient_hash', '=', hash],
+        ['sent_at', '>', new Date(now.getTime() - 24 * 3_600_000)],
+      ])
+    }
+  })
+
+  it('keeps every implementation dependency earlier than its owning step', () => {
+    const rows = planRows()
+    expect(rows.length).toBeGreaterThanOrEqual(34)
+    const seen = new Set<string>()
+    for (const row of rows) {
+      const step = row[1] as string
+      const dependencies = (row[3] as string).trim()
+      expect(seen.has(step), `step ${step} has a unique owner`).toBe(false)
+      if (dependencies !== 'None') {
+        for (const dependency of dependencies.split(',').map((value) => value.trim())) {
+          expect(seen.has(dependency), `step ${step} requires earlier step ${dependency}`).toBe(
+            true,
+          )
+        }
+      }
+      seen.add(step)
+    }
+    for (const step of ['6', '7']) {
+      const row = rows.find((entry) => entry[1] === step)
+      expect(row, `step ${step} remains in the plan`).toBeDefined()
+      expect(dependencies(row)).toContain('3')
+      expect(row?.[6]).not.toMatch(/without a duplicate send|racing worker/)
+    }
+  })
+
+  it('splits dense steps and wires execution audit events before binding the writer', () => {
+    const rows = planRows()
+    const step = (id: string) => rows.find((entry) => entry[1] === id)
+    for (const id of ['13d', '13e', '15b', '16b', '16c', '17a', '17b', '19a', '19b'])
+      expect(step(id), `step ${id} is in the plan`).toBeDefined()
+    // Merged rows must not return: the old webhook outbox, audit and opt-in steps.
+    for (const id of ['13', '17', '19', '9a', '9b'])
+      expect(step(id), `no step ${id}`).toBeUndefined()
+    // Pure timer rules precede capture, so capture can record minimum_gap/offset_not_future.
+    expect(dependencies(step('8a'))).toEqual(['1'])
+    expect(dependencies(step('8b'))).toContain('8a')
+    const wiring = step('15b')?.[4] ?? ''
+    for (const owner of ['(8b, 8c)', '(9)', '(12a, 12b)', '(14a, 14b)', 'previewed (15a)'])
+      expect(wiring).toContain(owner)
+    expect(dependencies(step('16b'))).toContain('15b')
+    expect(dependencies(step('16c'))).toEqual(['16b'])
+    expect(text).toContain('Step 15b alone wires every execution and preview event into the port')
+  })
+
+  it('keeps disabled behavior distinct from interface publication and enabled parity inventory', () => {
+    const rollout = document
+      .split('## Rollout and limitations')[1]
+      ?.split('## ')[0]
+      ?.replace(/\s+/g, ' ')
+    expect(rollout).toContain(
+      'Hard-off means behavior, not registration: every workflow operation returns `404 workflows_disabled`',
+    )
+    expect(rollout).toContain(
+      'MCP `tools/list` omits workflow tools while off; direct known-tool calls return the same `404 workflows_disabled`',
+    )
+    expect(rollout).toContain('Build the parity inventory with the feature enabled')
+    expect(rollout).toContain('scope-registry rows ship in each operation')
+    expect(rollout).toContain(
+      '`apps/site/src/content/docs/docs/api-keys.md` and `mcp.md`, generated from `packages/auth/src/api-key-operations.ts`, list workflow operations',
+    )
+    expect(rollout).toContain('add adjacent prose documenting them as disabled until enabled')
+    // The cited MCP seam: hidden catalog tools still reach runTool on a direct call.
+    const tools = read('apps/server/src/mcp/tools.ts')
+    expect(tools).toContain(
+      'const catalog = new Map(tools.map((prepared) => [prepared.tool.name, prepared]))',
+    )
+    expect(tools).toContain('return runTool(known.tool, request.params.arguments, call, logError)')
+    expect(rollout).toContain('Step 4 extends the catalog/visible split in `registerTools()`')
+    expect(rollout).toContain('Workflow tools are always included in `productTools()`')
+    for (const consumer of [
+      'apps/server/src/capability-contracts.test.ts',
+      'apps/server/src/mcp/scopes.test.ts',
+      'apps/server/src/mcp/schema-contracts.test.ts',
+    ]) {
+      expect(read(consumer)).toMatch(/productTools\(\{ db[^)]*slotSnippetsEnabled: true \}\)/)
+      expect(rollout).toContain(`\`${consumer}\``)
+    }
+  })
+
+  it('binds the webhook expansion to the enum, constraints and delivery key on main', () => {
+    const current = WEBHOOK_EVENTS.length
+    const extended = current + 1
+    expect(text).toContain(
+      `\`WEBHOOK_EVENTS\` has ${current} kinds: ${prose(code(WEBHOOK_EVENTS))}.`,
+    )
+    // The service already derives its bound from the constant, so appending needs no literal.
+    expect(read('packages/webhooks/src/service.ts')).toContain('.max(WEBHOOK_EVENTS.length)')
+    expect(text).toContain('Service `eventsOf()` already validates `.max(WEBHOOK_EVENTS.length)`')
+    expect(text).toContain('`eventsOf()` keeps `.max(WEBHOOK_EVENTS.length)` and gains no literal')
+
+    // The installed subscription CHECK is the last one in migration order.
+    const subscription = latest(
+      /cardinality\(events\) BETWEEN 1 AND (\d+) AND\s+events <@ ARRAY\[([^\]]*)\]/g,
+    )
+    expect(Number(subscription.match[1])).toBe(current)
+    expect(quoted(subscription.match[2])).toEqual([...WEBHOOK_EVENTS])
+    expect(text).toContain(
+      `The webhook baseline on main comes from migration ${subscription.number}`,
+    )
+    expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${current}\``)
+    expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${extended}\``)
+    for (const [, upper] of text.matchAll(/BETWEEN 1 AND (\d+)/g))
+      expect([current, extended]).toContain(Number(upper))
+    const counts = [
+      ...text.matchAll(/(\d+) to (\d+) kinds/g),
+      ...text.matchAll(/(\d+) current kinds to (\d+)/g),
+    ]
+    expect(counts.length).toBeGreaterThanOrEqual(4)
+    for (const [, from, to] of counts)
+      expect([Number(from), Number(to)]).toEqual([current, extended])
+
+    // Delivery kinds and the delivery uniqueness key as main installs and uses them.
+    const deliveryKinds = latest(/event_type_check CHECK \(event_type IN \(([^)]*)\)\)/g)
+    expect(quoted(deliveryKinds.match[1])).toEqual([...WEBHOOK_EVENTS])
+    const key = latest(/ALTER TABLE webhook_deliveries ADD UNIQUE NULLS NOT DISTINCT \(([^)]*)\)/g)
+    const columns = key.match[1] as string
+    expect(columns).toBe('webhook_id, booking_id, event_type, request_id')
+    expect(read('packages/webhooks/src/delivery.ts')).toContain(
+      `oc.columns([${columns
+        .split(', ')
+        .map((column) => `'${column}'`)
+        .join(', ')}]).doNothing()`,
+    )
+    expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns})\``)
+    expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns}, workflow_run_id)\``)
+    expect(text).toContain('No existing row is rewritten or backfilled')
+
+    // Stale baselines from before the reschedule-request kinds must not return.
+    for (const stale of [
+      /\.max\(3\)/,
+      /\.max\(\d+\)/,
+      /\b(?:three|four|five|six) (?:allowed |current |webhook )?(?:event )?(?:kinds|events)\b/i,
+      /from three to four/i,
+      /\b1[–-]4\b/,
+      /\(4\), matching/,
+      /\(webhook_id, booking_id, event_type\)/,
+      /Backfill existing rows as booking-origin/,
+    ])
+      expect(text).not.toMatch(stale)
+
+    expect(text).toContain('Steps 13d and 13e own the additive `workflow.executed` subscription')
+    expect(text).toContain(
+      'Document response enums as open and tell consumers to ignore unknown events',
+    )
+    expect(text).toContain(
+      '`WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team workflow deliveries',
+    )
+    expect(text).toContain('verifies an additive OpenAPI diff')
+    expect(text).toContain('Published migrations 0017 and 0064 remain unchanged')
+    expect(text).toContain('so `workflows_disabled` wins when both apply')
+    expect(text).toContain('compares the requested set with the row locked by `lockedWebhook()`')
+    // Postgres needs the exact arbiter columns once 14a re-keys the delivery uniqueness.
+    expect(text).toContain("moves the existing capture's conflict target")
+    const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
+    expect(step('13d')).toContain('replaces the 0064 webhooks.events CHECK')
+    expect(step('13d')).toContain(`${current} to ${extended} kinds`)
+    expect(step('14a')).toContain('webhook_deliveries.workflow_run_id')
+    expect(step('14a')).toContain('event_type CHECK')
+  })
+
+  it('decides every BookingNotifier event kind on main for workflow capture', () => {
+    const context = read('packages/scheduling/src/context.ts')
+    const union = context.split('export type BookingEvent =')[1]?.split('\n\n')[0] ?? ''
+    const kinds = [...union.matchAll(/type: '([a-z_]+)'/g)].map((match) => match[1] as string)
+    expect(kinds.length).toBeGreaterThan(0)
+    const listed = (pattern: RegExp) =>
+      [...(pattern.exec(text)?.[1] ?? '').matchAll(/`([a-z_]+)`/g)].map((match) => match[1])
+    const capturing = listed(/and only for its ((?:`[a-z_]+`(?:, | and )?)+) events/)
+    const silent = listed(/also has ((?:`[a-z_]+`(?:, | and )?)+)\. Those \w+ capture no workflow/)
+    expect(capturing).toEqual(['created', 'rescheduled', 'cancelled'])
+    expect([...capturing, ...silent].sort()).toEqual([...kinds].sort())
+    expect(text).toContain(
+      `Those ${numberWords[silent.length]} capture no workflow and create no occurrence. They neither retire, recalculate nor postpone timers or delayed work`,
+    )
+    expect(text).toContain('V1 offers no workflow trigger for reschedule requests')
+  })
+
+  it('records workflow charges in the shared ledger and bounds SMTP outage behavior', () => {
+    expect(text).toContain(
+      'Workflow charges are recorded in `notification_email_sends`, the table that core admission already counts, not in a separate ledger',
+    )
+    expect(text).toContain(
+      'one `notification_email_sends` row with a workflow-purpose recipient hash and `workflow_reservation_id` set',
+    )
+    expect(text).toContain('It recounts every window without its own ledger row')
+    expect(text).toContain('A retry never adds a second ledger row')
+    const retry = bookingNotificationJob({} as NotificationDeps).retry
+    expect(retry).toEqual({
+      limit: number('NOTIFICATION_RETRY_LIMIT'),
+      delaySeconds: number('NOTIFICATION_RETRY_DELAY_SECONDS'),
+      backoff: true,
+      maxDelaySeconds: number('NOTIFICATION_RETRY_MAX_DELAY_SECONDS'),
+    })
+    // Webhook deliveries share the schedule the design calls "roughly seven-hour".
+    expect(webhookDeliveryJob({} as WebhookDeps).retry).toEqual(retry)
+    let seconds = 0
+    for (let attempt = 0; attempt < number('NOTIFICATION_RETRY_LIMIT'); attempt++)
+      seconds += Math.min(
+        number('NOTIFICATION_RETRY_DELAY_SECONDS') * 2 ** attempt,
+        number('NOTIFICATION_RETRY_MAX_DELAY_SECONDS'),
+      )
+    const hours = numberWords[Math.round(seconds / 3600)]
+    expect(text).toContain(
+      `Core booking-notification mail retries ${number('NOTIFICATION_RETRY_LIMIT')} times, from one minute, doubling, capped at one hour: about ${hours} hours in total`,
+    )
+    expect(text).toContain(`roughly ${hours}-hour retry schedule`)
+    expect(text).toContain(
+      `An SMTP outage longer than the ${number('WORKFLOW_MAX_LATE_MINUTES')}-minute late bound`,
+    )
+    expect(text).toContain(
+      `An SMTP outage longer than ${number('WORKFLOW_MAX_LATE_MINUTES')} minutes expires the workflow email due in it, while core mail retries for about ${hours} hours`,
+    )
+  })
+
+  it('forwards workflow settings through Compose with empty defaults and lazy disable', () => {
+    const compose = read('docker-compose.yml')
+    expect(compose).not.toMatch(/^\s*env_file:/m)
+    expect(compose).toMatch(/^ {4}environment:$/m)
+    expect(read('docker-compose.worker.yml')).toMatch(/extends:\n\s+file: docker-compose\.yml/)
+    // Empty Compose forwards mean the server default for flags and mail limits alike.
+    const synthetic = {
+      DATABASE_URL: 'postgres://localhost/workflows_docs_unused',
+      BETTER_AUTH_SECRET: 'workflows-docs-synthetic-secret-32-characters',
+    }
+    const empty = loadConfig({
+      ...synthetic,
+      SLOT_SNIPPETS_ENABLED: '',
+      FOLLOW_UP_HOST_NOTES_ENABLED: '',
+      MAIL_MAX_PER_HOUR: '',
+    })
+    expect(empty.SLOT_SNIPPETS_ENABLED).toBe(false)
+    expect(empty.FOLLOW_UP_HOST_NOTES_ENABLED).toBe(true)
+    expect(empty.MAIL_MAX_PER_HOUR).toBe(number('MAIL_MAX_PER_HOUR'))
+    for (const key of [
+      'WORKFLOWS_ENABLED',
+      'WORKFLOW_MAIL_MAX_PER_HOUR',
+      'WORKFLOW_OWNER_MAIL_MAX_PER_HOUR',
+    ]) {
+      expect(text).toContain(`\`\${${key}:-}\``)
+      expect(text).toContain(`\`${key}=\``)
+      expect(document).not.toMatch(new RegExp(`\\$\\{${key}:-[^}]`))
+    }
+    expect(text).toContain('so step 10 adds no `.env.example` line or `configuration.md` row')
+    const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
+    expect(step('10')).toContain(`Compose \`\${…:-}\` forwards`)
+    expect(step('19b')).toContain(`\`\${WORKFLOWS_ENABLED:-}\``)
+    expect(text).toContain('Disabling one definition is lazy')
+    expect(text).toContain('Deletion is eager')
+    expect(text).toContain('`workflowsEnabled`')
+    const instance = read('apps/server/src/routes/instance.ts')
+    for (const field of ['followUpHostNotesEnabled', 'slotSnippetsEnabled'])
+      expect(instance).toContain(`${field}: z.boolean().optional()`)
+  })
+
+  it('keeps host-authored workflow text under the existing Cloud abuse policy', () => {
+    expect(text).toContain(
+      'Host-written subject and body text use the same `FOLLOW_UP_HOST_NOTES_ENABLED` policy',
+    )
+    expect(text).toContain(
+      'When false, save/update/preview reject custom subject/body with `invalid_workflow`; templates permit only built-in localized text and safe variables',
+    )
+    expect(text).toContain('Dispatch rechecks the switch and falls back to built-in text')
+    expect(text).toContain('Hourmere Cloud MUST keep it false')
+    expect(text).toContain('Self-hosted defaults retain the existing true host-notes default')
+    expect(text).toContain(
+      'The final workflow default flip does not change this independent switch or relax the Cloud requirement',
+    )
+  })
+})
