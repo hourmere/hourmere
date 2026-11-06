@@ -10,6 +10,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,
   split workers, back up and upgrade.
+- [Cal.com / cal.diy import](/docs/calcom-import): preview and apply local-only busy records,
+  inspect limits and overlaps, and recover an incomplete selection.
 - [Configuration reference](/docs/configuration): environment variables and Compose behavior.
 - [Troubleshooting](/docs/troubleshooting): email delivery, workers, HTTPS, DNS and database
   startup failures.
@@ -40,6 +42,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
+  local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
+  block the batch, while daily/weekly/monthly limit differences are reported as warnings.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
