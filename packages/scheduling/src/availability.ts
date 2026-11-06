@@ -33,6 +33,7 @@ import {
 } from './conferences.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { assertCanExplainEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
@@ -1230,16 +1231,16 @@ export interface ExplainEventAvailabilityQuery {
 }
 
 /**
- * Explains public-bookable event types without calendar or booking identities/content.
- * Team host identities are included only after checking the caller's current, verified
- * organization membership and management role. Public/ordinary-member calls are redacted.
+ * Explains availability only to event-type managers; unauthorized callers see not_found.
+ * Team host identities require the same current, verified management permission as writes.
  * Calendar readiness errors remain errors, matching normal availability; stale round-robin
  * members are omitted only when another member can actually offer a slot in the range.
  */
 export async function explainEventAvailability(
-  ctx: PublicContext | ServiceContext,
+  ctx: ServiceContext,
   query: ExplainEventAvailabilityQuery,
 ): Promise<ExplainedSlot[]> {
+  await assertCanExplainEventType(ctx, query.eventTypeId)
   checkSlotRange(query.rangeStart, query.rangeEnd)
   if (Temporal.Instant.compare(query.rangeEnd, LATEST_RANGE_END) > 0)
     throw new DomainError(
@@ -1291,7 +1292,7 @@ export async function explainEventAvailability(
         ctx.automaticMeet,
       )
   }
-  const discloseHosts = et.team !== undefined && (await canDiscloseExplanationHosts(ctx, et))
+  const discloseHosts = et.team !== undefined
   const hosts = et.schedulingType === 'round_robin' ? et.eligibleHostUserIds : et.hostUserIds
   const maximumCandidates = Math.floor(MAX_SLOT_CANDIDATES / Math.max(1, hosts.length))
   const inputs: { hostUserId: string; input: ExplainAvailabilityInput; slots: ExplainedSlot[] }[] =
@@ -1426,31 +1427,6 @@ function explainWithinBudget(input: ExplainAvailabilityInput, maximumCandidates:
       throw new DomainError('invalid', 'range_too_long', 'Ask for a shorter explanation range')
     throw error
   }
-}
-
-async function canDiscloseExplanationHosts(
-  ctx: PublicContext | ServiceContext,
-  event: PublicEventTypeRecord,
-): Promise<boolean> {
-  if (!('principal' in ctx) || ctx.principal.organization.id !== event.organizationId) return false
-  if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full') return false
-  const membership = await ctx.db
-    .selectFrom('auth.member as member')
-    .innerJoin('auth.user as user', 'user.id', 'member.userId')
-    .leftJoin(
-      'personal_organizations as personal',
-      'personal.organization_id',
-      'member.organizationId',
-    )
-    .select(['member.role', 'personal.user_id'])
-    .where('member.userId', '=', ctx.principal.user.id)
-    .where('member.organizationId', '=', event.organizationId)
-    .where('user.emailVerified', '=', true)
-    .executeTakeFirst()
-  if (!membership) return false
-  const roles = membership.role.split(',').map((role) => role.trim())
-  // Team types are managed by owners/admins; personal types remain their owner's.
-  return membership.user_id === null && (roles.includes('owner') || roles.includes('admin'))
 }
 
 function explanationSlotKey(slot: Slot): string {

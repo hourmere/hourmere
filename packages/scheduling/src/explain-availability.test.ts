@@ -10,7 +10,7 @@ import { explainEventAvailability, findSlots, listPublicTeamSlots } from './avai
 import * as conferences from './conferences.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
-import { activateRoundRobin, createEventType } from './event-types.ts'
+import { activateRoundRobin, assertCanExplainEventType, createEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { parseQuestions } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
@@ -59,6 +59,7 @@ function sourceCopy(
     hasValidHostShape,
     parseQuestions,
     eligibleRoundRobinHosts,
+    assertCanExplainEventType,
   }
   return new Function(
     ...Object.keys(bindings),
@@ -89,7 +90,28 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       weeklyHours: { monday: [{ start: '09:00', end: '12:00' }] },
     })
     const eventTypeId = await f.eventType(host.organizationId, host.userId, rules)
-    return { host, eventTypeId, ctx: { db, now }, query: { eventTypeId, ...range } }
+    const user = await db
+      .selectFrom('auth.user')
+      .select(['id', 'name', 'email'])
+      .where('id', '=', host.userId)
+      .executeTakeFirstOrThrow()
+    const organization = await db
+      .selectFrom('auth.organization')
+      .select(['id', 'name', 'slug'])
+      .where('id', '=', host.organizationId)
+      .executeTakeFirstOrThrow()
+    const ctx = testContext(
+      db,
+      {
+        kind: 'api_key',
+        apiKeyId: 'fixture',
+        apiKeyScope: 'full',
+        user,
+        organization: { ...organization, personal: true },
+      },
+      now,
+    )
+    return { host, eventTypeId, ctx, query: { eventTypeId, ...range } }
   }
 
   async function team(mode: 'individual' | 'collective' | 'round_robin') {
@@ -152,7 +174,20 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       findSlots(db, { ...s.query, hostUserId: s.host.userId, now: now(), durationMinutes: 45 }),
     ).rejects.toMatchObject({ code: 'invalid_duration' })
     await db.deleteFrom('schedules').where('user_id', '=', s.host.userId).execute()
+    const verifyMissingSchedule = async (read: Explain) => {
+      await expect(read(s.ctx, s.query)).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ status: 'unavailable' })]),
+      )
+    }
+    await verifyMissingSchedule(explainEventAvailability)
+    await expect(
+      verifyMissingSchedule(
+        sourceCopy(["schedule?.time_zone ?? 'UTC'", 'schedule.time_zone']).explainEventAvailability,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verifyMissingSchedule(explainEventAvailability)
     const missing = await explainEventAvailability(s.ctx, s.query)
+    expect(missing.length).toBeGreaterThan(0)
     expect(missing.every((slot) => codes(slot)?.includes('outside_working_hours'))).toBe(true)
     expect(await findSlots(db, { ...s.query, hostUserId: s.host.userId, now: now() })).toEqual([])
     await expect(
@@ -194,7 +229,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     },
   )
 
-  it('clips blocking intervals and projects only safe fields for public, member, owner, demoted and removed callers', async () => {
+  it('clips blocking intervals and projects only safe fields for managers', async () => {
     const s = await team('collective')
     const busy = await f.calendarBusy(s.owner.id, [['2026-11-02T08:00Z', '2026-11-02T09:10Z']])
     const booking = await f.booking(
@@ -215,7 +250,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       })
       .where('id', '=', booking)
       .execute()
-    const verify = async (read: Explain, ctx: PublicContext | ServiceContext, expose: boolean) => {
+    const verify = async (read: Explain, ctx: ServiceContext, expose: boolean) => {
       const slots = await read(ctx, s.query)
       for (const slot of slots) {
         expect(Object.keys(slot).sort()).toEqual(['end', 'reasons', 'start', 'status'])
@@ -251,17 +286,19 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
         expect(serialized).not.toContain(s.member.id)
       }
     }
-    await verify(explainEventAvailability, { db, now }, false)
-    await verify(explainEventAvailability, testContext(db, s.team.as(s.member), now), false)
     await verify(explainEventAvailability, s.ctx, true)
-    await verify(explainEventAvailability, testContext(db, s.owner.principal, now), false)
+    await expect(
+      explainEventAvailability(testContext(db, s.owner.principal, now), s.query),
+    ).rejects.toMatchObject({ code: 'event_type_not_found' })
     await db
       .updateTable('auth.member')
       .set({ role: 'member' })
       .where('organizationId', '=', s.team.id)
       .where('userId', '=', s.owner.id)
       .execute()
-    await verify(explainEventAvailability, s.ctx, false)
+    await expect(explainEventAvailability(s.ctx, s.query)).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
     await db
       .deleteFrom('auth.member')
       .where('organizationId', '=', s.team.id)
@@ -273,40 +310,78 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     })
   })
 
-  it('requires management-capable API key scope before disclosing owner or admin host identities', async () => {
+  it('requires full API key scope for owner and admin explanations', async () => {
     const s = await team('collective')
     const principal = s.ctx.principal
-    if (principal.kind !== 'api_key') throw new Error('Expected an API key fixture')
-    const verify = async (read: Explain) => {
-      for (const role of ['owner', 'admin']) {
-        await db
-          .updateTable('auth.member')
-          .set({ role })
-          .where('organizationId', '=', s.team.id)
-          .where('userId', '=', s.owner.id)
-          .execute()
-        for (const apiKeyScope of ['full', 'read', 'bookings'] as const) {
-          const slots = await read({ ...s.ctx, principal: { ...principal, apiKeyScope } }, s.query)
-          expect(slots.length).toBeGreaterThan(0)
-          const serialized = JSON.stringify(slots)
-          if (apiKeyScope === 'full') expect(serialized).toContain(s.owner.id)
-          else {
-            expect(serialized).not.toContain(s.owner.id)
-            expect(serialized).not.toContain(s.member.id)
-          }
-        }
+    if (principal.kind !== 'api_key') throw new Error('Expected API key fixture')
+    for (const role of ['owner', 'admin']) {
+      await db
+        .updateTable('auth.member')
+        .set({ role })
+        .where('organizationId', '=', s.team.id)
+        .where('userId', '=', s.owner.id)
+        .execute()
+      for (const apiKeyScope of ['full', 'read', 'bookings'] as const) {
+        const read = explainEventAvailability(
+          { ...s.ctx, principal: { ...principal, apiKeyScope } },
+          s.query,
+        )
+        if (apiKeyScope === 'full') expect(JSON.stringify(await read)).toContain(s.owner.id)
+        else
+          await expect(read).rejects.toMatchObject({
+            kind: 'not_found',
+            code: 'event_type_not_found',
+          })
       }
     }
-    await verify(explainEventAvailability)
-    await expect(
-      verify(
-        sourceCopy([
-          "if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full') return false",
-          '',
-        ]).explainEventAvailability,
-      ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
-    await verify(explainEventAvailability)
+  })
+
+  it('denies public, other-organization, non-owner and member callers exactly like missing types', async () => {
+    const s = await team('collective')
+    const p = await personal()
+    const missing = await explainEventAvailability(s.ctx, {
+      ...s.query,
+      eventTypeId: '00000000-0000-4000-8000-000000000000',
+    }).catch((error: DomainError) => ({
+      kind: error.kind,
+      code: error.code,
+      message: error.message,
+    }))
+    for (const [ctx, query] of [
+      [{ db, now } as PublicContext as ServiceContext, s.query],
+      [testContext(db, s.owner.principal, now), s.query],
+      [testContext(db, s.team.as(s.member), now), s.query],
+      [
+        { ...p.ctx, principal: { ...p.ctx.principal, organization: s.ctx.principal.organization } },
+        p.query,
+      ],
+      [{ ...p.ctx, principal: { ...p.ctx.principal, user: s.ctx.principal.user } }, p.query],
+    ] as const) {
+      await expect(
+        explainEventAvailability(ctx, query).catch((error: DomainError) => ({
+          kind: error.kind,
+          code: error.code,
+          message: error.message,
+        })),
+      ).resolves.toEqual(missing)
+    }
+  })
+
+  it('excludes team types placed in a personal organization in the shared permission helper', async () => {
+    const s = await personal()
+    await db
+      .updateTable('event_types')
+      .set({ owner_user_id: null })
+      .where('id', '=', s.eventTypeId)
+      .execute()
+    await expect(assertCanExplainEventType(s.ctx, s.eventTypeId)).rejects.toMatchObject({
+      kind: 'not_found',
+      code: 'event_type_not_found',
+    })
+    await expect(explainEventAvailability(s.ctx, s.query)).rejects.toMatchObject({
+      kind: 'not_found',
+      code: 'event_type_not_found',
+    })
   })
 
   it('keeps a stale round-robin member neutral and matches the normal failure when no fresh slot is offered', async () => {
@@ -343,12 +418,30 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
 
   it('explains an activated round-robin pool with no remaining eligible hosts', async () => {
     const s = await team('round_robin')
+    const manager = await createTestUser(db, 'Non-host owner')
+    await db
+      .insertInto('auth.member')
+      .values({
+        userId: manager.id,
+        organizationId: s.team.id,
+        role: 'owner',
+        createdAt: new Date(),
+      })
+      .execute()
+    const managerCtx = testContext(
+      db,
+      { ...manager.principal, organization: s.ctx.principal.organization },
+      now,
+    )
     await db
       .deleteFrom('auth.member')
       .where('organizationId', '=', s.team.id)
       .where('userId', 'in', [s.owner.id, s.member.id])
       .execute()
-    const slots = await explainEventAvailability({ db, now }, s.query)
+    const slots = await explainEventAvailability(managerCtx, s.query)
+    await expect(explainEventAvailability(s.ctx, s.query)).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
     expect(slots.length).toBeGreaterThan(0)
     expect(slots.every((slot) => codes(slot)?.includes('no_eligible_round_robin_host'))).toBe(true)
     expect(slots.every((slot) => slot.status === 'unavailable')).toBe(true)
@@ -359,7 +452,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       .execute()
     const verifyCombined = async (read: Explain) => {
       const combined = await read(
-        { db, now: () => instant('2026-11-03T00:00Z') },
+        { ...managerCtx, now: () => instant('2026-11-03T00:00Z') },
         { ...s.query, durationMinutes: 45 },
       )
       expect(
@@ -474,7 +567,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
             )
         }
         const query = { eventTypeId: s.event.id, rangeStart: start, rangeEnd: end, durationMinutes }
-        const explained = await explainEventAvailability({ db, now: () => clock }, query)
+        const explained = await explainEventAvailability({ ...s.ctx, now: () => clock }, query)
         const normal = await listPublicTeamSlots(
           { db, now: () => clock },
           {
@@ -526,7 +619,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       .where('organizationId', '=', s.team.id)
       .where('userId', '=', manager.id)
       .execute()
-    expect(await read()).not.toContain(s.owner.id)
+    await expect(read()).rejects.toMatchObject({ code: 'event_type_not_found' })
     await db
       .updateTable('auth.member')
       .set({ role: 'admin' })
@@ -538,13 +631,13 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       .set({ emailVerified: false })
       .where('id', '=', manager.id)
       .execute()
-    expect(await read()).not.toContain(s.owner.id)
+    await expect(read()).rejects.toMatchObject({ code: 'event_type_not_found' })
     await db
       .deleteFrom('auth.member')
       .where('organizationId', '=', s.team.id)
       .where('userId', '=', manager.id)
       .execute()
-    expect(await read()).not.toContain(s.owner.id)
+    await expect(read()).rejects.toMatchObject({ code: 'event_type_not_found' })
   })
 
   it('rejects explain ranges beyond the normal service upper bound', async () => {
@@ -696,19 +789,17 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     },
   )
 
-  it('detects source-copy mutation removing host privacy authorization', async () => {
+  it('detects source-copy mutation removing manager authorization', async () => {
     const s = await team('collective')
     const ctx = testContext(db, s.team.as(s.member), now)
     const verify = async (read: Explain) => {
-      expect(JSON.stringify(await read(ctx, s.query))).not.toContain(s.owner.id)
+      await expect(read(ctx, s.query)).rejects.toMatchObject({ code: 'event_type_not_found' })
     }
     await verify(sourceCopy().explainEventAvailability)
     await expect(
       verify(
-        sourceCopy([
-          'const discloseHosts = et.team !== undefined && (await canDiscloseExplanationHosts(ctx, et))',
-          'const discloseHosts = true',
-        ]).explainEventAvailability,
+        sourceCopy(['await assertCanExplainEventType(ctx, query.eventTypeId)', ''])
+          .explainEventAvailability,
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
     await verify(sourceCopy().explainEventAvailability)

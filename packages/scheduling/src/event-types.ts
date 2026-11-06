@@ -755,6 +755,19 @@ async function visibleRow(db: Db, ctx: ServiceContext, id: string, { lock = fals
   return row
 }
 
+/** Manager-only diagnostics hide both existence and the reason authorization failed. */
+export async function assertCanExplainEventType(ctx: ServiceContext, id: string): Promise<void> {
+  if (!ctx.principal) throw notFound()
+  if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full') throw notFound()
+  const row = await visibleRow(ctx.db, ctx, id)
+  try {
+    await assertCanWrite(ctx.db, ctx, row)
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'insufficient_role') throw notFound()
+    throw error
+  }
+}
+
 /** A visible personal event type is the caller's own; a team one needs owner or admin. */
 async function assertCanWrite(
   db: Db,
@@ -763,7 +776,8 @@ async function assertCanWrite(
   lock = false,
 ) {
   if (row.owner_user_id !== null) return
-  if (!(await access(db, ctx, lock)).canManageTeam) throw insufficientRole()
+  const current = await access(db, ctx, lock)
+  if (current.personalOwnerId !== null || !current.canManageTeam) throw insufficientRole()
 }
 
 /** The caller's standing in the organization they act in. */

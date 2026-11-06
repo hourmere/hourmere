@@ -8,6 +8,7 @@ import {
   getAvailableSlots,
   type Slot,
 } from './index.ts'
+import type { EventTypeRules } from './types.ts'
 
 const instant = Temporal.Instant.from
 const interval = (start: string, end: string) => ({ start: instant(start), end: instant(end) })
@@ -448,13 +449,13 @@ describe('explainAvailability', () => {
         eventType: {
           durationMinutes,
           allowedDurationsMinutes: [15, 30, 45, 60],
-          slotStepMinutes: [15, 20, 30, 45][random(4)],
+          slotStepMinutes: [15, 20, 30, 45][random(4)] ?? 30,
           bufferBeforeMinutes: random(4) * 5,
           bufferAfterMinutes: random(4) * 5,
           minimumNoticeMinutes: random(24 * 60),
           bookingWindowDays: random(2) + 1,
           maxBookingsPerDay: random(3) + 1,
-        },
+        } satisfies Required<EventTypeRules>,
         rangeStart,
         rangeEnd,
         durationMinutes: random(2) === 0 ? ([15, 30, 45, 60][random(4)] ?? 30) : undefined,

@@ -76,19 +76,23 @@ clipped to the candidate slot. They never contain calendar event titles, attende
 locations, external event IDs, calendar IDs, booking IDs or invitee information.
 The scheduling layer constructs the projection from an explicit field allowlist.
 
-Team host identities require current permission to manage the event type. Being
-one of its hosts, an ordinary team member or a former administrator does not grant
-that permission. An unprivileged explanation omits host identifiers. API keys
-also require `full` scope for host identity disclosure; `read` and
-`bookings` retain redacted explanations even for an owner or administrator.
-Transports must use the scheduling service, rather than publishing raw engine inputs, database
-rows or a caller-supplied permission flag.
+The entire service is manager-only and accepts `ServiceContext`: personal event types
+require their owner acting in the event type's organization; team types require current,
+verified owner/admin membership in a non-personal organization. API keys require `full`
+scope. Public callers, other organizations, ordinary members, former administrators,
+and `read`/`bookings` keys receive the same `not_found` outcome as a missing event type.
+Team managers may see host identifiers. Even an empty eligible round-robin pool is
+explainable only to its managers, with `no_eligible_round_robin_host`.
+Transports must use the scheduling service, rather than publishing raw engine inputs,
+database rows or a caller-supplied permission flag. Future REST, MCP, CLI and admin
+consumers must retain this manager-only boundary. Any future public explanation must
+not return busy/conflict intervals.
 
 Blocking intervals express the part of the candidate affected by a constraint.
 For buffer-only conflicts the raw busy interval can lie outside the candidate;
-its influence on the candidate is clipped instead. Neither representation reveals
-the full extent of an unrelated busy interval. Rules applying to the entire
-candidate use the candidate's full interval.
+its influence on the candidate is clipped instead. Clipping limits each reason to its
+candidate, but repeated candidates can reveal busy timings; this is why the entire
+service is manager-only. Rules applying to the entire candidate use its full interval.
 
 Unknown provider readiness must remain an error or neutral unavailable state.
 It must never be described as missing working hours, a missing calendar or a known

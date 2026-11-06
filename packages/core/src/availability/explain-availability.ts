@@ -1,7 +1,9 @@
+import { intervalIndex } from './interval-index.ts'
 import {
   AVAILABILITY_REASON_CODES,
   type AvailabilityReason,
   type AvailabilityReasonCode,
+  type EventTypeRules,
   type ExplainAvailabilityInput,
   type ExplainedSlot,
   type InstantInterval,
@@ -17,6 +19,20 @@ import {
 const NS_PER_MINUTE = 60_000_000_000n
 const MINUTES_PER_DAY = 1440
 const COMPATIBLE = { disambiguation: 'compatible' } as const
+
+/** Adding an engine rule requires an explicit explanation implementation and parity coverage. */
+const EXPLAINED_RULES = {
+  durationMinutes: true,
+  allowedDurationsMinutes: true,
+  slotStepMinutes: true,
+  bufferBeforeMinutes: true,
+  bufferAfterMinutes: true,
+  minimumNoticeMinutes: true,
+  maxBookingsPerDay: true,
+  bookingWindowDays: true,
+} satisfies Record<keyof EventTypeRules, true>
+// Keep this compile-time checklist local to diagnostics, with no normal-path allocation.
+void EXPLAINED_RULES
 
 interface NsInterval {
   readonly start: bigint
@@ -73,6 +89,25 @@ export function explainAvailability(input: ExplainAvailabilityInput): ExplainedS
       : q.now.toZonedDateTimeISO(q.timeZone).add({ days: q.bookingWindowDays }).toInstant()
           .epochNanoseconds
 
+  const before = BigInt(q.bufferBeforeMinutes) * NS_PER_MINUTE
+  const after = BigInt(q.bufferAfterMinutes) * NS_PER_MINUTE
+  const busyOverlapping = intervalIndex(q.busy.map(ns))
+  const bookingsOverlapping = intervalIndex(
+    [...q.bookings, ...otherBookings].map((booking) => {
+      const interval = ns(booking)
+      const bookingBefore = BigInt(booking.bufferBeforeMinutes) * NS_PER_MINUTE
+      const bookingAfter = BigInt(booking.bufferAfterMinutes) * NS_PER_MINUTE
+      return {
+        start: interval.start - bookingBefore,
+        end: interval.end + bookingAfter,
+        interval,
+        bookingBefore,
+        bookingAfter,
+      }
+    }),
+  )
+  const workingOverlapping = intervalIndex(workingIntervals)
+
   return candidates.map((slot): ExplainedSlot => {
     const start = slot.start.epochNanoseconds
     const end = slot.end.epochNanoseconds
@@ -92,9 +127,10 @@ export function explainAvailability(input: ExplainAvailabilityInput): ExplainedS
 
     if (start < q.now.epochNanoseconds) add('past', { start, end: q.now.epochNanoseconds })
     if (!durationOffered) add('duration_not_offered')
-    const insideHours = workingIntervals.some((i) => i.start <= start && end <= i.end)
+    const working = workingOverlapping(start, end)
+    const insideHours = working.some((i) => i.start <= start && end <= i.end)
     if (!insideHours) {
-      const uncovered = uncoveredParts({ start, end }, workingIntervals)
+      const uncovered = uncoveredParts({ start, end }, working)
       // Separate local-day intervals cannot authorize a meeting across midnight,
       // even if their union happens to cover its elapsed time completely.
       for (const interval of uncovered.length ? uncovered : [{ start, end }]) {
@@ -106,22 +142,13 @@ export function explainAvailability(input: ExplainAvailabilityInput): ExplainedS
     }
     if (windowEnd !== undefined && start > windowEnd) add('booking_window')
 
-    const before = BigInt(q.bufferBeforeMinutes) * NS_PER_MINUTE
-    const after = BigInt(q.bufferAfterMinutes) * NS_PER_MINUTE
     const paddedSlot = { start: start - before, end: end + after }
-    for (const busy of q.busy) {
-      const interval = ns(busy)
+    for (const interval of busyOverlapping(paddedSlot.start, paddedSlot.end)) {
       if (overlaps({ start, end }, interval)) add('calendar_busy', interval)
       candidateBuffers(interval, start, end, before, after, add)
     }
-    for (const booking of [...q.bookings, ...otherBookings]) {
-      const interval = ns(booking)
-      const bookingBefore = BigInt(booking.bufferBeforeMinutes) * NS_PER_MINUTE
-      const bookingAfter = BigInt(booking.bufferAfterMinutes) * NS_PER_MINUTE
-      const paddedBooking = {
-        start: interval.start - bookingBefore,
-        end: interval.end + bookingAfter,
-      }
+    for (const paddedBooking of bookingsOverlapping(paddedSlot.start, paddedSlot.end)) {
+      const { interval, bookingBefore, bookingAfter } = paddedBooking
       if (overlaps({ start, end }, interval)) add('host_conflict', interval)
       candidateBuffers(paddedBooking, start, end, before, after, add)
       const beforeInterval = { start: paddedBooking.start, end: interval.start }
@@ -256,10 +283,9 @@ function wallClock(date: Temporal.PlainDate, minute: number) {
 }
 
 function uncoveredParts(slot: NsInterval, working: readonly NsInterval[]): NsInterval[] {
-  const ordered = [...working].sort((a, b) => compare(a.start, b.start))
   const parts: NsInterval[] = []
   let cursor = slot.start
-  for (const interval of ordered) {
+  for (const interval of working) {
     if (interval.end <= cursor) continue
     if (interval.start >= slot.end) break
     if (interval.start > cursor) parts.push({ start: cursor, end: min(slot.end, interval.start) })
@@ -302,8 +328,4 @@ function min(a: bigint, b: bigint) {
 
 function max(a: bigint, b: bigint) {
   return a > b ? a : b
-}
-
-function compare(a: bigint, b: bigint) {
-  return a < b ? -1 : a > b ? 1 : 0
 }
