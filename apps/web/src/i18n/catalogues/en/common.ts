@@ -1,10 +1,13 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'This request has expired or changed. Reload your booking to choose what to do next.':
+    'This request has expired or changed. Reload your booking to choose what to do next.',
+  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
+    'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
   'This waitlist is full (100 entries). Please check available times later.':
     'This waitlist is full (100 entries). Please check available times later.',
   'Waitlist email is unavailable. Please contact the host.':
     'Waitlist email is unavailable. Please contact the host.',
-
   'This imported booking is read-only and managed in the original system.':
     'This imported booking is read-only and managed in the original system.',
   'This location is unavailable. Contact the host to book.':
