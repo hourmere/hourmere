@@ -125,6 +125,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('DELETE', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'booking_write', 'key'),
   rest('POST', '/api/v1/event-types/{id}/round-robin/activate', 'other_write', 'key'),
   rest('GET', '/api/v1/instance', 'public_metadata', 'public_metadata'),
+  rest('GET', '/api/v1/instance/embed', 'session_only', 'session_only'),
   rest('GET', '/api/v1/mcp-oauth/connections', 'session_only', 'session_only'),
   rest('DELETE', '/api/v1/mcp-oauth/connections/{id}', 'session_only', 'session_only'),
   rest('POST', '/api/v1/mcp-oauth/consent', 'session_only', 'session_only'),

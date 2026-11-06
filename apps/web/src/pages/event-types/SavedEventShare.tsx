@@ -17,6 +17,7 @@ import {
 import type { Me } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { validSchedule } from '../availability/valid-default.ts'
+import { EventEmbedAction } from './EventEmbedAction.tsx'
 import type { EditorReadiness } from './editor-readiness.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
 import { HostSlotPicker } from './HostSlotPicker.tsx'
@@ -105,7 +106,7 @@ export function SavedEventShare({
     item.summary === 'check_failed' ||
     item.summary === 'not_checked' ||
     reasons.some((reason) => reason === 'check_failed' || reason === 'check_not_performed')
-  const shareable =
+  const configured =
     !disabled &&
     (personal || team) &&
     !missingHandle &&
@@ -115,13 +116,17 @@ export function SavedEventShare({
     !hostAvailabilityMissing &&
     !hostConfigurationMissing &&
     !checksBlocked &&
-    !inactive &&
-    !event.isHidden &&
     !needsActivation
+  const shareable = configured && !inactive && !event.isHidden
   const url = shareable
     ? personal && profile
       ? publicPageUrl(profile.handle, event.slug)
       : publicTeamPageUrl(me.organization.slug, event.slug)
+    : null
+  const embedPath = configured
+    ? personal && profile
+      ? `/${encodeURIComponent(profile.handle)}/${encodeURIComponent(event.slug)}`
+      : `/team/${encodeURIComponent(me.organization.slug)}/${encodeURIComponent(event.slug)}`
     : null
   const canPick =
     instance.status === 'ready' &&
@@ -289,6 +294,11 @@ export function SavedEventShare({
           )}
         </ul>
       )}
+      <EventEmbedAction
+        event={{ ...event, isActive: !inactive }}
+        bookingPath={embedPath}
+        disabled={disabled}
+      />
       {canPick &&
         instance.status === 'ready' &&
         (pickerOpen ? (

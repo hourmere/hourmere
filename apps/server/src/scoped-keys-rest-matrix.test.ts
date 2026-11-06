@@ -119,6 +119,7 @@ const classes = {
     'POST /api/v1/conference-connections/{id}/refresh',
     'POST /api/v1/conference-connections/zoom/authorize',
     'POST /api/v1/conference-connections/zoom/authorize-meetings',
+    'GET /api/v1/instance/embed',
     'GET /api/v1/mcp-oauth/connections',
     'DELETE /api/v1/mcp-oauth/connections/{id}',
     'POST /api/v1/mcp-oauth/consent',
@@ -309,11 +310,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
             ? 'booking_not_found'
             : template === '/api/v1/readiness/self'
               ? 'readiness_access_denied'
-              : template.startsWith('/api/v1/team') || template.startsWith('/api/v1/teams')
-                ? 'team_management_access_denied'
-                : template.startsWith('/api/v1/conference-connections')
-                  ? 'conference_session_required'
-                  : 'session_required'
+              : template === '/api/v1/instance/embed'
+                ? 'embed_configuration_access_denied'
+                : template.startsWith('/api/v1/team') || template.startsWith('/api/v1/teams')
+                  ? 'team_management_access_denied'
+                  : template.startsWith('/api/v1/conference-connections')
+                    ? 'conference_session_required'
+                    : 'session_required'
         return {
           method,
           path,
@@ -607,14 +610,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 98-operation contract and all 294 scope combinations', () => {
+    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(98)
-      expect(new Set(ids).size).toBe(98)
+      expect(ids).toHaveLength(99)
+      expect(new Set(ids).size).toBe(99)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(294)
+      expect(cases).toHaveLength(297)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -636,7 +639,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         if (kind === 'session_only') {
           expect(response.status).toBe(fixture.expectedStatus)
-          expect(await response.json()).toMatchObject({ error: fixture.nativeError })
+          const body = await response.json()
+          expect(body).toMatchObject({ error: fixture.nativeError })
+          if (operation === 'GET /api/v1/instance/embed') {
+            expect(body).toEqual({ error: 'embed_configuration_access_denied' })
+            expect(response.headers.get('vary')).toBe('Cookie, Authorization')
+          }
           expect(google.calls.length).toBe(beforeProvider)
         } else if (!allowed[kind].includes(scope)) {
           expect(response.status).toBe(403)
@@ -684,7 +692,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.state).toBe(consumed ? 'used' : revoked ? 'revoked' : 'active')
           expect(link.booking_id !== null).toBe(consumed)
         }
-        expect(response.headers.get('cache-control')).toBe('no-store')
+        expect(response.headers.get('cache-control')).toBe(
+          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+        )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link
         // evidence deliberately prevents deleting that booking on its own.

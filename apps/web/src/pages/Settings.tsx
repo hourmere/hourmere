@@ -485,7 +485,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           label={t('Notification language')}
           error={errors.locale}
           hint={t(
-            'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
+            'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
           )}
         >
           {(props) => (

@@ -252,6 +252,11 @@ function RoleChange({
               {t('Change {name} from {oldRole} to {newRole}?', { name, oldRole, newRole })}
             </BreakableText>
           </p>
+          {member.user.email && (
+            <p className="user-content">
+              <BreakableText>{member.user.email}</BreakableText>
+            </p>
+          )}
           <p>
             {t(
               nextRole === 'admin'

@@ -1,11 +1,24 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { json, type RouteModule } from '../openapi.ts'
+import { createMiddleware } from 'hono/factory'
+import type { CallerEnv } from '../caller.ts'
+import { errorResponses, json, type RouteModule } from '../openapi.ts'
+
+const PublicUrl = z.url().openapi({
+  description: 'The public origin of this instance, configured by its operator',
+})
+const EmbedConfiguration = z
+  .object({
+    publicUrl: PublicUrl,
+    embedAllowedOrigins: z.array(z.url()).max(32).optional().openapi({
+      description:
+        'Exact website origins approved for embedding; empty when disabled, absent when unknown',
+    }),
+  })
+  .openapi('EmbedConfiguration')
 
 const Instance = z
   .object({
-    publicUrl: z.url().openapi({
-      description: 'The public origin of this instance, configured by its operator',
-    }),
+    publicUrl: PublicUrl,
     hostedSignupUrl: z.url().openapi({
       description: 'Hosted service destination for public attribution and sign-up links',
     }),
@@ -24,6 +37,9 @@ const Instance = z
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
+    embedEnabled: z.boolean().optional().openapi({
+      description: 'Whether embedding is enabled; absent when unknown',
+    }),
     signIn: z
       .object({
         email: z.boolean().openapi({ description: 'Sign-in links sent by email' }),
@@ -38,6 +54,7 @@ const Instance = z
  * What this instance offers, for clients deciding what to show before anyone signs in (the
  * web app's sign-in buttons). Public and the same for every caller; it never carries
  * secrets; the public hosted sign-up destination is safe to share.
+ * Only the embed capability is public; approved origins require a verified host session.
  */
 export function instanceRoutes({
   publicUrl,
@@ -45,6 +62,7 @@ export function instanceRoutes({
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
+  embedAllowedOrigins,
   slotSnippetsEnabled = false,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
@@ -57,6 +75,8 @@ export function instanceRoutes({
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
+  /** Normalized EMBED_ALLOWED_ORIGINS; undefined preserves unknown capability readiness. */
+  embedAllowedOrigins?: readonly string[]
   slotSnippetsEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
@@ -70,6 +90,7 @@ export function instanceRoutes({
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     followUpHostNotesEnabled,
+    ...(embedAllowedOrigins !== undefined && { embedEnabled: embedAllowedOrigins.length > 0 }),
     slotSnippetsEnabled,
     signIn: {
       email: true,
@@ -77,7 +98,21 @@ export function instanceRoutes({
       microsoft: socialProviders.microsoft !== undefined,
     },
   }
-  return ({ app }) => {
+  const embedConfiguration: z.infer<typeof EmbedConfiguration> = {
+    publicUrl,
+    ...(embedAllowedOrigins !== undefined && { embedAllowedOrigins: [...embedAllowedOrigins] }),
+  }
+  return ({ app, caller }) => {
+    const privateHeaders = createMiddleware(async (c, next) => {
+      c.header('Cache-Control', 'private, no-store')
+      c.header('Vary', 'Cookie, Authorization')
+      await next()
+    })
+    const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
+      if (c.var.principal.kind !== 'session')
+        return c.json({ error: 'embed_configuration_access_denied' }, 403)
+      await next()
+    })
     app.openapi(
       createRoute({
         method: 'get',
@@ -89,6 +124,32 @@ export function instanceRoutes({
         },
       }),
       (c) => c.json(body, 200),
+    )
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/instance/embed',
+        summary: 'Read the embed configuration for the signed-in host interface',
+        description:
+          'Requires a verified web session and current organization membership. Returns the operator-approved website origins to hosts generating booking widgets; these origins are never included in public instance discovery. API keys and MCP OAuth tokens cannot read this browser-session-only configuration. An absent origin list means unknown configuration; an empty list means embedding is disabled.',
+        tags: ['Instance'],
+        security: [{ session: [] }],
+        middleware: [privateHeaders, caller, sessionOnly] as [
+          typeof privateHeaders,
+          typeof caller,
+          typeof sessionOnly,
+        ],
+        responses: {
+          200: {
+            description: 'Private host embed configuration',
+            content: json(EmbedConfiguration),
+          },
+          ...errorResponses({
+            403: 'embed_configuration_access_denied: requires a verified web session',
+          }),
+        },
+      }),
+      (c) => c.json(embedConfiguration, 200),
     )
   }
 }

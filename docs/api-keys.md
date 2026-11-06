@@ -180,6 +180,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, bookings` |
 | `POST /api/v1/event-types/{id}/round-robin/activate` | Session or API key | `full` |
 | `GET /api/v1/instance` | Public; no key needed | `full, read, bookings` |
+| `GET /api/v1/instance/embed` | Browser session only | — |
 | `GET /api/v1/mcp-oauth/connections` | Browser session only | — |
 | `DELETE /api/v1/mcp-oauth/connections/{id}` | Browser session only | — |
 | `POST /api/v1/mcp-oauth/consent` | Browser session only | — |

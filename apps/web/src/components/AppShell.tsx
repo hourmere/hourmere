@@ -7,6 +7,7 @@ import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
+import { JoinedTeamNotice } from './JoinedTeamNotice.tsx'
 import { InstanceLegalLinks } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 import { PageSkeleton } from './PageSkeleton.tsx'
@@ -117,7 +118,9 @@ function Shell() {
     if (notice && notice.path !== null && notice.path !== pathname) setNotice(null)
   }, [notice, pathname, setNotice])
   const shownNotice =
-    notice && (notice.path === null || notice.path === pathname) ? notice.message : null
+    notice && !notice.joinedTeam && (notice.path === null || notice.path === pathname)
+      ? notice.message
+      : null
 
   // A link that leaves a page with unsaved changes asks first (see unsaved-changes.tsx).
   // Capturing: this runs before the link's own handler, which then sees the click cancelled.
@@ -201,6 +204,7 @@ function Shell() {
           ref={main}
           tabIndex={-1}
         >
+          <JoinedTeamNotice />
           {shownNotice && (
             <div className="alert alert-info notice">
               <p role={notice?.path === null ? 'status' : 'alert'}>{ui(shownNotice)}</p>

@@ -61,6 +61,9 @@ function mutate(source: string, before: string, after = '') {
 }
 
 const common = {
+  EventEmbedAction: () => null,
+  HostSlotPicker: () => null,
+  verifySlotPickerAccess: async () => {},
   ...paths,
   Link,
   CopyButton,
@@ -474,7 +477,7 @@ describe('team sharing production-source negative controls', () => {
       event: EVENT,
       item: { ...CHECK, summary: 'configuration_blocked' as const },
     },
-    { guard: '    !inactive &&', event: { ...EVENT, isActive: false }, item: CHECK },
+    { guard: '!inactive &&', event: { ...EVENT, isActive: false }, item: CHECK },
     { guard: '!needsActivation', event: { ...EVENT, roundRobinActive: false }, item: CHECK },
   ])('detects removal of share $guard', ({ guard, event, item }) => {
     assertShareHidden(shareFunction, event, item)
