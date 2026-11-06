@@ -1093,6 +1093,12 @@ async function buildAvailabilityInputForMode(
     ])
     .where('bh.user_id', '=', hostUserId)
     .where('bh.active', '=', true)
+    .where((eb) =>
+      eb.or([
+        eb('b.status', '!=', 'pending_payment'),
+        eb('b.payment_hold_expires_at', '>', sql<Date>`clock_timestamp()`),
+      ]),
+    )
     .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
 
   // A slot owns one occupancy regardless of the number of seats. Its immutable buffers
