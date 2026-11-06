@@ -126,12 +126,12 @@ are shown below; session cookies do not authenticate MCP.
 
 | MCP tool | CLI command | Input | Key scopes |
 |---|---|---|---|
-| `get_event_type_waitlist` | `event-waitlist` | `id` | `read`, `full` |
-| `set_event_type_waitlist` | `set-event-waitlist` | `id`, `enabled` | `full` |
-| `list_waitlist_entries` | `waitlist-entries` | `id`, optional `after`, `limit` | `read`, `full` |
-| `remove_waitlist_entry` | `remove-waitlist-entry` | `id`, `entryId` | `full` |
-| `join_waitlist` | `join-waitlist` | Join body above plus `slug` and exactly one of `handle` or `teamSlug` | `bookings`, `full` |
-| `resend_waitlist_verification` | `resend-waitlist-verification` | `email`, `slug`, exactly one of `handle` or `teamSlug` | `bookings`, `full` |
+| `get_event_type_waitlist` | `event-waitlist` | `id` | `read, full` |
+| `set_event_type_waitlist` | `set-event-waitlist` | `id, enabled` | `full` |
+| `list_waitlist_entries` | `waitlist-entries` | `id`, optional `after`, `limit` | `read, full` |
+| `remove_waitlist_entry` | `remove-waitlist-entry` | `id, entryId` | `full` |
+| `join_waitlist` | `join-waitlist` | Join body above plus `slug` and exactly one of `handle` or `teamSlug` | `bookings, full` |
+| `resend_waitlist_verification` | `resend-waitlist-verification` | `email`, `slug`, exactly one of `handle` or `teamSlug` | `bookings, full` |
 
 For example, call `set_event_type_waitlist` with:
 
