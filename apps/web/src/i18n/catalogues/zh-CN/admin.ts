@@ -4,8 +4,8 @@ export const admin = {
   'No-show': '未出席',
   'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
     '这些标记仅供主持人和团队管理员查看。不会发送邮件，已安排的跟进消息也不会改变。',
-  'Clear no-show for {name}': '清除 {name} 的未出席标记',
-  'Mark {name} as a no-show': '将 {name} 标记为未出席',
+  'Clear no-show for {name}': '清除{name}的未出席标记',
+  'Mark {name} as a no-show': '将{name}标记为未出席',
   'Clear no-show': '清除未出席标记',
   'Mark no-show': '标记为未出席',
   'Could not update the no-show mark. Refresh the booking and try again.':
