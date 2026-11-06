@@ -34,6 +34,7 @@ const scopes = ['full', 'read', 'bookings'] as const
 // Do not derive expectations from the production registry being tested.
 const classes = {
   booking_read: [
+    'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
@@ -269,6 +270,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         publicUrl,
         routes: productRoutes({
           db,
+          slotSnippetsEnabled: true,
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -441,6 +443,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expectedStatus = 202
           }
         }
+      } else if (template === '/api/v1/open-time-snippets') {
+        payload = { eventTypeId: mainEvent, from: start, to: end }
       } else if (template.startsWith('/api/v1/schedules')) {
         if (template.includes('{id}')) {
           cleanupSchedule = await f.schedule(owner.user.id, {
@@ -611,14 +615,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
+    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(99)
-      expect(new Set(ids).size).toBe(99)
+      expect(ids).toHaveLength(100)
+      expect(new Set(ids).size).toBe(100)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(297)
+      expect(cases).toHaveLength(300)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

@@ -89,6 +89,7 @@ export default defineConfig({
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Booking waitlists', link: '/docs/booking-waitlist' },
+            { label: 'Open-time snippets', link: '/docs/open-time-snippets' },
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },
             { label: 'Notifications', link: '/docs/notifications' },
