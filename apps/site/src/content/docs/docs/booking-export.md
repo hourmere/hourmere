@@ -32,12 +32,14 @@ booking list. The response is not cached.
 
 | Parameter | Meaning |
 |---|---|
-| `from`, `to` | Required RFC 3339 instants. Include bookings starting at or after `from` and strictly before `to`. Maximum range: 366 elapsed days (366 × 24 hours). |
+| `from` | Required RFC 3339 instant. Include bookings starting at or after this instant. |
+| `to` | Required RFC 3339 instant. Include bookings starting strictly before this instant. Must be after `from`, at most 366 elapsed days (366 × 24 hours) later. |
 | `timeZone` | IANA display time zone, default `UTC`. UTC columns are always included. |
 | `status` | Optional `confirmed` or `cancelled`; omission includes both. |
 | `eventTypeId` | Optional event type UUID within the authorized organization. |
 | `hostUserId` | Optional saved booking host UUID; collective bookings still appear once. |
-| `endAfter`, `endTo` | Optional existing list filters: end strictly after, or at/before, the given instant. |
+| `endAfter` | Optional existing list filter: end strictly after the given instant. |
+| `endTo` | Optional existing list filter: end at or before the given instant. |
 | `order` | `asc` (default) or `desc`, by start time and booking ID. |
 | `bom` | `true` adds a UTF-8 byte-order mark for Excel. Default `false` keeps machine-oriented CSV free of a BOM. |
 | `expectedOrganizationId` | Optional organization binding for a browser download. A changed current organization refuses the request instead of exporting a different space. |
@@ -69,16 +71,20 @@ Headers are stable machine-readable names, independent of the admin interface la
 | `event_type_id` | Associated event type UUID. |
 | `event_type` | Event type title. |
 | `title` | Booking title. |
-| `start`, `end` | Start/end in the requested zone, with UTC offset. |
-| `start_utc`, `end_utc` | The same instants in UTC. |
+| `start` | Start in the requested zone, with UTC offset. |
+| `end` | End in the requested zone, with UTC offset. |
+| `start_utc` | Start instant in UTC. |
+| `end_utc` | End instant in UTC. |
 | `status` | Stored booking status, including cancelled predecessors after a reschedule. |
-| `invitee_name`, `invitee_email` | The booking's primary invitee. |
+| `invitee_name` | The primary invitee's name. |
+| `invitee_email` | The primary invitee's email address. |
 | `guests_count` | Number of additional attendees. |
 | `hosts` | JSON containing saved booking host IDs and their current names/email addresses. |
 | `location_option` | JSON containing the option's ID, kind and label when present, without resolved private links. |
 | `answers` | JSON keyed by question ID, preserving the saved responses. |
 | `source` | Creation source, including `import` for imported local bookings. |
-| `created_at`, `cancelled_at` | UTC creation/cancellation timestamps; empty cancellation value when absent. |
+| `created_at` | UTC creation timestamp. |
+| `cancelled_at` | UTC cancellation timestamp, empty when absent. |
 
 Answers use one JSON column instead of one column per question because an export can
 span event types with different questions and historical edits. Stable question IDs keep
