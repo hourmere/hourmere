@@ -11,6 +11,7 @@ import * as Conferences from './conferences.ts'
 import type { PublicContext } from './context.ts'
 import * as Errors from './errors.ts'
 import * as Hosts from './hosts.ts'
+import * as LocationOptions from './location-options.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as Questions from './questions.ts'
@@ -34,6 +35,7 @@ const dependencies: Record<string, object> = {
   './conferences.ts': Conferences,
   './errors.ts': Errors,
   './hosts.ts': Hosts,
+  './location-options.ts': LocationOptions,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './questions.ts': Questions,

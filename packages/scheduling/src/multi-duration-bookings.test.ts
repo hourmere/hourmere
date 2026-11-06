@@ -23,6 +23,7 @@ import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
 import * as hosts from './hosts.ts'
+import * as locationOptions from './location-options.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { validateResponses } from './questions.ts'
@@ -97,6 +98,7 @@ function sourceCopy(change?: Change): Api {
     ...availability,
     ...bookingPage,
     ...conferences,
+    ...locationOptions,
     DomainError,
     ...hosts,
     ...notificationSettings,

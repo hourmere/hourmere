@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import { createEventType, joinWaitlist, setEventTypeWaitlist } from '@hourmere/scheduling'
+import {
+  createEventType,
+  joinWaitlist,
+  publicLocationOptions,
+  setEventTypeWaitlist,
+} from '@hourmere/scheduling'
 import {
   createFixtures,
   createTestTeam,
@@ -66,8 +71,9 @@ function publicProjection(before?: string, after?: string) {
   }
   return new Function(
     'eventTypeNotFound',
+    'publicLocationOptions',
     `${stripTypeScriptTypes(source)}; return publicEventType`,
-  )(() => new Error('Missing event')) as (
+  )(() => new Error('Missing event'), publicLocationOptions) as (
     record: Record<string, unknown>,
   ) => Record<string, unknown>
 }
@@ -80,6 +86,7 @@ function assertPublicProjection(project = publicProjection()) {
     durationMinutes: 30,
     allowedDurationsMinutes: [30],
     location: null,
+    locations: null,
     questions: [],
     allowGuests: false,
     successRedirect: null,

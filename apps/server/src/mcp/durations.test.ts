@@ -249,8 +249,8 @@ describe.skipIf(!bootstrap)('MCP selected meeting lengths', () => {
     [
       'selected booking forwarding',
       [
-        '          durationMinutes: args.durationMinutes,\n          invitee:',
-        '          invitee:',
+        '          durationMinutes: args.durationMinutes,\n          locationOptionId:',
+        '          locationOptionId:',
       ],
       verifyBooking,
     ],
