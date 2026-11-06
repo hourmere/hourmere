@@ -36,6 +36,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   The [design and credential/discovery foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
   adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
+- Group seats currently have internal storage and service support only. Public booking
+  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
+  this limitation applies equally to self-hosted installations.
+
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

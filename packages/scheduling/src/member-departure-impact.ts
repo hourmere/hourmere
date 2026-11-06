@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { checkedCatalogPage } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 import { TeamAdminBookingSchema } from './team-admin-booking.ts'
 import { readTeamBookingPage } from './team-bookings.ts'
@@ -161,7 +162,7 @@ async function readImpact(
 
   const bookingCount = await ctx.db
     .selectFrom('bookings as booking')
-    .innerJoin('booking_hosts as host', 'host.booking_id', 'booking.id')
+    .innerJoin(resolvedBookingHosts(ctx.db).as('host'), 'host.booking_id', 'booking.id')
     .leftJoin('event_types as event', 'event.id', 'booking.event_type_id')
     .select((eb) => eb.fn.countAll<string>().as('count'))
     .where('booking.organization_id', '=', input.teamId)

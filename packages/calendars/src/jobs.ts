@@ -6,6 +6,7 @@ import {
   recoverBookingCalendarPage,
   writeBookingCalendar,
 } from './booking-events.ts'
+import { writeGroupSlotCalendar } from './group-slot-events.ts'
 import type { CalendarDeps } from './index.ts'
 import { syncGoogleCalendar } from './sync.ts'
 
@@ -24,17 +25,22 @@ export function calendarSyncJob(deps: CalendarDeps) {
 export function bookingCalendarJob(deps: CalendarDeps) {
   return defineJob({
     name: BOOKING_CALENDAR_JOB,
-    payload: z.strictObject({ bookingId: z.uuid() }),
+    payload: z.union([
+      z.strictObject({ bookingId: z.uuid() }),
+      z.strictObject({ groupSlotId: z.uuid() }),
+    ]),
     policy: 'stately',
     concurrency: 2,
     retry: { limit: 12, delaySeconds: 60, backoff: true, maxDelaySeconds: 3600 },
     expireInSeconds: 300,
-    handler: ({ bookingId }, { signal }) =>
-      writeBookingCalendar(
-        deps,
-        bookingId,
-        AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
-      ),
+    handler: (payload, { signal }) =>
+      'groupSlotId' in payload
+        ? writeGroupSlotCalendar(deps, payload.groupSlotId, signal)
+        : writeBookingCalendar(
+            deps,
+            payload.bookingId,
+            AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+          ),
   })
 }
 export function calendarDispatchJob(

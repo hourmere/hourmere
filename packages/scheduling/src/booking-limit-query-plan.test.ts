@@ -163,12 +163,16 @@ describe.skipIf(!serverUrl)('indexed booking limit availability queries', () => 
       'availability must not scan unrelated bookings',
     ).toEqual([])
     if (limits === 'none') {
-      expect(query.sql, 'unlimited types omit the complete-period branch').not.toMatch(
-        /\bunion all\b/i,
-      )
+      expect(
+        query.sql.match(/from "booking_hosts" as "bh"/g),
+        'unlimited types omit the complete-period booking branch',
+      ).toHaveLength(1)
       expect(indexes).not.toContain('bookings_event_type_start')
     } else {
-      expect(query.sql).toMatch(/\bunion all\b/i)
+      expect(
+        query.sql.match(/from "booking_hosts" as "bh"/g),
+        'limited types retain the indexed complete-period booking branch',
+      ).toHaveLength(2)
       expect(indexes, 'complete periods use the event-type/start index').toContain(
         'bookings_event_type_start',
       )
