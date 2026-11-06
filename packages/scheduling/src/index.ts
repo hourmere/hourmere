@@ -68,6 +68,14 @@ export {
   rescheduleManagedBooking,
 } from './bookings.ts'
 export {
+  BRAND_LOGO_MAX_BYTES,
+  BrandingUpdateInput,
+  getBranding,
+  getBrandLogo,
+  setBranding,
+  uploadBrandLogo,
+} from './branding.ts'
+export {
   type CatalogPage,
   type CatalogPageInput,
   DEFAULT_CATALOG_PAGE_SIZE,

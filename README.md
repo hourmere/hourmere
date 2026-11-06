@@ -402,6 +402,11 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+Organization owners and team admins can store a logo and primary colour through settings,
+REST, MCP and CLI. [Branding settings](https://hourmere.com/docs/branding) include safe image
+uploads and automatic readable button-text selection; public pages and emails do not apply
+the stored theme yet.
+
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 

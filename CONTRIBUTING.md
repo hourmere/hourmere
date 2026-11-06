@@ -387,6 +387,12 @@ When adding or changing a write operation:
    rejects new or reintroduced entries, directing authors to add the MCP tool and CLI
    command. When closing a gap, add its real mapping and remove its gap entry; stale gaps
    fail, including operations removed, changed to reads or made browser-session-only.
+   The branding image upload has a narrow binary transport mapping:
+   `{ "mcpReference": "set_branding", "cliUpload": "branding upload", "reason": "…" }`.
+   The guard checks the exact upload operation and route, the CLI's `REST_COMMANDS`
+   destination, and the registered reference-setting MCP tool. This does not exempt
+   other writes or permit a new known gap; binary uploads travel through REST while
+   MCP sets an already uploaded reference.
 4. Update or remove the entry when the operation or either interface name changes. Run
    `npm run api:types` and commit the regenerated API types after route changes.
 5. Run the guard locally:

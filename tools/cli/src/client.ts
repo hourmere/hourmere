@@ -246,3 +246,68 @@ export async function callTool(options: {
     throw new CliError('request_failed')
   }
 }
+
+/** Binary uploads use REST; MCP can subsequently reference the returned content hash. */
+export async function uploadLogo(options: {
+  url: URL
+  key: string
+  path: string
+  contentType: string
+  fetch?: typeof fetch
+}): Promise<Record<string, unknown>> {
+  const { constants } = await import('node:fs')
+  const { open } = await import('node:fs/promises')
+  const limit = 512 * 1024
+  const handle = await open(
+    options.path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  )
+  let data: Buffer
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile()) throw new CliError('invalid_input_file')
+    if (stat.size > limit) throw new CliError('input_too_large')
+    data = Buffer.alloc(limit + 1)
+    let size = 0
+    for (;;) {
+      const { bytesRead } = await handle.read(data, size, data.length - size, null)
+      size += bytesRead
+      if (size > limit) throw new CliError('input_too_large')
+      if (bytesRead === 0) break
+    }
+    data = data.subarray(0, size)
+  } finally {
+    await handle.close()
+  }
+  try {
+    const response = await (options.fetch ?? fetch)(new URL('/api/v1/branding/logo', options.url), {
+      method: 'POST',
+      redirect: 'error',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        authorization: `Bearer ${options.key}`,
+        'content-type': options.contentType,
+        accept: 'application/json',
+        'User-Agent': `hourmere-cli/${version}`,
+      },
+      body: new Uint8Array(data),
+    })
+    let result: unknown
+    try {
+      result = await readResponse(response)
+    } catch (error) {
+      if (response.ok) throw error
+    }
+    if (!response.ok)
+      throw new CliError(
+        safeCode(isObject(result) ? result.error : undefined, 'http_error'),
+        response.status,
+      )
+    if (!isObject(result)) throw new CliError('invalid_response')
+    return result
+  } catch (error) {
+    if (error instanceof CliError) throw error
+    throw new CliError('request_failed')
+  }
+}

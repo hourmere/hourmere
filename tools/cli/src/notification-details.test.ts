@@ -13,7 +13,9 @@ function sourceCopy(file: string, replacement?: Replacement) {
     source = source.replace(...replacement)
   }
   return stripTypeScriptTypes(
-    source.replace(/^import[^\n]*\n/gm, '').replaceAll('import.meta.url', 'clientModuleUrl'),
+    source
+      .replace(/^import[\s\S]*?from '[^']+'\n/gm, '')
+      .replaceAll('import.meta.url', 'clientModuleUrl'),
   ).replace(/^export /gm, '')
 }
 function clientCopy(replacement?: Replacement): typeof client {
