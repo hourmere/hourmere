@@ -857,6 +857,18 @@ export interface SignInEmails {
   id: string;
 }
 
+export interface SmsDeliveries {
+  created_at: Generated<Timestamp>;
+  key_hash: Buffer;
+  organization_id: string | null;
+  provider_message_id: string | null;
+  recipient_hash: Buffer | null;
+  recipient_mask: string | null;
+  request_hash: Buffer | null;
+  status: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -1076,6 +1088,7 @@ export interface DB {
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
   sign_in_emails: SignInEmails;
+  sms_deliveries: SmsDeliveries;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

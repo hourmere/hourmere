@@ -1580,3 +1580,33 @@ UNION view that resolves ordinary booking resources or a seat's shared slot reso
 the existing recipient worker; it never transfers ownership to a seat. Logistics readiness
 uses the conference's matching applied revision and ready URL, independently of calendar
 count writeback. Count failures therefore cannot revoke a ready URL or resend invitations.
+
+### Operator SMS dispatch foundation
+
+Migration `0069_sms_delivery_limits.sql` adds `sms_deliveries`, an internal ledger,
+not a reminder queue. No host or invitee SMS surface exists yet. Each logical job has
+one SHA-256 key digest, globally unique across organizations. The transaction takes
+a database-local advisory fence, checks rolling recipient/hour, recipient/day,
+instance/hour and organization/day budgets using database time, and commits a
+`dispatching` reservation before HTTP. All attempts consume budget, including failed
+and uncertain ones. No worker ever reclaims a reservation. A crash before dispatch
+can lose a message; a crash after dispatch cannot cause its retry to send twice.
+
+Rows contain only a purpose-keyed HMAC of the normalized destination, a last-two-digit
+mask, organization ID, a keyed request fingerprint, provider message ID, status and
+timestamps. Neither the body, full phone number nor Twilio credentials are persisted.
+Request fingerprints bind destination, body and organization so changed retries fail.
+A secret rotation does not change the stable job-key digest or allow another dispatch;
+retained requests instead fail closed on a fingerprint mismatch. Keep the hash key
+stable because rotation resets recipient accounting, and protect its backup.
+Organization IDs deliberately have no cascading foreign key: organization deletion
+must never reopen a consumed job key.
+
+After 30 days, hourly maintenance (registered only when SMS is configured) and
+opportunistic maintenance erase all delivery details in batches of at most 1,000.
+Only the job-key digest, timestamps and `expired` status remain indefinitely. These
+small tombstones prevent old job retries from sending after detail retention ends.
+A stopped worker delays cleanup; resume it to process the backlog. A retained accepted
+record can return its provider ID on retry; dispatching, failed, unknown and expired
+records fail closed. Status callbacks and final delivery receipts are deferred, so
+`accepted` means Twilio accepted the request, not that a handset received it.
