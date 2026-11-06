@@ -250,7 +250,7 @@ export async function deliverScheduledBookingEmail(
       if (!(await conferenceNotificationAllowed(db, row.booking_id, 'reminder', true)))
         throw new NotificationRetryError('Conference preparation remains pending')
       const c = await db
-        .selectFrom('booking_conferences')
+        .selectFrom('booking_notification_conference_context')
         .select('revision')
         .where('booking_id', '=', row.booking_id)
         .executeTakeFirst()
@@ -262,13 +262,20 @@ export async function deliverScheduledBookingEmail(
       // would invert sendOnce's identity-before-budget lock order.
       const available = await db
         .selectFrom('booking_hosts as bh')
-        .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
+        .innerJoin('bookings as b', (join) =>
+          join.on((eb) =>
+            eb.or([
+              eb('b.id', '=', eb.ref('bh.booking_id')),
+              eb('b.group_slot_id', '=', eb.ref('bh.group_slot_id')),
+            ]),
+          ),
+        )
         .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
         .innerJoin('auth.member as m', (join) =>
           join.onRef('m.userId', '=', 'u.id').onRef('m.organizationId', '=', 'b.organization_id'),
         )
         .select('u.id')
-        .where('bh.booking_id', '=', claim.booking_id)
+        .where('b.id', '=', claim.booking_id)
         .where('u.id', '=', organizer.id)
         .where('u.email', '=', organizer.email)
         .where('u.emailVerified', '=', true)
@@ -321,7 +328,7 @@ export async function deliverScheduledBookingEmail(
       location: data.booking.location,
     }
     const recipients = [
-      ...(rule.recipients.host
+      ...(rule.recipients.host && !data.booking.groupSlotId
         ? data.hosts.map((h) => ({
             key: `host:${h.id}`,
             email: h.email,

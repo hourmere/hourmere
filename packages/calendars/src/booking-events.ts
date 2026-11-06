@@ -4,6 +4,7 @@ import { sql } from 'kysely'
 import { writeConferenceMirrors } from './conference-mirrors.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import type { GoogleEventWrite } from './google-events.ts'
+import { writeGroupSlotCalendar } from './group-slot-events.ts'
 import type { CalendarDeps } from './index.ts'
 import { useGoogleConnection } from './sync.ts'
 
@@ -15,7 +16,7 @@ interface BookingEvent {
 interface CalendarBookingQueue {
   enqueue(
     name: typeof BOOKING_CALENDAR_JOB,
-    payload: { bookingId: string },
+    payload: { bookingId: string } | { groupSlotId: string },
     options?: EnqueueOptions,
   ): Promise<string | null>
 }
@@ -35,6 +36,17 @@ export async function redispatchBookingCalendar(
   bookingId: string,
 ) {
   return db.transaction().execute(async (trx) => {
+    const seat = await trx
+      .selectFrom('bookings')
+      .select('group_slot_id')
+      .where('id', '=', bookingId)
+      .executeTakeFirst()
+    if (seat?.group_slot_id)
+      return queue.enqueue(
+        BOOKING_CALENDAR_JOB,
+        { groupSlotId: seat.group_slot_id },
+        { transaction: trx, singletonKey: `group:${seat.group_slot_id}` },
+      )
     const root = await rootOf(trx, bookingId)
     if (!root) throw new Error('Booking no longer exists')
     return queue.enqueue(
@@ -158,6 +170,29 @@ export async function recoverBookingCalendarPage(
 export function calendarBookingNotifier(queue: CalendarBookingQueue) {
   return async (trx: Db, event: BookingEvent) => {
     if (!trx.isTransaction) throw new Error('Calendar jobs require the booking transaction')
+    const seat = await trx
+      .selectFrom('bookings')
+      .select(['group_slot_id', 'rescheduled_from_id'])
+      .where('id', '=', event.bookingId)
+      .executeTakeFirst()
+    if (seat?.group_slot_id) {
+      const slots = new Set([seat.group_slot_id])
+      if (event.type === 'rescheduled' && seat.rescheduled_from_id) {
+        const source = await trx
+          .selectFrom('bookings')
+          .select('group_slot_id')
+          .where('id', '=', seat.rescheduled_from_id)
+          .executeTakeFirst()
+        if (source?.group_slot_id) slots.add(source.group_slot_id)
+      }
+      for (const groupSlotId of [...slots].sort())
+        await queue.enqueue(
+          BOOKING_CALENDAR_JOB,
+          { groupSlotId },
+          { transaction: trx, singletonKey: `group:${groupSlotId}` },
+        )
+      return
+    }
     const root = await rootOf(trx, event.bookingId)
     if (root) {
       const automatic = await trx
@@ -182,6 +217,12 @@ export async function writeBookingCalendar(
   bookingId: string,
   signal = AbortSignal.timeout(120_000),
 ) {
+  const seat = await deps.db
+    .selectFrom('bookings')
+    .select('group_slot_id')
+    .where('id', '=', bookingId)
+    .executeTakeFirst()
+  if (seat?.group_slot_id) return writeGroupSlotCalendar(deps, seat.group_slot_id, signal)
   const root = await rootOf(deps.db, bookingId)
   if (!root) return
   // Automatic roots have exactly one provider-create authority, including unknown imports.

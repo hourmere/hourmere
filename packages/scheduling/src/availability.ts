@@ -783,6 +783,8 @@ export interface AvailabilityQuery {
   now: Temporal.Instant
   /** A booking that must not block, e.g. the one being rescheduled. */
   excludeBookingId?: string | undefined
+  /** Exact slot generations omitted for a validated join or final-seat move. */
+  excludeGroupSlotIds?: readonly string[] | undefined
   /** Collective snapshots always use each original host’s current default schedule. */
   useDefaultSchedule?: boolean | undefined
 }
@@ -1013,7 +1015,39 @@ export async function buildAvailabilityInput(
     .where('bh.active', '=', true)
     .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
 
-  const [overrides, busy, bookings] = await Promise.all([
+  // A slot owns one occupancy regardless of the number of seats. Its immutable buffers
+  // survive event edits, and complete local periods use the same window as normal rows.
+  const groupBookings = db
+    .selectFrom('booking_hosts as gh')
+    .innerJoin('group_slots as gs', 'gs.id', 'gh.group_slot_id')
+    .select((eb) => [
+      floorMs(eb, eb.ref('gs.start_at')).as('start_at'),
+      ceilMs(eb, eb.ref('gs.end_at')).as('end_at'),
+      'gs.event_type_id',
+      'gs.buffer_before_minutes',
+      'gs.buffer_after_minutes',
+    ])
+    .where('gh.user_id', '=', hostUserId)
+    .where('gh.active', '=', true)
+    .$if(!!query.excludeGroupSlotIds?.length, (q) =>
+      q.where('gs.id', 'not in', query.excludeGroupSlotIds as readonly string[]),
+    )
+    .where((eb) =>
+      eb.or([
+        eb('gh.period', '&&', windowRange(eb)),
+        ...(periodWindows.length > 0
+          ? [
+              eb.and([
+                eb('gs.event_type_id', '=', eventTypeId),
+                eb('gs.start_at', '>=', new Date(bookingWindow.start.epochMilliseconds)),
+                eb('gs.start_at', '<', new Date(bookingWindow.end.epochMilliseconds)),
+              ]),
+            ]
+          : []),
+      ]),
+    )
+
+  const [overrides, busy, bookings, slots] = await Promise.all([
     db
       .selectFrom('schedule_overrides')
       .select(['date', 'intervals'])
@@ -1047,6 +1081,21 @@ export async function buildAvailabilityInput(
             eb('cb.all_day_end', '>', windowDates.start),
           ]),
         ]),
+      )
+      // Slot identity, never interval/title, identifies the shared provider copy. A
+      // second connection to the same Google calendar has the same external identity.
+      .$if(!!query.excludeGroupSlotIds?.length, (q) =>
+        q.where(sql<boolean>`NOT EXISTS (
+          SELECT 1 FROM group_slot_calendar_events gsce
+          JOIN calendars wc ON wc.id=gsce.calendar_id
+          JOIN calendar_connections wcc ON wcc.id=wc.connection_id
+          WHERE gsce.group_slot_id IN (${sql.join(query.excludeGroupSlotIds ?? [])})
+            AND gsce.external_event_id=cb.external_event_id
+            AND (gsce.calendar_id=cb.calendar_id OR (
+              cc.provider='google' AND wcc.provider='google'
+              AND wcc.user_id=${hostUserId}::uuid AND wc.external_id=c.external_id
+            ))
+        )`),
       )
       // The moved booking's own event in the host's calendar must not block its new time.
       .$if(excludeBookingId !== undefined, (q) =>
@@ -1103,6 +1152,7 @@ export async function buildAvailabilityInput(
         ),
       )
       .execute(),
+    groupBookings.execute(),
   ])
 
   const busyIntervals: InstantInterval[] = busy
@@ -1122,7 +1172,7 @@ export async function buildAvailabilityInput(
     // The engine refuses empty intervals, including a local date skipped by a zone change.
     .filter((i) => Temporal.Instant.compare(i.end, i.start) > 0)
   const ownBookings: ExistingBooking[] = []
-  for (const row of bookings) {
+  for (const row of [...bookings, ...slots]) {
     const booking = {
       start: toInstant(row.start_at),
       end: toInstant(row.end_at),
