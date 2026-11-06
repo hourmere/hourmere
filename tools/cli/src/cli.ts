@@ -1,8 +1,18 @@
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
-import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version } from './client.ts'
+import {
+  CliError,
+  callTool,
+  endpoint,
+  isObject,
+  MAX_INPUT_BYTES,
+  uploadLogo,
+  version,
+} from './client.ts'
 
 export const COMMANDS = {
+  'branding get': 'get_branding',
+  'branding set': 'set_branding',
   whoami: 'whoami',
   profile: 'get_profile',
   catalog: 'list_event_types',
@@ -32,9 +42,13 @@ export const COMMANDS = {
   'one-time-links revoke': 'revoke_one_time_link',
 } as const
 
+export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' } as const
+
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
+       hourmere branding get|set [--input FILE|-]
+       hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
@@ -74,7 +88,9 @@ See https://hourmere.com/docs/cli for complete usage.
 `
 
 interface Options {
-  command: keyof typeof COMMANDS
+  command: keyof typeof COMMANDS | keyof typeof REST_COMMANDS
+  file?: string
+  contentType?: string
   input?: string
   output?: string
   url?: string
@@ -86,9 +102,11 @@ interface Options {
 function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
-  const command = first === 'one-time-links' ? `${first} ${parts.shift() ?? ''}` : first
+  const command =
+    first === 'one-time-links' || first === 'branding' ? `${first} ${parts.shift() ?? ''}` : first
   const rest = parts
-  if (!command || !Object.hasOwn(COMMANDS, command)) throw new CliError('invalid_command')
+  if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
+    throw new CliError('invalid_command')
   const options: Options = { command: command as keyof typeof COMMANDS }
   const seen = new Set<string>()
   for (let i = 0; i < rest.length; i += 1) {
@@ -96,6 +114,8 @@ function parse(argv: readonly string[]): Options {
     if (
       !flag ||
       ![
+        '--file',
+        '--content-type',
         '--json',
         '--input',
         '--output',
@@ -127,6 +147,11 @@ function parse(argv: readonly string[]): Options {
       (value.startsWith('-') && !(flag === '--input' && value === '-'))
     )
       throw new CliError('invalid_options')
+    if (flag === '--file' || flag === '--content-type') {
+      if (command !== 'branding upload') throw new CliError('invalid_options')
+      if (flag === '--file') options.file = value
+      else options.contentType = value
+    }
     if (flag === '--input') options.input = value
     if (flag === '--output') options.output = value
     if (flag === '--url') options.url = value
@@ -160,6 +185,13 @@ function parse(argv: readonly string[]): Options {
     throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
     throw new CliError('one_time_link_output_forbidden')
+  if (
+    command === 'branding upload' &&
+    (!options.file ||
+      options.input ||
+      !['image/png', 'image/jpeg', 'image/webp'].includes(options.contentType ?? ''))
+  )
+    throw new CliError('invalid_options')
   return options
 }
 
@@ -300,13 +332,22 @@ export async function runCli(options: {
     // Reserve the private output before making a booking: a path error must not lose its token.
     if (args.output) output = await open(args.output, 'wx', 0o600)
     called = true
-    const result = await callTool({
-      url,
-      key,
-      tool: COMMANDS[args.command],
-      input,
-      fetch: options.fetch,
-    })
+    const result =
+      args.command === 'branding upload'
+        ? await uploadLogo({
+            url,
+            key,
+            path: args.file ?? '',
+            contentType: args.contentType ?? '',
+            fetch: options.fetch,
+          })
+        : await callTool({
+            url,
+            key,
+            tool: COMMANDS[args.command],
+            input,
+            fetch: options.fetch,
+          })
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
