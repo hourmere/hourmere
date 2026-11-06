@@ -38,6 +38,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- The [n8n community node](/docs/n8n) is not yet published to npm or available on n8n Cloud.
+  Self-hosters can install its local package; downstream effects need durable idempotency.
+
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

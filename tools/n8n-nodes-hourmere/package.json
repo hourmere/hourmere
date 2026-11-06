@@ -1,0 +1,50 @@
+{
+  "name": "n8n-nodes-hourmere",
+  "version": "0.1.0",
+  "description": "Hourmere booking actions and signed webhook triggers for n8n",
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "author": {
+    "name": "Cobaltmere, LLC",
+    "email": "hello@hourmere.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hourmere/hourmere.git",
+    "directory": "tools/n8n-nodes-hourmere"
+  },
+  "homepage": "https://hourmere.com/docs/n8n",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run test:contract && n8n-node build && npm run pack:smoke",
+    "lint": "n8n-node lint",
+    "typecheck": "tsc --noEmit",
+    "test:contract": "vitest run --root ../.. tools/n8n-nodes-hourmere/contract.test.ts --maxWorkers=2 --no-fsModuleCache",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": false,
+    "credentials": [
+      "dist/credentials/HourmereApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Hourmere/Hourmere.node.js",
+      "dist/nodes/HourmereTrigger/HourmereTrigger.node.js"
+    ]
+  },
+  "peerDependencies": {
+    "n8n-workflow": "2.45.1"
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "0.54.2",
+    "n8n-workflow": "2.45.1",
+    "typescript": "5.9.3"
+  }
+}

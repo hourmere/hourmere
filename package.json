@@ -23,7 +23,7 @@
     "db:down": "docker compose -p hourmere-dev -f docker-compose.dev.yml down",
     "db:cleanup-tests": "node --env-file-if-exists=.env scripts/cleanup-test-databases.ts",
     "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts && node --env-file-if-exists=.env packages/jobs/src/migrate-cli.ts",
-    "lint": "biome check .",
+    "lint": "biome check . && npm run lint --workspace n8n-nodes-hourmere",
     "format": "biome check --write .",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types && tsc -p tools/cli && tsc -p scripts",
     "test": "vitest run",

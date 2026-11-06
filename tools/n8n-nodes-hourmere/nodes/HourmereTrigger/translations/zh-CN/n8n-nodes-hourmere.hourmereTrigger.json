@@ -1,0 +1,22 @@
+{
+  "nodeView": {
+    "notice": {
+      "displayName": "需要 Full（完整访问）API 密钥及组织所有者或管理员权限。工作流静态数据包含 Webhook 签名密钥，请妥善保护。请使用事件 ID 对下游操作去重。"
+    },
+    "events": {
+      "displayName": "事件",
+      "description": "触发工作流的事件。",
+      "options": {
+        "booking.cancelled": {
+          "displayName": "预约已取消"
+        },
+        "booking.created": {
+          "displayName": "预约已创建"
+        },
+        "booking.rescheduled": {
+          "displayName": "预约已改期"
+        }
+      }
+    }
+  }
+}

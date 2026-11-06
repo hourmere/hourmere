@@ -1,0 +1,138 @@
+{
+  "nodeView": {
+    "operation": {
+      "displayName": "操作",
+      "options": {
+        "listEventTypes": {
+          "displayName": "列出活动类型"
+        },
+        "findSlots": {
+          "displayName": "查找可预约时段"
+        },
+        "createBooking": {
+          "displayName": "创建预约"
+        },
+        "getBooking": {
+          "displayName": "获取预约"
+        },
+        "cancelBooking": {
+          "displayName": "取消预约"
+        },
+        "rescheduleBooking": {
+          "displayName": "改期预约"
+        },
+        "listBookings": {
+          "displayName": "列出预约"
+        }
+      }
+    },
+    "pageType": {
+      "displayName": "预约页面",
+      "options": {
+        "personal": {
+          "displayName": "个人"
+        },
+        "team": {
+          "displayName": "团队"
+        }
+      }
+    },
+    "handle": {
+      "displayName": "个人用户名／团队网址标识"
+    },
+    "slug": {
+      "displayName": "活动类型网址标识"
+    },
+    "start": {
+      "displayName": "开始时间",
+      "description": "带有 Z 或明确 UTC 偏移量的 RFC 3339 时间。"
+    },
+    "end": {
+      "displayName": "查询结束时间"
+    },
+    "timeZone": {
+      "displayName": "时区",
+      "description": "IANA 时区，例如 America/Los_Angeles。返回时段保留原始 UTC 时间。"
+    },
+    "name": {
+      "displayName": "预约人姓名"
+    },
+    "email": {
+      "displayName": "预约人邮箱"
+    },
+    "idempotencyKey": {
+      "displayName": "幂等键",
+      "description": "重试同一预约时，保留相同的唯一键和完全相同的输入。"
+    },
+    "bookingId": {
+      "displayName": "预约 ID"
+    },
+    "reason": {
+      "displayName": "取消原因"
+    },
+    "additionalFields": {
+      "displayName": "其他字段",
+      "placeholder": "添加字段",
+      "options": {
+        "durationMinutes": {
+          "displayName": "时长（分钟）"
+        },
+        "responses": {
+          "displayName": "问题回答（JSON）",
+          "description": "以问题 ID 为键的回答，仅用于创建预约。"
+        },
+        "guests": {
+          "displayName": "同行人（JSON）",
+          "description": "包含姓名和邮箱的对象数组，仅用于创建预约。"
+        }
+      }
+    },
+    "filters": {
+      "displayName": "筛选条件",
+      "placeholder": "添加筛选条件",
+      "options": {
+        "from": {
+          "displayName": "最早开始时间"
+        },
+        "to": {
+          "displayName": "开始时间早于"
+        },
+        "endAfter": {
+          "displayName": "结束时间晚于"
+        },
+        "endTo": {
+          "displayName": "最晚结束时间"
+        },
+        "cursor": {
+          "displayName": "分页游标"
+        },
+        "status": {
+          "displayName": "状态",
+          "options": {
+            "confirmed": {
+              "displayName": "已确认"
+            },
+            "cancelled": {
+              "displayName": "已取消"
+            }
+          }
+        },
+        "order": {
+          "displayName": "排序",
+          "options": {
+            "asc": {
+              "displayName": "升序"
+            },
+            "desc": {
+              "displayName": "降序"
+            }
+          }
+        },
+        "limit": {
+          "displayName": "条数上限",
+          "description": "最多返回的结果条数。"
+        }
+      }
+    }
+  }
+}

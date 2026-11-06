@@ -106,6 +106,7 @@ export default defineConfig({
             { label: 'Automatic Zoom', link: '/docs/automatic-zoom' },
             { label: 'Automatic Google Meet', link: '/docs/automatic-google-meet' },
             { label: 'Webhooks', link: '/docs/webhooks' },
+            { label: 'n8n', link: '/docs/n8n' },
             { label: 'Website widgets', link: '/docs/embedding' },
           ],
         },
