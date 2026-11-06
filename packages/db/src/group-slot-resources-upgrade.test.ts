@@ -13,7 +13,10 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-slot-resource-predecessor-'))
     let old: TestDatabase | undefined, fresh: TestDatabase | undefined
     try {
-      for (const name of await readdir(migrationsDir))
+      const migrations = (await readdir(migrationsDir))
+        .filter((name) => name.endsWith('.sql'))
+        .sort()
+      for (const name of migrations)
         if (name.endsWith('.sql') && name < '0061')
           await copyFile(join(migrationsDir, name), join(directory, name))
       old = await createTestDatabase(serverUrl as string, directory)
@@ -49,7 +52,9 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const slots = (
         await old.pool.query('SELECT to_jsonb(s)::text AS row FROM group_slots s ORDER BY id')
       ).rows
-      expect(await runMigrations(old.pool)).toEqual(['0061_group_slot_resources.sql'])
+      const expectedUpgrades = migrations.filter((name) => name >= '0061')
+      expect(expectedUpgrades[0]).toBe('0061_group_slot_resources.sql')
+      expect(await runMigrations(old.pool)).toEqual(expectedUpgrades)
       expect(
         (
           await old.pool.query(
@@ -82,7 +87,7 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
         insertSeat(client, f, ids.slot, 'third@example.test', { location }),
       )
       const after = await snapshotSchema(old.pool)
-      await runMigrations(old.pool)
+      expect(await runMigrations(old.pool)).toEqual([])
       expect(await snapshotSchema(old.pool)).toEqual(after)
       fresh = await createTestDatabase(serverUrl as string)
       expect(await snapshotSchema(fresh.pool)).toEqual(after)
