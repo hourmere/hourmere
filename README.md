@@ -14,6 +14,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
   one-on-one single-host types; everyone eligible can be notified, with no reservation.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
   [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
+- A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
+  available as a private integration until published.
 
 ## Repository layout
 
@@ -34,6 +36,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
+| `tools/zapier-hourmere` | Private Zapier Platform CLI app using the existing REST API; deployed separately from Hourmere and excluded from its Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
 ## Development
 
@@ -398,6 +401,8 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
+  Self-hosters can deploy the source as a private integration using their own Zapier account.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

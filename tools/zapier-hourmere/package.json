@@ -1,0 +1,25 @@
+{
+  "name": "@hourmere/zapier-hourmere",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private Zapier integration for Hourmere bookings",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node --check index.js && node --check lib.js && node --check hooks.js",
+    "test": "vitest run --root ../.. tools/zapier-hourmere --maxWorkers=2 --no-fsModuleCache",
+    "validate": "DISABLE_ZAPIER_ANALYTICS=1 NO_UPDATE_NOTIFIER=1 zapier-platform validate --without-style",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zapier-platform-core": "19.2.1"
+  },
+  "devDependencies": {
+    "zapier-platform-cli": "19.2.1",
+    "nock": "15.0.5"
+  },
+  "license": "AGPL-3.0-only"
+}

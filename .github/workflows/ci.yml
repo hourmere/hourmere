@@ -97,6 +97,21 @@ jobs:
       - name: Run CLI unit tests without PostgreSQL
         run: npm test -- tools/cli/src/cli.test.ts tools/cli/src/package.test.ts --maxWorkers=2
 
+  zapier-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: tools/zapier-hourmere/.node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - name: Test the Zapier runtime with mocked HTTP on Node 22
+        run: npm test -- tools/zapier-hourmere/test/app.test.ts --maxWorkers=2 --no-fsModuleCache
+      - run: npm run build --workspace @hourmere/zapier-hourmere
+      - name: Validate locally without a Zapier account or network checks
+        run: npm run validate --workspace @hourmere/zapier-hourmere
+
   docker:
     runs-on: ubuntu-latest
     env:
