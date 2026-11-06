@@ -22,6 +22,8 @@ function cacheable(response) {
     response.status === 200 &&
     !response.redirected &&
     !/\b(no-store|private)\b/i.test(response.headers.get('cache-control') || '') &&
+    // Browsers hide Set-Cookie: this is not a security boundary. Safety comes from
+    // the build-owned allowlist, omitted credentials and zero runtime cache writes.
     !response.headers.has('set-cookie') &&
     response.type !== 'opaque'
   )
@@ -32,7 +34,23 @@ self.addEventListener('install', (event) => {
     (async () => {
       const cache = await caches.open(CACHE_NAME)
       try {
+        const previous = (await caches.keys()).filter(
+          (name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME,
+        )
         for (const path of PRECACHE) {
+          // Only content-hashed assets are immutable by URL. Refresh HTML, icons and
+          // the offline notice every deploy, and never reuse another application's cache.
+          if (/^\/assets\/[^/]+-[\w-]+\.(js|css|woff2?)$/.test(path)) {
+            let reused = false
+            for (const name of previous) {
+              const cached = await (await caches.open(name)).match(path)
+              if (!cached || !cacheable(cached)) continue
+              await cache.put(path, cached)
+              reused = true
+              break
+            }
+            if (reused) continue
+          }
           // Static files do not need cookies; do not persist authenticated variants.
           const response = await fetch(
             new Request(new URL(path, self.location.origin), {

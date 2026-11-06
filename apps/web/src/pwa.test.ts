@@ -1,9 +1,17 @@
-import { afterEach, expect, it, vi } from 'vitest'
-import { installAdminPwa } from './pwa.ts'
+import { renderHook } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import indexHtml from '../index.html?raw'
+import { installAdminPwa, useAdminPwa } from './pwa.ts'
 
 const cleanups: (() => void)[] = []
+let originalHead: string
+beforeEach(() => {
+  originalHead = document.head.innerHTML
+  document.head.innerHTML = new DOMParser().parseFromString(indexHtml, 'text/html').head.innerHTML
+})
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
+  document.head.innerHTML = originalHead
   Reflect.deleteProperty(navigator, 'serviceWorker')
   vi.unstubAllEnvs()
 })
@@ -87,4 +95,45 @@ it('uses the production build flags by default', () => {
   vi.stubEnv('VITE_PWA_ENABLED', 'true')
   cleanups.push(installAdminPwa('/app/', undefined, undefined, new URL('https://example.test')))
   expect(register).toHaveBeenCalledOnce()
+})
+
+function lightTheme() {
+  return document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"][media="(prefers-color-scheme: light)"]',
+  )?.content
+}
+
+it('keeps the original public toolbar colour and restores it after leaving admin', () => {
+  setup('/alice/chat')
+  expect(lightTheme()).toBe('#ffffff')
+  setup('/app/event-types')
+  expect(lightTheme()).toBe('#1f4fd8')
+  expect(
+    document.querySelector('meta[media="(prefers-color-scheme: dark)"]')?.getAttribute('content'),
+  ).toBe('#0e1015')
+  for (const cleanup of cleanups.splice(0)) cleanup()
+  setup('/team/acme/demo')
+  expect(lightTheme()).toBe('#ffffff')
+})
+
+it('retains the same manifest and registration across admin route changes', () => {
+  vi.stubEnv('PROD', true)
+  vi.stubEnv('VITE_PWA_ENABLED', 'true')
+  const register = vi.fn().mockResolvedValue({})
+  Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { register } })
+  const { rerender, unmount } = renderHook(({ path }) => useAdminPwa(path), {
+    initialProps: { path: '/app/event-types' },
+  })
+  const manifest = document.querySelector('link[rel="manifest"]')
+  expect(manifest).not.toBeNull()
+  rerender({ path: '/app/bookings' })
+  expect(document.querySelector('link[rel="manifest"]')).toBe(manifest)
+  expect(register).toHaveBeenCalledOnce()
+  rerender({ path: '/alice/chat' })
+  expect(document.querySelector('link[rel="manifest"]')).toBeNull()
+  expect(lightTheme()).toBe('#ffffff')
+  rerender({ path: '/app/settings' })
+  expect(document.querySelector('link[rel="manifest"]')).not.toBeNull()
+  expect(lightTheme()).toBe('#1f4fd8')
+  unmount()
 })

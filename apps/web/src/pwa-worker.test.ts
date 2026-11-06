@@ -13,7 +13,7 @@ const source = readFileSync(new URL('../pwa/worker.js', import.meta.url), 'utf8'
   .replace('__PRECACHE__', JSON.stringify(paths))
   .replace('__CACHE_NAME__', JSON.stringify('hourmere-shell-current'))
 
-function harness(active = false) {
+function harness(active = false, worker = source) {
   const listeners: Record<string, (event: unknown) => void> = {}
   const store = new Map<string, Response>()
   const cache = {
@@ -23,8 +23,19 @@ function harness(active = false) {
       return store.get(path)
     }),
   }
+  const oldStore = new Map<string, Response>()
+  const otherStore = new Map<string, Response>()
   const caches = {
-    open: vi.fn(async () => cache),
+    open: vi.fn(async (name: string) =>
+      name === 'hourmere-shell-current'
+        ? cache
+        : {
+            ...cache,
+            match: vi.fn(async (path: string | Request) =>
+              (name === 'hourmere-shell-old' ? oldStore : otherStore).get(String(path)),
+            ),
+          },
+    ),
     keys: vi.fn(async () => ['hourmere-shell-old', 'hourmere-shell-current', 'other-app-cache']),
     delete: vi.fn(async () => true),
   }
@@ -32,8 +43,9 @@ function harness(active = false) {
   const skipWaiting = vi.fn(async () => {})
   const claim = vi.fn()
   const postMessage = vi.fn()
-  const registration = { active: active ? {} : null, waiting: { postMessage } }
-  runInNewContext(source, {
+  const unregister = vi.fn(async () => true)
+  const registration = { active: active ? {} : null, waiting: { postMessage }, unregister }
+  runInNewContext(worker, {
     URL,
     Request,
     Response,
@@ -80,6 +92,9 @@ function harness(active = false) {
     lifecycle,
     request,
     store,
+    oldStore,
+    otherStore,
+    unregister,
     postMessage,
     listeners,
   }
@@ -351,5 +366,96 @@ it('leaves in-memory builds valid without creating output files', async () => {
     }
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+async function verifyReuse(worker = source) {
+  const sw = harness(true, worker)
+  for (const path of paths) sw.oldStore.set(path, new Response('previous'))
+  await sw.lifecycle('install')
+  expect(sw.fetch.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual(
+    paths.filter((path) => path !== '/assets/main-abc123.js'),
+  )
+  expect(await sw.store.get('/assets/main-abc123.js')?.text()).toBe('previous')
+  expect(await sw.store.get('/index.html')?.text()).toBe('static')
+}
+
+async function verifyReuseIsolation(worker = source) {
+  const sw = harness(true, worker)
+  sw.otherStore.set('/assets/main-abc123.js', new Response('another application'))
+  sw.oldStore.set(
+    '/assets/main-abc123.js',
+    new Response('private', { headers: { 'cache-control': 'private' } }),
+  )
+  await sw.lifecycle('install')
+  expect(await sw.store.get('/assets/main-abc123.js')?.text()).toBe('static')
+}
+
+it('reuses unchanged hashed URLs from an older Hourmere cache but refreshes mutable files', async () => {
+  await verifyReuse()
+  await verifyReuseIsolation()
+})
+
+async function verifyDisabled(worker: string) {
+  const sw = harness(true, worker)
+  await sw.lifecycle('install')
+  expect(sw.skipWaiting).toHaveBeenCalledOnce()
+  await sw.lifecycle('activate')
+  expect(sw.caches.delete.mock.calls).toEqual([['hourmere-shell-old'], ['hourmere-shell-current']])
+  expect(sw.unregister).toHaveBeenCalledOnce()
+  expect(sw.listeners.fetch).toBeUndefined()
+  expect(sw.request('/app/bookings', {}, true)).toBeUndefined()
+  expect(sw.fetch).not.toHaveBeenCalled()
+  expect(sw.claim).not.toHaveBeenCalled()
+}
+
+it('ships a disabled-build worker that immediately retires installed workers without fetching', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hourmere-pwa-disabled-build-'))
+  try {
+    await writeFile(join(root, 'index.html'), '<html><body>disabled shell</body></html>')
+    await build({ root, configFile: false, logLevel: 'silent', plugins: [offlineShell(false)] })
+    const worker = await readFile(join(root, 'dist/app/sw.js'), 'utf8')
+    await verifyDisabled(worker)
+    expect(existsSync(join(root, 'dist/app/offline.html'))).toBe(false)
+    const sw = harness(true, worker)
+    sw.caches.keys.mockRejectedValue(new Error('storage denied'))
+    await expect(sw.lifecycle('activate')).rejects.toThrow('storage denied')
+    expect(sw.unregister).toHaveBeenCalledOnce()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('detects source-copy mutations to disabled worker protections', async () => {
+  const worker = readFileSync(new URL('../pwa/disabled-worker.js', import.meta.url), 'utf8')
+  for (const [before, after] of [
+    ['event.waitUntil(self.skipWaiting())', 'event.waitUntil(Promise.resolve())'],
+    [".filter((name) => name.startsWith('hourmere-shell-'))", '.filter(() => true)'],
+    ['.map((name) => caches.delete(name))', '.map(() => Promise.resolve())'],
+    ['await self.registration.unregister()', 'await Promise.resolve()'],
+    ['// No fetch listener:', "self.addEventListener('fetch', () => {})\n// No fetch listener:"],
+  ] as const) {
+    expect(worker).toContain(before)
+    await expect(verifyDisabled(worker.replace(before, after))).rejects.toThrow()
+  }
+})
+
+it('detects source-copy mutations to hashed URL reuse and mutable-file refresh', async () => {
+  for (const [before, after] of [
+    ['if (reused) continue', 'if (false) continue'],
+    ['if (/^\\/assets\\/[^/]+-[\\w-]+\\.(js|css|woff2?)$/.test(path))', 'if (true)'],
+  ] as const) {
+    expect(source).toContain(before)
+    await expect(verifyReuse(source.replace(before, after))).rejects.toThrow()
+  }
+})
+
+it('detects source-copy mutations to reused cache ownership and response validation', async () => {
+  for (const [before, after] of [
+    ['name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME,', 'name !== CACHE_NAME,'],
+    ['if (!cached || !cacheable(cached)) continue', 'if (!cached) continue'],
+  ] as const) {
+    expect(source).toContain(before)
+    await expect(verifyReuseIsolation(source.replace(before, after))).rejects.toThrow()
   }
 })

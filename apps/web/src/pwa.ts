@@ -1,3 +1,11 @@
+import { useEffect } from 'react'
+
+/** Keep installation metadata stable while moving between admin routes. */
+export function useAdminPwa(pathname: string) {
+  const admin = pathname === '/app' || pathname.startsWith('/app/')
+  useEffect(() => installAdminPwa(admin ? '/app/' : '/'), [admin])
+}
+
 /** Installation metadata belongs only to the admin surface, including SPA transitions. */
 export function installAdminPwa(
   pathname: string,
@@ -6,7 +14,17 @@ export function installAdminPwa(
   location: Pick<Location, 'protocol' | 'hostname'> = window.location,
 ) {
   const admin = pathname === '/app' || pathname.startsWith('/app/')
-  if (!admin || !production || !enabled) return () => {}
+  if (!admin) return () => {}
+
+  const theme = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"][media="(prefers-color-scheme: light)"]',
+  )
+  const publicTheme = theme?.content
+  if (theme) theme.content = '#1f4fd8'
+  const restoreTheme = () => {
+    if (theme && publicTheme !== undefined) theme.content = publicTheme
+  }
+  if (!production || !enabled) return restoreTheme
 
   const manifest = document.createElement('link')
   manifest.rel = 'manifest'
@@ -45,5 +63,6 @@ export function installAdminPwa(
   }
   return () => {
     for (const node of nodes) node.remove()
+    restoreTheme()
   }
 }

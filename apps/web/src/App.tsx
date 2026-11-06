@@ -43,7 +43,7 @@ import {
 } from './lazy-pages.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
-import { installAdminPwa } from './pwa.ts'
+import { useAdminPwa } from './pwa.ts'
 
 export const appRoutes = createRoutesFromElements(
   <>
@@ -129,7 +129,7 @@ function RouteLoadingStatus() {
  */
 export function App() {
   const { pathname } = useLocation()
-  useEffect(() => installAdminPwa(pathname), [pathname])
+  useAdminPwa(pathname)
   const admin = matchRoutes(appRoutes, pathname)?.some(
     ({ route }) => route.handle?.surface === 'admin',
   )

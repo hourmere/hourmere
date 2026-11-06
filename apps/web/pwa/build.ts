@@ -14,7 +14,7 @@ export function isShellAsset(path: string): boolean {
 }
 
 /** No runtime manifest or dependencies: the output files themselves define each cache version. */
-export function offlineShell(): Plugin {
+export function offlineShell(enabled = true): Plugin {
   let output: string
   let writeOutput = true
   return {
@@ -28,6 +28,13 @@ export function offlineShell(): Plugin {
       // Analysis builds return their bundle in memory and must not inspect or create dist.
       if (!writeOutput) return
       await mkdir(resolve(output, 'app'), { recursive: true })
+      if (!enabled) {
+        await writeFile(
+          resolve(output, 'app/sw.js'),
+          await readFile(new URL('./disabled-worker.js', import.meta.url)),
+        )
+        return
+      }
       const offline = await readFile(new URL('./offline.html', import.meta.url), 'utf8')
       await writeFile(resolve(output, 'app/offline.html'), offline)
       await writeFile(

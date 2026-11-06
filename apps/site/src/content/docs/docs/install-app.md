@@ -10,9 +10,18 @@ The public booking pages do not offer installation of the account app.
 
 ## iPhone and iPad
 
-In Safari, open the Share menu, choose **Add to Home Screen**, and confirm **Add**.
-If your device offers **Open as Web App**, leave it enabled. Open the new Hourmere icon
-from your home screen. You may need to sign in again in the installed app.
+Check your sign-in method before installing. iOS home-screen web apps keep cookies
+separate from Safari. Email sign-in links open in Safari, so completing one there does
+not sign you in inside the installed app.
+
+For a standalone app, use a sign-in method that completes inside the app, such as a
+configured Google or Microsoft sign-in flow, and check that it returns to the app on your
+device. If you rely on email-link sign-in, keep using Hourmere in Safari. If your device
+offers **Open as Web App**, turn it off when adding a Safari shortcut for this purpose.
+
+To install after checking sign-in, open Safari's Share menu, choose **Add to Home Screen**,
+and confirm **Add**. Open the new Hourmere icon and verify that sign-in works there before
+relying on the installed app.
 
 ## Android
 
@@ -52,7 +61,8 @@ Public booking pages need a connection and do not gain an offline fallback.
 ## Updates and self-hosting
 
 Online page navigation fetches the current entry page from the server. A newly downloaded
-worker replaces the previous version and removes old app-shell caches; reconnect and
+worker reuses unchanged hashed JavaScript and CSS files by URL, fetches changed assets
+and unversioned shell files, then removes old app-shell caches after activation. Reconnect and
 reload an already open tab to pick up the latest interface. If the browser has removed
 site storage, the offline notice is available again after a successful online visit.
 
@@ -64,9 +74,20 @@ maximum scope already covers the app; no broader `Service-Worker-Allowed` header
 Do not broaden its scope to `/` or have the proxy cache private responses. HTTPS is required
 except for local development on localhost.
 
-Development builds do not register a service worker. To disable registration in a production
-build, set `VITE_PWA_ENABLED=false` when building the web app, then deploy that rebuilt
-output. This is a build-time setting, not a running-server environment switch. Existing
-installations may still have a registered worker: clear the instance's site data in browser
-settings to remove it and its cached static files. These caches contain no account data.
-To remove the installed app itself, use your browser or operating system's uninstall option.
+Development builds do not register a service worker. To turn PWA support off, set
+`VITE_PWA_ENABLED=false` in the repository-root `.env`, rebuild and redeploy. The
+[self-hosting instructions](/docs/self-hosting#turn-off-app-installation) cover Compose,
+direct web builds and Docker build arguments. An empty or omitted value uses the current
+default (`true`); explicit `true` and `false` are accepted, and other values fail the build.
+Changing only the running container's environment cannot change an already-built app.
+
+The disabled build stops registering workers and still serves `/app/sw.js` as a minimal
+retirement worker. When an existing browser next checks for an update online, it activates
+that worker, deletes Hourmere's app-shell caches, and unregisters itself. It does not
+intercept requests or force a page reload. Offline clients cannot receive this change until
+they reconnect, and browser update timing varies. Keep serving the retirement worker so
+clients returning later can receive it; do not replace it with a 404. An already open page
+may remain controlled until it closes or reloads. Cookies and account data are not deleted.
+
+The home-screen or desktop icon remains installed. To remove the installed app itself,
+use your browser or operating system's uninstall option.
