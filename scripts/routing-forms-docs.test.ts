@@ -10,7 +10,7 @@ const limits = {
   label_length: 200,
   text_answer_length: 500,
   message_length: 2000,
-  submission_bytes: 16384,
+  submission_bytes: 65536,
   route_lifetime_minutes: 30,
   purge_grace_hours: 24,
 }
@@ -24,6 +24,18 @@ function verifyLimits(source: string) {
 describe('routing design numeric contract', () => {
   it('pins the complete numeric limit register for later implementation', () => {
     verifyLimits(document)
+  })
+
+  it('fits a fully filled Chinese form inside the documented body cap', () => {
+    const answers = Object.fromEntries(
+      Array.from({ length: limits.questions_per_form }, (_, index) => [
+        `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        '汉'.repeat(limits.text_answer_length),
+      ]),
+    )
+    const body = JSON.stringify({ versionId: '00000000-0000-4000-8000-000000000000', answers })
+    const documentedCap = Number(document.match(/^\| submission_bytes \| (\d+) \|/m)?.[1])
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThanOrEqual(documentedCap)
   })
 
   it.each(Object.entries(limits))('rejects source-copy drift of %s', (key, value) => {
