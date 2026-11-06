@@ -692,3 +692,10 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.
