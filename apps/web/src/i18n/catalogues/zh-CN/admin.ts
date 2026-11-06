@@ -1051,7 +1051,7 @@ export const admin = {
   'Monthly limit must be at least the weekly limit.': '每月上限不得低于每周上限。',
   'Monthly limit must be at least the daily limit.': '每月上限不得低于每日上限。',
   'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.':
-    '预约上限已在其他地方更改。请重新加载以查看当前上限，再次保存。你的更改尚未保存。',
+    '预约上限已在其他地方更改。请重新加载查看当前上限后再保存。你的更改尚未保存。',
   'Daily limit': '每日上限',
   Date: '日期',
   'Date overrides': '特定日期安排',
