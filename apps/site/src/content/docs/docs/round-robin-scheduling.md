@@ -55,7 +55,7 @@ uses the team name and omits `host.timeZone`; invitees view offered times in the
 
 A configured host who has left, been deleted, or lost verified status is ineligible. An
 otherwise eligible host without a default schedule, with a conflicting booking/busy block,
-or over their buffer/daily limit is normally unavailable. Exact
+or blocked by a buffer or daily, weekly or monthly limit is normally unavailable. Exact
 `calendar_sync_unavailable` failures can be skipped when another host offers a fresh slot.
 When no host offers a slot and at least one calendar could not be evaluated, the request
 fails with `calendar_sync_unavailable`; a definitely unavailable pool returns no slots or
@@ -111,6 +111,7 @@ availability and retry. It never appends new host locks to a changed lock set. T
 fairness row is locked after the event, and selection,
 counter/last-sequence changes, the booking, required snapshots and all delivery enqueues
 commit atomically. Overlapping pools use the same host locks as individual/collective
-bookings, protecting buffers and daily caps across event types. Configuration/activation
+bookings, protecting buffers across event types and daily, weekly and monthly caps
+within each event type. Configuration/activation
 uses the existing organization → event → current actor/host → state protocol and retains
 authorization locks through commit.
