@@ -51,3 +51,12 @@ internal exact-generation exclusion for a validated join/final-seat move, coveri
 slot occupancy and precisely mapped provider copies. Unrelated simultaneous events remain
 blocking. `event_types.locations` and `bookings.location_option` retain the configured and
 chosen option snapshots; group admission enforces one shared location choice per slot.
+
+`availability.ts` also serves the manager-only `explainEventAvailability` path through
+`buildAvailabilityInputForMode`. It shares the same once-per-slot occupancy query and
+period windows. The explanation branch keeps other event types' slot intervals and
+snapshotted buffers in `blockingBookings`, rather than folding them into provider busy
+time; this preserves booking-conflict provenance without reading any seat contact data.
+Missing schedules use the explanation's empty-hours fallback while ordinary availability
+still returns no offered slots. These diagnostics do not provide a capacity-aware public
+slot picker or attendee roster.

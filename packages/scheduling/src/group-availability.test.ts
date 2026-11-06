@@ -209,10 +209,10 @@ describe.skipIf(!serverUrl)('group slot availability', () => {
   })
 
   it.each([
-    { name: 'slot occupancy', change: ['[...bookings, ...slots]', 'bookings'] },
+    { name: 'slot occupancy', change: ['.unionAll(groupBookings)', ''] },
     {
       name: 'one count per occupied slot',
-      change: ['[...bookings, ...slots]', '[...bookings, ...slots, ...slots]'],
+      change: ['.unionAll(groupBookings)', '.unionAll(groupBookings).unionAll(groupBookings)'],
     },
     { name: 'complete group period query', change: ['...(periodWindows.length > 0', '...(false'] },
     {
