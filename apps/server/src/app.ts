@@ -332,7 +332,8 @@ const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
   if (c.req.path.includes('/provisioning-tokens')) {
     await next()
-    console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
+    const managementRoute = routePath(c)
+    console.log(escapeControlCharacters(`--> ${c.req.method} ${managementRoute} ${c.res.status}`))
     return
   }
   if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
