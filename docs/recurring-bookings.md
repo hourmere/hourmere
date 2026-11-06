@@ -58,12 +58,18 @@ compare them. Raising a limit requires design review and new performance evidenc
 | Maximum batch database read statements | 32 | Fixed budget for availability fact loading, independent of occurrence count. |
 | Maximum batch fact rows | 10000 | Fail closed rather than truncate a dense busy/booking history. |
 | Batch deadline in milliseconds | 5000 | Includes fact loading and evaluation; abort work and release the connection. |
+| Maximum guests | 10 | Retains the existing guest ceiling, in addition to the booker. |
+| Recipient mail per rolling hour | 5 | Existing default booking-mail budget. |
+| Recipient mail per rolling day | 20 | Existing default booking-mail budget. |
+| Instance mail per rolling hour | 100 | Shared default ledger for booking, sign-in and team mail. |
+| Public booking requests per minute per IP | 10 | Existing public book limiter; one series submission uses one request. |
+| Series submissions per hour per IP and event | 2 | Additional series-specific admission cap, shared across personal/team create routes. |
 
 The event's booking window can only shorten the horizon. Count includes the initial
 occurrence, never automatically extends to replace a conflict, and cannot be open-ended.
 No `UNTIL`, arbitrary RRULE, RDATE, multiple weekdays per week, or caller-provided
 expanded UTC array. A request contains `rule: {pattern, count, ordinal?, weekday?}`
-and `firstLocalStart` without offset. Reject ordinal/weekday outside monthly rules.
+and `firstLocalStart` with a required numeric UTC offset (for example `2027-11-07T01:30:00-05:00`). Validate that offset against the event zone on that date; reject a mismatch instead of normalizing it. Reject ordinal/weekday outside monthly rules.
 The server expands the rule. An RRULE equivalent is useful for explanation only:
 weekly maps to `FREQ=WEEKLY;INTERVAL=1;COUNT=n`, fortnightly to interval 2, and
 monthly to `FREQ=MONTHLY;BYDAY=2MO;COUNT=n` (or `-1MO` for last Monday).
@@ -73,7 +79,7 @@ It is not an ICS serialization promise.
 ## Time zones and DST
 
 The event's saved recurrence zone governs expansion, including collective and round-robin
-series. Pin that zone on the series. Each occurrence preserves the initial local start
+series. Hosts may not yet be selected in round-robin, and collective hosts may have different zones; one event-owned zone makes expansion deterministic before host selection. Pin that zone on the series. Each occurrence preserves the initial local start
 time in that zone across DST, not a fixed elapsed interval. Invitee display zones only
 change labels; show the governing zone and every date, local offset and invitee-local
 time before confirmation. An invitee in another DST regime can see their hour change.
@@ -81,8 +87,9 @@ Duration remains elapsed minutes, as for ordinary bookings.
 
 Use Temporal with explicit disambiguation: a nonexistent local start makes that occurrence
 unavailable (`nonexistent_local_time`), without shifting forward or skipping it. A repeated
-local start always selects the earlier instant; display its offset in preview and persist
-it. There is no later-fold selector in this release. An end crossing a transition is computed
+local start after the first occurrence selects the earlier instant; display its offset in preview and persist
+it. The first occurrence honors the supplied offset, including a later-fold slot selected
+from ordinary availability; never silently replace that instant with the earlier fold. An end crossing a transition is computed
 by adding elapsed duration to the start instant. Store both UTC instants on each normal
 booking and the original local start on its series occurrence. A timezone database update
 never recalculates committed bookings; only a newly previewed/moved occurrence uses current
@@ -90,7 +97,7 @@ rules. Recheck preview's resolved instants at commit; return `series_changed` if
 
 Examples for acceptance: New York weekly 09:00 across spring/fall changes stays 09:00
 while UTC changes; a New York 02:30 spring-gap occurrence rejects the batch; repeated
-01:30 in autumn uses the earlier offset. Include Australia/Lord_Howe's half-hour change,
+01:30 in autumn uses the earlier offset for generated dates; first-slot tests cover both valid offsets and reject an invalid offset. Include Australia/Lord_Howe's half-hour change,
 a non-DST zone and differing host/invitee zones. Monthly `last` must work across February
 and leap years without substituting a numbered date.
 
@@ -110,11 +117,11 @@ Readiness errors, loading and unauthorized responses remain unknown, never “mi
 | Minimum notice and window | Re-evaluate each occurrence against one fresh clock sampled after locks. All must pass; later dates cannot escape the current window. |
 | One-time links | Unsupported for series initially; refuse before consumption with `recurrence_not_supported`. Their existing single-booking semantics are unchanged. |
 | Group seats | Unsupported, including creating a new slot or joining an occupied slot. Do not silently treat a series as one seat/slot. |
-| Round-robin | One host for the entire series, chosen from hosts eligible and available for every occurrence. Never choose a different host per date. If intersections are empty, fail even if each date has some host. Apply existing fair selection once among whole-series candidates and advance fairness once on successful commit, never preview/replay. |
+| Round-robin | One host for the entire series, chosen from hosts eligible and available for every occurrence. Never choose a different host per date. If intersections are empty, fail even if each date has some host. Apply existing fair selection once among whole-series candidates and advance fairness once on successful commit, never preview/replay. Existing least-recently-assigned rotation measures assignments, not booked minutes: a 12-date series can load one host twelve times more than a single booking. Mitigate with cumulative host limits and an owner-lowered maxOccurrences; explicitly document that equal meeting-count distribution is not guaranteed. Do not pretend repeated timestamp advances solve this skew. |
 | Collective | The same complete pinned required-host set attends every occurrence; all must pass. Missing/currently invalid membership fails closed. |
 | Waitlist | No series waitlist or redemption token initially; reject a waitlist token on series creation. Existing single-slot waitlists remain unchanged. Cancelled occurrences may trigger normal single-slot waitlist wakeups through existing committed effects. |
 | Paid bookings | Unsupported. Reject paid event configurations, rather than charging once or partly refunding an atomic series. |
-| Imported bookings | Continue to block availability. Never attach imported read-only rows to a new series or allow series operations to bypass `imported_booking_read_only`. No inference of imported recurrence. |
+| Imported bookings | Continue to block availability. Never attach imported read-only rows to a new series or allow series operations to bypass `imported_booking_read_only`. No inference of imported recurrence. The Cal.com importer retains its `event_recurring` warning ("Recurring event generation is not imported"); its yearly/1–20 intervals/32-count rules must not be partially mapped into this subset. |
 | Guests, duration, location, conferences | Respect current opt-ins and validation; snapshot the same choices per occurrence. Automatic conferences remain independently provisioned and ready-gated per occurrence, not one shared provider meeting. |
 
 Calendar freshness policy stays identical to ordinary booking: unknown busy data is not
@@ -140,7 +147,7 @@ Proposed future migration (allocate its number when implemented, not here):
   nullable `event_type_id` (deletion sets null), immutable original event UUID snapshot,
   rule version/validated rule columns, `time_zone`, initial local start, requested count,
   duration/notification/host-policy snapshots, `created_at`/`updated_at` timestamptz,
-  revision for optimistic concurrency and nullable SHA-256 series manage-token digest.
+  revision for optimistic concurrency and nullable SHA-256 primary-booker API series manage-token digest.
   Store neither raw management tokens nor raw idempotency response bodies.
 - `booking_series_occurrences`: UUIDv7 `id`, organization and series IDs, stable
   `ordinal` (1 through requested count), original local start and resolved UTC start/end,
@@ -161,6 +168,13 @@ Proposed future migration (allocate its number when implemented, not here):
   IDs. Unique `(organization_id, authority_scope, operation_kind, idempotency_key)`.
   Persist create and bulk-cancel receipts transactionally. Scope remains tied to the
   caller/API key or OAuth consent (anonymous shared organization scope), never to email alone.
+- `booking_series_notifications`: series/action revision/kind/recipient unique receipt,
+  recipient role and capability scope, nullable unique SHA-256 manage-token digest,
+  outcome/suppression reason and bounded affected ordinals. This is a new series equivalent
+  of booking notification receipts, not an encrypted credential outbox. Delete with series
+  retention; successful hashes remain valid for the retained series history. Durable jobs
+  carry only IDs, never raw capabilities. Member lifecycle jobs must suppress their ordinary
+  confirmation/cancellation fan-out when owned by an aggregate series action.
 - Index series `(organization_id, id)` for cursor listing, occurrences `(series_id, ordinal)`,
   bookings `series_occurrence_id`, and receipt series FK. Existing booking time/status,
   exclusion and host indexes remain in force. Series rows and receipts cascade on
@@ -243,18 +257,34 @@ not token recovery from a GET or replay.
 Both hosts and the primary booker may cancel future occurrences subject to current ordinary
 booking authorization. Hosts must be authorized for every target, never gain cross-team
 power from knowing a series UUID; a team admin without existing booking authority gains none.
-A guest's existing links remain occurrence-only. Invitee moves retain current move-count,
+Guests retain no booking mutation authority; existing guest mail does not issue manage links. Invitee moves retain current move-count,
 cutoff, duration and availability rules; pinned round-robin/collective hosts do not rotate
 on a move. Host moves preserve the current host-specific policy. Cancellation stays possible
 when an event is disabled/deleted, while moving still needs a bookable event.
 
-Mint one separate series capability for the primary booker, store its digest and deliver
-its raw value only at creation or in the encrypted notification outbox under existing expiry
-rules. Use a fragment-based series manage page and request-body capability, not URL query
-parameters or logs. Each occurrence keeps its own token and reschedule-chain following
-semantics; an occurrence token cannot authorize siblings or mint a series token. Series
-reads require the series capability or a currently authorized host. A series token follows
-its stable occurrence records to successors but does not expand into unrelated bookings.
+Mint a primary-booker API series capability at creation and persist only its digest;
+return the raw value once, never on replay. For each booker/guest series email, mint a fresh 32-byte
+base64url capability at send time and store only its digest in the new series notification
+receipt, following today's `booking_notifications` transaction/send pattern. SMTP failure
+rolls the receipt back; retry mints a new token. Terminal budget suppression clears that
+attempt's digest and does not retry; earlier delivered/API capabilities stay valid. No raw
+series token enters a job or encrypted outbox. A crash after SMTP before commit has the
+existing duplicate/invalid-link window; do not claim exactly-once delivery.
+
+Each booker/guest mail contains one `/series/manage#<token>` link. The page sends the fragment token
+in POST bodies or the redacted `x-series-manage-token` header for existing GET manage/slots operations (never logs/query strings) and lists every occurrence and its current
+successor. Booker capabilities can read the series and cancel all/following; guest mail
+capabilities expose only that recipient's permitted read-only details, never sibling attendee data or mutation authority. Host mail links to authenticated
+series detail instead. Existing per-occurrence capabilities remain occurrence-only.
+The series page invokes existing manage-booking read/slots/reschedule/cancel operations extended
+with a mutually exclusive `seriesToken` plus stable `ordinal` authority mode (ordinal may be a GET query field, never the token); the service
+resolves the current chain and applies that recipient's existing permissions/cutoffs. It
+never returns or mints raw occurrence tokens. Thus one delivered series link reaches every
+occurrence without needing twelve separately delivered links. Series token lookup checks
+both API and successful notification digests, role, retained ownership and revocation.
+Already displayed API links and authenticated host access survive suppressed mail; a lost
+anonymous response plus suppressed email cannot be recovered by replay. Show delivery
+failure through authorized reads and document host assistance, not guaranteed delivery.
 
 Bulk cancel accepts `scope: "all" | "following"`, `fromOrdinal` only for following,
 `expectedRevision`, a request key and optional reason. Sample one clock after locks; compute
@@ -265,24 +295,66 @@ occurrence. Series capability remains useful for reading history after cancellat
 
 ## Notifications and calendars
 
-Choose per-occurrence confirmations and ICS, with the position/count and a series manage
-link for the primary booker; the web confirmation lists all occurrences. Explicitly warn
-before booking that each date sends an invitation. This preserves per-occurrence conference
-readiness, recipient privacy and existing durable delivery receipts. Do not send a second
-aggregate confirmation with duplicate calendar attachments. Reminders/follow-ups stay per
-occurrence using snapshotted policy and its own due times. Bulk cancellation queues one
-ordinary cancellation per affected occurrence/recipient, with finite retries and existing
-mail budgets; batching does not bypass suppression or promise exactly-once SMTP delivery.
+Notifications are per series action. Creation sends one confirmation per recipient
+listing every occurrence, with one calendar attachment containing every occurrence.
+Whole-series or this-and-following cancellation sends one email per recipient listing the
+affected and unchanged dates, with one attachment containing the affected events. A
+single-occurrence reschedule or cancel sends one email for that occurrence. Do not also
+queue the ordinary per-occurrence lifecycle messages for a series action. Reminders and
+follow-ups remain per occurrence with ordinary budgets and snapshotted due times.
 
-Each invitation has one independent VEVENT, using that occurrence's reschedule-chain root
-UID, organizer snapshot and existing SEQUENCE rules. Use UTC DTSTART/DTEND, no RRULE,
-EXDATE or RECURRENCE-ID; a move updates that occurrence UID and a cancel cancels only it.
-This deliberately sacrifices calendar-native “edit series” grouping. Google, Outlook and
-Apple interoperability must be exercised on actual supported clients before release;
-independent VEVENTs avoid depending on identical recurrence-exception interpretations but
-are a design choice, not proof of universal compatibility. Follow [existing calendar
-invitation rules](https://hourmere.com/docs/notifications#calendar-invitations) and
-[RFC 5545 VEVENT](https://www.rfc-editor.org/rfc/rfc5545#section-3.6.1).
+With default limits and an initially empty ledger, 12 occurrences with 10 guests send
+1 email to each of 11 invitee recipients: 1 < 5/hour and 1 < 20/day, not 12 each.
+Including the maximum 8 collective hosts, creation costs 11 + 8 = 19 instance emails,
+below 100/hour. Creation followed by a whole-series cancellation in the same hour costs
+2 per invitee and 38 instance emails; two maximum series each created and cancelled cost
+4 per invitee and 76 instance emails. No host reserve is needed for this proof (the
+existing worker allows verified hosts up to 120, but that is not extra invitee capacity).
+Keep 12 occurrences and 10 guests. Previous traffic, reminders, unrelated sign-in/team
+mail or lower operator-configured limits can still exhaust the shared ledger; these
+figures prove bounded isolated actions fit, not guaranteed global delivery. Preserve
+ordinary suppression semantics and expose terminal per-recipient delivery outcomes in
+authorized series reads; never mark suppressed mail delivered or erase existing links.
+
+The aggregate confirmation waits for all required occurrence conferences to be ready,
+using a bounded durable retry policy; it cannot send a partial calendar and silently omit
+an unready date. On exhaustion expose failed/pending occurrence readiness in the series
+page and host repair workflow. No extra automatic per-occurrence confirmation on repair.
+Refresh lifecycle/revision before send so an overtaken aggregate cannot revive cancelled
+or moved events. This deliberately trades independent sibling delivery for one complete mail.
+
+Use one RFC 5545 VCALENDAR attachment with multiple independent VEVENTs, each retaining
+its occurrence reschedule-chain UID, organizer snapshot and SEQUENCE, UTC DTSTART/DTEND,
+and STATUS for cancellations. Omit METHOD for this aggregate calendar snapshot: it is an
+importable calendar file, **not a multi-UID iTIP REQUEST or CANCEL** (iTIP scheduling messages
+require a single UID). This fits the one-attachment decision while preserving existing
+independent booking/provider identities. RRULE+EXDATE would introduce a second master UID
+and RECURRENCE-ID exception model for independently moved bookings and pinned provider
+copies; that extra reconciliation is excluded. Ordinary single-occurrence messages keep
+the existing one-UID iTIP behavior. Bulk cancellation's snapshot may require manual import
+and client confirmation to update/remove existing entries; do not promise automatic native
+series scheduling or uniform cancellation imports. List every cancelled date in the mail.
+
+Automate parser round trips, UID uniqueness/stability, all 12 entries, SEQUENCE/STATUS,
+privacy, one attachment, SMTP counts, dedupe and fake-provider update/cancel checks.
+Before release the only owner client check is to import a synthetic maximum-series file,
+then a generated single-move update and bulk-cancel snapshot into one supported version
+each of Google Calendar, Outlook and Apple Calendar, recording count, duplicates and
+whether cancellations require deletion. Use isolated test calendars, no real attendees or
+provider sends. Record versions/results and concise user instructions; incompatible update
+or cancellation behavior is a release blocker requiring a new calendar decision, not an
+unbounded owner matrix. See [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545) and
+[iTIP restrictions](https://www.rfc-editor.org/rfc/rfc5546#section-3.2).
+
+Implementation acceptance with default limits: a 12-occurrence/10-guest/8-host series
+produces exactly 19 confirmations and then 19 bulk-cancel mails, zero suppressed receipts,
+12 calendar entries per creation attachment, and working links to all permitted ordinals.
+Repeat for following cancellation and one-occurrence move/cancel on fresh fixtures. Fill
+the ledger to the default boundary in negative controls and assert explicit suppression,
+no retry, no false delivered state, preserved previously issued links and no capability
+recovery. Mutate aggregate enqueueing back to occurrence fan-out and require real count
+and zero-suppression assertions to fail. These are future implementation tests; this PR
+only pins the design contract, not runtime delivery behavior.
 
 Provider writes are also one event per occurrence per existing pinned destination, with
 ordinary idempotent identities, retries and cancellations. Google writeback uses the same
@@ -311,7 +383,7 @@ mappings together, generate web API types, and preserve existing error shapes fr
 | Cancel tail/all | POST `/booking-series/{id}/cancel` for host; POST `/booking-series/manage/cancel` with token for booker | `cancel_booking_series` host/manageToken mode | `series cancel` |
 | Move/cancel one | Existing booking endpoints; optional additive series metadata | Existing `reschedule_booking` / `cancel_booking` | Existing `reschedule` / `cancel` |
 
-Preview is explicitly a read even though POST: public callers and `read`, `bookings`,
+Preview and `POST /booking-series/manage` are explicitly booking reads in the API-key scope registry and generated scope table even though POST: public callers and `read`, `bookings`,
 `full` keys can use it. Create/cancel require `bookings` or `full` when a key is supplied;
 reads accept all three with current booking visibility. API key scope never substitutes
 for a host role or capability. A supplied invalid/disallowed bearer fails without anonymous
@@ -319,11 +391,23 @@ fallback. Preserve MCP OAuth `mcp:tools`, session expected-organization protecti
 same-origin checks, hidden-link semantics and public route resolution. Public capabilities
 remain available without authentication; never require a paid account or cloud deployment.
 
+The implementation must add these explicit classifications to the shared scope registry
+and regenerate its API-key scope table; POST-read classification does not exempt parity.
+
+| REST operation group | Scope classification | Allowed supplied key scopes |
+| --- | --- | --- |
+| Event-type create/update recurrence | Account configuration write | `full` |
+| Both series-preview POSTs | Booking read | `read`, `bookings`, `full` |
+| Series list/host GET and POST `/booking-series/manage` | Booking read | `read`, `bookings`, `full` |
+| Both series-create POSTs and both series-cancel POSTs | Booking write | `bookings`, `full` |
+| Existing member manage/slots reads | Booking read | `read`, `bookings`, `full` |
+| Existing member reschedule/cancel POSTs | Booking write | `bookings`, `full` |
+
 Example preview input (the event supplies and validates the governing zone):
 
 ```json
 {
-  "firstLocalStart": "2027-02-02T09:00:00",
+  "firstLocalStart": "2027-02-02T09:00:00-05:00",
   "rule": {"pattern": "weekly", "count": 6},
   "durationMinutes": 30
 }
@@ -379,28 +463,66 @@ an abort bound, not a throughput SLA. One transaction/connection per write, no o
 pools, no connection retained while awaiting external I/O. Test pools must close in teardown
 and each file stay well under CI's 100-connection default.
 
-Reuse public IP/account/event rate limits and request-body limits. Charge admission/mail
-budgets by occurrence and recipient rather than one cheap “series” request; replay creates
-no new charge for deliveries. Authentication and cheap validation precede expensive work.
-Never log capabilities, raw answers or attendee arrays; previews expose only safe outcomes.
-Apply cancellation outbox dedupe and ordinary mail budgets even to bulk actions. Retain
-existing guest limits and encrypted outbox expiry, and bound all responses by count.
-No hidden unbounded automatic retries; retryable failures require a new current preview
-unless recovering an already committed request with its original key.
+A series submission counts as one public booking request against the existing
+10 requests/60 seconds per IP book limiter, not twelve. Add a series-specific cap of
+2 submissions/rolling hour per IP and event, with a shared durable counter across server
+processes; reject excess with 429 before expansion. Replays still consume request limits
+but produce no new mail. Preview retains the 120 requests/60 seconds per IP slots limiter;
+manage retains 30/60 seconds. The extra create cap bounds repeated series admission but
+cannot reserve the shared mail ledger against other IPs/events. Apply ordinary recipient
+and instance budgets per actual aggregate email, never per contained VEVENT. Keep body
+limits, cheap validation, cancellation dedupe and finite retries. Never log capabilities,
+raw answers or attendee arrays. Bound every response by count. Retryable admission failures
+require a fresh preview unless recovering a committed request with its original key.
 
 ## Implementation plan
 
-Each row is a roughly one-day reviewable slice, with shared helpers split further if the
-acceptance cannot fit. Do not combine all slices into one implementation PR.
+Each row is one roughly one-working-day implementation change. Dependencies name only
+previous rows; endpoint families and UI surfaces ship separately. All REST paths below
+are relative to `/api/v1`; operation IDs are proposed unless already present.
+**Interface gate** means the row ships its named REST operations, MCP tools, CLI commands,
+OpenAPI schemas, authorization/API-key-scope registry and generated web API types together,
+and passes route coverage, interface parity and API-key-scope parity in that same change.
+This includes public POSTs and read-style POSTs; no new write waits for a later parity step.
+All web UI uses the generated `/api/v1` client and only endpoints completed in earlier rows.
+Each protection needs a source-copy mutation proving a real assertion fails without it.
 
-| Slice | Deliverable | Concrete acceptance checks |
-| --- | --- | --- |
-| Engine: expansion and batch availability | Pure rule expansion and bounded shared-service fact loader/check; no checkout UI. | Weekly/fortnightly/monthly ordinals; leap year, gap/fold, Lord Howe; cumulative host-zone daily/week/month limits and buffers; common round-robin host; unknown freshness; at limits 96 evaluations, at most 32 reads/10000 rows and abort at 5000 ms; source-copy mutations break each protection. |
-| Atomic creation | Future migration plus transaction-aware batch insertion and receipts. | Populated predecessor/fresh/no-op migration and regenerated types; concurrent series/single bookings and identical/different replay; failure at first/middle/final insertion leaves zero rows/jobs; fairness once; no external I/O under locks; preserved single-booking tests. |
-| Series cancellation | Tail/all cancellation, series capabilities and single-member lock integration. | One vs following vs all; stable ordinal after moves; host/booker/guest and cross-org authorization; cutoff, stale revision, no-op/replay; cancel vs single move/create races and deletion; exactly the affected local outboxes, no deadlocks, no token recovery. |
-| Notifications and ICS | Per-occurrence delivery using existing receipts/UIDs and provider targets. | One failed conference does not block ready siblings; move/cancel one UID; SMTP retry/budget negative controls; Google/Microsoft fake adapters only; Google/Outlook/Apple manual import/update/cancel matrix with explicit results and owner steps. |
-| UI and REST/MCP/CLI | Equivalent proposed operations, event enablement and full-list preview/management. | OpenAPI/authorization/parity guards and generated types; replay/error/capability redaction; jsdom conflict/stale/unknown states; en and zh-CN admin, all shipped public locales; preserve weekly-hours readiness hint; CI browser checks for full/partial availability. |
-| Docs and acceptance | published user/agent/self-host guides and known limits, release/upgrade notes. | Cross-DST end-to-end creation, one move, tail cancel and replay; different host/invitee zones; compare DB instants, exports, webhooks and ICS; limit and unsupported-feature examples; same feature on self-hosting; actual client matrix evidence or clearly recorded release blocker. |
+Introduce proposed `RECURRING_BOOKINGS_ENABLED=false` in 1a. **Off** below means no real
+series admission or notification emission; only isolated test fixtures enable unfinished
+paths. Schema migrations still run normally. **Off; test-on** permits end-to-end fixtures,
+not production enablement. Keep it off through 6d, so aggregate email never sends a link to
+a missing page. Step 7 permits operator opt-in only after every dependency and acceptance
+check passes; the shipped default remains false. Once enabled, turning the flag off stops
+new configuration/preview/create and hides admission controls, but keeps existing series
+reads, manage pages, moves/cancels and delivery workers working. This is an admission flag,
+not a mechanism that strands existing recipients. Do not enable a partially deployed build.
+
+| Step (about one day each) | Earlier dependencies | Owned deliverable and REST / MCP / CLI operations | Concrete acceptance checks | Flag state |
+| --- | --- | --- | --- | --- |
+| 1a. Rule expansion | None | Pure rule normalization/expansion and flag plumbing; no REST routes, MCP tools or CLI commands. | Weekly/fortnightly/monthly ordinals, leap year, gap, both first-slot fold offsets and Lord Howe; governing-zone determinism before host choice; fixed count/horizon and unsupported combinations. | Off |
+| 1b. Batch availability | 1a | Explicit-start fact loader/check shared with single-booking rules; no REST routes, MCP tools or CLI commands. | Cumulative host-zone daily/week/month limits, buffers, common round-robin host and unknown freshness; 96 evaluations, at most 32 reads/10000 rows, abort at 5000 ms; dense benchmark with measured evidence required before revising a budget. | Off |
+| 2a. Schema and upgrade | 1a | Future migration for recurrence/revision, series/member/request-receipt and notification bookkeeping described above, booking membership, composite FKs and deferred guards; regenerated DB types. No REST routes, MCP tools or CLI commands. | Populated predecessor upgrade preserves realistic data; fresh install and no-op rerun; cross-org/member and duplicate-active-ordinal violations fail; existing single bookings remain valid. | Off |
+| 2b. Atomic creation service | 1b, 2a | Transaction-aware insertion, request fingerprint and replay receipts; no REST routes, MCP tools or CLI commands. | Concurrent series/single admission, same/different-key replay, failure at first/middle/final insertion leaves zero rows/jobs; one host for all round-robin dates and documented fairness update; no external I/O under locks. | Off |
+| 3a. Capabilities and member integration | 2b | Series capability resolver and existing single-member read/move/cancel service integration; no REST routes, MCP tools or CLI commands. | Returned-token and send-time email-token hashes resolve safely; stable ordinal follows reschedule chain; cross-series/org/guest refusal; org → series → member → hosts order; single-member move/cancel races preserve existing protections. | Off |
+| 3b. Tail/all cancellation service | 3a | Transactional tail/all cancellation and action dedupe; no REST routes, MCP tools or CLI commands. | One/following/all scopes, cutoff, expected revision, no-op/replay and deletion; cancel versus move/create races; exactly the affected local outboxes and no deadlocks. | Off |
+| 4a. Aggregate notification delivery | 3b | One confirmation/cancellation per series action and recipient, durable dedupe and send-time capability hashing; define series-manage fragment URL contract consumed by 6c. No REST routes, MCP tools or CLI commands. | Default-budget 12-occurrence/10-guest create and tail/all cancel fixtures deliver complete lists without suppressed rows; include maximum hosts in instance accounting; shared-budget exhaustion, SMTP retry and replay controls; no raw tokens in jobs/logs and no guest mutation capability. | Off |
+| 4b. Calendar attachments and provider jobs | 4a | One aggregate calendar attachment, stable per-occurrence UID/SEQUENCE and existing per-booking provider jobs; no REST routes, MCP tools or CLI commands. | Parse every VEVENT and compare UTC times/UIDs; one move affects one UID, tail cancel only its members; fake Google writes/Microsoft no-write behavior; aggregate waits for all conferences and exposes bounded-retry exhaustion; automate calendar-file checks, leaving only the client behavior checks specified above for the owner. | Off |
+| 5a. Event configuration interfaces | 2a, 4b | Existing `createEventType` POST `/event-types` and `updateEventType` PATCH `/event-types/{id}` gain `recurrence`; existing MCP `create_event_type` / `update_event_type` arguments and CLI `create-event` / `update-event` flags. | Interface gate; owner/admin and expected-organization checks; disabled recurrence compatibility and revision invalidation; public event metadata exposes only permitted recurrence choices. | Off |
+| 5b. Preview interfaces | 1b, 5a | `createPublicBookingSeriesPreview` POST `/public/{handle}/{slug}/series-preview`; `createPublicTeamBookingSeriesPreview` POST `/public/teams/{handle}/{slug}/series-preview`; MCP `preview_booking_series` personal/team modes; CLI `series preview`. | Interface gate with explicit read classification for both POSTs; all dates and safe errors, stale-calendar failure, hidden links, public limits and invalid bearer refusal. | Off |
+| 5c. Creation interfaces | 2b, 4b, 5b | `createPublicBookingSeries` POST `/public/{handle}/{slug}/booking-series`; `createPublicTeamBookingSeries` POST `/public/teams/{handle}/{slug}/booking-series`; MCP `create_booking_series` personal/team modes; CLI `series book`. | Interface gate; preview equality, safe 400/409/429/503 mapping and replay; one public booking charge plus series cap; no partial booking/mail after failed admission; capability redaction. | Off |
+| 5d. Series read interfaces | 3a, 5c | `listBookingSeries` GET `/booking-series`; `getHostBookingSeries` GET `/booking-series/{id}`; `getManagedBookingSeries` POST `/booking-series/manage`; MCP `list_booking_series`, `get_booking_series` host/manageToken modes; CLI `series list`, `series get`. | Interface gate, explicitly classifying manage POST as read; bounded pagination/detail, host visibility, token-only access, supplied-key scope enforcement and uniform missing-capability errors. | Off |
+| 5e. Series cancellation interfaces | 3b, 5d | `cancelHostBookingSeries` POST `/booking-series/{id}/cancel`; `cancelManagedBookingSeries` POST `/booking-series/manage/cancel`; MCP `cancel_booking_series` host/manageToken modes; CLI `series cancel`. | Interface gate; all/following semantics and atomic revalidation, no-op/replay, stale revision, cutoff and guest refusal; one aggregate action notification per recipient. | Off |
+| 5f. Single-occurrence interfaces | 3a, 5e | Extend existing GET `/bookings/manage`, GET `/bookings/manage/slots`, `rescheduleManagedBooking` POST `/bookings/manage/reschedule` and `cancelManagedBooking` POST `/bookings/manage/cancel` for a series capability plus member ordinal (GET uses a dedicated redacted token header and ordinal query, POST uses body fields); preserve `rescheduleHostBooking` POST `/bookings/{id}/reschedule` and `cancelHostBooking` POST `/bookings/{id}/cancel`. Existing MCP `reschedule_booking` / `cancel_booking` and CLI `reschedule` / `cancel` gain the same member selector. | Interface gate; selector cannot escape the authorized series, follows the current member chain and requires expected member revision; single move/cancel sends one occurrence email; existing single-booking input/response behavior and ordinary manage-slot range cap remain intact. | Off |
+| 6a. Admin configuration UI | 5a | Event recurrence enablement/editor using completed configuration endpoints; no REST routes, MCP tools or CLI commands. | jsdom enable/disable/validation and neutral loading/403/error states; en/zh-CN; preserve team weekly-hours hint; accessible controls and CI browser flow. | Off; test-on |
+| 6b. Public booking page | 5b, 5c, 6a | Rule/count selection, full preview and atomic submit using completed preview/create endpoints; no REST routes, MCP tools or CLI commands. | All public locales; full/partial/stale/unknown availability, first-fold selection, retained request-key replay and returned series manage link; generated-client CI browser creation flow. | Off; test-on |
+| 6c. Series manage page | 5d, 5e, 5f, 6b | Fragment-token page listing every member and its move/cancel controls plus tail/all cancel; no REST routes, MCP tools or CLI commands. | Every member from the aggregate email is reachable; fragment stripped safely, no capability leakage; guest read-only access and rejection of every mutation; reschedule-chain follow, stale revision, cancel and failure UI; all public locales and CI browser flow. | Off; test-on |
+| 6d. Host series UI | 5d, 5e, 5f, 6c | Host series list/detail and member/tail/all actions through completed endpoints; no REST routes, MCP tools or CLI commands. | Host/cross-org visibility, en/zh-CN, current member after moves, cancellation summaries and neutral unknown readiness; generated-client CI browser flow. | Off; test-on |
+| 7. Documentation and DST acceptance | 1a–6d | User/agent/self-host guides, deployment/upgrade and flag notes, importer warning and documented client limitations; no REST routes, MCP tools or CLI commands. | Cross-DST creation → one move → tail cancel → replay across host/invitee zones; compare DB instants, exports, webhooks and ICS; maximum-recipient default-budget acceptance; recorded client results/release blockers and self-host parity. | Default off; opt-in only after acceptance |
+
+Calendar checks use parser/SMTP fixtures and fake provider adapters. The only owner client
+check is the exact synthetic import → single move → bulk-cancel sequence specified in
+“Notifications and calendars,” once per named client/version; record its result or a release
+blocker. No separate broad manual matrix or live provider-send test is added by this plan.
 
 ## Out of scope and known limitations
 
@@ -409,7 +531,7 @@ at creation, arbitrary per-date alternatives, partial commits, tail/all reschedu
 series waitlist, one-time-link redemption, group seats, payment/refund orchestration,
 imported-series management, per-occurrence round-robin rotation, provider recurring masters,
 or automatic time-zone-rule repair. Calendar clients see independent events; booking twelve
-dates can produce twelve invitations per recipient. Atomic local admission cannot guarantee
+dates produces one aggregate confirmation per recipient, with calendar import limitations described above. Atomic local admission cannot guarantee
 provider delivery or protect against an external calendar change not yet synchronized.
 The narrower combinations and rejection policy are deliberate first-release decisions;
 future expansion must separately specify accounting, capabilities, races and compatibility.

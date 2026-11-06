@@ -13,6 +13,12 @@ const bounds = [
   ['Maximum batch database read statements', 32],
   ['Maximum batch fact rows', 10000],
   ['Batch deadline in milliseconds', 5000],
+  ['Maximum guests', 10],
+  ['Recipient mail per rolling hour', 5],
+  ['Recipient mail per rolling day', 20],
+  ['Instance mail per rolling hour', 100],
+  ['Public booking requests per minute per IP', 10],
+  ['Series submissions per hour per IP and event', 2],
 ] as const
 
 function verifyBounds(source: string) {
@@ -25,7 +31,7 @@ function verifyBounds(source: string) {
 }
 
 describe('recurring booking design bounds', () => {
-  it('pins all eight numeric facts in the normative table', () => {
+  it('pins all fourteen numeric facts in the normative table', () => {
     verifyBounds(document)
   })
 
