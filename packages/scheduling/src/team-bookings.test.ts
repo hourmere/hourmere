@@ -17,6 +17,7 @@ import {
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { createEventType } from './event-types.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 import {
   TeamAdminBookingListPageSchema as TeamAdminBookingPageSchema,
@@ -65,6 +66,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     'encodeBookingCursor',
     'DomainError',
     'isUuid',
+    'resolvedBookingHosts',
     'toTeamAdminBooking',
     'findPublicEventType',
     'findPublicTeamEventType',
@@ -75,6 +77,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     page.encodeBookingCursor,
     DomainError,
     isUuid,
+    resolvedBookingHosts,
     toTeamAdminBooking,
     findPublicEventType,
     findPublicTeamEventType,
