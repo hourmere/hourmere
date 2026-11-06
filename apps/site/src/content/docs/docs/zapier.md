@@ -14,8 +14,8 @@ owner steps; checking out or building Hourmere does not register or upload an in
 Create an API key at **App → API keys** (`/app/api-keys`) in the organization you want
 to automate. In Zapier, enter that key and your instance's HTTPS origin, for example
 `https://hourmere.example.com`, without `/api/v1` or a path prefix. The base URL is
-required: Hourmere does not currently document a public Cloud API origin, and
-`https://hourmere.com` is the marketing website. Zapier must be able to reach the instance.
+required: Hourmere does not currently document a public Cloud API origin. The marketing
+website is separate from your instance. Zapier must be able to reach the instance.
 Your connection remains bound to the key's organization and existing permissions.
 The connection test makes one authenticated `GET /api/v1/me` request; it makes no booking.
 
@@ -118,6 +118,5 @@ instance, then share access only with intended testers through Zapier's private-
 sharing controls. Public directory listing requires a separate publication/review process.
 
 See Zapier's official [CLI overview](https://docs.zapier.com/integrations/build-cli/overview),
-[core reference](https://docs.zapier.com/integrations/build-cli/core),
-[testing guide](https://docs.zapier.com/integrations/build-cli/testing-and-debugging) and
-[CLI commands](https://github.com/zapier/zapier-platform/blob/main/packages/cli/docs/cli.md).
+[core reference](https://docs.zapier.com/integrations/build-cli/core) and
+[testing guide](https://docs.zapier.com/integrations/build-cli/testing-and-debugging).

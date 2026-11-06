@@ -38,7 +38,7 @@ module.exports = {
     type: 'custom',
     fields: [
       field('baseUrl', 'Hourmere HTTPS origin', true, {
-        helpText: 'For example https://hourmere.example.com. Hourmere Cloud is not available yet.',
+        helpText: 'Enter your instance origin; no default Cloud API origin is documented.',
       }),
       field('apiKey', 'API key', true, {
         type: 'password',
