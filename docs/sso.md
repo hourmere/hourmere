@@ -836,7 +836,7 @@ setting before `useSsoRecovery` and the operator recovery command exist.
 **Published catalogues.** From Draft reads on, each row that adds SSO REST operations,
 MCP tools or CLI commands registers them in `packages/auth/src/api-key-operations.ts`,
 as the registry's parity tests require. OpenAPI, MCP `tools/list`, CLI help and the
-generated scope tables in `docs/api-keys.md`, `docs/mcp.md` and their hourmere.com copies
+generated scope tables in `docs/api-keys.md`, `docs/mcp.md` and their documentation-site copies
 therefore list them in every release, while hard-off. Draft reads adds a static note
 beside those tables, outside the generated `api-key-scope-table` markers, stating that
 SSO operations return `404 sso_disabled` until an operator enables the protocol, and
