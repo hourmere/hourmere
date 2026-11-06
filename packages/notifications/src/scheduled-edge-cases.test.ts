@@ -899,7 +899,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           ],
         ],
       ],
-      ['booking-host', [[".where('bh.booking_id', '=', claim.booking_id)", '']]],
+      // Resolve ordinary and slot-owned host rows through the current booking; removing
+      // this fence must not accept the same host's unrelated booking as eligibility.
+      ['booking-host', [[".where('b.id', '=', claim.booking_id)", '']]],
       [
         'selected-identity',
         [

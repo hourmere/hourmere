@@ -356,6 +356,20 @@ export interface BookingHosts {
   user_id: string;
 }
 
+export interface BookingNotificationConferenceContext {
+  applied_revision: number | null;
+  booking_id: string | null;
+  calendar_id: string | null;
+  invitation_organizer_email: string | null;
+  invitation_organizer_name: string | null;
+  join_url: string | null;
+  organization_id: string | null;
+  organizer_user_id: string | null;
+  provider: string | null;
+  revision: number | null;
+  state: string | null;
+}
+
 export interface BookingNotifications {
   booking_id: string;
   created_at: Generated<Timestamp>;
@@ -573,6 +587,14 @@ export interface GroupBookingMoveReceipts {
   source_group_slot_id: string;
 }
 
+export interface GroupSlotCalendarEvents {
+  calendar_id: string;
+  count_revision: Int8;
+  etag: string | null;
+  external_event_id: string;
+  group_slot_id: string;
+}
+
 export interface GroupSlotCancelReceipts {
   authority_hash: Buffer;
   authority_kind: string;
@@ -584,6 +606,56 @@ export interface GroupSlotCancelReceipts {
   organization_id: string;
   request_key: string;
   result_revision: Int8;
+}
+
+export interface GroupSlotConferences {
+  applied_revision: number | null;
+  attempts: Generated<number>;
+  calendar_id: string | null;
+  conference_patch_request_id: string | null;
+  connection_id: string | null;
+  create_started: Generated<boolean>;
+  error_code: string | null;
+  external_event_id: string | null;
+  group_slot_id: string;
+  invitation_organizer_email: string;
+  invitation_organizer_name: string;
+  join_url: string | null;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  organization_id: string;
+  organizer_user_id: string;
+  provider: string;
+  request_id: Generated<string>;
+  revision: Generated<number>;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  zoom_connection_id: string | null;
+  zoom_meeting_id: string | null;
+  zoom_user_id: string | null;
+}
+
+export interface GroupSlotHostMailReceipts {
+  created_at: Generated<Timestamp>;
+  message_id: string;
+  outcome: string;
+  revision: Int8;
+}
+
+export interface GroupSlotHostMessages {
+  attempts: Generated<number>;
+  claim_token: string | null;
+  due_at: Timestamp;
+  expires_at: Timestamp;
+  group_slot_id: string;
+  id: Generated<string>;
+  kind: string;
+  lease_until: Timestamp | null;
+  next_attempt_at: Timestamp;
+  revision: Int8;
+  rule_id: string;
+  state: Generated<string>;
 }
 
 export interface GroupSlots {
@@ -602,8 +674,11 @@ export interface GroupSlots {
   host_schedule_uses_default: Generated<boolean>;
   host_time_zone: Generated<string>;
   host_user_id: string;
+  ical_organizer_email: string | null;
+  ical_organizer_name: string | null;
   id: Generated<string>;
   location: Json | null;
+  location_option: Json | null;
   logistics_revision: Generated<Int8>;
   organization_id: string;
   organizer_user_id: string | null;
@@ -961,6 +1036,7 @@ export interface DB {
   booking_conference_notifications: BookingConferenceNotifications;
   booking_conferences: BookingConferences;
   booking_hosts: BookingHosts;
+  booking_notification_conference_context: BookingNotificationConferenceContext;
   booking_notifications: BookingNotifications;
   booking_scheduled_messages: BookingScheduledMessages;
   bookings: Bookings;
@@ -974,7 +1050,11 @@ export interface DB {
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   group_booking_move_receipts: GroupBookingMoveReceipts;
+  group_slot_calendar_events: GroupSlotCalendarEvents;
   group_slot_cancel_receipts: GroupSlotCancelReceipts;
+  group_slot_conferences: GroupSlotConferences;
+  group_slot_host_mail_receipts: GroupSlotHostMailReceipts;
+  group_slot_host_messages: GroupSlotHostMessages;
   group_slots: GroupSlots;
   import_items: ImportItems;
   import_sources: ImportSources;

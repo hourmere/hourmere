@@ -323,7 +323,7 @@ function teamBookingQuery(
       q.where((eb) =>
         eb.exists(
           eb
-            .selectFrom('booking_hosts as assigned_host')
+            .selectFrom(resolvedBookingHosts(ctx.db).as('assigned_host'))
             .select('assigned_host.booking_id')
             .whereRef('assigned_host.booking_id', '=', 'b.id')
             .where('assigned_host.user_id', '=', hostUserId as string),

@@ -889,6 +889,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       DomainError,
       isUuid,
       toTeamAdminBooking,
+      resolvedBookingHosts,
     }
     return new Function(
       ...Object.keys(bindings),
