@@ -5,8 +5,11 @@ CREATE TABLE organization_brand_logos (
   data bytea NOT NULL CHECK (octet_length(data) BETWEEN 1 AND 524288),
   UNIQUE (organization_id, hash)
 );
-ALTER TABLE auth.organization
-  ADD COLUMN brand_logo text,
-  ADD COLUMN brand_primary_color text CHECK (brand_primary_color ~ '^#[0-9A-F]{6}$'),
-  ADD CONSTRAINT organization_brand_logo_fk FOREIGN KEY (id, brand_logo)
-    REFERENCES organization_brand_logos(organization_id, hash) DEFERRABLE INITIALLY DEFERRED;
+-- Keep product settings outside Better Auth's native organization response boundary.
+CREATE TABLE organization_branding (
+  organization_id uuid PRIMARY KEY REFERENCES auth.organization(id) ON DELETE CASCADE,
+  brand_logo text,
+  brand_primary_color text CHECK (brand_primary_color ~ '^#[0-9A-F]{6}$'),
+  CONSTRAINT organization_brand_logo_fk FOREIGN KEY (organization_id, brand_logo)
+    REFERENCES organization_brand_logos(organization_id, hash) DEFERRABLE INITIALLY DEFERRED
+);

@@ -217,8 +217,6 @@ export interface AuthOauthResource {
 }
 
 export interface AuthOrganization {
-  brand_logo: string | null;
-  brand_primary_color: string | null;
   createdAt: Timestamp;
   id: Generated<string>;
   logo: string | null;
@@ -792,6 +790,12 @@ export interface OneTimeBookingLinks {
   used_at: Timestamp | null;
 }
 
+export interface OrganizationBranding {
+  brand_logo: string | null;
+  brand_primary_color: string | null;
+  organization_id: string;
+}
+
 export interface OrganizationBrandLogos {
   data: Buffer;
   hash: string;
@@ -1072,6 +1076,7 @@ export interface DB {
   notification_email_sends: NotificationEmailSends;
   one_time_booking_links: OneTimeBookingLinks;
   organization_brand_logos: OrganizationBrandLogos;
+  organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;

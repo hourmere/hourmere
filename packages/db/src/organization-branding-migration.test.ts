@@ -48,20 +48,14 @@ describe.skipIf(!serverUrl)('branding migration', () => {
         Promise.all(
           ['auth."user"', 'auth.organization', 'auth.member', 'event_types', 'bookings'].map(
             async (table) =>
-              (
-                await pool.query(
-                  `SELECT to_jsonb(t) ${table === 'auth.organization' ? "- 'brand_logo' - 'brand_primary_color'" : ''} AS row FROM ${table} t ORDER BY id`,
-                )
-              ).rows,
+              (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY id`)).rows,
           ),
         )
       const before = await records()
       await copyFile(join(migrationsDir, migration), join(directory, migration))
       expect(await runMigrations(pool, directory)).toEqual([migration])
       expect(await records()).toEqual(before)
-      expect(
-        (await pool.query('SELECT brand_logo,brand_primary_color FROM auth.organization')).rows,
-      ).toEqual([{ brand_logo: null, brand_primary_color: null }])
+      expect((await pool.query('SELECT * FROM organization_branding')).rows).toEqual([])
       fresh = await createTestDatabase(serverUrl as string)
       expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
       expect(await runMigrations(pool, directory)).toEqual([])
@@ -94,11 +88,25 @@ describe.skipIf(!serverUrl)('branding migration', () => {
           await client.query('BEGIN')
           try {
             await client.query(sql)
+            await client.query(
+              'INSERT INTO organization_branding (organization_id) VALUES ($1),($2)',
+              [org, other],
+            )
+            if (kind === 'native_boundary') {
+              expect(
+                (
+                  await client.query(
+                    "SELECT column_name FROM information_schema.columns WHERE table_schema='auth' AND table_name='organization' AND column_name IN ('brand_logo','brand_primary_color')",
+                  )
+                ).rows,
+              ).toEqual([])
+            }
             if (kind === 'color')
               await expect(
-                client.query("UPDATE auth.organization SET brand_primary_color='red' WHERE id=$1", [
-                  org,
-                ]),
+                client.query(
+                  "UPDATE organization_branding SET brand_primary_color='red' WHERE organization_id=$1",
+                  [org],
+                ),
               ).rejects.toMatchObject({ code: '23514' })
             if (kind === 'size')
               await expect(
@@ -128,10 +136,10 @@ describe.skipIf(!serverUrl)('branding migration', () => {
                 'a'.repeat(64),
                 Buffer.from('png'),
               ])
-              await client.query('UPDATE auth.organization SET brand_logo=$2 WHERE id=$1', [
-                other,
-                'a'.repeat(64),
-              ])
+              await client.query(
+                'UPDATE organization_branding SET brand_logo=$2 WHERE organization_id=$1',
+                [other, 'a'.repeat(64)],
+              )
               await expect(client.query('SET CONSTRAINTS ALL IMMEDIATE')).rejects.toMatchObject({
                 code: '23503',
               })
@@ -141,12 +149,17 @@ describe.skipIf(!serverUrl)('branding migration', () => {
           }
         }
         for (const [kind, before, after] of [
+          [
+            'native_boundary',
+            '-- Keep product settings outside',
+            'ALTER TABLE auth.organization ADD COLUMN brand_logo text, ADD COLUMN brand_primary_color text;\n-- Keep product settings outside',
+          ],
           ['color', "CHECK (brand_primary_color ~ '^#[0-9A-F]{6}$')", 'CHECK (true)'],
           ['single', 'organization_id uuid PRIMARY KEY', 'organization_id uuid NOT NULL'],
           ['size', 'CHECK (octet_length(data) BETWEEN 1 AND 524288)', 'CHECK (true)'],
           [
             'ownership',
-            'FOREIGN KEY (id, brand_logo)\n    REFERENCES organization_brand_logos(organization_id, hash) DEFERRABLE INITIALLY DEFERRED',
+            'FOREIGN KEY (organization_id, brand_logo)\n    REFERENCES organization_brand_logos(organization_id, hash) DEFERRABLE INITIALLY DEFERRED',
             'CHECK (true)',
           ],
         ] as const) {

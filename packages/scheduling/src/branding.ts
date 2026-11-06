@@ -72,13 +72,12 @@ function view(row: { brand_logo: string | null; brand_primary_color: string | nu
   }
 }
 async function read(db: Db, organizationId: string) {
-  return view(
-    await db
-      .selectFrom('auth.organization')
-      .select(['brand_logo', 'brand_primary_color'])
-      .where('id', '=', organizationId)
-      .executeTakeFirstOrThrow(),
-  )
+  const row = await db
+    .selectFrom('organization_branding')
+    .select(['brand_logo', 'brand_primary_color'])
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  return view(row ?? { brand_logo: null, brand_primary_color: null })
 }
 export async function getBranding(ctx: ServiceContext) {
   await authorize(ctx.db, ctx)
@@ -128,17 +127,19 @@ export async function setBranding(ctx: BrandingContext, input: unknown) {
         .executeTakeFirst())
     )
       throw new DomainError('not_found', 'brand_logo_not_found')
-    if (brandLogo !== undefined || brandPrimaryColor !== undefined)
+    if (brandLogo !== undefined || brandPrimaryColor !== undefined) {
+      const changes = {
+        ...(brandLogo !== undefined ? { brand_logo: brandLogo } : {}),
+        ...(brandPrimaryColor !== undefined
+          ? { brand_primary_color: brandPrimaryColor?.toUpperCase() ?? null }
+          : {}),
+      }
       await trx
-        .updateTable('auth.organization')
-        .set({
-          ...(brandLogo !== undefined ? { brand_logo: brandLogo } : {}),
-          ...(brandPrimaryColor !== undefined
-            ? { brand_primary_color: brandPrimaryColor?.toUpperCase() ?? null }
-            : {}),
-        })
-        .where('id', '=', org)
+        .insertInto('organization_branding')
+        .values({ organization_id: org, ...changes })
+        .onConflict((oc) => oc.column('organization_id').doUpdateSet(changes))
         .execute()
+    }
     if (brandLogo === null)
       await trx.deleteFrom('organization_brand_logos').where('organization_id', '=', org).execute()
     return read(trx, org)
@@ -197,9 +198,9 @@ export async function uploadBrandLogo(ctx: BrandingContext, data: Buffer, conten
       .onConflict((oc) => oc.column('organization_id').doUpdateSet({ hash, data: normalized }))
       .execute()
     await trx
-      .updateTable('auth.organization')
-      .set({ brand_logo: hash })
-      .where('id', '=', org)
+      .insertInto('organization_branding')
+      .values({ organization_id: org, brand_logo: hash })
+      .onConflict((oc) => oc.column('organization_id').doUpdateSet({ brand_logo: hash }))
       .execute()
     return read(trx, org)
   })

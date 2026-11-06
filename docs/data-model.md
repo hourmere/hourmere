@@ -59,8 +59,10 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 
 ### Organization branding
 
-Migration `0062_organization_branding.sql` adds nullable `auth.organization.brand_logo`
-and `brand_primary_color`. Existing organizations keep their data and receive no custom
+Migration `0062_organization_branding.sql` adds `organization_branding`, keyed by organization, with nullable
+`brand_logo` and `brand_primary_color`. Keeping these settings outside `auth.organization`
+preserves the native Better Auth response boundary. A missing row means both settings
+are unset. Existing organizations keep their data and receive no custom
 branding. Colours are normalized to uppercase `#RRGGBB`, with a database format constraint.
 The logo reference is a SHA-256 digest of normalized PNG bytes in
 `organization_brand_logos`. A composite foreign key binds the reference to the same
