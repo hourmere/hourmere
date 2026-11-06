@@ -30,11 +30,17 @@ export interface BookingExportInput {
   expectedOrganizationId?: string | undefined
 }
 
-/** Formula protection precedes RFC 4180 quoting, including leading Unicode whitespace. */
+/**
+ * Formula protection precedes RFC 4180 quoting, including leading Unicode whitespace. A
+ * spreadsheet that splits on `;` treats a segment's leading `"` as a text qualifier, so quotes
+ * between the separator and the trigger are skipped and the apostrophe goes after them.
+ */
 export function csvCell(value: unknown): string {
   let text = value === null || value === undefined ? '' : String(value)
-  if (/(^|[;,])\s*[=+\-@\t\r]/u.test(text)) text = `'${text}`
-  text = text.replace(/;(\s*[=+\-@\t\r])/gu, ";'$1")
+  if (/(^|[;,])[\s"]*[=+\-@\t\r]/u.test(text)) text = `'${text}`
+  text = text.replace(/;([\s"]*)(?=[=+\-@\t\r])/gu, (_, gap: string) =>
+    gap.includes('"') ? `;${gap}'` : `;'${gap}`,
+  )
   return /[";,\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 

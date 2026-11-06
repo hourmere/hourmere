@@ -72,10 +72,18 @@ describe('CSV cells', () => {
     const row = ['id', 'ordinary', 'x;=HYPERLINK("https://evil.invalid")', 'z;  +CMD']
       .map(csvCell)
       .join(',')
-    for (const field of row.split(';')) expect(field).not.toMatch(/^\s*[=+\-@\t\r]/u)
+    for (const field of row.split(';')) expect(field).not.toMatch(/^[\s"]*[=+\-@\t\r]/u)
     expect(row).toContain(";'=HYPERLINK")
     expect(row).toContain(";'  +CMD")
   })
+  it.each(['x;"=1+1;z', 'x; "@cmd', 'x;""+SUM(1)', '"=HYPERLINK("https://evil.invalid")'])(
+    'neutralizes triggers behind quotes when a semicolon parser splits the row: %j',
+    (value) => {
+      const row = ['id', csvCell(value), 'z'].join(',')
+      for (const field of row.split(';')) expect(field).not.toMatch(/^[\s"]*[=+\-@\t\r]/u)
+      expect(parseCsv(`${csvCell(value)}\r\n`)[0]?.[0]?.startsWith("'")).toBe(true)
+    },
+  )
   it('preserves nested JSON after removing the spreadsheet protection prefix', () => {
     const value = JSON.stringify({ q: [1, -2], text: 'ordinary' })
     const cell = parseCsv(`${csvCell(value)}\r\n`)[0]?.[0] ?? ''
