@@ -68,8 +68,9 @@ pseudonymous records, not readable email addresses; removal does not reset these
 These are elapsed days, including across daylight-saving changes. An hourly bounded
 cleanup removes records after their deadlines; a backlog can delay physical deletion.
 Booked or expired contact details are cleared by cleanup, and minimal terminal entry
-metadata is retained for 7 days. Rotating the accounting secret (`BETTER_AUTH_SECRET`) clears all waitlist entries and
-resets the hash-based accounting boundary; it is not a normal unsubscribe action.
+metadata is retained for 7 days. Rotating the accounting secret (`BETTER_AUTH_SECRET`)
+clears all waitlist entries and resets the hash-based accounting boundary; it is not a
+normal unsubscribe action.
 
 Managers never receive verification, removal or booking-attribution tokens in entry
 responses. Treat emailed links as private capabilities. Do not forward them or include
@@ -161,9 +162,9 @@ across API keys as well as durable mailbox, event and trusted connection-IP limi
 
 - SMTP (`SMTP_URL` and `MAIL_FROM`) is required; there is no log-mailer fallback.
 - Each event type allows at most 100 active entries (pending, active or notified). The
-  101st person sees a clear “This waitlist is full (100 entries). Please check available times later.” error,
-  rather than “check your email”; no entry or verification email is created.
-
+  101st person sees a clear “This waitlist is full (100 entries). Please check available
+  times later.” error, rather than “check your email”; no entry or verification email
+  is created.
 - No priority, reservation, guaranteed notification or guaranteed booking; email delivery
   depends on the worker, SMTP and shared recipient budgets.
 - Only one-on-one single-host types, at the default meeting length. No round-robin,

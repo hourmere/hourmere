@@ -91,7 +91,58 @@ describe('booking waitlist documentation facts', () => {
     const runtime = read('../../web/src/public/WaitlistJoin.tsx')
     check(runtime, guide)
     expect(() => check(runtime.replace(phrase, 'Check your email'), guide)).toThrow(assertion)
-    expect(() => check(runtime, guide.replace(phrase, 'Check your email'))).toThrow(assertion)
+    expect(() => check(runtime, prose(guide).replace(phrase, 'Check your email'))).toThrow(
+      assertion,
+    )
+  })
+
+  it('rejects claims that development logs expose waitlist mail or private links', () => {
+    const check = (source: string) => {
+      const text = prose(source)
+      expect(text).not.toMatch(/development mailer logs/i)
+      // Catch affirmative paraphrases as well as the original sentence. Negated
+      // statements explain the real SMTP-only behaviour and remain valid.
+      for (const sentence of text.split(/[.!?](?:\s|$)/)) {
+        if (
+          /\b(?:never|not)\s+(?:be\s+)?(?:logged|printed|written|sent|log|print|send)\b/i.test(
+            sentence,
+          )
+        )
+          continue
+        const mail = /\b(?:waitlist|private|verification|development mailer)\b/i.test(sentence)
+        const logging = /\b(?:logs?|logged|logging|prints?|printed|console|stdout)\b/i.test(
+          sentence,
+        )
+        const fallback =
+          /development|dev.mailer|without SMTP|SMTP.{0,30}(?:absent|missing|unset|unconfigured|not configured)/i.test(
+            sentence,
+          )
+        expect(mail && logging && fallback, sentence).toBe(false)
+      }
+      expect(text).not.toContain('separate work')
+    }
+    for (const source of [guide, read('./content/docs/docs/notifications.md')]) {
+      check(source)
+      for (const claim of [
+        'The development mailer logs email contents, including private links.',
+        'Without SMTP, waitlist verification links are printed to the console.',
+        'When SMTP is not configured, waitlist verification links are printed to the console.',
+        'Private waitlist messages appear in server logs during development.',
+        'Waitlist management remains separate work.',
+      ]) {
+        expect(() => check(`${source}\n\n${claim}`)).toThrow(assertion)
+      }
+    }
+  })
+
+  it('keeps the known limitations list tight', () => {
+    const check = (source: string) => {
+      const list = source.split('## Known limitations\n')[1]?.trim()
+      expect(list).toBeDefined()
+      expect(list).not.toMatch(/\n\s*\n/)
+    }
+    check(guide)
+    expect(() => check(guide.replace('\n- No priority', '\n\n- No priority'))).toThrow(assertion)
   })
 
   it('names the secret and its waitlist rotation effect in both operator guides', () => {
