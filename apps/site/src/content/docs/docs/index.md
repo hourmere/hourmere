@@ -32,6 +32,10 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
+  The [design and credential/discovery foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
+  adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
+  is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
