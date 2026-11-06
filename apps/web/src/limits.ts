@@ -27,6 +27,8 @@ export const RULES = {
   bufferAfterMinutes: { min: 0, max: 1440 },
   minimumNoticeMinutes: { min: 0, max: 525_600 },
   maxBookingsPerDay: { min: 1, max: 1000 },
+  maxBookingsPerWeek: { min: 1, max: 1000 },
+  maxBookingsPerMonth: { min: 1, max: 1000 },
   bookingWindowDays: { min: 1, max: 3650 },
 } as const
 

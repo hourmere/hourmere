@@ -663,3 +663,14 @@ a known meeting ID without selecting another account or creating a replacement. 
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
 ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.
+
+## Configure booking limits
+
+Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`: whole numbers from 1 to 1000, or `null` for no ceiling.
+Omitted update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. Event-type reads return all three settings. API keys need `full` scope
+for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
+CLI examples, host schedule time zones, Monday-based weeks, calendar months and
+counting rules. Lowering a ceiling does not cancel existing bookings.

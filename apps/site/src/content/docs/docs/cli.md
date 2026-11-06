@@ -302,3 +302,14 @@ with no validated ID remains ambiguous: retry does not issue another POST or ado
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
 requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).
+
+## Configure booking limits
+
+Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`: whole numbers from 1 to 1000, or `null` for no ceiling.
+Omitted update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. Event-type reads return all three settings. API keys need `full` scope
+for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
+CLI examples, host schedule time zones, Monday-based weeks, calendar months and
+counting rules. Lowering a ceiling does not cancel existing bookings.

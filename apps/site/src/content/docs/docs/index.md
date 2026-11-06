@@ -17,6 +17,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
+  the editor, REST, MCP or CLI.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
@@ -31,6 +33,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
 ## Known limitations
+
+- [Booking limits](/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per

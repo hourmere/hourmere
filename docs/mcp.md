@@ -148,3 +148,13 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 `[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
+
+## Configure booking limits
+
+`create_event_type` and `update_event_type` accept nullable `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns the settings.
+Each ceiling is a whole number from 1 to 1000. Updates preserve omitted fields, and
+explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month apply
+whenever each pair is configured. The same REST permissions and validation apply.
+See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
+time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.

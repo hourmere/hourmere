@@ -278,10 +278,16 @@ describe('creating an event type', () => {
       ['minimumNoticeMinutes', '会议至少需要提前多久预约。'],
       ['bufferBeforeMinutes', '每次会议前保留的空闲时间。'],
       ['bufferAfterMinutes', '每次会议后保留的空闲时间。'],
+      ['maxBookingsPerWeek', '每周的预约数量，1–1000。留空表示不限。'],
+      ['maxBookingsPerMonth', '每月的预约数量，1–1000。留空表示不限。'],
     ]) {
       expect(document.getElementById(`${id}-hint`)?.textContent).toContain(hint)
     }
-    expect(document.body.textContent).not.toMatch(/How far ahead|Free time kept/)
+    expect(screen.getByLabelText(/每周上限/)).toBeDefined()
+    expect(screen.getByLabelText(/每月上限/)).toBeDefined()
+    expect(document.body.textContent).not.toMatch(
+      /How far ahead|Free time kept|Weekly limit|Monthly limit/,
+    )
   })
 
   it('offers an optional random unlisted suffix on plain HTTP without changing the link until accepted', async () => {
@@ -357,6 +363,8 @@ describe('creating an event type', () => {
     await user.type(field('Minimum notice (minutes)'), '240')
     await user.type(field(/Booking window/), '60')
     await user.type(field(/Daily limit/), '4')
+    await user.type(field(/Weekly limit/), '8')
+    await user.type(field(/Monthly limit/), '20')
     await user.clear(field('Buffer before (minutes)'))
     await user.type(field('Buffer before (minutes)'), '5')
     await user.clear(field('Buffer after (minutes)'))
@@ -377,6 +385,8 @@ describe('creating an event type', () => {
         bufferAfterMinutes: 10,
         minimumNoticeMinutes: 240,
         maxBookingsPerDay: 4,
+        maxBookingsPerWeek: 8,
+        maxBookingsPerMonth: 20,
         bookingWindowDays: 60,
         location: { kind: 'phone', number: '+14155550123' },
         questions: [],
@@ -701,6 +711,8 @@ describe('editing an event type', () => {
     scheduleId: SCHEDULE_ID,
     minimumNoticeMinutes: 1440,
     maxBookingsPerDay: 3,
+    maxBookingsPerWeek: 5,
+    maxBookingsPerMonth: 10,
     questions: [
       { id: 'company', label: 'Company', type: 'short_text', required: true },
       { id: 'plan', label: 'Plan', type: 'select', required: false, options: ['Free', 'Pro'] },
@@ -712,6 +724,8 @@ describe('editing an event type', () => {
     const api = eventTypeServer([saved])
     await openExisting()
     expect(field('Title').value).toBe('Intro call')
+    expect(field(/Weekly limit/).value).toBe('5')
+    expect(field(/Monthly limit/).value).toBe('10')
     expect(field('Address').value).toBe('Unter den Linden 1')
     expect(field('Minimum notice (minutes)').value).toBe('1440')
     expect(screen.getByText(/= 1 day\./)).toBeDefined()
@@ -737,7 +751,6 @@ describe('editing an event type', () => {
         bufferBeforeMinutes: 0,
         bufferAfterMinutes: 0,
         minimumNoticeMinutes: 1440,
-        maxBookingsPerDay: 3,
         bookingWindowDays: null,
         // Saved questions keep their ids, so earlier answers stay attached.
         questions: [
