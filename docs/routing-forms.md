@@ -1,7 +1,8 @@
 # Routing forms — proposed design
 
 Status: design only; no routing form is available yet. This proposal adds no tables,
-routes, UI or plan checks. The eventual feature is free on self-hosted and Cloud alike.
+routes, UI or plan checks. The eventual feature is free on self-hosted and Cloud alike,
+and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
 [MCP](mcp.md) and [team administrator booking fields](team-admin-bookings.md) remain
 canonical for existing behavior. All contracts below describe future implementation.
@@ -41,8 +42,9 @@ draft revision, published-version pointer and enabled/archived state. Public pat
 `/route/{handle}/{slug}` for personal owners and `/route/team/{teamSlug}/{slug}` for teams;
 reserve `route` using `packages/core/src/reserved.ts` before exposing it. The namespace
 step must check existing personal handles and team slugs case-insensitively: if `route`
-is already claimed, leave public routing disabled and require an explicit operator-led
-rename with the owner before enablement; never silently take over an existing URL.
+is already claimed, routing stays effectively off on that instance (see
+[Rollout gating](#rollout-gating)) until an explicit operator-led rename with the owner;
+never silently take over an existing URL.
 Public API paths use `/api/v1/public/-/routing/{handle}/{slug}` and
 `/api/v1/public/-/routing/teams/{teamSlug}/{slug}`. The `-` segment cannot be a valid
 handle, so it cannot shadow existing personal endpoints; the explicit `teams` branch
@@ -85,13 +87,18 @@ addition to this envelope. These bounds keep validation and evaluation work fini
 
 Nonempty titles, labels, options and message targets are required. Empty question/rule
 arrays are permitted for a fallback-only form. IDs are UUIDs, not labels or array offsets.
-The body-byte cap applies independently of per-field maxima. A fully filled form of
-20 × 500 CJK code units (about 31 KB including JSON keys) fits the 65536-byte cap;
-clients serialize ordinary UTF-8 JSON rather than unnecessarily escaping every character. Versions and organization
-form quotas must be bounded by the storage task before launch; their numeric values are
-not fixed here. Reuse existing public read/booking request budgets initially, with a
-separate routing-write bucket and durable per-form/instance admission ceilings; the public
-execution task must document and test those ceilings before enabling public writes.
+The body-byte cap applies independently of per-field maxima. It equals the server's
+default `/api` body limit (`DEFAULT_BODY_LIMIT` in `apps/server/src/body-limit.ts`), so the
+submission route declares no larger limit. That file's rule requires a route limit to fit
+its largest legal request with every string at its maximum length and every character
+escaped as `\uXXXX`. The largest legal submission is 20 short-text answers of 500 CJK code
+units keyed by question UUIDs: 30,904 bytes as ordinary UTF-8 JSON and 64,764 bytes with
+every character of every string, keys and `versionId` included, escaped as `\uXXXX`. Both
+fit the cap, so clients may send either encoding. Versions and organization form quotas
+are chosen and pinned in step a1a; their numeric values are not fixed here. Public
+submissions and continuations use the named rate-limit buckets and admission ceilings in
+[Ownership, permissions and public security](#ownership-permissions-and-public-security);
+step c1 pins their values before any public routing write exists.
 
 ## Rules and versions
 
@@ -153,8 +160,10 @@ the server resolves the event from the token rather than redirecting to its publ
 Routing booking results and exact replays use a dedicated projection without reusable
 handle/slug/path fields or saved after-booking redirects, following one-time-link
 projection practice. Route-capability booking suppresses the `successRedirect` snapshot,
-response field and confirmation Continue link, including exact replays; ordinary direct
-bookings keep their existing redirect behavior. Manage links retain their normal private authority. Arbitrary
+response field and confirmation Continue link, including exact replays, for listed and
+hidden targets alike (a [known limitation](#out-of-scope-and-known-limitations)); ordinary
+direct bookings keep their existing redirect behavior. Manage links retain their normal
+private authority. Arbitrary
 host-authored text is not scrubbed for URLs; this rule prevents automatic link disclosure.
 Hidden remains discovery control, not access control: someone already holding the
 ordinary direct URL can still book without a routing token exactly as today. Routing
@@ -187,10 +196,14 @@ an event FK; never retain deleted users' names/email just for routing diagnostic
 ## Answer transfer, receipts and privacy
 
 Submission is POST JSON, never URL/query parameters. It returns either a message or an
-opaque random `routeToken` plus expiry, with no answers echoed. Store only its digest;
-store the validated answers encrypted with a purpose-specific key, binding organization,
-form/version and receipt IDs as authenticated associated data. The hand-off URL is exactly `{PUBLIC_URL}/route/continue#token={encodedRouteToken}`,
-using the configured same origin and only the URL-encoded opaque token. The client reads
+opaque random `routeToken`, its `continuationUrl` and expiry, with no answers echoed.
+Store only the token's digest; store the validated answers encrypted with a
+purpose-specific key, binding organization, form/version and receipt IDs as authenticated
+associated data. The server builds `continuationUrl` in the submission response (REST,
+`route_lead` and `routing-forms route` alike), exactly
+`{PUBLIC_URL}/route/continue#token={encodedRouteToken}` from the configured public origin,
+as it does for one-time link URLs; clients and agents never assemble it. It contains only
+the URL-encoded opaque token. The web form page navigates to it. The continuation page reads
 it into memory and immediately clears the fragment with `history.replaceState`;
 never server access logs, query strings, referrers, localStorage or analytics. All routing
 responses/pages use no-store and no-referrer. Tokens and bodies are redacted from logs.
@@ -243,7 +256,7 @@ Deleting the organization deletes its receipts and snapshots with its bookings.
 | Authorized booking host detail / agent host detail | Add optional `routing` with form/version, matched and resolved rule IDs, and question/answer label snapshots; same current host/org checks as ordinary custom answers |
 | Invitee private management detail | Own answer snapshot only; no predicates, route names, other targets or author diagnostics |
 | Team-admin booking list/detail and exports | No routing answers or provenance. Preserve the exact [whitelist](team-admin-bookings.md); managing a form grants no host-booking read authority |
-| Host export | Include routing answers only in an explicitly requested authorized host export, with stable field IDs/version labels and CSV formula escaping; no broad admin export or abandoned-lead export |
+| Booking CSV export | Extend the existing server-side booking export (`GET /bookings/export.csv`, `export_bookings`, CLI `export`) with an explicitly requested routing column group for personal exports only, using its stable headers, JSON answer cells and CSV formula protection. Team exports keep the team-admin whitelist and refuse the option. No separate export, broad admin export or abandoned-lead export |
 | Webhooks | Keep existing immutable minimal whitelist: no routing answers, route IDs, contact data or capability. No submission webhook |
 | Email, ICS, provider calendar copies, embed messages, analytics | No new routing answer/provenance fields. Mapped ordinary answers keep existing surface-specific rules |
 
@@ -266,13 +279,22 @@ Deleting the organization deletes its receipts and snapshots with its bookings.
 - Embeds: defer routing-form embeds initially. Existing event embeds remain unchanged;
   dedicated routing pages deny framing. Later support needs the existing exact-origin,
   source/instance-checked protocol and no answer/token data in parent messages.
-- Paid bookings: no payment capability is added here. Until a paid-event contract can bind
-  receipt consumption to final booking/payment commit and checkout expiry, reject paid
-  targets at publication/runtime; never bypass a required payment. Future payment failures
-  must not consume a receipt or advance fairness. No provider calls from routing.
-- Group seats: defer routing to group event types while their public enablement is separate;
-  reject them initially. Durations, zones, notice, capacity and DST otherwise remain the
-  selected event's normal booking rules; no second availability engine.
+- Paid bookings: Hourmere has no payment capability, and none is added here. A receipt is
+  consumed when the booking commits; nothing can bind that consumption to payment
+  completion or checkout expiry, so a paid target could bypass a required payment or
+  consume a receipt for an unpaid booking. Target eligibility is therefore an allowlist
+  that fails closed: any payment requirement a later event setting adds is rejected at
+  publication (validator a2, publish transaction a3) and treated as a broken target at
+  runtime until a paid-event contract exists. Future payment failures must not consume a
+  receipt or advance fairness. No provider calls from routing.
+- Group seats: group booking (`booking_mode = 'group'`) is an internal capability without
+  public enablement. A seat shares slot capacity, per-slot booker uniqueness and seat
+  idempotency, which the single-booking receipt contract does not cover, and routing must
+  not become an unplanned public entry point to group booking. The same allowlist accepts
+  only `booking_mode = 'individual'`: group targets are rejected at publication and treated
+  as broken at runtime if an event changes mode later. Durations, zones, notice, capacity
+  and DST otherwise remain the selected event's normal booking rules; no second
+  availability engine.
 
 ## Ownership, permissions and public security
 
@@ -290,12 +312,24 @@ a supplied bearer must be valid and scope-authorized without anonymous/cookie fa
 MCP OAuth retains `mcp:tools` with the same live ownership checks. Configuration access
 never expands the session-only team-admin booking endpoints to agent credentials.
 
-Apply trusted-proxy client IP resolution, existing public-read budgets, distinct routing
-submission/continuation buckets, shared durable form/instance admission ceilings and the
-body-size cap before expensive validation/storage. Hash rate-limit IP keys with a dedicated
-HMAC purpose; retain no raw IP or answer values in rate accounting. Rate-limit refused and
-invalid requests too. Repeated route submissions may mint separate receipts within those
-budgets; booking replays cannot consume a receipt twice. Do not send email on submission.
+Apply trusted-proxy client IP resolution, the rate-limit buckets and admission ceilings
+below and the body-size cap before expensive validation/storage. These names are used
+everywhere in this document and in the implementation:
+
+| Name | Kind | Applies to |
+|---|---|---|
+| `page` | Existing public request bucket (`PUBLIC_RATE_LIMITS`) | `GET` public form metadata |
+| `routingSubmission` | New public request bucket | `POST …/route` submissions |
+| `routingContinuation` | New public request bucket | Continuation resolve and slots |
+| `book` | Existing public request bucket | Continuation booking |
+| Form admission ceiling | New durable ceiling shared by all server processes | Receipts minted per form |
+| Instance admission ceiling | New durable ceiling shared by all server processes | Receipts minted per instance |
+
+Key the two new request buckets with a dedicated HMAC purpose over the client key and
+retain no raw IP or answer values in routing rate accounting; the admission ceilings count
+per form and per instance only, and the existing `page` and `book` buckets keep their
+current keys. Rate-limit refused and invalid requests too. Repeated route submissions may mint separate receipts within those limits; booking
+replays cannot consume a receipt twice. Do not send email on submission.
 Public preview is forbidden. Unknown/archived forms share a neutral unavailable response;
 unknown, expired and invalid continuation tokens are indistinguishable. Reject excess
 input depth and unknown keys. Render author content as text, and do not fetch remote URLs.
@@ -363,25 +397,39 @@ booking payloads get optional fields; do not rename enums, error codes or existi
 | `POST /routing-continuations/bookings` using the existing booking service with `routeToken` (no event URL selector) | `create_booking` | `book` | Existing booking authority plus route capability |
 | Extend `GET /bookings/{id}` | `get_booking` | `bookings get` | Current host/org authority; read/bookings/full |
 | Extend `GET /bookings/manage` | No new tool (private manage-token UI) | No new command | Existing invitee manage-token authority; own answer snapshot only |
+| Extend `GET /bookings/export.csv` with `includeRoutingAnswers` (step e3, once the booking export is on main) | Extend `export_bookings` | Extend `export` | Existing personal export authority (read/full); team exports refuse the option |
+
+While routing is effectively off, every routing operation in this table returns
+`404 feature_disabled`: for `create_booking` and `book` only requests carrying `routeToken`,
+and an exact committed routed-booking replay still succeeds. The export's
+`includeRoutingAnswers` option returns the same error; the two booking-read extensions keep
+returning stored routing provenance. See [Rollout gating](#rollout-gating).
 
 Draft create uses a client-generated UUID `requestId` scoped to actor/organization for
 idempotency. Publish/update/archive take `expectedRevision`; repeat publish with its same
 requestId and canonical input returns its original version. Changed input with the same
 key returns `idempotency_key_reused`. Route submission takes `{ versionId, answers }`;
 it intentionally has no durable replay cache containing raw tokens. On lost response the
-invitee submits again and gets a new expiring receipt, within admission budgets. Each
+invitee submits again and gets a new expiring receipt, within the admission ceilings. Each
 receipt remains single-use; only booking idempotency prevents duplicate booking retries.
 CLI JSON input comes from stdin/file, not answer-bearing command-line arguments; CLI/MCP
 must treat returned route capabilities as sensitive and never emit them to diagnostic logs.
+The CLI already redacts management capabilities on stdout. `routing-forms route` therefore
+prints `routeToken` and `continuationUrl` as `[redacted]` on stdout and writes them only with
+the existing `--output FILE` flag, into a new 0600 JSON file, exactly like returned manage
+tokens. `routing-forms resolve`, `routing-forms slots` and `book` accept `routeToken` only
+in JSON input and redact it from stdout, `--output` files and errors. CLI help and the CLI
+guide document this. MCP `route_lead` returns both fields in its result.
 
 Agent example: read public form metadata, ask the lead for the declared questions, call
 `route_lead` with `versionId` and `answers` keyed by question UUIDs, then use returned
 `routeToken` for `find_routed_slots` and `create_booking` with a retained booking idempotency
 key. The agent receives a message or the selected booking projection, not predicates
 or members to choose from. It gets invitee agreement before booking; route submission alone
-creates no booking or notification. For an invitee to finish instead, the agent returns the same-origin fragment link
-defined above in its private conversation with that invitee, states the absolute expiry,
-and stops short of booking. The link contains no answers, event ID, slug or public link.
+creates no booking or notification. For an invitee to finish instead, the agent returns
+the `continuationUrl` from `route_lead` unchanged (the server-built same-origin fragment
+link defined above) in its private conversation with that invitee, states the absolute
+expiry, and stops short of booking. The link contains no answers, event ID, slug or public link.
 Anyone who receives/forwards it has the same bearer capability until expiry or consumption;
 it is not identity-bound. Opening the link does not consume it, booking does. Do not put
 it in public posts, diagnostic logs or third-party link shorteners; delivery does not renew
@@ -390,9 +438,11 @@ its lifetime. If expired, ask the invitee to restart the form, never silently re
 | Status/code | Meaning and recovery |
 |---|---|
 | 400 `invalid_routing_form`, `invalid_routing_answers`, `invalid_routing_target` | Invalid authored config, supplied answers or unsupported target/mapping; optional open-string `field`, no submitted values |
+| 400 `invalid_request` | `includeRoutingAnswers` on a team export |
 | 401 `unauthorized`, 403 `insufficient_scope` | Existing credential rules |
 | 403 `team_management_access_denied` | Uniform unauthorized team configuration access |
 | 404 `routing_form_not_found` | Unknown/out-of-scope private form or unavailable public form, without existence clues |
+| 404 `feature_disabled` | Routing is effectively off on this instance. After existing transport checks, the response is identical for every form and token; retry only after the operator enables routing |
 | 409 `organization_context_changed` | Existing session context recovery |
 | 409 `routing_revision_conflict`, `routing_form_changed` | Reload editor or public form respectively |
 | 409 `routing_unavailable` | Neutral invalid/expired/consumed capability or target no longer usable; restart unless exact booking replay succeeds |
@@ -407,62 +457,138 @@ it was an empty schedule or absent configuration. Public errors omit rule/target
 
 The later project plan is rescheduled into the named steps below, each budgeted at about
 one working day including its focused tests. The order is storage/services (a), complete
-configuration interfaces (b), public execution (c), editor (d), then answer surfaces and
-release acceptance (e). Dependencies refer only to earlier rows. No step borrows an API,
-validator or permission check from a later step. In particular, the editor uses the
-OpenAPI-generated `/api/v1` client in `apps/web/src/api/resources.ts`; configuration REST
-writes, their MCP tools, invoking CLI commands, scope/parity registrations and generated
-`apps/web/src/api/schema.d.ts` land together in the owning b-step. The same rule applies
-to each public POST, including read-like resolve/slots operations.
+configuration interfaces (b), public execution (c), editor and operator setting (d), then
+answer surfaces, documentation and release acceptance (e). Each step depends only on the
+row directly above it. No step borrows an API, validator or permission check from a later
+step. In particular, the editor uses the OpenAPI-generated `/api/v1` client in
+`apps/web/src/api/resources.ts`; configuration REST writes, their MCP tools, invoking CLI
+commands, scope/parity registrations and generated `apps/web/src/api/schema.d.ts` land
+together in the owning b-step. The same rule applies to each public POST, including
+read-like resolve/slots operations.
 
-`ROUTING_FORMS_ENABLED` is a server/operator feature flag, default `false`, introduced in
-a1. While false, public form and continuation pages and API/MCP execution return neutral
-unavailable responses before metadata or tokens are exposed; configuration and author-only
-preview remain available to authorized managers. The web reads the server's flag through
-`GET /api/v1/instance` (`routingFormsEnabled`), not a separately switchable build flag. A
-publish does not override it. It cannot be enabled on a release until all c-steps, all
-editor steps and e5 acceptance are complete. Disabling it blocks new routing/continuation
-activity but preserves ordinary bookings, authorized booking history and exact committed
-booking retries. Intermediate integration tests enable it only in isolated fixtures; before
-the editor exists those fixtures author and publish forms through the already completed
-configuration APIs. Production stays off throughout intermediate steps.
+### Rollout gating
+
+Releases are cut by a manual tag on any main commit (`.github/workflows/release.yml`), so
+every step below must be safe to ship on its own.
+
+**Hard-off until d4.** From a1b through d3 there is no operator-settable switch. Routing is
+off in code: server composition passes `routingFormsEnabled: false` from a code constant,
+not from an environment variable or any other setting, so no release tagged in that range
+can turn routing on. Integration and jsdom tests enable routing only by injecting
+`routingFormsEnabled: true` into the app or service dependencies under test, as existing
+`slotSnippetsEnabled` tests do. Before the editor exists, those fixtures author and publish
+forms through the already completed configuration APIs.
+
+**Setting from d4.** d4 is the first step after configuration interfaces (b1–b3), public
+execution (c1–c7) and the complete editor with archive (d1–d3) are all on main. It replaces
+the constant with the operator setting `ROUTING_FORMS_ENABLED`: `true` or `false`, unset
+means `false`, any other value fails configuration validation at startup. e5 changes
+"unset" to mean `true` once its acceptance passes, so self-hosted and Cloud instances get
+the full feature by default; an explicit `false` remains the opt-out. An operator who opts
+in on a release between d4 and e4 gets working forms, editor and public execution, but
+host answer detail, the export's routing columns and public documentation arrive only in
+e1–e4. Routing snapshots stored after opting in appear in host detail once e1–e2 ship;
+mapped answers are ordinary booking answers immediately.
+
+**Effective state.** Before d4, routing is always off outside tests. From d4, routing is
+effectively on only when the setting is `true` and no legacy `route` personal handle or
+team slug exists. The server runs a1c's case-insensitive collision detector at startup,
+logs a warning with the remedy when it finds one, and keeps routing off until an
+operator-led rename and a restart. Because a1c reserves `route`, no new collision can
+appear later. `GET /api/v1/instance` reports the effective value as `routingFormsEnabled`;
+the web reads only that field, never a separate build flag. Publishing never overrides it.
+
+**What the off state exposes.** While routing is effectively off:
+
+- Every routing operation returns `404 feature_disabled` over REST, MCP and CLI:
+  configuration list/get/create/update/archive/publish/preview, public metadata and
+  submission, and continuation resolve/slots/bookings (including `create_booking` and
+  `book` with `routeToken`). Existing transport checks (body cap, credential validation,
+  rate limits) run first, unchanged. The guard then runs before any scope/role check,
+  organization/form/receipt/token lookup or body validation, so the response is identical
+  for every form and token. One exception: continuation booking first looks up the
+  caller's existing booking idempotency record, and only an exact authorized replay of an
+  already committed routed booking returns that booking; no receipt is read or consumed.
+- A booking export request with `includeRoutingAnswers` returns `feature_disabled`;
+  exports without the option are unchanged.
+- Operation names stay registered in OpenAPI, the MCP tool list and the CLI command table,
+  because interface parity requires them; each documents `feature_disabled`. No form
+  metadata, answers, tokens, screens, navigation entries or writes are reachable.
+- The web shows no routing navigation entry and mounts neither the manager screens (they
+  render the ordinary not-found page) nor the public `/route/...` pages. Those paths fall
+  through to existing public page resolution, so a legacy `route` owner's pages are
+  unaffected. `/route/continue` first clears any `#token=` fragment with
+  `history.replaceState`.
+- Booking reads keep any routing provenance already stored with a booking (host detail,
+  invitee management snapshot). On an instance that never enabled routing, nothing new
+  appears.
+
+**Turning the setting off later.** Setting `ROUTING_FORMS_ENABLED=false` and restarting after
+routing was in use has exactly these effects:
+
+- Existing forms are kept unchanged: drafts, published versions, enabled/archived states
+  and slugs. Nothing is deleted, archived or unpublished. The editor and configuration
+  operations are unavailable (`feature_disabled`) until routing is re-enabled; forms are
+  then exactly as they were.
+- Published links stop working: public pages fall through as above and the public API
+  returns `feature_disabled` without metadata. Links never redirect to the target events.
+  They work again when routing is re-enabled, with the usual form and target checks.
+- Pending continuation tokens (unconsumed receipts) are refused with `feature_disabled`
+  and are not extended. Their absolute 30-minute lifetime keeps running, and cleanup keeps
+  purging encrypted answers on schedule. A token still unexpired when routing is
+  re-enabled works again; an expired one never does.
+- Routed bookings already made stay ordinary bookings: confirmations, manage links,
+  reschedule, cancel, host detail and invitee snapshots are unaffected, and exact replays of
+  committed routed bookings still succeed. Only the export's routing columns are
+  unavailable while off.
+- Target-health invalidation and receipt/version cleanup keep running.
+
+### Steps
 
 All REST paths in the ownership table are relative to `/api/v1`. `P` abbreviates both
 `/public/-/routing/{handle}/{slug}` and `/public/-/routing/teams/{teamSlug}/{slug}`;
 `-` cannot be a valid user handle. A row saying “none” introduces no transport operation.
 Reuse of an earlier operation is stated explicitly, so it does not imply a later adapter.
+“Off:” in each acceptance cell is that step's check that the off state exposes nothing it
+adds. “Hard-off” means the code constant above; “fixtures on” means tests inject
+`routingFormsEnabled: true`.
 
-| Step (~one day each) | What it builds | Owned REST / MCP / CLI operations | Depends on | Feature flag state | Acceptance checks |
+| Step (~one day each) | What it builds | Owned REST / MCP / CLI operations | Depends on | Rollout state | Acceptance checks |
 |---|---|---|---|---|---|
-| a1 — Storage and rollout guard | Five-table migration, composite organization FKs, immutable history support, bounded form/version quotas; declare flag and expose its boolean in existing public config; reserve browser `/route` name | Extend `GET /instance` (`routingFormsEnabled`), OpenAPI and generated web types; no new MCP tool/CLI command | None | Introduce default false | Check main/open-PR migration numbers; realistic predecessor preservation, fresh install and no-op rerun; DB types; cross-org FK negatives; reserve `route` in user/team handle checks; legacy `route` collision report blocks enablement until explicitly resolved without silently renaming an owner or shadowing their page |
-| a2 — Shared validation and evaluation | Question/rule validation, ordered first-match evaluator, target eligibility including hidden events, complete answer-mapping validator | None; pure/shared services | a1 | False | Every type/operator/boundary, optional answers, AND/one-of/fallback; dangling IDs, incompatible destination fields/options and cross-org targets rejected; per-member personal/single-host targets accepted within the same organization |
-| a3 — Configuration services and publication | Draft CRUD/archive, optimistic revisions, idempotency, atomic immutable publish, dependency generation and side-effect-free preview service | None; service entry points only | a2 | False | Concurrent publish has one winner; stale save/archive rejected; stable IDs/history; current membership and mapping/target validation inside publish transaction; preview writes no receipt/answers |
-| a4 — Target lifecycle and retention | Invalidation on event delete/disable/member departure, derived author health, bounded receipt/version cleanup jobs | None; extend existing mutation services without adding public operations | a3 | False | Publish/deletion/departure races respect organization → event → form → receipt order; fallback included; neutral unknown readiness; no deletion blockers/history cascades; encrypted answers purged after expiry, consumed evidence retained; bounded pools/batches |
-| b1 — Configuration read/create/update/archive interfaces | Shared REST/MCP/CLI adapters, key scopes, strict schemas, OpenAPI and generated web types | `GET /routing-forms`, `GET /routing-forms/{id}`, `POST /routing-forms`, `PATCH /routing-forms/{id}`, `DELETE /routing-forms/{id}`; `list_routing_forms`, `get_routing_form`, `create_routing_form`, `update_routing_form`, `archive_routing_form`; `routing-forms list/get/create/update/archive` | a4 | False; managers only | All transports share organization/role/scope matrix; read/full for reads, full for writes; Origin/Referer and expected-organization checks; create replay/revision conflicts; parity registry and generated-client checks |
-| b2 — Publish interfaces | Explicit publication adapter and authoritative publish errors | `POST /routing-forms/{id}/publish`; `publish_routing_form`; `routing-forms publish` | b1 | False; managers only | Full scope and current permissions; same-input publish retry vs changed-key input; invalid mappings/targets rejected across transports; parity/OpenAPI/types |
-| b3 — Preview interfaces | Author-only draft preview and diagnostics | `POST /routing-forms/{id}/preview`; `preview_routing_form`; `routing-forms preview` | b2 | False; managers only | Full scope; evaluator parity; no anonymous preview, persistence, tokens or notification; CLI stdin/file JSON; parity/OpenAPI/types |
-| c1 — Receipt and admission services | Purpose-bound encryption/digests, absolute expiry, body cap, HMAC rate buckets and durable admission ceilings | None; routing submission service only | b3 | False | Pin/document form/instance ceilings; fully filled maximum Chinese payload fits; oversize/depth/unknown keys fail before storage; refusal/invalid-request budgets; message result retains nothing; purpose separation and expiry |
-| c2 — Public metadata and submission adapters | Personal/team public projection, version-pinned submission and receipt response | `GET P`, `POST P/route`; `get_public_routing_form`, `route_lead`; `routing-forms public/route` | c1 | False; fixture enablement only | Anonymous and supplied-bearer scope rules; collision-free personal/team paths; stale version refresh; off-state no metadata leak; token/body log redaction; no predicates, alternative targets or hidden slugs; parity/OpenAPI/types |
-| c3 — Public form page | Accessible question UI on `/route/{handle}/{slug}` and `/route/team/{teamSlug}/{slug}`, validation and stale-form recovery in every shipped public locale | None; consumes c2 through generated client | c2 | False; fixture enablement only | All question types, keyboard/labels/errors, jsdom/accessibility; preserve compatible answers in memory only; no URL answers; message outcomes and neutral unavailable page |
-| c4 — Continuation resolution and slots | Token-bound current target projection, mapped prefill and ordinary availability, same-origin fragment handoff contract | `POST /routing-continuations/resolve`, `POST /routing-continuations/slots`; `resolve_routing_continuation`, `find_routed_slots`; `routing-forms resolve/slots` | c3 | False; fixture enablement only | Thirty-minute absolute lifetime; repeated reads do not consume/extend receipt; guessed/expired/archived/broken target fails neutrally; title/duration and required booking fields without hidden slug/path; mapping revalidation; no assignment advance; parity/OpenAPI/types |
-| c5 — Booking consumption and provenance | Route-capability booking adapter, atomic consume/snapshot/outbox writes and idempotency integration | `POST /routing-continuations/bookings`; extend `create_booking` and `book` with mutually exclusive `routeToken` selector; existing direct booking operations unchanged | c4 | False; fixture enablement only | Concurrent use yields one booking; rollback leaves receipt usable; authorized exact replay after expiry; changed input/key rejected; same lock order and snapshot labels; suppress successRedirect snapshot/response on creation and replay; route token cannot combine with one-time token; parity/OpenAPI/types |
-| c6 — Continuation booking UI and handoff | `/route/continue#token=…`, immediate fragment clearing, editable prefill and booking confirmation using selected-event projection | None; consumes c4/c5 through generated client | c5 | False; fixture enablement only | Agent-to-invitee link contains token only; no-referrer/no-store and no persistent browser storage; matched hidden event books without exposing direct path; no after-booking redirect Continue link; expired/consumed neutral recovery; public locales and accessible jsdom tests |
-| c7 — Scheduling integration matrix | Finish shared booking lifecycle integration across host modes, reschedule/cancel, waitlist and unsupported combinations | Extend existing personal/team booking and host/invitee reschedule/cancel service behavior only; no new endpoint/tool/command | c6 | False; fixture enablement only | Round-robin assigns once on commit/replay; collective hosts preserved; DST/duration/notice checks; cancel/reschedule preserve routing snapshot without reviving receipt; routing waitlist controls absent; ordinary direct waitlist unchanged and never inherits answers; paid/group/one-time combinations rejected; no email/ICS/provider/webhook answer expansion |
-| d1 — Question editor | Manager list/draft screens and stable-ID question/option ordering in en + zh-CN | None; consumes b1 through generated client | c7 | False | Create/edit/reorder questions/options; keyboard reorder, jsdom; natural Chinese/full-width punctuation; preserve weekly-hours hint and neutral loading/403/error states |
-| d2 — Rule and mapping editor | Ordered rules, targets, fallback and answer-mapping controls in en + zh-CN | None; consumes b1/b3 through generated client | d1 | False | First-match order, per-member event selection, hidden targets, mapping validation and preview; accessible controls and jsdom tests |
-| d3 — Publication and repair editor | Publish/disable/archive flows, fallback review, version conflicts and broken-target repair in en + zh-CN | None; consumes b1/b2/b3 through generated client | d2 | False | End-to-end author draft → preview → publish using shipped APIs; stale-editor recovery, disable/archive acknowledgement, derived health and repair; no public enablement from editor |
-| e1 — Host answer detail interfaces | Optional authorized host `routing` projection; explicit MCP host-detail read | Extend `GET /bookings/{id}`; add `get_booking` and `bookings get` (read/bookings/full); no new REST write | d3 | False | Positive snapshot/version/rule assertions; live host/org authorization; no routing addition to team-admin list/detail, webhooks or ordinary broad lists; OpenAPI/types and MCP/CLI contract tests |
-| e2 — Host and invitee answer screens | Host booking detail in en + zh-CN; invitee private management snapshot in public locales | Extend `GET /bookings/manage` projection; host web consumes e1; no new MCP/CLI operation for private manage UI | e1 | False | Host sees original routing and final booking answers distinctly; invitee sees only own answer snapshot, no rule IDs/names/diagnostics/other targets; existing manage-token authority; reschedule history and escaping; locale/jsdom checks |
-| e3 — Explicit host CSV export | Opt-in host export of currently selected/filtered authorized bookings; stable form/version/question columns and answer labels | None; web assembles CSV from existing host `GET /bookings` and e1 `GET /bookings/{id}` via generated client; no export endpoint/tool/command | e2 | False | Explicit “include routing answers” choice; each detail read rechecks host access; bounded pagination; stable field IDs/version labels and CSV formula escaping; no team-admin/abandoned-response export |
-| e4 — Operator and agent documentation | Public documentation-site how-to, all interface examples, capability handoff, limits/privacy and release prerequisites | None | e3 | False | Examples match registered tools/CLI; explain hidden targets, token lifetime/single booking use, answer retention and export opt-in; document flag and legacy namespace collision remediation; self-hosted/Cloud parity |
-| e5 — Independent acceptance and enablement | Complete synthetic public → route → booking → host/invitee/export acceptance; release enablement checklist | None | e4 (therefore every c/d step) | Default stays false; operator may enable only after acceptance | Flag-off negatives and flag-on fixture end-to-end matrix; privacy/replay/deletion mutation controls; full gates and CI including e2e using fakes; author-side review followed by project-lead independent acceptance; legacy namespace collision check must pass |
+| a1a — Routing storage | Five-table migration, composite organization FKs, immutable history support, bounded form/version quotas with values chosen and pinned here | None; storage only | None | No routing code path exists | Check main/open-PR migration numbers; realistic predecessor preservation, fresh install and no-op rerun; DB types; cross-org FK negatives; quota boundaries. Off: OpenAPI document, MCP tool list, CLI commands and web routes unchanged |
+| a1b — Hard-off guard | Code constant `routingFormsEnabled = false` in server composition (no environment variable); shared guard returning `404 feature_disabled` in the order stated under Rollout gating; effective state in existing public config | Extend `GET /instance` (`routingFormsEnabled`), OpenAPI and generated web types; no new MCP tool/CLI command | a1a | Hard-off constant introduced | Guard ordering and identical response; injected `true` reaches guarded paths in tests only; setting `ROUTING_FORMS_ENABLED` in the environment changes nothing; a mutation flipping the constant fails a real assertion. Off: `/instance` reports `false` |
+| a1c — Route namespace | Reserve `route` case-insensitively for personal handles and team slugs; legacy collision detector, wired into the effective state in d4 | None; extend existing handle/team-slug validation only | a1b | Hard-off | New `route` handle or team slug in any case rejected on sign-up, profile edit and team create/rename; legacy `route` owners keep their pages and are never renamed silently; detector finds case variants; `apps/web/src/public/routes.test.tsx` coupling. Off: a legacy owner's pages resolve as today |
+| a2 — Shared validation and evaluation | Question/rule validation, ordered first-match evaluator, target eligibility allowlist (enabled, nondeleted, listed or hidden, same organization, `booking_mode = 'individual'`, no payment requirement), complete answer-mapping validator | None; pure/shared services | a1c | Hard-off | Every type/operator/boundary, optional answers, AND/one-of/fallback; dangling IDs, incompatible destination fields/options and cross-org targets rejected; per-member personal/single-host targets accepted within the same organization; group-mode targets and a synthetic payment-requiring projection rejected with `invalid_routing_target`, for the reasons under Scheduling interactions; unknown modes fail closed. Off: no transport, nothing reachable |
+| a3 — Configuration services and publication | Draft CRUD/archive, optimistic revisions, idempotency, atomic immutable publish, dependency generation and side-effect-free preview service | None; service entry points only | a2 | Hard-off | Concurrent publish has one winner; stale save/archive rejected; stable IDs/history; current membership and mapping/target validation inside publish transaction, including group/paid rejection for targets changed after draft save; preview writes no receipt/answers. Off: no transport, nothing reachable |
+| a4 — Target lifecycle and retention | Invalidation on event delete/disable, booking-mode change and member departure; derived target health (`ok`, `unavailable`, `unknown`); bounded receipt/version cleanup jobs | None; extend existing mutation services without adding public operations | a3 | Hard-off | Publish/deletion/departure races respect organization → event → form → receipt order; fallback included; `unknown` never shown as missing configuration; no deletion blockers/history cascades; encrypted answers purged after expiry, consumed evidence retained; bounded pools/batches. Off: with no forms, existing event delete/disable/departure responses unchanged and jobs no-op |
+| b1 — Configuration read/create/update/archive interfaces | Shared REST/MCP/CLI adapters, key scopes, strict schemas, OpenAPI and generated web types. Both reads return a4's derived target health, rederived on read: per rule and fallback for the published version in `get`, a per-form summary in `list` | `GET /routing-forms`, `GET /routing-forms/{id}`, `POST /routing-forms`, `PATCH /routing-forms/{id}`, `DELETE /routing-forms/{id}`; `list_routing_forms`, `get_routing_form`, `create_routing_form`, `update_routing_form`, `archive_routing_form`; `routing-forms list/get/create/update/archive` | a4 | Hard-off; fixtures on | All transports share organization/role/scope matrix; read/full for reads, full for writes; Origin/Referer and expected-organization checks; create replay/revision conflicts; health present after a missed invalidation job, so d3 needs no API change; parity registry and generated-client checks. Off: every operation returns `feature_disabled` over REST/MCP/CLI before any lookup; no row written |
+| b2 — Publish interfaces | Explicit publication adapter and authoritative publish errors | `POST /routing-forms/{id}/publish`; `publish_routing_form`; `routing-forms publish` | b1 | Hard-off; fixtures on | Full scope and current permissions; same-input publish retry vs changed-key input; invalid mappings/targets, including group and paid targets, rejected with `invalid_routing_target` across transports; parity/OpenAPI/types. Off: `feature_disabled`; no version written |
+| b3 — Preview interfaces | Author-only draft preview and diagnostics | `POST /routing-forms/{id}/preview`; `preview_routing_form`; `routing-forms preview` | b2 | Hard-off; fixtures on | Full scope; evaluator parity; no anonymous preview, persistence, tokens or notification; CLI stdin/file JSON; parity/OpenAPI/types. Off: `feature_disabled`; no evaluation runs |
+| c1 — Receipt and admission services | Purpose-bound encryption/digests, absolute expiry, body cap, `routingSubmission` and `routingContinuation` buckets, form and instance admission ceilings | None; routing submission service only | b3 | Hard-off; fixtures on | Pin bucket and ceiling values; unescaped and fully `\uXXXX`-escaped maximum Chinese payloads fit; oversize/depth/unknown keys fail before storage; refused and invalid requests count against the buckets; message result retains nothing; purpose separation and expiry. Off: service refuses before storing a receipt or counting admission |
+| c2 — Public metadata and submission adapters | Personal/team public projection, version-pinned submission and receipt response with server-built `continuationUrl` | `GET P`, `POST P/route`; `get_public_routing_form`, `route_lead`; `routing-forms public/route` | c1 | Hard-off; fixtures on | Anonymous and supplied-bearer scope rules; `page` and `routingSubmission` buckets; collision-free personal/team paths; stale version refresh; token/body log redaction; CLI stdout redacts `routeToken`/`continuationUrl` and `--output` writes them to a new 0600 file; no predicates, alternative targets or hidden slugs; parity/OpenAPI/types. Off: both paths return `feature_disabled` without metadata, for existing and unknown forms alike |
+| c3 — Public form page | Accessible question UI on `/route/{handle}/{slug}` and `/route/team/{teamSlug}/{slug}`, validation and stale-form recovery in every shipped public locale | None; consumes c2 through generated client | c2 | Hard-off; fixtures on | All question types, keyboard/labels/errors, jsdom/accessibility; preserve compatible answers in memory only; no URL answers; message outcomes and neutral unavailable page; navigates to the returned `continuationUrl`. Off: paths fall through to existing public page resolution; no metadata request |
+| c4 — Continuation resolution and slots | Token-bound current target projection, mapped prefill and ordinary availability | `POST /routing-continuations/resolve`, `POST /routing-continuations/slots`; `resolve_routing_continuation`, `find_routed_slots`; `routing-forms resolve/slots` | c3 | Hard-off; fixtures on | Thirty-minute absolute lifetime; repeated reads do not consume/extend receipt; `routingContinuation` bucket; guessed/expired/archived/broken target fails neutrally; title/duration and required booking fields without hidden slug/path; mapping revalidation; no assignment advance; CLI redacts the input token; parity/OpenAPI/types. Off: `feature_disabled` for valid, expired and unknown tokens alike; receipts untouched |
+| c5a — Routed booking service | Atomic consume, provenance and answer snapshot with ordinary booking/host/outbox writes; receipt identity in the idempotency fingerprint; `successRedirect` snapshot suppression at creation | None; extend the existing booking service only | c4 | Hard-off; fixtures on | Concurrent use yields one booking; rollback leaves receipt usable; same lock order and snapshot labels; no redirect snapshot stored; minimal consumed evidence without token or duplicate ciphertext. Off: service refuses before consuming anything; only an exact committed replay returns |
+| c5b — Routed booking interfaces | Route-capability booking adapter, dedicated booking/replay projection without reusable path or redirect fields, one-time-link exclusion | `POST /routing-continuations/bookings`; extend `create_booking` and `book` with mutually exclusive `routeToken` selector; existing direct booking operations unchanged | c5a | Hard-off; fixtures on | Authorized exact replay after expiry; changed input/key rejected; no `successRedirect` response field or Continue link on creation or replay; `routeToken` with a one-time token rejected; `book` bucket; CLI redacts the input token; parity/OpenAPI/types. Off: `feature_disabled` except an exact committed replay; direct booking unchanged |
+| c6 — Continuation booking UI and handoff | `/route/continue#token=…`, immediate fragment clearing, editable prefill and booking confirmation using selected-event projection | None; consumes c4/c5b through generated client | c5b | Hard-off; fixtures on | Agent-to-invitee link contains token only; no-referrer/no-store and no persistent browser storage; matched hidden event books without exposing direct path; no after-booking redirect Continue link; expired/consumed neutral recovery; public locales and accessible jsdom tests. Off: page clears the fragment, then falls through; no API call |
+| c7 — Scheduling integration matrix | Finish shared booking lifecycle integration across host modes, reschedule/cancel, waitlist and unsupported combinations | Extend existing personal/team booking and host/invitee reschedule/cancel service behavior only; no new endpoint/tool/command | c6 | Hard-off; fixtures on | Round-robin assigns once on commit/replay; collective hosts preserved; DST/duration/notice checks; cancel/reschedule preserve routing snapshot without reviving receipt; routing waitlist controls absent; ordinary direct waitlist unchanged and never inherits answers; paid/group/one-time combinations rejected; no email/ICS/provider/webhook answer expansion. Off: existing booking lifecycle suites pass unchanged |
+| d1 — Question editor and archive | Manager list/draft screens, stable-ID question/option ordering and archive with confirmation in en + zh-CN, so every form the web can create can be removed in the web | None; consumes b1 (including `DELETE /routing-forms/{id}`) through generated client | c7 | Hard-off; fixtures on | Create/edit/reorder questions/options; keyboard reorder, jsdom; archived forms leave the active list and block new submissions; natural Chinese/full-width punctuation; preserve weekly-hours hint and neutral loading/403/error states. Off: no navigation entry; manager routes show the ordinary not-found page; no routing request issued |
+| d2 — Rule and mapping editor | Ordered rules, targets, fallback and answer-mapping controls in en + zh-CN | None; consumes b1/b3 through generated client | d1 | Hard-off; fixtures on | First-match order, per-member event selection, hidden targets, mapping validation and preview; accessible controls and jsdom tests. Off: no rule or mapping control reachable; no routing request issued |
+| d3 — Publication and repair editor | Publish, disable and re-enable flows, fallback review, version conflicts and broken-target repair from b1's health in en + zh-CN | None; consumes b1/b2/b3 through generated client | d2 | Hard-off; fixtures on | End-to-end author draft → preview → publish using shipped APIs; stale-editor recovery, disable acknowledgement, health display and repair; no public enablement from editor. Off: no publication or repair control reachable; no routing request issued |
+| d4 — Operator setting | Replace the code constant with `ROUTING_FORMS_ENABLED` (unset = `false`); effective state with the startup collision check and warning; `.env.example`, README and OpenAPI/MCP/CLI descriptions name the setting | None new; `GET /instance` now reports the setting-derived effective state | d3 | Setting introduced, default `false` | `true` runs the full flow in an integration test with environment-derived config; invalid value fails startup; a collision forces off with a warning; every “turning the setting off later” effect above has a test. Off: with the setting unset or `false`, the a1b–d3 off checks pass unchanged |
+| e1 — Host answer detail interfaces | Optional authorized host `routing` projection; explicit MCP host-detail read | Extend `GET /bookings/{id}`; add `get_booking` and `bookings get` (read/bookings/full); no new REST write | d4 | Setting, default `false` | Positive snapshot/version/rule assertions; live host/org authorization; no routing addition to team-admin list/detail, webhooks or ordinary broad lists; OpenAPI/types and MCP/CLI contract tests. Off: no `routing` field on bookings without provenance; stored provenance still shown |
+| e2 — Host and invitee answer screens | Host booking detail in en + zh-CN; invitee private management snapshot in public locales | Extend `GET /bookings/manage` projection; host web consumes e1; no new MCP/CLI operation for private manage UI | e1 | Setting, default `false` | Host sees original routing and final booking answers distinctly; invitee sees only own answer snapshot, no rule IDs/names/diagnostics/other targets; existing manage-token authority; reschedule history and escaping; locale/jsdom checks. Off: screens add nothing for bookings without provenance |
+| e3 — Routing columns in booking CSV export | Prerequisite: the server-side booking CSV export (`GET /bookings/export.csv`, `export_bookings`, CLI `export`) is on main; e3 does not start, and builds no substitute, before it is. Adds an opt-in routing column group (`routing_form_id`, `routing_form_version`, `routing_matched_rule_id`, `routing_resolved_rule_id`, `routing_answers` JSON keyed by question ID with label snapshots) to personal exports | Extend `GET /bookings/export.csv` (`includeRoutingAnswers`), `export_bookings` and `export`; no new operation | e2 | Setting, default `false` | Personal read/full only, same as the export; team exports refuse the option with `invalid_request` and keep the team-admin whitelist; the export's formula protection, JSON escaping, row bounds and streaming apply to the new cells; web en + zh-CN choice; parity/OpenAPI/types. Off: web hides the choice, the option returns `feature_disabled`, ordinary exports unchanged |
+| e4 — Operator and agent documentation | Public documentation-site how-to, all interface examples, capability handoff, limits/privacy, the setting and its off-state effects; after-booking guide “Current limits” sentence | None | e3 | Setting, default `false` | Examples match registered tools/CLI; explain hidden targets, token lifetime/single booking use, answer retention, export opt-in and `feature_disabled`; document legacy namespace collision remediation; self-hosted/Cloud parity; the after-booking guide states that bookings made through a routing form, on `/route/continue` or with a `routeToken` over REST/MCP/CLI, receive no after-booking continuation even when the event type has one. Off: pages describe the setting as off by default and how to enable it |
+| e5 — Independent acceptance and default on | Complete synthetic public → route → booking → host/invitee/export acceptance; change unset `ROUTING_FORMS_ENABLED` to mean `true` and update `.env.example`, README and every documented default | None | e4 (therefore every c/d step) | Merging e5 changes the default to `true`; explicit `false` opts out | Default configuration (no environment value) end-to-end matrix; upgrading an instance with no forms only adds the navigation entry and `/route` pages; a legacy collision still keeps routing off; privacy/replay/deletion mutation controls; full gates and CI including e2e using fakes; author-side review followed by project-lead independent acceptance. e5 merges only after that acceptance passes. Off: explicit `false` reruns every earlier step's off checks |
 
 Each implementation step adds assertion-failing source-copy mutations for its protections
 and owns its focused tests and generated artifacts. The final e5 step runs the full release
 matrix rather than deferring missing implementation to acceptance. This design's doc-fact
-test checks only the numeric register, Chinese payload envelope and mutation controls; it does not claim to test
-routing behavior that does not exist yet. No schema change, migration, product strings or
-UI is part of this design PR.
+test checks only the numeric register, the unescaped and fully escaped maximum submission
+against the cap and the server's default body limit, and mutation controls; it does not
+claim to test routing behavior that does not exist yet. No schema change, migration,
+product strings or UI is part of this design PR.
 
 ## Out of scope and known limitations
 
@@ -474,4 +600,14 @@ public locales; author-written labels/messages remain in the author's language i
 No CAPTCHA, verified lead identity, routing-only access gate or slot reservation. Users can
 share ordinary booking URLs and infer policies from repeated public outcomes. Expired
 answers may remain in operator backups; physical purge depends on working maintenance.
+
+- After-booking redirects are not offered for routing-continuation bookings, for listed and
+  hidden targets alike and including exact replays. A host who relies on a redirect for a
+  thank-you or conversion page does not get it for routed bookings; direct bookings of the
+  same event keep it. The after-booking guide's “Current limits” section states this (e4).
+- Routing answers of team-form bookings are not exported: team exports keep the
+  team-admin whitelist, so those answers are visible only in authorized host booking detail.
+- While routing is off, the export's routing columns are unavailable; booking detail and
+  invitee snapshots keep showing stored routing answers.
+
 No decisions in this document alter the accepted team-admin data whitelist.
