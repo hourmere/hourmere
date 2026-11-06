@@ -19,17 +19,29 @@ for the development database.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up          # Postgres 18 on localhost:5432 (docker-compose.dev.yml)
 npm run dev            # API on :3000, web app on http://localhost:5173
 ```
 
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
+
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.
 
-The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with a single
-`package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
+The root npm workspace includes `apps/*`, `packages/*`, `tools/api-types`, `tools/cli`
+and `tools/e2e`, with `package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
 `npm install <package> --workspace @hourmere/scheduling`, and commit the updated lockfile.
+
+The standalone n8n package uses its own committed lockfile and the separate
+`n8n-compatibility` CI job. From `tools/n8n-nodes-hourmere`, run `npm ci --ignore-scripts`,
+`npm run lint`, `npm run typecheck`, `npm run build` and `npm test`. Its OpenAPI
+contract test runs in the root suite and imports only dependency-free signature code.
+Never add the n8n toolchain to the root workspaces or root dependency tree.
 
 ## Checks
 
@@ -191,8 +203,9 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing `check`,
-`cli-compatibility`, `docker` and `e2e` jobs. The separate
+The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing `check`,
+`cli-compatibility`, `docker` and `e2e` jobs unchanged, alongside the standalone
+`n8n-compatibility` job. The separate
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
 and manual dispatches. Layout shards fail on every layout finding, scan error, browser
 failure or missing report; axe fails on serious/critical violations and scan/execution

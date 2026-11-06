@@ -11,3 +11,4 @@ temp
 .DS_Store
 coverage
 .claude
+tools/n8n-nodes-hourmere

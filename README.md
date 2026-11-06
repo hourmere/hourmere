@@ -45,10 +45,16 @@ Requires Node.js 26 and Docker.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up      # Postgres on localhost:5432
 npm run dev        # API on :3000, web app on http://localhost:5173
 ```
+
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
 
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
 In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
