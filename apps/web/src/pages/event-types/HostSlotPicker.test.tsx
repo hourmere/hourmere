@@ -3,7 +3,7 @@ import * as snippet from '@hourmere/core/slot-snippet'
 import { formatSlotLabel } from '@hourmere/core/slot-snippet'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import * as zonePicker from '../../components/TimeZonePicker.tsx'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
@@ -21,9 +21,9 @@ afterEach(() => {
 })
 
 const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
-const slots = (count = 2, minutes = 30, day = DAY): Slot[] =>
+const slots = (count = 2, minutes = 30): Slot[] =>
   Array.from({ length: count }, (_, index) => {
-    const start = Date.parse(`${day}T09:00:00.000Z`) + index * 30 * 60_000
+    const start = Date.parse(`${DAY}T09:00:00.000Z`) + index * 30 * 60_000
     return {
       start: new Date(start).toISOString(),
       end: new Date(start + minutes * 60_000).toISOString(),
@@ -176,8 +176,15 @@ describe('host open-time picker', () => {
   })
 
   it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
-    // Tokyo can already be tomorrow while the default Berlin fixture is still today.
-    const client = server(slots(2, 30, dateKeyIn(Date.now(), 'Asia/Tokyo')))
+    // The fixture slots sit on the Berlin date. Pin the clock to 08:00 UTC on that date so
+    // Tokyo, Berlin and New York all show the same calendar day; between 15:00 UTC and Berlin
+    // midnight Tokyo is already on the next day and the slots would be filtered out.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.parse(`${DAY}T08:00:00.000Z`))
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    const client = server()
     renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
       'fr',
