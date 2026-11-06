@@ -7,17 +7,19 @@ import {
   getEventType,
   getProfile,
   getSchedule,
+  getScheduleAvailability,
   listEventTypeCatalog,
   listScheduleCatalog,
   MAX_CATALOG_PAGE_SIZE,
   NotificationSettingsSchema,
   SCHEDULE_NAME_MAX_LENGTH,
   type ServiceContext,
+  saveScheduleAvailability,
   updateEventType,
 } from '@hourmere/scheduling'
 import { EventType } from '../routes/event-types.ts'
 import { Profile } from '../routes/profile.ts'
-import { Schedule } from '../routes/schedules.ts'
+import { Schedule, ScheduleAvailability, ScheduleAvailabilityInput } from '../routes/schedules.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
 
 const PageInput = z.strictObject({
@@ -140,6 +142,34 @@ export function catalogTools({
       annotations,
       async run(args, call) {
         return listScheduleCatalog(context(call.caller), args)
+      },
+    }),
+    defineTool({
+      name: 'get_schedule_availability',
+      title: 'Get complete availability',
+      description:
+        'Reads your schedule, all date overrides and their opaque version in one consistent snapshot. Use its version as expectedVersion when saving with save_schedule_availability. Requires full or read API key scope.',
+      input: IdInput,
+      output: ScheduleAvailability,
+      annotations,
+      async run(args, call) {
+        return ScheduleAvailability.parse(
+          await getScheduleAvailability(context(call.caller), args.id),
+        )
+      },
+    }),
+    defineTool({
+      name: 'save_schedule_availability',
+      title: 'Save complete availability',
+      description:
+        'Atomically saves your schedule and replaces all date overrides. Supply id, name, timeZone, weeklyHours, overrides and expectedVersion from get_schedule_availability; isDefault is optional. Empty override intervals make that date unavailable; omitted dates resume weekly hours. Stale versions return schedule_conflict without changes; reread and reconcile before retrying. Requires full API key scope or authorized MCP OAuth.',
+      input: ScheduleAvailabilityInput.extend(IdInput.shape),
+      output: ScheduleAvailability,
+      annotations: { ...annotations, readOnlyHint: false },
+      async run({ id, ...input }, call) {
+        return ScheduleAvailability.parse(
+          await saveScheduleAvailability(context(call.caller), id, input),
+        )
       },
     }),
     defineTool({

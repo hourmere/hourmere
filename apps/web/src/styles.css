@@ -2121,9 +2121,13 @@ input[type="radio"] {
 
 @media (min-width: 640px) {
   .weekday {
-    grid-template-columns: 9rem minmax(0, 1fr);
+    grid-template-columns: 9rem minmax(0, 1fr) auto;
     align-items: start;
   }
+}
+
+.weekday-copy {
+  justify-self: start;
 }
 
 .weekday-toggle {
@@ -2213,6 +2217,10 @@ input[type="radio"] {
 }
 
 .override-form {
+  min-width: 0;
+  margin-inline: 0;
+  padding-inline: 0;
+  border: 0;
   display: grid;
   gap: var(--space-3);
   margin-top: var(--space-4);

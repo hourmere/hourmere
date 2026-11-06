@@ -99,6 +99,8 @@ notifications and trigger configured integrations.
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `get_schedule_availability` | — | `schedule-availability` | `full, read` |
+| `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |

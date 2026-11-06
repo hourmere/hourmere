@@ -208,6 +208,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/schedules` | Session or API key | `full, read` |
 | `POST /api/v1/schedules` | Session or API key | `full` |
 | `GET /api/v1/schedules/{id}` | Session or API key | `full, read` |
+| `GET /api/v1/schedules/{id}/availability` | Session or API key | `full, read` |
+| `PUT /api/v1/schedules/{id}/availability` | Session or API key | `full` |
 | `DELETE /api/v1/schedules/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/schedules/{id}` | Session or API key | `full` |
 | `GET /api/v1/schedules/{id}/overrides` | Session or API key | `full, read` |
@@ -262,6 +264,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `get_schedule_availability` | — | `schedule-availability` | `full, read` |
+| `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |

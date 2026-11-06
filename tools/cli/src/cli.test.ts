@@ -716,6 +716,8 @@ describe('CLI transport and arguments', () => {
     ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
+    ['schedule-availability', 'get_schedule_availability'],
+    ['save-availability', 'save_schedule_availability'],
     ['slots', 'find_available_slots'],
     ['book', 'create_booking'],
     ['list', 'list_bookings'],

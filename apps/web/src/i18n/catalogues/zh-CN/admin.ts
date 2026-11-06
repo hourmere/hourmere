@@ -1,5 +1,22 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Copy hours from {0}': '复制{0}的时段',
+  'Copy to…': '复制到…',
+  'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.':
+    '将所选日期的时段替换为当天时段，包括不可预约状态。点击“保存更改”后生效。',
+  Weekdays: '工作日',
+  'All days': '所有日期',
+  'Apply copy': '应用复制',
+  'Each date can have only one override.': '每个日期只能有一项日期安排。',
+  'Date overrides replace weekly hours on that date. Save changes applies every change on this page.':
+    '日期安排会替换当天的每周时段。点击“保存更改”即可保存本页所有更改。',
+  'No date overrides.': '暂无日期安排。',
+  'Date override {0}': '日期安排 {0}',
+  'Save schedule details, weekly hours and date overrides together with Save changes.':
+    '点击“保存更改”，统一保存日程详情、每周时段和日期安排。',
+  'This schedule changed in another tab. Your changes are still here. Reload the page and review the latest hours before saving again.':
+    '此日程已在其他标签页中更改。你的更改仍保留在此页面。请重新加载页面，查看最新时段后再保存。',
+
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
 

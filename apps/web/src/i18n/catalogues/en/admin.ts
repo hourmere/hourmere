@@ -1,5 +1,22 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Copy hours from {0}': 'Copy hours from {0}',
+  'Copy to…': 'Copy to…',
+  'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.':
+    'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.',
+  Weekdays: 'Weekdays',
+  'All days': 'All days',
+  'Apply copy': 'Apply copy',
+  'Each date can have only one override.': 'Each date can have only one override.',
+  'Date overrides replace weekly hours on that date. Save changes applies every change on this page.':
+    'Date overrides replace weekly hours on that date. Save changes applies every change on this page.',
+  'No date overrides.': 'No date overrides.',
+  'Date override {0}': 'Date override {0}',
+  'Save schedule details, weekly hours and date overrides together with Save changes.':
+    'Save schedule details, weekly hours and date overrides together with Save changes.',
+  'This schedule changed in another tab. Your changes are still here. Reload the page and review the latest hours before saving again.':
+    'This schedule changed in another tab. Your changes are still here. Reload the page and review the latest hours before saving again.',
+
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 

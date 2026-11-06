@@ -3058,6 +3058,27 @@ export interface paths {
         patch: operations["updateSchedule"];
         trace?: never;
     };
+    "/api/v1/schedules/{id}/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read weekly hours and all date overrides together */
+        get: operations["getScheduleAvailability"];
+        /**
+         * Save weekly hours and replace all date overrides atomically
+         * @description Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB.
+         */
+        put: operations["saveScheduleAvailability"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules/{id}/overrides": {
         parameters: {
             query?: never;
@@ -5262,6 +5283,33 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             weeklyHours: components["schemas"]["WeeklyHours"];
+        };
+        ScheduleAvailability: {
+            overrides: components["schemas"]["ScheduleOverride"][];
+            schedule: components["schemas"]["Schedule"];
+            /** @description Opaque revision for the complete availability snapshot */
+            version: string;
+        };
+        ScheduleAvailabilityInput: {
+            /** @description Version from getScheduleAvailability; stale revisions return schedule_conflict */
+            expectedVersion: string;
+            /** @description Make it the default (the previous default stops being one). The user's first schedule is always the default. */
+            isDefault?: boolean;
+            name: string;
+            overrides: {
+                /**
+                 * Format: date
+                 * @example 2026-12-24
+                 */
+                date: string;
+                intervals: components["schemas"]["WallClockIntervalInput"][];
+            }[];
+            /**
+             * @description IANA time zone name
+             * @example Europe/Berlin
+             */
+            timeZone: string;
+            weeklyHours: components["schemas"]["WeeklyHoursInput"];
         };
         ScheduleInput: {
             /** @description Make it the default (the previous default stops being one). The user's first schedule is always the default. */
@@ -9262,6 +9310,153 @@ export interface operations {
             };
             /** @description schedule_is_default: isDefault false on the default schedule */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getScheduleAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Consistent snapshot and opaque revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleAvailability"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    saveScheduleAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleAvailabilityInput"];
+            };
+        };
+        responses: {
+            /** @description Saved snapshot and new revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleAvailability"];
+                };
+            };
+            /** @description invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version or invalid_schedule_overrides */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_conflict: availability changed since it was read; schedule_is_default: cannot unset the default */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

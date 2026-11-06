@@ -127,6 +127,10 @@
     "mcp": "revoke_one_time_link",
     "cli": "one-time-links revoke"
   },
+  "saveScheduleAvailability": {
+    "mcp": "save_schedule_availability",
+    "cli": "save-availability"
+  },
   "selectMcpOAuthOrganization": {
     "exemption": "browser-session-only",
     "reason": "Selecting an MCP OAuth grant's organization requires the user's browser consent flow."

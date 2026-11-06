@@ -1,3 +1,4 @@
+import '@hono/zod-openapi'
 // Independent accepted operation table, exercised through real key authentication and
 // every composed REST route. Providers use the repository transport fake only.
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -17,6 +18,7 @@ import {
 } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { getScheduleAvailability } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { createWebhook } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -79,6 +81,7 @@ const classes = {
     'GET /api/v1/event-types/{id}/waitlist/entries',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
+    'GET /api/v1/schedules/{id}/availability',
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
@@ -100,6 +103,7 @@ const classes = {
     'POST /api/v1/schedules',
     'DELETE /api/v1/schedules/{id}',
     'PATCH /api/v1/schedules/{id}',
+    'PUT /api/v1/schedules/{id}/availability',
     'PUT /api/v1/schedules/{id}/overrides/{date}',
     'DELETE /api/v1/schedules/{id}/overrides/{date}',
     'POST /api/v1/schedules/default',
@@ -460,6 +464,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 201
         }
         if (operation === 'PATCH /api/v1/schedules/{id}') payload = { name: nonce }
+        if (operation === 'PUT /api/v1/schedules/{id}/availability') {
+          const snapshot = await getScheduleAvailability(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            id,
+          )
+          payload = {
+            name: nonce,
+            timeZone: snapshot.schedule.timeZone,
+            weeklyHours: { monday: [{ start: '10:00', end: '16:00' }] },
+            overrides: [{ date, intervals: [] }],
+            expectedVersion: snapshot.version,
+          }
+        }
         if (operation === 'PUT /api/v1/schedules/{id}/overrides/{date}') {
           payload = { intervals: [] }
           expectedStatus = 201
@@ -610,14 +627,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
+    it('covers the exact 101-operation contract and all 303 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(99)
-      expect(new Set(ids).size).toBe(99)
+      expect(ids).toHaveLength(101)
+      expect(new Set(ids).size).toBe(101)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(297)
+      expect(cases).toHaveLength(303)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -649,6 +666,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
         } else if (!allowed[kind].includes(scope)) {
           expect(response.status).toBe(403)
           expect(await response.json()).toEqual(denied)
+          if (operation === 'PUT /api/v1/schedules/{id}/availability') {
+            const snapshot = await getScheduleAvailability(
+              { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+              fixture.cleanupSchedule as string,
+            )
+            expect(snapshot.version).toBe(
+              (fixture.payload as { expectedVersion: string }).expectedVersion,
+            )
+          }
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
@@ -657,6 +683,26 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expect(data).not.toHaveProperty('error')
             if (operation === 'PUT /api/v1/event-types/{id}/notifications')
               expect(data).toMatchObject(fixture.payload as { notifications: unknown })
+            if (operation === 'PUT /api/v1/schedules/{id}/availability') {
+              const input = fixture.payload as {
+                name: string
+                weeklyHours: unknown
+                overrides: unknown
+                expectedVersion: string
+              }
+              expect(data).toMatchObject({
+                schedule: { name: input.name, weeklyHours: input.weeklyHours },
+                overrides: input.overrides,
+              })
+              expect(data.version).not.toBe(input.expectedVersion)
+            }
+            if (operation === 'GET /api/v1/schedules/{id}/availability') {
+              expect(data).toMatchObject({
+                schedule: { id: fixture.cleanupSchedule },
+                overrides: [],
+                version: expect.stringMatching(/^[a-f0-9]{64}$/),
+              })
+            }
             if (operation === 'POST /api/v1/schedules')
               await db
                 .deleteFrom('schedules')

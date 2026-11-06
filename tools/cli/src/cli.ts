@@ -18,6 +18,8 @@ export const COMMANDS = {
   'resend-waitlist-verification': 'resend_waitlist_verification',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
+  'schedule-availability': 'get_schedule_availability',
+  'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
   book: 'create_booking',
   list: 'list_bookings',
@@ -37,6 +39,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots,
+          schedule-availability, save-availability,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,

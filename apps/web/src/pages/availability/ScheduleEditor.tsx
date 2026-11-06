@@ -1,7 +1,7 @@
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
-import { errorMessage } from '../../api/errors.ts'
+import { errorMessage, RequestError } from '../../api/errors.ts'
 import { isNotFound, loadProfile, loadSchedules, type Schedule } from '../../api/resources.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.tsx'
@@ -16,10 +16,20 @@ import { msg, type UiText } from '../../i18n/translate.ts'
 import { PATHS, schedulePath } from '../../paths.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
+import { CopyDay } from './CopyDay.tsx'
 import { IntervalsEditor } from './IntervalsEditor.tsx'
-import { Overrides } from './Overrides.tsx'
+import {
+  comparableOverrides,
+  type Override,
+  Overrides,
+  overrideDraft,
+  overrideErrors,
+  overrideLabels,
+  overridesBody,
+} from './Overrides.tsx'
 import {
   comparable,
+  copyDay,
   type DayDraft,
   dayField,
   draftFromSchedule,
@@ -36,6 +46,8 @@ import {
 
 interface Loaded {
   schedule: Schedule | null
+  overrides: Override[]
+  version: string
   schedules: Schedule[]
   /** For a new schedule: the profile's zone, else the browser's. */
   defaultTimeZone: string
@@ -58,11 +70,16 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
         id === undefined ? loadProfile(signal) : null,
       ])
       let schedule: Schedule | null = null
+      let overrides: Override[] = []
+      let version = ''
       if (id !== undefined) {
         try {
-          schedule = await unwrap(
-            api.GET('/api/v1/schedules/{id}', { params: { path: { id } }, signal }),
+          const snapshot = await unwrap(
+            api.GET('/api/v1/schedules/{id}/availability', { params: { path: { id } }, signal }),
           )
+          schedule = snapshot.schedule
+          overrides = snapshot.overrides
+          version = snapshot.version
         } catch (err) {
           if (isNotFound(err, 'schedule_not_found')) return 'missing'
           throw err
@@ -70,6 +87,8 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
       }
       return {
         schedule,
+        overrides,
+        version,
         schedules,
         defaultTimeZone: profile?.timeZone ?? browserTimeZone(),
       }
@@ -107,7 +126,13 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
   return <ScheduleForm {...state.data} />
 }
 
-function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
+function ScheduleForm({
+  schedule,
+  overrides,
+  version: initialVersion,
+  schedules,
+  defaultTimeZone,
+}: Loaded) {
   const { t, text, ui, uiText } = useI18n()
 
   const navigate = useNavigate()
@@ -117,6 +142,9 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     schedule ? draftFromSchedule(schedule) : newScheduleDraft(defaultTimeZone),
   )
   const [draft, setDraft] = useState(baseline)
+  const [version, setVersion] = useState(initialVersion)
+  const [overrideBaseline, setOverrideBaseline] = useState(() => overrides.map(overrideDraft))
+  const [overrideDrafts, setOverrideDrafts] = useState(overrideBaseline)
   const isFirst = schedules.length === 0
   const [makeDefault, setMakeDefault] = useState(false)
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -127,7 +155,10 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
   const statusRef = useRef<HTMLParagraphElement>(null)
   const mounted = useMounted()
 
-  const dirty = comparable(draft) !== comparable(baseline) || makeDefault
+  const dirty =
+    comparable(draft) !== comparable(baseline) ||
+    makeDefault ||
+    comparableOverrides(overrideDrafts) !== comparableOverrides(overrideBaseline)
   useUnsavedChanges(dirty)
 
   const others = schedules.filter((s) => s.id !== saved?.id)
@@ -147,7 +178,8 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     setAttempt((n) => n + 1)
     setFormError(null)
     setStatus('')
-    const problems = validateSchedule(draft)
+    if (saving) return
+    const problems = { ...validateSchedule(draft), ...overrideErrors(overrideDrafts) }
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
     // Locked until the answer comes, so it cannot overwrite later edits (see EventTypeForm).
@@ -158,11 +190,24 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     try {
       if (saved) {
         const updated = await unwrap(
-          api.PATCH('/api/v1/schedules/{id}', { params: { path: { id: saved.id } }, body }),
+          api.PUT('/api/v1/schedules/{id}/availability', {
+            params: { path: { id: saved.id } },
+            body: {
+              ...body,
+              ...(makeDefault && { isDefault: true }),
+              overrides: overridesBody(overrideDrafts),
+              expectedVersion: version,
+            },
+          }),
         )
         if (!mounted.current) return
-        const next = draftFromSchedule(updated)
-        setSaved(updated)
+        const next = draftFromSchedule(updated.schedule)
+        setSaved(updated.schedule)
+        setVersion(updated.version)
+        setMakeDefault(false)
+        const nextOverrides = updated.overrides.map(overrideDraft)
+        setOverrideBaseline(nextOverrides)
+        setOverrideDrafts(nextOverrides)
         setBaseline(next)
         setDraft(next)
         setStatus('Saved.')
@@ -187,7 +232,15 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     } catch (err) {
       if (!mounted.current) return
       setStatus('')
-      const mapped = scheduleServerErrors(err)
+      const mapped =
+        err instanceof RequestError && err.code === 'schedule_conflict'
+          ? {
+              fields: {},
+              message: msg(
+                'This schedule changed in another tab. Your changes are still here. Reload the page and review the latest hours before saving again.',
+              ),
+            }
+          : scheduleServerErrors(err)
       setErrors(mapped.fields)
       setFormError(
         Object.keys(mapped.fields).length > 0
@@ -204,6 +257,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     await unwrap(api.DELETE('/api/v1/schedules/{id}', { params: { path: { id: saved.id } } }))
     if (!mounted.current) return
     setBaseline(draft)
+    setOverrideBaseline(overrideDrafts)
     navigate(PATHS.availability, { state: flash(msg('Deleted “{0}”.', { '0': saved.name })) })
   }
 
@@ -217,25 +271,23 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         lede={
           saved
             ? t(
-                'Save schedule details and weekly hours here. Save date overrides in their section below.',
+                'Save schedule details, weekly hours and date overrides together with Save changes.',
               )
             : t('Set your weekly hours in the time zone people can book you in.')
         }
       />
       {saved && (
-        <DefaultStatus
-          schedule={saved}
-          onChanged={(updated) => {
-            setSaved(updated)
-            setStatus(msg('“{name}” is now your default schedule.', { name: updated.name }))
-          }}
-        />
+        <p className="default-status">
+          {saved.isDefault
+            ? t('Event types use this schedule unless you choose another one for them.')
+            : t('Event types use this schedule only where you choose it.')}
+        </p>
       )}
 
       <form className="editor" onSubmit={submit} noValidate>
         <ErrorSummary
           errors={errors}
-          labels={scheduleLabels(draft)}
+          labels={{ ...scheduleLabels(draft), ...overrideLabels(overrideDrafts) }}
           message={formError}
           attempt={attempt}
         />
@@ -273,12 +325,15 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                 )}
               </Field>
             </div>
-            {!saved && !isFirst && (
+            {((!saved && !isFirst) || (saved && !saved.isDefault)) && (
               <label className="checkbox">
                 <input
                   type="checkbox"
                   checked={makeDefault}
-                  onChange={(e) => setMakeDefault(e.target.checked)}
+                  onChange={(e) => {
+                    setMakeDefault(e.target.checked)
+                    setStatus('')
+                  }}
                 />
                 {t('Make this my default schedule')}
               </label>
@@ -327,11 +382,28 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                     ) : (
                       <p className="muted weekday-off">{t('Unavailable')}</p>
                     )}
+                    <CopyDay
+                      source={day}
+                      onCopy={(targets) => {
+                        setDraft((d) => copyDay(d, day, targets))
+                        setStatus('')
+                      }}
+                    />
                   </li>
                 )
               })}
             </ul>
           </section>
+          {saved && (
+            <Overrides
+              drafts={overrideDrafts}
+              onChange={(next) => {
+                setOverrideDrafts(next)
+                setStatus('')
+              }}
+              errors={errors}
+            />
+          )}
         </fieldset>
 
         <div className="form-actions">
@@ -347,9 +419,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         </div>
       </form>
 
-      {saved ? (
-        <Overrides schedule={saved} />
-      ) : (
+      {!saved && (
         <section className="panel" aria-labelledby="overrides-heading">
           <h2 id="overrides-heading">{t('Date overrides')}</h2>
           <p className="muted">
@@ -362,60 +432,6 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
 
       {saved && <DeleteSchedule schedule={saved} others={others} onDelete={remove} />}
     </>
-  )
-}
-
-/** Whether this is the default schedule, and a way to make it the default. */
-function DefaultStatus({
-  schedule,
-  onChanged,
-}: {
-  schedule: Schedule
-  onChanged: (schedule: Schedule) => void
-}) {
-  const { t, uiText: ui } = useI18n()
-
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<UiText | null>(null)
-
-  async function makeDefault() {
-    setBusy(true)
-    setError(null)
-    try {
-      onChanged(
-        await unwrap(
-          api.PATCH('/api/v1/schedules/{id}', {
-            params: { path: { id: schedule.id } },
-            body: { isDefault: true },
-          }),
-        ),
-      )
-    } catch (err) {
-      setError(msg('Could not make it the default. {0}', { '0': errorMessage(err) }))
-    }
-    setBusy(false)
-  }
-
-  if (schedule.isDefault) {
-    return (
-      <p className="default-status">
-        <span className="badge badge-success">{t('Default')}</span>{' '}
-        {t('Event types use this schedule unless you choose another one for them.')}
-      </p>
-    )
-  }
-  return (
-    <div className="default-status">
-      <p>{t('Event types use this schedule only where you choose it.')}</p>
-      <button type="button" className="button button-small" onClick={makeDefault} disabled={busy}>
-        {busy ? t('Saving…') : t('Make default')}
-      </button>
-      {error && (
-        <p className="alert alert-error" role="alert">
-          {ui(error)}
-        </p>
-      )}
-    </div>
   )
 }
 
