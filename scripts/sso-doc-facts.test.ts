@@ -63,21 +63,28 @@ const samlCommitments = {
 } as const
 
 // A lifetime-based rejection anywhere would contradict the deadline rule, so every
-// sentence of the whole document is checked, not one section. Only a negation directly
-// before the verb ("Do not reject ...", "are not rejected") marks the protected rule.
+// sentence of the whole document is checked, not one section. A rejection is a
+// reject/refuse/deny verb not directly negated, or a negated "accept". Only a negation
+// directly before the reject verb ("Do not reject ...", "are not rejected") marks the
+// protected rule. Validity wording and the limit's identifier count as lifetime terms.
+const lifetimeTerm =
+  /\blifetimes?\b|maximumSamlAssertionLifetime|\bvalidity (?:window|interval|period)\b|\bvalid for\b|\bwindow\b/i
+const negatedAccept =
+  /\b(?:do not|does not|don't|doesn't|never|must not|cannot|can't|will not|won't|may not)\s+accept/i
 function lifetimeRejections(document: string) {
   return document
     .replace(/\s+/g, ' ')
     .split(/(?<=[.!?]) /)
     .filter((sentence) => {
       const verb = /\b(?:reject|refus|den(?:y|ie))\w*/i.exec(sentence)
-      if (!verb) return false
-      const before = sentence.slice(0, verb.index).trim().split(' ').slice(-3).join(' ')
+      const before = verb ? sentence.slice(0, verb.index).trim().split(' ').slice(-3).join(' ') : ''
+      const rejects =
+        (verb !== null && !/\b(?:not|never|don't)$/i.test(before)) || negatedAccept.test(sentence)
       return (
+        rejects &&
         /\bassertions?\b/i.test(sentence) &&
-        /\blifetimes?\b/i.test(sentence) &&
-        /\b(?:exceed\w*|longer than|more than|greater than|above)\b/i.test(sentence) &&
-        !/\b(?:not|never|don't)$/i.test(before)
+        lifetimeTerm.test(sentence) &&
+        /\b(?:exceed\w*|longer than|more than|greater than|above)\b/i.test(sentence)
       )
     })
 }
@@ -111,6 +118,7 @@ describe('SAML acceptance deadline documentation (not runtime verification)', ()
     ['pinned limits prose', '## Pinned operational limits\n'],
     ['implementation sequence', '## Implementation sequence\n'],
     ['self-hosting notes', '## Self-hosting and local acceptance\n'],
+    ['delegated clients section', '### Delegated clients\n'],
   ])('rejects a contradictory lifetime rule in the %s', (_, heading) => {
     for (const rule of [
       'Reject assertions whose Conditions lifetime exceeds maximumSamlAssertionLifetime.',
@@ -120,6 +128,9 @@ describe('SAML acceptance deadline documentation (not runtime verification)', ()
       'Deny any assertion with a lifetime longer than 600 seconds.',
       'Reject assertions whose lifetime exceeds 600 seconds; do not log them.',
       'Reject assertions whose lifetime exceeds the maximum and never accept unsigned ones.',
+      'Refuse any assertion whose validity window exceeds `maximumSamlAssertionLifetime`.',
+      'Assertions valid for longer than 600 seconds are rejected.',
+      'Hourmere does not accept an assertion whose lifetime exceeds 600 seconds.',
     ]) {
       expect(source).toContain(heading)
       const mutated = source.replace(heading, `${heading}\n${rule}\n`)
@@ -147,22 +158,28 @@ const settingPrerequisites = {
     'Identity recovery',
     'OIDC step-up',
     'Team enforcement',
+    'Team write enforcement',
     'Native enforcement',
     'Delegation enforcement',
     'Recovery enrollment',
-    'Policy and activation',
+    'Provider activation',
+    'Enforcement policy',
     'Recovery use',
+    'Recovery repair',
     'Operator recovery',
     'Member UI',
     'Recovery UI',
     'Enforcement UI',
     'Keycloak OIDC fixture',
+    'Keycloak OIDC linking',
     'Keycloak OIDC acceptance',
   ],
   SAML: [
     'Recovery use',
+    'Recovery repair',
     'Operator recovery',
     'Team enforcement',
+    'Team write enforcement',
     'SAML verifier',
     'SAML timing and replay',
     'SAML start',
@@ -174,6 +191,7 @@ const settingPrerequisites = {
     'SAML step-up',
     'SAML UI',
     'Keycloak SAML fixture',
+    'Keycloak SAML linking',
     'Keycloak SAML acceptance',
   ],
 } as const
@@ -240,7 +258,7 @@ function assertPlan(document: string) {
     const reachable = closure.get(`${protocol} setting`) ?? new Set<string>()
     for (const prerequisite of prerequisites) expect([...reachable]).toContain(prerequisite)
   }
-  expect([...(closure.get('Policy and activation') ?? [])]).toContain('Recovery enrollment')
+  expect([...(closure.get('Enforcement policy') ?? [])]).toContain('Recovery enrollment')
 }
 
 function row(document: string, step: string) {
@@ -288,8 +306,7 @@ describe('SSO implementation plan ordering and rollout gating (documentation onl
     ],
     [
       'a dependency on a later row',
-      (document: string) =>
-        replaceCell(document, 'Recovery enrollment', 2, 'Policy and activation'),
+      (document: string) => replaceCell(document, 'Recovery enrollment', 2, 'Enforcement policy'),
     ],
     [
       'a setting that skips recovery and UI prerequisites',
