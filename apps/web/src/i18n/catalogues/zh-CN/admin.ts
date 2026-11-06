@@ -11,7 +11,7 @@ export const admin = {
   'Date overrides replace weekly hours on that date. Save changes applies every change on this page.':
     '日期安排会替换当天的每周时段。点击“保存更改”即可保存本页所有更改。',
   'No date overrides.': '暂无日期安排。',
-  'Date override {0}': '日期安排 {0}',
+  'Date override {0}': '日期安排{0}',
   'Save schedule details, weekly hours and date overrides together with Save changes.':
     '点击“保存更改”，统一保存日程详情、每周时段和日期安排。',
   'This schedule changed in another tab. Your changes are still here. Reload the page and review the latest hours before saving again.':

@@ -694,7 +694,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
                 schedule: { name: input.name, weeklyHours: input.weeklyHours },
                 overrides: input.overrides,
               })
-              expect(data.version).not.toBe(input.expectedVersion)
+              expect(data).toHaveProperty('version', expect.stringMatching(/^[a-f0-9]{64}$/))
+              expect(data).not.toHaveProperty('version', input.expectedVersion)
             }
             if (operation === 'GET /api/v1/schedules/{id}/availability') {
               expect(data).toMatchObject({
