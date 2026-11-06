@@ -151,6 +151,41 @@ describe('public waitlist entry', () => {
     await user.click(within(alert).getByRole('link', { name: 'Enter an email address.' }))
     expect(document.activeElement).toBe(email)
   })
+  it.each([
+    ['waitlist_full', 'This waitlist is full (100 entries). Please check available times later.'],
+    ['waitlist_smtp_not_configured', 'Waitlist email is unavailable. Please contact the host.'],
+  ])('explains %s without claiming a confirmation was sent', async (code, message) => {
+    fakeApi({
+      ...eventRoutes(enabled, []),
+      'POST /api/v1/public/ada/intro/waitlist': () => json(409, { error: code }),
+    })
+    renderApp('/ada/intro')
+    const user = await openForm()
+    await fill(user)
+    await user.click(screen.getByRole('button', { name: 'Join the waitlist' }))
+    await screen.findByText(message)
+    expect(screen.queryByRole('heading', { name: success })).toBeNull()
+  })
+  it('explains SMTP loss during an explicit resend without claiming it was sent', async () => {
+    fakeApi({
+      ...eventRoutes(enabled, []),
+      'POST /api/v1/public/ada/intro/waitlist': () => json(202, { accepted: true }),
+      'POST /api/v1/public/ada/intro/waitlist/resend': () =>
+        json(409, { error: 'waitlist_smtp_not_configured' }),
+    })
+    renderApp('/ada/intro')
+    const user = await openForm()
+    await fill(user)
+    await user.click(screen.getByRole('button', { name: 'Join the waitlist' }))
+    await screen.findByRole('heading', { name: success })
+    await user.click(screen.getByRole('button', { name: 'Resend confirmation email' }))
+    await screen.findByText('Waitlist email is unavailable. Please contact the host.')
+    expect(
+      screen.queryByText(
+        'Confirmation email requested. Check your email; sending limits may prevent delivery.',
+      ),
+    ).toBeNull()
+  })
   it('keeps responses neutral and has no automatic retry or resend', async () => {
     const api = fakeApi({
       ...eventRoutes(enabled, []),
@@ -259,6 +294,8 @@ describe('waitlist boundaries and public locales', () => {
   })
   it('translates every added public string in all shipped locales', () => {
     const keys = [
+      'This waitlist is full (100 entries). Please check available times later.',
+      'Waitlist email is unavailable. Please contact the host.',
       'Join the waitlist',
       'No available times in this period.',
       'Check your email to confirm',

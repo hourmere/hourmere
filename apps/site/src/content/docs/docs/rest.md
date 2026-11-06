@@ -241,3 +241,10 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.
