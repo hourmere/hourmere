@@ -61,10 +61,22 @@ const samlCommitments = {
   replayRetention: '`max(acceptanceDeadline + clockSkew, requestExpiresAt)`',
 } as const
 
-// A lifetime-based rejection anywhere would contradict the deadline rule, so the
-// forbidden wording is checked against the whole document, not one section.
-const lifetimeRejection =
-  /\breject(?:s|ed|ing)?\b[^.]*?\bassertions?\b[^.]*?\blifetimes?\b[^.]*?\bexceed/i
+// A lifetime-based rejection anywhere would contradict the deadline rule, so every
+// sentence of the whole document is checked, not one section. Negated sentences such
+// as "Do not reject an assertion solely because ..." are the protected rule itself.
+function lifetimeRejections(document: string) {
+  return document
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?]) /)
+    .filter(
+      (sentence) =>
+        /\b(?:reject|refus|den(?:y|ie))\w*/i.test(sentence) &&
+        /\bassertions?\b/i.test(sentence) &&
+        /\blifetimes?\b/i.test(sentence) &&
+        /\b(?:exceed\w*|longer than|more than|greater than|above)\b/i.test(sentence) &&
+        !/\b(?:do not|does not|don't|never|not solely)\b/i.test(sentence),
+    )
+}
 
 function assertSamlCommitments(document: string) {
   const section = document.split('### SAML\n')[1]?.split('\n### ')[0] ?? ''
@@ -72,7 +84,7 @@ function assertSamlCommitments(document: string) {
   for (const commitment of Object.values(samlCommitments)) {
     expect(normalized).toContain(commitment)
   }
-  expect(document.replace(/\s+/g, ' ')).not.toMatch(lifetimeRejection)
+  expect(lifetimeRejections(document)).toEqual([])
 }
 
 describe('SAML acceptance deadline documentation (not runtime verification)', () => {
@@ -99,6 +111,9 @@ describe('SAML acceptance deadline documentation (not runtime verification)', ()
     for (const rule of [
       'Reject assertions whose Conditions lifetime exceeds maximumSamlAssertionLifetime.',
       'The verifier rejects SAML assertions whose\nlifetime exceeds the configured maximum.',
+      'Assertions whose lifetime exceeds maximumSamlAssertionLifetime are rejected.',
+      'Refuse assertions whose lifetime exceeds the configured maximum.',
+      'Deny any assertion with a lifetime longer than 600 seconds.',
     ]) {
       expect(source).toContain(heading)
       const mutated = source.replace(heading, `${heading}\n${rule}\n`)
@@ -135,13 +150,15 @@ const settingPrerequisites = {
     'Member UI',
     'Recovery UI',
     'Enforcement UI',
-    'Keycloak OIDC',
+    'Keycloak OIDC fixture',
+    'Keycloak OIDC acceptance',
   ],
   SAML: [
     'Recovery use',
     'Operator recovery',
     'Team enforcement',
     'SAML verifier',
+    'SAML timing and replay',
     'SAML start',
     'SAML ACS and completion',
     'SAML configuration and test',
@@ -150,7 +167,8 @@ const settingPrerequisites = {
     'SAML identity recovery',
     'SAML step-up',
     'SAML UI',
-    'Keycloak SAML',
+    'Keycloak SAML fixture',
+    'Keycloak SAML acceptance',
   ],
 } as const
 
@@ -253,7 +271,7 @@ describe('SSO implementation plan ordering and rollout gating (documentation onl
       (document: string) =>
         replaceCell(
           document,
-          'Keycloak SAML',
+          'Keycloak SAML acceptance',
           3,
           'OIDC setting (default false); SAML setting introduced (default false)',
         ),
@@ -299,13 +317,23 @@ describe('SSO implementation plan ordering and rollout gating (documentation onl
 function assertStableCodes(document: string) {
   const table =
     document.split('The stable domain codes are exactly:\n\n')[1]?.split('\n\n')[0] ?? ''
-  const listed = [...table.matchAll(/^\| `([a-z_]+)` \| (\d{3}) \|/gm)].map(([, code]) => code)
-  expect(listed.length).toBeGreaterThan(0)
-  expect(new Set(listed).size).toBe(listed.length)
+  const statuses = new Map(
+    [...table.matchAll(/^\| `([a-z_]+)` \| (\d{3}) \|/gm)].map(([, code, status]) => [
+      code,
+      status,
+    ]),
+  )
+  const rows = table.split('\n').filter((line) => line.startsWith('| `'))
+  expect(statuses.size).toBeGreaterThan(0)
+  expect(statuses.size).toBe(rows.length)
   for (const required of ['sso_disabled', 'sso_reauthentication_required', 'sso_required'])
-    expect(listed).toContain(required)
-  // Every SSO code the design mentions anywhere must be defined in that table.
-  for (const [, code] of document.matchAll(/`(sso_[a-z_]+)`/g)) expect(listed).toContain(code)
+    expect(statuses.has(required)).toBe(true)
+  // Every SSO code the design mentions anywhere must be defined in that table, and a
+  // status written next to it must be the table's status.
+  for (const [, status, code = ''] of document.matchAll(/`(?:(\d{3}) )?(sso_[a-z_]+)`/g)) {
+    expect([...statuses.keys()]).toContain(code)
+    if (status) expect(status).toBe(statuses.get(code))
+  }
 }
 
 describe('SSO stable error codes (documentation only)', () => {
@@ -313,12 +341,20 @@ describe('SSO stable error codes (documentation only)', () => {
     assertStableCodes(source)
   })
 
-  it('rejects a code used without a definition', () => {
+  it.each([
+    'Refusals use `sso_recovery_missing`.',
+    'Refusals use `409 sso_recovery_missing`.',
+    'Refusals use `409 sso_disabled`.',
+  ])('rejects an undefined or mismatched code: %s', (sentence) => {
     const mutated = source.replace(
       '## Out of scope and remaining decisions\n',
-      '## Out of scope and remaining decisions\n\nRefusals use `sso_recovery_missing`.\n',
+      `## Out of scope and remaining decisions\n\n${sentence}\n`,
     )
     expect(() => assertStableCodes(mutated)).toThrow()
+    assertStableCodes(source)
+  })
+
+  it('rejects a removed code definition', () => {
     const removed = source.replace(/^\| `sso_disabled` \|.*\n/m, '')
     expect(removed).not.toBe(source)
     expect(() => assertStableCodes(removed)).toThrow()
