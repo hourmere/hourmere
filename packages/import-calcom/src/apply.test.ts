@@ -5,6 +5,8 @@ import { setTimeout } from 'node:timers/promises'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { insertBooking } from '../../scheduling/src/bookings.ts'
+import { notificationSnapshot } from '../../scheduling/src/notification-settings.ts'
 import { createTestUser } from '../../scheduling/src/testing.ts'
 import { applyExtractedImport, applyImport } from './apply.ts'
 import { runCli } from './cli.ts'
@@ -21,7 +23,7 @@ import {
   type SourceInput,
 } from './preview.ts'
 import { createSourceFixture } from './source-fixture.ts'
-import { readTargetState, validateAuthorization } from './target.ts'
+import { parserContext, readTargetState, validateAuthorization } from './target.ts'
 import type { SourceVersion } from './types.ts'
 
 describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic import', () => {
@@ -100,6 +102,88 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     ).rows[0]
   }
   const empty = { profiles: 0, schedules: 0, events: 0, bookings: 0 }
+
+  async function overdueHoldImport(api = applyExtractedImport) {
+    const f = await setup()
+    const booking = required(f.plan.plan.bookings[0])
+    const clock = await target.pool.query<{ deadline: string }>(
+      "SELECT (clock_timestamp()-interval '1 minute')::text AS deadline",
+    )
+    const hold = await createDb(target.pool)
+      .transaction()
+      .execute((trx) =>
+        insertBooking(trx, {
+          organizationId: f.user.principal.organization.id,
+          eventTypeId: null,
+          start: Temporal.Instant.from(booking.start),
+          end: Temporal.Instant.from(booking.end),
+          title: 'Abandoned checkout',
+          location: null,
+          responses: {},
+          source: 'web',
+          apiKeyId: null,
+          hostUserIds: [f.user.id],
+          hostsUseDefaultSchedule: false,
+          attendees: [],
+          notificationSnapshot: notificationSnapshot(null),
+          manageTokenHash: null,
+          paymentHoldExpiresAt: Temporal.Instant.from(required(clock.rows[0]).deadline).toString(),
+        }),
+      )
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    const result = await api(target.pool, f.plan, f.input, async () => f.snapshot)
+    expect(result.status).toBe('applied')
+    expect(
+      (await target.pool.query('SELECT status FROM bookings WHERE id=$1', [hold.id])).rows,
+    ).toEqual([{ status: 'expired' }])
+  }
+  it('imports over an unswept overdue payment hold and releases its occupancy', async () => {
+    await overdueHoldImport()
+  })
+  it('detects omission of import admission cleanup in an isolated source copy', async () => {
+    await checkSourceMutation(
+      new URL('./apply.ts', import.meta.url),
+      "WHERE b.status='pending_payment' AND b.payment_hold_expires_at<=clock_timestamp()",
+      "WHERE false AND b.status='pending_payment' AND b.payment_hold_expires_at<=clock_timestamp()",
+      (module) => module.applyExtractedImport as typeof applyExtractedImport,
+      overdueHoldImport,
+    )
+  })
+  async function busyHolds(api = parserContext) {
+    const f = await setup()
+    const state = await readTargetState(
+      target.pool,
+      f.input.sourceId,
+      f.input.authorization,
+      f.snapshot.cutoff,
+    )
+    const common = {
+      hosts: [{ user_id: f.user.id }],
+      start_at: '2040-01-02T12:00:00Z',
+      end_at: '2040-01-02T12:30:00Z',
+    }
+    state.bookings = [
+      { ...common, id: 'confirmed', status: 'confirmed' },
+      { ...common, id: 'live', status: 'pending_payment', payment_hold_active: true },
+      { ...common, id: 'overdue', status: 'pending_payment', payment_hold_active: false },
+      { ...common, id: 'expired', status: 'expired' },
+      { ...common, id: 'cancelled', status: 'cancelled' },
+    ]
+    expect(api(state, f.input.authorization).busy).toHaveLength(2)
+  }
+  it('counts only confirmed bookings and live holds as import conflicts', async () => {
+    await busyHolds()
+  })
+  it('detects treating terminal or overdue holds as import conflicts', async () => {
+    await checkSourceMutation(
+      new URL('./target.ts', import.meta.url),
+      "(b.status === 'confirmed' || (b.status === 'pending_payment' && b.payment_hold_active === true))",
+      "b.status !== 'cancelled'",
+      (module) => module.parserContext as typeof parserContext,
+      busyHolds,
+    )
+  })
 
   it.each(['cal.diy-a5ee96f77edd', 'cal.com-v6.2.0'] as const)(
     'previews real target and imports %s once, with stable crosswalk and no jobs',
