@@ -75,6 +75,12 @@ before the start and three follow-ups after the scheduled end, each from 5 minut
 elapsed days away. Each rule selects invitee, guests and/or hosts; follow-ups can include
 an optional plain-text host note when the operator permits it.
 
+Hourmere's [one-time booking links](/docs/one-time-links) permit one committed booking,
+with creation, listing and revocation in the event-type editor, REST, MCP and CLI. The URL
+is shown only on creation; metadata cannot recover it. Optional expiry and editable
+invitee prefill are supported. Hidden event types only leave the public profile listing;
+their ordinary direct address stays reusable. One-time links are a separate capability.
+
 Check the documented limits when evaluating it:
 
 - Reminders are skipped unless their send time is more than one hour after booking or
@@ -82,6 +88,11 @@ Check the documented limits when evaluating it:
   settings and recalculate the times. Follow-ups use the scheduled end regardless of
   attendance, and a calendar decline does not cancel them. Shared mail limits can prevent
   delivery; see the [known limitations](/docs/reminders-and-follow-ups#known-limitations).
+- One-time URLs cannot be embedded or recovered after dismissal; revoke a lost unused
+  link and create another. Prefill does not verify the recipient. Cancellation and
+  rescheduling never reactivate the link. Each personal owner/team has at most 1000
+  active unexpired links, with a 200-link sub-limit for ordinary team members. See the
+  [one-time link limits and privacy rules](/docs/one-time-links#limits-and-cleanup).
 - [Microsoft calendar connections](/docs/microsoft-calendar) list calendars and refresh
   credentials, but do not synchronize busy times or write booking events.
 - [Zoom account connections](/docs/zoom-connections) are separate from sign-in and calendar

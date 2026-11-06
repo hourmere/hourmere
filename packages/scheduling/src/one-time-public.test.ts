@@ -10,7 +10,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as Availability from './availability.ts'
 import * as Bookings from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
-import { createOneTimeBookingLink, revokeOneTimeBookingLink } from './one-time-links.ts'
+import {
+  createOneTimeBookingLink,
+  revokeManagedOneTimeBookingLink,
+  revokeOneTimeBookingLink,
+} from './one-time-links.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -347,6 +351,148 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
     await verifyConcurrent()
   }, 30_000)
 
+  async function verifyRevocationWins(module = Bookings) {
+    const s = await setup()
+    const notify = vi.fn(async () => {})
+    let reached = false
+    let resume: (() => void) | undefined
+    const paused = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    // Pause after the locked eligibility recheck, while the transaction holds no
+    // link-row lock. Revocation must still defeat the later insertion and claim.
+    const pausedDb = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      transformResult: async ({ result }) => {
+        if (
+          !reached &&
+          result.rows.some((row) => Object.keys(row).length === 1 && 'notifications' in row)
+        ) {
+          reached = true
+          await paused
+        }
+        return result
+      },
+    })
+    let settled = false
+    const booking = Promise.allSettled([
+      module.createOneTimeBooking({ ...ctx, db: pausedDb, notify }, s.input()).finally(() => {
+        settled = true
+      }),
+    ])
+    let revoked: Awaited<ReturnType<typeof revokeManagedOneTimeBookingLink>> | undefined
+    let blockedFailure: unknown
+    try {
+      for (let attempt = 0; !reached && !settled; attempt++) {
+        expect(attempt < 400, 'booking must reach its locked notification-policy read').toBe(true)
+        await setTimeout(5)
+      }
+      expect(reached, 'booking must remain in flight while the host revokes').toBe(true)
+      revoked = await revokeManagedOneTimeBookingLink(s.service, {
+        eventTypeId: s.eventTypeId,
+        id: s.link.id,
+      })
+    } catch (error) {
+      blockedFailure = error
+    } finally {
+      resume?.()
+    }
+    const [result] = await booking
+    if (blockedFailure) throw blockedFailure
+    expect(result?.status).toBe('rejected')
+    expect(result?.status === 'rejected' && result.reason).toMatchObject(unavailable)
+    expect(revoked?.state).toBe('revoked')
+    expect(revoked?.bookingId).toBeNull()
+    expect(await bookingCount(s.eventTypeId)).toBe(0)
+    expect(notify).not.toHaveBeenCalled()
+    expect(await storedLink(s.link.id)).toMatchObject({
+      state: 'revoked',
+      booking_id: null,
+      used_at: null,
+    })
+    expect(
+      await failure(() => Availability.getOneTimeBookingPage(ctx, s.link.token)),
+    ).toMatchObject(unavailable)
+  }
+
+  async function verifyBookingWins(module = Bookings) {
+    const s = await setup()
+    let reached = false
+    let resume: (() => void) | undefined
+    const paused = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const notify = vi.fn(async () => {
+      reached = true
+      await paused
+    })
+    let bookingSettled = false
+    const booking = Promise.allSettled([
+      module.createOneTimeBooking({ ...ctx, notify }, s.input()).finally(() => {
+        bookingSettled = true
+      }),
+    ])
+    let revokeSettled = false
+    let revocation:
+      | Promise<PromiseSettledResult<Awaited<ReturnType<typeof revokeManagedOneTimeBookingLink>>>[]>
+      | undefined
+    let blockedFailure: unknown
+    try {
+      for (let attempt = 0; !reached && !bookingSettled; attempt++) {
+        expect(attempt < 400, 'booking must reach its pre-commit notification callback').toBe(true)
+        await setTimeout(5)
+      }
+      expect(reached, 'booking must remain in flight while the host revokes').toBe(true)
+      revocation = Promise.allSettled([
+        revokeManagedOneTimeBookingLink(s.service, {
+          eventTypeId: s.eventTypeId,
+          id: s.link.id,
+        }).finally(() => {
+          revokeSettled = true
+        }),
+      ])
+      // A correct revoke waits for the booking's claim. A broken claim can let it
+      // finish early; still release the booking so the persisted outcome is asserted.
+      for (let attempt = 0; !revokeSettled; attempt++) {
+        const waiting = await sql<{ count: string }>`SELECT count(*) AS count FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'`.execute(db)
+        if (Number(waiting.rows[0]?.count) >= 1) break
+        expect(attempt < 400, 'revocation must overlap the uncommitted booking').toBe(true)
+        await setTimeout(5)
+      }
+    } catch (error) {
+      blockedFailure = error
+    } finally {
+      resume?.()
+    }
+    const [created] = await booking
+    const [revoked] = (await revocation) ?? []
+    if (blockedFailure) throw blockedFailure
+    expect(created?.status).toBe('fulfilled')
+    expect(revoked?.status).toBe('fulfilled')
+    if (created?.status !== 'fulfilled' || revoked?.status !== 'fulfilled') return
+    expect(revoked.value?.state).toBe('used')
+    expect(revoked.value?.bookingId).toBe(created.value.booking.id)
+    expect(revoked.value?.revokedAt).toBeNull()
+    expect(await bookingCount(s.eventTypeId)).toBe(1)
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(await storedLink(s.link.id)).toMatchObject({
+      state: 'used',
+      booking_id: created.value.booking.id,
+      revoked_at: null,
+    })
+    expect(
+      await failure(() => Availability.getOneTimeBookingPage(ctx, s.link.token)),
+    ).toMatchObject(unavailable)
+  }
+
+  it('serializes 20 overlapping revoke/booking races with only the winning terminal outcome', async () => {
+    for (let round = 0; round < 10; round++) {
+      await verifyBookingWins()
+      await verifyRevocationWins()
+    }
+  }, 30_000)
+
   it('replays concurrent and later winning requests without claiming or notifying again', async () => {
     const s = await setup()
     const notify = vi.fn(async () => {})
@@ -581,6 +727,30 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
       (module) => verifyConcurrent(module, 1),
     )
   })
+
+  it.each([
+    ['booking wins', verifyBookingWins, 'revoked', 'used'],
+    ['revocation wins', verifyRevocationWins, 'fulfilled', 'rejected'],
+  ] as const)(
+    'detects a removed claim in the race where %s',
+    async (_, verify, actual, expected) => {
+      const hash = () =>
+        createHash('sha256')
+          .update(readFileSync(new URL('./bookings.ts', import.meta.url)))
+          .digest('hex')
+      const original = hash()
+      await verify()
+      const copy = await sourceCopy<typeof Bookings>('./bookings.ts', [
+        'if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)',
+        '',
+      ])
+      await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError', actual, expected })
+      expect(hash(), 'production source remains byte-identical after the isolated mutation').toBe(
+        original,
+      )
+      await verify()
+    },
+  )
 
   it('detects an unbound idempotency fingerprint with real replay assertion failures', async () => {
     await mutation(
