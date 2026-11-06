@@ -164,6 +164,7 @@ describe('UI measurement CI contract', () => {
       'cli-compatibility',
       'docker',
       'e2e',
+      'zapier-compatibility',
     ])
     expect(requiredSource).not.toContain('ui-checks.yml')
     expect(releaseSource).not.toContain('ui-checks.yml')
