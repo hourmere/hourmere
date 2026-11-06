@@ -962,6 +962,44 @@ function EventTypeForm({
                     />
                   )}
                 </Field>
+                <Field
+                  id="maxBookingsPerWeek"
+                  label={t('Weekly limit')}
+                  optional
+                  error={errors.maxBookingsPerWeek}
+                  hint={t('Bookings per week, {0}–{1}. Empty: no limit.', {
+                    '0': RULES.maxBookingsPerWeek.min,
+                    '1': RULES.maxBookingsPerWeek.max,
+                  })}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.maxBookingsPerWeek}
+                      onChange={(e) => set('maxBookingsPerWeek', e.target.value)}
+                    />
+                  )}
+                </Field>
+                <Field
+                  id="maxBookingsPerMonth"
+                  label={t('Monthly limit')}
+                  optional
+                  error={errors.maxBookingsPerMonth}
+                  hint={t('Bookings per month, {0}–{1}. Empty: no limit.', {
+                    '0': RULES.maxBookingsPerMonth.min,
+                    '1': RULES.maxBookingsPerMonth.max,
+                  })}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.maxBookingsPerMonth}
+                      onChange={(e) => set('maxBookingsPerMonth', e.target.value)}
+                    />
+                  )}
+                </Field>
                 <MinutesField
                   id="bufferBeforeMinutes"
                   label={t('Buffer before')}

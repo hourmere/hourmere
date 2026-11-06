@@ -96,6 +96,8 @@ export interface EventTypeDraft {
   bufferAfterMinutes: string
   minimumNoticeMinutes: string
   maxBookingsPerDay: string
+  maxBookingsPerWeek: string
+  maxBookingsPerMonth: string
   bookingWindowDays: string
   position: string
   isActive: boolean
@@ -149,6 +151,8 @@ export function emptyDraft(): EventTypeDraft {
     bufferAfterMinutes: '0',
     minimumNoticeMinutes: '0',
     maxBookingsPerDay: '',
+    maxBookingsPerWeek: '',
+    maxBookingsPerMonth: '',
     bookingWindowDays: '',
     position: '0',
     isActive: true,
@@ -198,6 +202,8 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     bufferAfterMinutes: String(e.bufferAfterMinutes),
     minimumNoticeMinutes: String(e.minimumNoticeMinutes),
     maxBookingsPerDay: text(e.maxBookingsPerDay),
+    maxBookingsPerWeek: text(e.maxBookingsPerWeek),
+    maxBookingsPerMonth: text(e.maxBookingsPerMonth),
     bookingWindowDays: text(e.bookingWindowDays),
     position: String(e.position),
     isActive: e.isActive,
@@ -287,8 +293,21 @@ const NUMBER_FIELDS = [
   ['bufferAfterMinutes', true],
   ['minimumNoticeMinutes', true],
   ['maxBookingsPerDay', false],
+  ['maxBookingsPerWeek', false],
+  ['maxBookingsPerMonth', false],
   ['bookingWindowDays', false],
 ] as const satisfies readonly (readonly [keyof typeof RULES, boolean])[]
+
+const BOOKING_LIMIT_FIELDS = [
+  'maxBookingsPerDay',
+  'maxBookingsPerWeek',
+  'maxBookingsPerMonth',
+] as const
+const BOOKING_LIMIT_PAIRS = [
+  ['maxBookingsPerDay', 'maxBookingsPerWeek', 'Weekly limit must be at least the daily limit.'],
+  ['maxBookingsPerWeek', 'maxBookingsPerMonth', 'Monthly limit must be at least the weekly limit.'],
+  ['maxBookingsPerDay', 'maxBookingsPerMonth', 'Monthly limit must be at least the daily limit.'],
+] as const
 
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft): FieldErrors {
@@ -363,6 +382,18 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
 
   for (const [name, required] of NUMBER_FIELDS) {
     add(name, wholeNumberProblem(draft[name], RULES[name], required))
+  }
+  for (const [shorter, longer, message] of BOOKING_LIMIT_PAIRS) {
+    const shorterValue = parseWhole(draft[shorter])
+    const longerValue = parseWhole(draft[longer])
+    if (
+      !errors[shorter] &&
+      !errors[longer] &&
+      shorterValue !== null &&
+      longerValue !== null &&
+      longerValue < shorterValue
+    )
+      add(longer, message)
   }
   add(
     'allowedDurationsMinutes',
@@ -494,6 +525,8 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     bufferAfterMinutes: whole(draft.bufferAfterMinutes) as number,
     minimumNoticeMinutes: whole(draft.minimumNoticeMinutes) as number,
     maxBookingsPerDay: whole(draft.maxBookingsPerDay),
+    maxBookingsPerWeek: whole(draft.maxBookingsPerWeek),
+    maxBookingsPerMonth: whole(draft.maxBookingsPerMonth),
     bookingWindowDays: whole(draft.bookingWindowDays),
     location,
     questions: draft.questions.map((q) => ({
@@ -520,6 +553,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // Omit untouched limits so metadata saves preserve concurrent configuration edits.
+  for (const name of BOOKING_LIMIT_FIELDS) {
+    if (whole(draft[name]) === whole(baseline[name])) delete body[name]
+  }
   // The compatibility field cannot represent a complete option list. Leave it out when
   // untouched, so metadata saves also preserve options configured by a newer client.
   if (JSON.stringify(body.location) === JSON.stringify(toInput(baseline).location))
@@ -591,6 +628,8 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     bufferAfterMinutes: 'Buffer after',
     minimumNoticeMinutes: 'Minimum notice',
     maxBookingsPerDay: 'Daily limit',
+    maxBookingsPerWeek: 'Weekly limit',
+    maxBookingsPerMonth: 'Monthly limit',
     bookingWindowDays: 'Booking window',
     position: 'Position',
     waitlist: 'Booking waitlist',
@@ -736,6 +775,18 @@ export function serverErrors(
             ? 'Include the default duration in the allowed durations.'
             : 'Offer from 1 to 12 durations.'
         return field('allowedDurationsMinutes', problem)
+      }
+      for (const [shorter, longer, message] of BOOKING_LIMIT_PAIRS) {
+        if (detail === `${longer} must be at least ${shorter}`) {
+          const shorterValue = parseWhole(draft[shorter])
+          const longerValue = parseWhole(draft[longer])
+          if (shorterValue === null || longerValue === null || shorterValue <= longerValue)
+            return field(
+              longer,
+              'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
+            )
+          return field(longer, message)
+        }
       }
       if (Object.hasOwn(RULE_MESSAGES, name)) return field(name, RULE_MESSAGES[name] as UiText)
       if (name === 'title') {

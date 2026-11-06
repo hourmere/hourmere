@@ -39,11 +39,13 @@ const read = {
 export function waitlistTools({
   db,
   secret,
+  smtpConfigured,
   publicUrl = 'http://localhost',
   now,
 }: {
   db: Db
   secret?: string | undefined
+  smtpConfigured?: boolean | undefined
   publicUrl?: string | undefined
   now?: (() => Temporal.Instant) | undefined
 }): Tool[] {
@@ -55,7 +57,8 @@ export function waitlistTools({
     now: now ?? (() => Temporal.Now.instant()),
   })
   const publicContext = (call: ToolCall): WaitlistContext => {
-    if (!secret) throw new DomainError('not_found', 'event_type_not_found')
+    if (!secret) throw new DomainError('conflict', 'waitlist_unavailable')
+    if (!smtpConfigured) throw new DomainError('conflict', 'waitlist_smtp_not_configured')
     return { db, secret, publicUrl, trustedIp: call.trustedIp, now }
   }
   return [
@@ -94,6 +97,7 @@ export function waitlistTools({
       }),
       output: WaitlistEntryPage,
       annotations: read,
+      privateDiagnostics: true,
       async run({ id, ...page }, call) {
         return listEventTypeWaitlistEntries(context(call.caller), id, page)
       },
@@ -106,6 +110,7 @@ export function waitlistTools({
       input: Id.extend({ entryId: z.uuid() }),
       output: z.object({ removed: z.literal(true) }),
       annotations: { ...read, readOnlyHint: false, destructiveHint: true },
+      privateDiagnostics: true,
       async run(args, call) {
         return removeEventTypeWaitlistEntry(context(call.caller), args.id, args.entryId)
       },
@@ -114,7 +119,7 @@ export function waitlistTools({
       name: 'join_waitlist',
       title: 'Join a booking waitlist',
       description:
-        'Requests email confirmation for a waitlist only when its enabled personal or single-host team event has no available times in preferredWindow. Give exactly one of handle or teamSlug, plus slug, email, optional name/locale, preferredWindow UTC instants and IANA timeZone, and explicit consent:true. Tell the invitee that the personal event owner or authorized team owners/admins can see their email, optional name and requested period, and ask for their consent before submitting. Nothing is reserved; the first successful ordinary booking wins. An accepted response always means check your email to confirm; it does not reveal existing registrations or mail delivery. Email verification is required even for signed-in callers. Shares REST’s durable email, event and trusted connection-IP abuse controls. Join and resend also share a 10-call-per-minute budget per user across all keys, including duplicate, suppressed and service-rejected requests. Never returns tokens and never automatically retries.',
+        'Requests email confirmation for a waitlist only when its enabled personal or single-host team event has no available times in preferredWindow. Give exactly one of handle or teamSlug, plus slug, email, optional name/locale, preferredWindow UTC instants and IANA timeZone, and explicit consent:true. Tell the invitee that the personal event owner or authorized team owners/admins can see their email, optional name and requested period, and ask for their consent before submitting. Nothing is reserved; the first successful ordinary booking wins. An accepted response always means check your email to confirm; it does not reveal existing registrations or mail delivery. Email verification and configured SMTP are required even for signed-in callers; missing SMTP returns waitlist_smtp_not_configured and a full 100-entry event returns waitlist_full. Shares REST’s durable email, event and trusted connection-IP abuse controls. Join and resend also share a 10-call-per-minute budget per user across all keys, including duplicate, suppressed and service-rejected requests. Never returns tokens and never automatically retries.',
       input: WaitlistJoinBody.extend(PageReference).refine(pageSelection, {
         message: 'Give exactly one of handle or teamSlug',
       }),
@@ -138,7 +143,7 @@ export function waitlistTools({
       name: 'resend_waitlist_verification',
       title: 'Request another waitlist confirmation email',
       description:
-        'Explicitly requests another confirmation email after the invitee asks for one. Give exactly one of handle or teamSlug, slug and email. Uses the same durable limits and trusted connection IP as joining, including the 15-minute minimum between emails. Shares joining’s 10-call-per-minute budget per user across all keys, including duplicate, suppressed and service-rejected requests. The accepted response does not reveal whether an entry exists, is verified or received mail. Does not change preferences or expiry. Never returns tokens and never automatically retries.',
+        'Explicitly requests another confirmation email after the invitee asks for one. Give exactly one of handle or teamSlug, slug and email. Uses the same durable limits and trusted connection IP as joining, including the 15-minute minimum between emails. Shares joining’s 10-call-per-minute budget per user across all keys, including duplicate, suppressed and service-rejected requests. The accepted response does not reveal whether an entry exists, is verified or received mail. Requires configured SMTP; otherwise returns waitlist_smtp_not_configured. Does not change preferences or expiry. Never returns tokens and never automatically retries.',
       input: WaitlistResendBody.extend(PageReference).refine(pageSelection, {
         message: 'Give exactly one of handle or teamSlug',
       }),

@@ -241,3 +241,21 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Configure booking limits
+
+Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`: whole numbers from 1 to 1000, or `null` for no ceiling.
+Omitted update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. Event-type reads return all three settings. API keys need `full` scope
+for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
+CLI examples, host schedule time zones, Monday-based weeks, calendar months and
+counting rules. Lowering a ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

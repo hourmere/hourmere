@@ -195,6 +195,8 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   commit (deferred), so the open transaction never locks the booking against a cancel.
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
+  The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
+  discovery foundation; CalDAV is not yet enabled in the product.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
   `event_type_id`. A rescheduled booking is a new row linked by `rescheduled_from_id`.
 - **Deleting an account** cascades to the user's own data (profile, schedules,
@@ -394,9 +396,10 @@ members receive a null label, rendered as a neutral unknown member in the editor
 `event_types.max_bookings_per_day`, `max_bookings_per_week` and
 `max_bookings_per_month` are independent optional integer ceilings from 1 to 1000;
 NULL means that period has no limit. Migration 0057 adds the weekly and monthly
-columns as NULL without changing existing event types or bookings. Weekly and monthly
-writes are internal service configuration in this slice; REST, MCP, CLI and editor
-controls follow separately.
+columns as NULL without changing existing event types or bookings. The editor, REST,
+MCP and CLI expose all three ceilings as `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`. Omitted update fields preserve saved values; explicit null
+removes a ceiling. See [booking limits](https://hourmere.com/docs/booking-limits).
 
 Configured ceilings must not descend as periods get longer: day ≤ week, week ≤ month,
 and day ≤ month whenever each pair is set. The last rule also applies when week is

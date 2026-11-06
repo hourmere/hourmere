@@ -83,6 +83,8 @@ const eventKeys = [
   'minimumNoticeMinutes',
   'bookingWindowDays',
   'maxBookingsPerDay',
+  'maxBookingsPerWeek',
+  'maxBookingsPerMonth',
   'location',
   'questions',
   'notifications',

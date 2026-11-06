@@ -23,6 +23,7 @@ import {
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { cleanText } from './text.ts'
+import { WAITLIST_ABUSE_RETENTION_DAYS, WAITLIST_WINDOW_MAX_DAYS } from './waitlist-policy.ts'
 
 export interface WaitlistContext extends Omit<PublicContext, 'now'> {
   secret: string
@@ -281,8 +282,8 @@ function checkWindow(start: Date, end: Date, now: Date) {
   if (
     start.getTime() < now.getTime() ||
     end <= start ||
-    end.getTime() > now.getTime() + 62 * DAY ||
-    end.getTime() - start.getTime() > 62 * DAY
+    end.getTime() > now.getTime() + WAITLIST_WINDOW_MAX_DAYS * DAY ||
+    end.getTime() - start.getTime() > WAITLIST_WINDOW_MAX_DAYS * DAY
   )
     throw new DomainError('invalid', 'invalid_waitlist_window')
 }
@@ -482,7 +483,7 @@ export async function joinWaitlist(
   input: JoinWaitlistInput,
 ): Promise<{ accepted: true }> {
   const parsed = parseInput(input)
-  return ctx.db.transaction().execute(async (db) => {
+  const result = await ctx.db.transaction().execute(async (db) => {
     await ensureWaitlistKey(
       db,
       ctx.secret,
@@ -523,7 +524,8 @@ export async function joinWaitlist(
       .where('event_type_id', '=', et.id)
       .where('status', 'in', LIVE)
       .executeTakeFirstOrThrow()
-    if (!budget.allowed || Number(count.duplicate) > 0 || Number(count.n) >= 100) return accepted()
+    if (Number(count.n) >= 100) return 'full' as const
+    if (!budget.allowed || Number(count.duplicate) > 0) return accepted()
     const expiresAt = new Date(Math.min(now.getTime() + 30 * DAY, parsed.end.getTime()))
     const entry = await db
       .insertInto('waitlist_entries')
@@ -548,6 +550,9 @@ export async function joinWaitlist(
     await generation(db, ctx, entry, budget, now)
     return accepted()
   })
+  // Commit the IP/event admission debit even when no entry or email can be created.
+  if (result === 'full') throw new DomainError('conflict', 'waitlist_full')
+  return result
 }
 
 export async function resendWaitlistVerification(
@@ -956,7 +961,7 @@ export async function cleanupWaitlist(ctx: WaitlistContext, options: { limit?: n
     const requests = await db
       .selectFrom('waitlist_verification_requests')
       .select('id')
-      .where('requested_at', '<=', new Date(now.getTime() - 2 * DAY))
+      .where('requested_at', '<=', new Date(now.getTime() - WAITLIST_ABUSE_RETENTION_DAYS * DAY))
       .limit(limit)
       .execute()
     if (requests.length)
