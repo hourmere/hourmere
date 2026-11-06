@@ -524,7 +524,8 @@ export async function joinWaitlist(
       .where('event_type_id', '=', et.id)
       .where('status', 'in', LIVE)
       .executeTakeFirstOrThrow()
-    if (!budget.allowed || Number(count.duplicate) > 0 || Number(count.n) >= 100) return accepted()
+    if (Number(count.n) >= 100) throw new DomainError('conflict', 'waitlist_full')
+    if (!budget.allowed || Number(count.duplicate) > 0) return accepted()
     const expiresAt = new Date(Math.min(now.getTime() + 30 * DAY, parsed.end.getTime()))
     const entry = await db
       .insertInto('waitlist_entries')

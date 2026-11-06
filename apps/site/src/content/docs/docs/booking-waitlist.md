@@ -8,6 +8,10 @@ from the Hourmere Cloud signup waitlist on this website.
 
 ## Enable and manage a waitlist
 
+Waitlists require SMTP (`SMTP_URL` and `MAIL_FROM`) for verification and notification
+emails. Without SMTP, no waitlist email is sent and invitees cannot confirm; the public
+page hides the waitlist option and join/resend return HTTP 409 `waitlist_smtp_not_configured`.
+
 1. Open **Event types** in the intended personal or team space and edit the event type.
 2. Under **Booking waitlist**, select **Let invitees join a waitlist when no times are
    available**, then save.
@@ -64,13 +68,13 @@ pseudonymous records, not readable email addresses; removal does not reset these
 These are elapsed days, including across daylight-saving changes. An hourly bounded
 cleanup removes records after their deadlines; a backlog can delay physical deletion.
 Booked or expired contact details are cleared by cleanup, and minimal terminal entry
-metadata is retained for 7 days. Rotating the accounting secret retires old entries and
+metadata is retained for 7 days. Rotating the accounting secret (`BETTER_AUTH_SECRET`) clears all waitlist entries and
 resets the hash-based accounting boundary; it is not a normal unsubscribe action.
 
 Managers never receive verification, removal or booking-attribution tokens in entry
 responses. Treat emailed links as private capabilities. Do not forward them or include
-them in analytics, support tickets or logs. Configure SMTP before inviting real users:
-the development mailer logs email contents, including private links. Operators should
+them in analytics, support tickets or logs. Waitlist links are never written to the log;
+the development mailer does not send waitlist messages. Operators should
 review [proxy logging](/docs/self-hosting#proxy-behavior-and-an-existing-proxy) and apply
 their own privacy policy and access controls. The website's Cloud signup retention policy
 does not govern booking waitlists on a self-hosted instance.
@@ -112,7 +116,9 @@ Replace these example dates with a future empty period within the allowed range.
 consent before submitting; do not automatically retry join or resend. Refresh availability
 on HTTP 409 `availability_changed` or `waitlist_unavailable`. A missing waitlist secret
 also returns `waitlist_unavailable`; the operator must repair configuration. Unsupported
-event shapes return `waitlist_unsupported`. Rate limits return `rate_limited` with
+event shapes return `waitlist_unsupported`. Missing SMTP returns HTTP 409
+`waitlist_smtp_not_configured`. A full waitlist returns HTTP 409 `waitlist_full`, with no
+enrollment or confirmation email; try again later. Rate limits return `rate_limited` with
 `Retry-After`. See the instance's `/api/v1/openapi.json` for the complete current schema.
 Event creation/update also accepts `waitlist: { "enabled": true }`; omission on update
 preserves the setting. Confirmation and leaving use the emailed browser flow; admin
@@ -152,6 +158,11 @@ the invitee for explicit consent before joining. Join/resend share a per-user bu
 across API keys as well as durable mailbox, event and trusted connection-IP limits.
 
 ## Known limitations
+
+- SMTP (`SMTP_URL` and `MAIL_FROM`) is required; there is no log-mailer fallback.
+- Each event type allows at most 100 active entries (pending, active or notified). The
+  101st person sees a clear “This waitlist is full (100 entries). Please check available times later.” error,
+  rather than “check your email”; no entry or verification email is created.
 
 - No priority, reservation, guaranteed notification or guaranteed booking; email delivery
   depends on the worker, SMTP and shared recipient budgets.

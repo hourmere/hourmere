@@ -82,8 +82,46 @@ describe('booking waitlist documentation facts', () => {
     })
   }
 
+  it('documents the actual full-waitlist UI response', () => {
+    const phrase = 'This waitlist is full (100 entries). Please check available times later.'
+    const check = (runtime: string, docs: string) => {
+      expect(runtime).toContain(phrase)
+      expect(prose(docs)).toContain(phrase)
+    }
+    const runtime = read('../../web/src/public/WaitlistJoin.tsx')
+    check(runtime, guide)
+    expect(() => check(runtime.replace(phrase, 'Check your email'), guide)).toThrow(assertion)
+    expect(() => check(runtime, guide.replace(phrase, 'Check your email'))).toThrow(assertion)
+  })
+
+  it('names the secret and its waitlist rotation effect in both operator guides', () => {
+    const check = (source: string) => {
+      expect(source).toContain('BETTER_AUTH_SECRET')
+      expect(prose(source)).toContain('clears all waitlist entries')
+    }
+    for (const source of [guide, read('./content/docs/docs/configuration.md')]) {
+      check(source)
+      expect(() => check(source.replaceAll('BETTER_AUTH_SECRET', 'OTHER_SECRET'))).toThrow(
+        assertion,
+      )
+      expect(() =>
+        check(source.replace('clears all waitlist entries', 'preserves entries')),
+      ).toThrow(assertion)
+    }
+  })
+
   it('pins the remaining lifecycle bounds to their runtime expressions', () => {
     for (const [path, expression, phrase] of [
+      [
+        '../../../packages/notifications/src/waitlist.ts',
+        "if (!deps.smtpConfigured) return finish(db, claim, row, 'failed', at, 'smtp_not_configured')",
+        'Waitlists require SMTP (SMTP_URL and MAIL_FROM)',
+      ],
+      [
+        '../../../packages/scheduling/src/waitlist.ts',
+        'Number(count.n) >= 100',
+        'at most 100 active entries',
+      ],
       [
         '../../../packages/scheduling/src/waitlist.ts',
         'now.getTime() + 30 * 60_000',

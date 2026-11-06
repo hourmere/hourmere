@@ -1,6 +1,8 @@
 import type { Page } from '@playwright/test'
 import { expect, type FixtureApp, test } from '../fixtures.ts'
 
+test.use({ waitlistSmtp: true })
+
 for (const locale of ['en', 'zh-CN'] as const) {
   test.describe(`waitlist lifecycle in ${locale}`, () => {
     test.use({ locale })
@@ -106,6 +108,35 @@ for (const locale of ['en', 'zh-CN'] as const) {
         ]),
       )
       expect(await app.waitlistContacts()).toEqual([{ status: 'booked', cleared: false }])
+    })
+
+    test('disabling a confirmed entry after cancellation prevents notification', async ({
+      page,
+      app,
+    }) => {
+      const day = await enable(page, app)
+      await joinFullDay(page, app, day, 'waitlist-confirmed-disable@hourmere.invalid')
+      await app.openWaitlistVerification(page)
+      await page.getByRole('button', { name: confirm, exact: true }).click()
+      await expect(page.getByRole('status')).toContainText(
+        zh ? '邮箱已确认' : 'Your email is confirmed',
+      )
+      expect(await app.waitlistContacts()).toEqual([{ status: 'active', cleared: false }])
+      const { bookingId } = await app.waitlistIds()
+      const cancelled = await page.request.post(`${app.url}/api/v1/bookings/${bookingId}/cancel`, {
+        headers: { Origin: app.url },
+        data: {},
+      })
+      expect(cancelled.status()).toBe(200)
+      const before = (await app.waitlistState()).messages
+      await hostEditor(page, app)
+      await page.locator('#waitlist').uncheck()
+      await saveSettings(page)
+      await expect(page.locator('#waitlist')).not.toBeChecked()
+      expect(await app.waitlistContacts()).toEqual([{ status: 'removed', cleared: true }])
+      await app.deliverWaitlistNotifications()
+      expect(await app.waitlistContacts()).toEqual([{ status: 'removed', cleared: true }])
+      expect((await app.waitlistState()).messages).toBe(before)
     })
 
     test('leave clears details and disabling clears remaining entries without email', async ({

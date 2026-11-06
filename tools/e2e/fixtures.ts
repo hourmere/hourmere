@@ -110,6 +110,7 @@ export interface FixtureOptions {
   uiAudit: boolean
   notificationEditor: boolean
   slotSnippets: boolean
+  waitlistSmtp: boolean
 }
 export const test = base.extend<{
   app: FixtureApp
@@ -119,12 +120,14 @@ export const test = base.extend<{
   uiAudit: boolean
   notificationEditor: boolean
   slotSnippets: boolean
+  waitlistSmtp: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
   uiAudit: [false, { option: true }],
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
+  waitlistSmtp: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -140,7 +143,15 @@ export const test = base.extend<{
     { auto: true },
   ],
   app: async (
-    { context, automaticMeet, multiHostMeet, uiAudit, notificationEditor, slotSnippets },
+    {
+      context,
+      automaticMeet,
+      multiHostMeet,
+      uiAudit,
+      notificationEditor,
+      slotSnippets,
+      waitlistSmtp,
+    },
     use,
   ) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
@@ -447,6 +458,12 @@ export const test = base.extend<{
         BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
+        // SMTP availability enables waitlist admission. This web-only fixture never
+        // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
+        ...(waitlistSmtp && {
+          SMTP_URL: 'smtp://127.0.0.1:1',
+          MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
+        }),
         EMBED_ALLOWED_ORIGINS: parentUrl,
         ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
         ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
