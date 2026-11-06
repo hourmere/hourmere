@@ -17,6 +17,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
+  the editor, REST, MCP or CLI.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
@@ -42,6 +44,9 @@ The website at hourmere.com is separate from your Hourmere instance.
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
   self-hosting, linking, enforcement and the planned implementation sequence.
   Planned SSO is available to every instance without a paid-plan requirement.
+- [Booking limits](/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

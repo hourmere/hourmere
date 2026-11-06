@@ -51,8 +51,8 @@ arguments. Existing handle inputs are unchanged. Pass the exact-case team slug i
 
 Availability is the intersection of the complete **start and end** interval offered by each
 host. Every host's working hours, exceptions, DST, calendar busy intervals/freshness, buffers,
-notice, booking window and daily cap must allow the slot. The same UTC interval must belong
-to every host's candidate grid: 09:00/09:30 and 09:15/09:45 grids need not overlap. The public
+notice, booking window and daily, weekly and monthly caps must allow the slot. The same
+UTC interval must belong to every host's candidate grid: 09:00/09:30 and 09:15/09:45 grids need not overlap. The public
 20,000-candidate budget is shared across all hosts, so a collective search may require a
 shorter date range than a one-host search. It is not multiplied by the host count.
 
@@ -61,7 +61,7 @@ pre-read host set in sorted order. They share-lock and re-read the event configu
 checking every host again. A concurrent host-set change is refused; no extra host lock is
 appended out of order. All booking hosts, invitees, retry state, calendar targets and queued
 notifications commit or roll back together. Existing overlap constraints remain the final
-protection, with advisory locks also serializing buffers and daily limits.
+protection, with advisory locks also serializing buffers and daily, weekly and monthly limits.
 Host eligibility then share-locks verified users before their member rows, in sorted
 user-ID order. Leave, administrative removal and role changes take the organization
 update lock before any member lock, so they wait for this booking transaction and apply
