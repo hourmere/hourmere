@@ -43,6 +43,8 @@ it('requires explicit SCIM operator opt-in', () => {
     true,
   )
   expect(() => loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: 'yes' })).toThrow()
+  // An empty value (as written in .env.example) means "use the release default".
+  expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: '' }).SCIM_PROVISIONING_ENABLED).toBe(false)
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', () => {

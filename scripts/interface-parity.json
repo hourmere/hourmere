@@ -153,11 +153,11 @@
   },
   "createScimProvisioningToken": {
     "exemption": "browser-session-only",
-    "reason": "Provisioning credential management requires a verified organization owner/admin browser session without Authorization, like API key management."
+    "reason": "Provisioning credential creation requires a verified organization owner browser session without Authorization, like API key management."
   },
   "rotateScimProvisioningToken": {
     "exemption": "browser-session-only",
-    "reason": "Provisioning credential management requires a verified organization owner/admin browser session without Authorization, like API key management."
+    "reason": "Provisioning credential rotation requires a verified organization owner browser session without Authorization, like API key management."
   },
   "revokeScimProvisioningToken": {
     "exemption": "browser-session-only",

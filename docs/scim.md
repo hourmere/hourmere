@@ -1,8 +1,9 @@
 # SCIM provisioning design and token foundation
 
 Status: token foundation only, reviewed against official sources on **2026-11-06**.
-`SCIM_PROVISIONING_ENABLED=false` by default. Enabling it permits credential
-creation and rotation, not user provisioning; listing and revocation remain available while off: every `/scim/v2` resource remains unavailable.
+`SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
+it permits credential creation and rotation, not user provisioning. Listing and revocation remain
+available while it is off, and every `/scim/v2` resource remains unavailable either way.
 The proposed protocol and lifecycle sections below are implementation requirements,
 not a description of shipped Users or Groups handlers. Every instance, including
 self-hosted installations, gets the same feature without a license or subscription.
@@ -330,7 +331,11 @@ Users, Groups and discovery handlers remain unregistered in production code unti
 Users, Groups, conformance and release acceptance rows are complete. Every intermediate
 main commit can be released safely: `SCIM_PROVISIONING_ENABLED` enables credential
 creation/rotation only and cannot activate these resource handlers. The final release row
-alone owns changing production registration; test-only injection is never operator-accessible.
+alone owns changing production registration and changes the default of
+`SCIM_PROVISIONING_ENABLED` to on. `.env.example` writes the setting empty and Compose passes
+`${SCIM_PROVISIONING_ENABLED:-}`, so installs copied from `.env.example` follow that new default
+without editing `.env`; the release row's acceptance checks this. Test-only injection is never
+operator-accessible.
 
 | Step | Earlier / external dependencies | Owned endpoints / tools / commands | Flag state | Acceptance checks |
 |---|---|---|---|---|
@@ -360,7 +365,7 @@ alone owns changing production registration; test-only injection is never operat
 | RFC and provider corpus | Group retirement | No new endpoint/tool/command | Resources hard-off | RFC errors/filters/PATCH, Okta PUT/Entra variants, source-copy controls, bounded Postgres pools |
 | Local Keycloak harness | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
 | Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
-| Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers |
+| Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
 
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional

@@ -9,7 +9,7 @@ export const admin = {
     '无法更新预配令牌。请先查看令牌列表，再重试。',
   'New provisioning token': '新预配令牌',
   'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
-    '请立即复制此令牌。关闭令牌或离开此视图后，将无法再次查看。',
+    '请立即复制此令牌。隐藏令牌或离开此视图后，将无法再次查看。',
   'Copy token': '复制令牌',
   'Dismiss token': '隐藏令牌',
   'Provisioning token name': '预配令牌名称',
@@ -25,7 +25,7 @@ export const admin = {
   'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
     '旧令牌将继续有效一小时。请在此期间将身份提供方中的令牌更新为新令牌。重叠有效期结束前无法再次轮换。',
   'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
-    '撤销后，当前令牌及其上一版本将立即失效。此操作无法撤销。',
+    '撤销后，当前令牌及其上一版本将立即失效。此操作不可恢复。',
 
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
