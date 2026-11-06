@@ -208,7 +208,8 @@ describe.skipIf(!bootstrap)('round-robin winner-only durable integrations', () =
       webhook = webhookBookingNotifier(queue, settings)
     return async (trx, event, time) => {
       await email(trx, event, time)
-      await calendar(trx, event)
+      if (event.type !== 'reschedule_requested' && event.type !== 'reschedule_request_expired')
+        await calendar(trx, event)
       await webhook(trx, event, time)
     }
   }

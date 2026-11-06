@@ -411,6 +411,7 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
         '/api/v1/bookings/manage/reschedule',
       ],
       cancel_booking: ['/api/v1/bookings/{id}/cancel', '/api/v1/bookings/manage/cancel'],
+      request_reschedule: ['/api/v1/bookings/{id}/request-reschedule'],
       retry_conference: ['/api/v1/bookings/{id}/conference/retry'],
       retry_calendar_copy: ['/api/v1/bookings/{id}/calendar-copy/retry'],
     }
