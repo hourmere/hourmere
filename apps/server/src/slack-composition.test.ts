@@ -81,7 +81,7 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
       })
       expect(created.status).toBe(201)
       const createdText = await created.text()
-      expect(createdText.includes(syntheticUrl)).toBe(false)
+      expect(createdText).not.toContain(syntheticUrl)
       const destination = JSON.parse(createdText) as { id: string }
       const sample = await request(`/slack-destinations/${destination.id}/test`, 'POST')
       expect(sample.status).toBe(202)
@@ -174,7 +174,7 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
         },
         { timeout: 8000, interval: 50 },
       )
-      expect(spies.some((spy) => JSON.stringify(spy.mock.calls).includes(syntheticUrl))).toBe(false)
+      for (const spy of spies) expect(JSON.stringify(spy.mock.calls)).not.toContain(syntheticUrl)
     } finally {
       await running?.close()
       await owned.drop()

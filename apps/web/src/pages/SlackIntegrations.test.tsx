@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import styles from '../styles.css?raw'
 import {
   fakeApi,
   json,
@@ -41,6 +42,38 @@ async function open() {
 }
 
 describe('Slack settings', () => {
+  it('wraps the integration toggle and expanded actions within narrow panel content', async () => {
+    server({ [`GET ${base}`]: () => json(200, [destination]) })
+    const user = await open()
+    await screen.findByText(destination.url)
+    for (const language of ['en', 'zh-CN']) {
+      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      const panel = document.getElementById('integrations-heading')?.closest('section')
+      const buttons = panel?.querySelectorAll('button') ?? []
+      expect(buttons.length).toBeGreaterThanOrEqual(4)
+      const sheet = document.createElement('style')
+      sheet.textContent = styles
+      document.head.append(sheet)
+      try {
+        for (const button of buttons) {
+          const computed = getComputedStyle(button)
+          expect(computed.whiteSpace, button.textContent ?? '').toBe('normal')
+          expect(computed.maxWidth, button.textContent ?? '').toBe('100%')
+          expect(computed.overflowWrap, button.textContent ?? '').toBe('anywhere')
+        }
+        // Source-copy negative control: removing the scoped rule restores the original
+        // nowrap behavior and must fail the same rendered-button assertion.
+        sheet.textContent = styles.replace(/\.slack-integrations \.button\s*\{[^}]*\}/, '')
+        const toggle = buttons[0]
+        expect(toggle).toBeDefined()
+        expect(() =>
+          expect(getComputedStyle(toggle as Element).whiteSpace).toBe('normal'),
+        ).toThrow()
+      } finally {
+        sheet.remove()
+      }
+    }
+  })
   it('never displays event choices from another space after a context switch', async () => {
     server({
       'GET /api/v1/event-types': () =>
@@ -152,7 +185,7 @@ describe('Slack settings', () => {
     await user.click(screen.getByRole('button', { name: 'Save Slack destination' }))
     await screen.findByText(destination.url)
     expect(screen.getByLabelText<HTMLInputElement>('Replacement Slack webhook URL').value).toBe('')
-    expect(document.body.textContent?.includes(secret)).toBe(false)
+    expect(document.body.textContent).not.toContain(secret)
     expect(requests.to(`POST ${base}`)[0]?.headers.get('X-Expected-Organization-Id')).toBe(
       ME.organization.id,
     )

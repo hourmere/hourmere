@@ -22,7 +22,7 @@ export function SlackIntegrations({ organizationId }: { organizationId: string }
   const [open, setOpen] = useState(false)
   const confirmLeave = useConfirmLeave()
   return (
-    <section className="panel" aria-labelledby="integrations-heading">
+    <section className="panel slack-integrations" aria-labelledby="integrations-heading">
       <h2 id="integrations-heading">{t('Integrations')}</h2>
       <button
         type="button"
