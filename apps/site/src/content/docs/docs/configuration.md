@@ -14,6 +14,19 @@ Restart/recreate affected processes after changing configuration. The interactiv
 plain Compose file or the optional automatic HTTPS override; see
 [self-hosting](/docs/self-hosting) for the complete command sequence.
 
+## Web build
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VITE_PWA_ENABLED` | `true` | Build-time app installation and static offline shell. Empty or omitted uses the current default; only explicit `true` or `false` is otherwise accepted. Invalid values fail the build. `false` stops registration and emits a self-unregistering worker for existing clients. |
+
+The web build reads this setting from the repository-root `.env` or its process environment.
+Docker Compose forwards it from `.env` as a build argument; a direct Docker build needs
+`--build-arg VITE_PWA_ENABLED=false`. Rebuild and redeploy after changes: setting a variable
+on a running container cannot alter compiled files. Leave the example value empty to
+follow future defaults. See [turn off app installation](/docs/self-hosting#turn-off-app-installation)
+for commands and the delayed effect on clients that are offline.
+
 ## Server and database
 
 PostgreSQL 18+ is required because migrations use `uuidv7()`. The bundled Compose stack

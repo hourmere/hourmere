@@ -11,6 +11,7 @@ WORKDIR /app
 # --omit=dev alone. So everything the server imports at run time must be a regular
 # dependency of some workspace, as pg is, although better-auth lists it as optional.
 FROM base AS build
+ARG VITE_PWA_ENABLED=
 COPY . .
 RUN npm ci --ignore-scripts \
  && npm run build --workspace @hourmere/web \

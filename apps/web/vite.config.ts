@@ -1,15 +1,21 @@
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
+import { offlineShell } from './pwa/build.ts'
+import { pwaEnabled } from './pwa/config.ts'
 
 export default defineConfig(({ mode }) => {
   // The API server's port: PORT from the environment or the repository's .env, as the server
   // itself reads it (default 3000). Only used here, never exposed to the app's code.
   const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
-  const apiPort = loadEnv(mode, repoRoot, '').PORT || '3000'
+  const env = loadEnv(mode, repoRoot, '')
+  const apiPort = env.PORT || '3000'
+  const enabled = pwaEnabled(env.VITE_PWA_ENABLED)
 
   return {
-    plugins: [react()],
+    envDir: repoRoot,
+    define: { 'import.meta.env.VITE_PWA_ENABLED': JSON.stringify(String(enabled)) },
+    plugins: [react(), offlineShell(enabled)],
     build: {
       // Lightning CSS rewrites container ranges despite this target; esbuild preserves
       // min-width queries for Safari 16.0–16.3, which ignores range syntax.
