@@ -885,7 +885,6 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       encodeBookingCursor,
       cancelTeamBookingInTransaction,
       importedBookingIds,
-      resolvedBookingHosts,
       DomainError,
       isUuid,
       toTeamAdminBooking,

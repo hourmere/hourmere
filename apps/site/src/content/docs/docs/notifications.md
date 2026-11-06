@@ -24,6 +24,10 @@ exclude import-connected records before applying their page limit so ordinary wo
 continue behind stale imported intents. See the
 [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md).
 
+No-show marks are private attendance metadata. They send no email and do not reschedule,
+suppress or recreate reminders or follow-ups. Existing follow-up eligibility still uses
+the scheduled end, regardless of attendance. See [marking no-shows](/docs/no-shows).
+
 ## Configure reminders and follow-ups
 
 For host steps in the event-type editor, see

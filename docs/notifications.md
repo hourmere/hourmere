@@ -11,7 +11,3 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
-
-No-show marks are private attendance metadata. They send no email and do not reschedule,
-suppress or recreate reminders or follow-ups. Existing follow-up eligibility still uses
-the scheduled end, regardless of attendance. See [no-shows](https://hourmere.com/docs/no-shows).
