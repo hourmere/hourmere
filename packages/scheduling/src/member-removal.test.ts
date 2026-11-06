@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 import { MemberDepartureBookingSchema } from './member-departure-impact.ts'
 import {
@@ -50,7 +51,7 @@ function copies(change?: Change, target: Source = 'handling'): { read: Read; lat
     )(DomainError, isUuid) as typeof page
   }
   if (target !== 'handling') {
-    const bindings = { sql, ...page, DomainError, isUuid, toTeamAdminBooking }
+    const bindings = { sql, ...page, DomainError, isUuid, toTeamAdminBooking, resolvedBookingHosts }
     team = new Function(
       ...Object.keys(bindings),
       `${compile('packages/scheduling/src/team-bookings.ts', 'team')}; return { countTeamBookings, readTeamBookingPage }`,

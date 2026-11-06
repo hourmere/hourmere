@@ -49,6 +49,7 @@ export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  setEmbedSnippet: (snippet: string) => void
   configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
   configureWaitlist: (kind: 'personal' | 'team', enabled?: boolean) => Promise<string>
@@ -413,7 +414,16 @@ export const test = base.extend<{
         .insertInto('round_robin_state')
         .values({ event_type_id: roundId, enabled: true })
         .execute()
+      let embedSnippet = ''
       parent = createHttpServer((request, response) => {
+        if (request.url === '/generated-embed') {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8')
+          response.setHeader('Cache-Control', 'no-store')
+          response.end(
+            `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Generated embed acceptance</title><body>${embedSnippet}</body></html>`,
+          )
+          return
+        }
         if (
           uiAudit &&
           process.env.CI &&
@@ -509,6 +519,9 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        setEmbedSnippet: (snippet) => {
+          embedSnippet = snippet
+        },
         configureDurations: async () => {
           await db
             .updateTable('event_types')

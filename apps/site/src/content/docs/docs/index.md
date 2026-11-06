@@ -39,6 +39,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
+- Group seats currently have internal storage and service support only. Public booking
+  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
+  this limitation applies equally to self-hosted installations.
 
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
