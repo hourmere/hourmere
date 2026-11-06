@@ -28,9 +28,9 @@ attendance commands. Non-host bookings return the same `booking_not_found` respo
 missing bookings, without revealing whether they exist.
 
 The team booking list/detail whitelist adds `canManageNoShow` and attendee `id`,
-`noShowMarkedAt` and `noShowMarkedBy` to the fields documented in
-[team administrator booking fields](team-admin-bookings.md). The marker fields are nullable;
-each attendee ID identifies its own row even if multiple attendees share an email address.
+`noShowMarkedAt` and `noShowMarkedBy` to the existing team booking fields. The marker
+fields are nullable; each attendee ID identifies its own row even if multiple attendees
+share an email address.
 Clients must tolerate absent additive fields from older servers. These fields remain
 private and are absent from public and invitee-management responses.
 

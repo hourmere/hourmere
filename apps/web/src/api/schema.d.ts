@@ -2624,7 +2624,7 @@ export interface paths {
         put?: never;
         /**
          * Request to join a booking waitlist
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["joinPersonalWaitlist"];
         delete?: never;
@@ -2644,7 +2644,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly request another verification email
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendPersonalWaitlist"];
         delete?: never;
@@ -2859,7 +2859,7 @@ export interface paths {
         put?: never;
         /**
          * Request to join a booking waitlist
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["joinTeamWaitlist"];
         delete?: never;
@@ -2879,7 +2879,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly request another verification email
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendTeamWaitlist"];
         delete?: never;
@@ -9111,7 +9111,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9192,7 +9192,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9367,7 +9367,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9448,7 +9448,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;

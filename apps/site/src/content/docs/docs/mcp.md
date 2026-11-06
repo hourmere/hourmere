@@ -688,3 +688,10 @@ owner/admin status does not grant access to bookings hosted by other members thr
 MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
 Non-host team administrators must use a browser session. See the
 [no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

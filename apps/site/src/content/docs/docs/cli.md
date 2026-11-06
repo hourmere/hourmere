@@ -344,3 +344,10 @@ of every scope and MCP OAuth can read or mark attendees only on bookings the cal
 hosts in the current organization. Non-host team owners/admins need a browser session;
 agent credentials receive `booking_not_found`, just as for a missing booking.
 Invitee pages and messages are unchanged, including scheduled follow-ups.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

@@ -945,7 +945,7 @@ finds a matching opening. Each message has at most three exact suggestions. Ever
 enters the same cohort; there is no hold or priority. Shared mail limits, delivery failures
 and earlier bookings can result in partial delivery. Suppressed slots are never back-filled.
 Verification and availability messages use the ordinary booking-recipient budget and the
-instance cap, without the host/sign-in reserve. SMTP must be configured; private waitlist
+instance cap, without the host/sign-in reserve. SMTP (`SMTP_URL` and `MAIL_FROM`) must be configured; private waitlist
 messages and capabilities are never printed by the development mailer.
 
 The worker scans durable outboxes at startup and every minute in bounded batches; queue
@@ -981,6 +981,6 @@ to one-time booking tokens under `/book/`, `/embed/book/` and `/api/v1/book/`, a
 secret query strings and headers. The bundled Caddy configuration omits the complete URI;
 see [proxy behavior](/docs/self-hosting#proxy-behavior-and-an-existing-proxy).
 
-Public join UI, administration summaries and general REST/MCP/CLI waitlist operations are
-separate work. The minimal mail-link confirmations and optional public-booking attribution
-are available in this delivery layer.
+Public joining, host administration, REST/MCP/CLI operations, mail-link confirmations and
+optional public-booking attribution are available. See [booking waitlists](/docs/booking-waitlist)
+for setup, SMTP requirements, capacity errors and the complete lifecycle.
