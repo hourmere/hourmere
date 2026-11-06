@@ -54,6 +54,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -162,6 +164,22 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 `[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
+
+## Store organization branding
+
+`get_branding` reads the current organization's saved logo reference, primary color and
+WCAG contrast results (`full` or `read` keys). `set_branding` accepts `brandPrimaryColor`
+as `#RRGGBB` and `brandLogo` as an existing uploaded SHA-256 reference (`full` keys).
+Omitted fields stay unchanged; `null` clears a field. Personal owners and team
+owners/admins can use these tools; members cannot. Readable black or white button text
+is selected automatically. The background contrast is reported against white.
+
+Upload a PNG, JPEG or WebP through REST `POST /api/v1/branding/logo` or
+`hourmere branding upload --file logo.png --content-type image/png`; MCP accepts the
+returned reference, not binary image data or remote URLs. Uploads are limited to
+512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
+the current organization. SVG and animated images are rejected. This stores branding;
+public page and email theme application is not included yet.
 
 ## Configure booking limits
 

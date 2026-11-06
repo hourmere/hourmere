@@ -48,7 +48,10 @@ function copy(change?: [string, string]): typeof runCli {
     expect(source).toContain(change[0])
     source = source.replace(...change)
   }
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
   const bindings = { constants, open, ...client }
   return new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),

@@ -63,6 +63,13 @@ the existing status filters retain that meaning. No reschedule-chain identifier 
 
 ## Versioning
 
+Organization branding adds `GET/PATCH /api/v1/branding`, binary
+`POST /api/v1/branding/logo` and protected `GET /api/v1/branding/logo/{hash}`. PATCH
+preserves omitted settings; null clears them. Reads require full/read API keys and
+writes require full, together with personal ownership or a team owner/admin role.
+Session writes require `X-Expected-Organization-Id`. See [branding](/docs/branding) for
+the image envelope, content-hash references and automatic readable text selection.
+
 - Product endpoints live under `/api/v1`. A breaking change means `/api/v2`, not an edit.
 - Within a version, only additive changes: new endpoints, new optional request fields,
   new response fields. Clients must ignore fields they do not know.
