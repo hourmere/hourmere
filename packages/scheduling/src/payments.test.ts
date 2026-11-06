@@ -232,6 +232,26 @@ describe.skipIf(!url)('payment holds', () => {
     )
     return { ...setupData, id }
   }
+  it('admits a group slot after another event payment hold expires', async () => {
+    const { ctx, input, host } = await expiredHold()
+    const f = createFixtures(db)
+    const groupId = await f.eventType(host.organizationId, host.userId, {
+      slug: 'group-after-hold',
+      durationMinutes: 30,
+    })
+    await db
+      .updateTable('event_types')
+      .set({ booking_mode: 'group', group_capacity: 2 })
+      .where('id', '=', groupId)
+      .execute()
+    await expect(
+      createPublicBooking(ctx, {
+        ...input,
+        slug: 'group-after-hold',
+        idempotencyKey: 'group-replacement',
+      }),
+    ).resolves.toHaveProperty('booking.status', 'confirmed')
+  })
   it('replaying an overdue hold returns expired without renewing its deadline', async () => {
     const { id, ctx, input } = await expiredHold()
     const fingerprint = createHash('sha256')

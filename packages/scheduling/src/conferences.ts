@@ -2,6 +2,7 @@ import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { cancelGroupSlotConference, prepareGroupSlotConference } from './group-conferences.ts'
 import { cleanText } from './text.ts'
 
 export const automaticMeet = (location: unknown): boolean =>
@@ -273,9 +274,19 @@ export function meetOrganizer(
 export async function prepareBookingConference(ctx: PublicContext, trx: Db, bookingId: string) {
   const booking = await trx
     .selectFrom('bookings')
-    .select(['location', 'event_type_id', 'organization_id', 'rescheduled_from_id'])
+    .select([
+      'location',
+      'event_type_id',
+      'organization_id',
+      'rescheduled_from_id',
+      'group_slot_id',
+    ])
     .where('id', '=', bookingId)
     .executeTakeFirstOrThrow()
+  if (booking.group_slot_id) {
+    await prepareGroupSlotConference(ctx, trx, booking.group_slot_id)
+    return
+  }
   if (!automaticConference(booking.location)) return
   const root = await conferenceRoot(trx, bookingId)
   if (!root) return
@@ -394,6 +405,16 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
 
 /** Lock order is always booking row (already held by caller), then conference intent. */
 export async function cancelBookingConference(trx: Db, bookingId: string, now: Temporal.Instant) {
+  const seat = await trx
+    .selectFrom('bookings')
+    .select('group_slot_id')
+    .where('id', '=', bookingId)
+    .executeTakeFirst()
+  if (seat?.group_slot_id) {
+    await cancelGroupSlotConference(trx, seat.group_slot_id, now)
+    return
+  }
+
   await trx
     .updateTable('booking_conferences')
     .set({
@@ -441,20 +462,29 @@ export async function bookingConferenceViews(
   const rows = await db
     .selectFrom('bookings as b')
     .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    .leftJoin('group_slot_conferences as gc', 'gc.group_slot_id', 'b.group_slot_id')
+    .leftJoin('group_slots as gs', 'gs.id', 'b.group_slot_id')
     // Drive hydration from every booking, including a predecessor whose conference
     // pointer moved to its successor after the initial booking read. No extra query
     // or transaction is needed to keep lifecycle, location and readiness together.
     .select([
       'b.id as booking_id',
       'b.status as booking_status',
-      'b.location as booking_location',
+      sql<Json | null>`CASE WHEN b.group_slot_id IS NULL THEN b.location
+        WHEN b.status='confirmed' AND gs.state='open' AND gc.state='ready'
+          AND gc.applied_revision=gc.revision AND gc.join_url IS NOT NULL
+        THEN gs.location || jsonb_build_object('url',gc.join_url)
+        ELSE gs.location END`.as('booking_location'),
+      'b.group_slot_id',
       'b.cancelled_at as booking_cancelled_at',
       'b.cancel_reason as booking_cancel_reason',
-      'c.root_booking_id',
-      'c.provider',
-      'c.state',
-      'c.error_code',
-      'c.organizer_user_id',
+      sql<string | null>`coalesce(c.root_booking_id,gc.group_slot_id)`.as('root_booking_id'),
+      sql<string | null>`coalesce(c.provider,gc.provider)`.as('provider'),
+      sql<string | null>`coalesce(c.state,gc.state)`.as('state'),
+      sql<string | null>`coalesce(c.error_code,gc.error_code)`.as('error_code'),
+      sql<string | null>`coalesce(c.organizer_user_id,gc.organizer_user_id)`.as(
+        'organizer_user_id',
+      ),
     ])
     .$if(callerUserId !== undefined, (q) =>
       q
@@ -472,16 +502,20 @@ export async function bookingConferenceViews(
     .select((eb) =>
       eb
         .or([
-          eb('c.invitation_organizer_email', 'is', null),
+          sql<boolean>`coalesce(c.invitation_organizer_email,gc.invitation_organizer_email) IS NULL`,
           eb.exists(
             eb
               .selectFrom('auth.user as u')
               .innerJoin('auth.member as m', 'm.userId', 'u.id')
               .select('u.id')
-              .whereRef('u.id', '=', 'c.organizer_user_id')
+              .where(sql<boolean>`u.id=coalesce(c.organizer_user_id,gc.organizer_user_id)`)
               .where('u.emailVerified', '=', true)
-              .whereRef('m.organizationId', '=', 'c.organization_id')
-              .whereRef('u.email', '=', 'c.invitation_organizer_email'),
+              .where(
+                sql<boolean>`m."organizationId"=coalesce(c.organization_id,gc.organization_id)`,
+              )
+              .where(
+                sql<boolean>`u.email=coalesce(c.invitation_organizer_email,gc.invitation_organizer_email)`,
+              ),
           ),
         ])
         .as('organizer_available'),
@@ -522,6 +556,7 @@ export async function bookingConferenceViews(
         ...(callerUserId !== undefined && r.root_booking_id
           ? {
               conferenceCanRetry:
+                !r.group_slot_id &&
                 !unavailable.has(r.booking_id) &&
                 r.error_code !== 'organizer_unavailable' &&
                 ownOrganizers.has(r.booking_id),
@@ -565,3 +600,5 @@ export interface CalendarCopyStatus {
   errorCode: string | null
   canRetry: boolean
 }
+
+export { releaseGroupSeatInvitations } from './group-conferences.ts'

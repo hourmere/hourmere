@@ -8,7 +8,7 @@ backup/restore procedure, not an older binary against the new schema.
 Existing bookings retain their status, timestamps and physical rows. The three new
 columns default to null/null/false. Only confirmed bookings and pending-payment holds
 own active host occupancy; expiry and cancellation release it atomically through the
-existing booking-host triggers. Migration 0061 is reserved by another open PR.
+existing booking-host triggers. Migration 0061 supplies the preceding group-slot resource schema.
 
 Keep `PAID_BOOKINGS_ENABLED=false`. This revision has internal services and a fake
 provider only, with no Checkout, price configuration, Stripe adapter or public payment
@@ -17,7 +17,7 @@ expired, cancelled or settled after admission is disabled; the minute expiry job
 runs. Actual refund execution and financial retention are follow-up work. Never use
 this foundation to accept real money.
 
-`payment-holds-migration.test.ts` upgrades realistic populated 0060 data, compares all
+`payment-holds-migration.test.ts` upgrades realistic populated 0061 data, compares all
 pre-existing columns and physical row identities, checks a fresh installation and a
 no-op rerun, and exercises source-copy negative controls for lifecycle and occupancy.
 See [the payment design](../../../docs/payments.md).

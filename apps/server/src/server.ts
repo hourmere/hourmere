@@ -38,6 +38,7 @@ import {
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
   createWaitlistEmailWorker,
+  groupHostMailJob,
   type InvitationEmailQueue,
   invitationEmailJob,
   invitationEmailRepairJob,
@@ -430,7 +431,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         }
       : {}),
   }
-  let enqueueConference: (id: string) => Promise<unknown> = async () => {}
+  let enqueueConference: (id: string, group?: boolean) => Promise<unknown> = async () => {}
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   let enqueueBookingCalendar: (id: string) => Promise<unknown> = async () => {}
   let enqueueWritebackRecovery: (connectionId: string, after?: string) => Promise<unknown> =
@@ -506,6 +507,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
       bookingNotificationJob(notificationDeps),
+      groupHostMailJob(notificationDeps),
       scheduledBookingEmailJob(notificationDeps),
       scheduledBookingEmailRepairJob(notificationDeps, scheduledQueue),
       conferenceNotificationDispatchJob(notificationDeps),
@@ -516,7 +518,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       invitationEmailRepairJob(repairInvitations),
       bookingConferenceJob(calendarDeps),
-      conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
+      conferenceDispatchJob(calendarDeps, (id, group) => enqueueConference(id, group)),
       conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
@@ -549,8 +551,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       { singletonKey: connectionId },
     )
   enqueueCalendar = (id) => jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id })
-  enqueueConference = (id) =>
-    jobs.enqueue('booking-conference', { rootBookingId: id }, { singletonKey: id })
+  enqueueConference = (id, group = false) =>
+    jobs.enqueue('booking-conference', group ? { groupSlotId: id } : { rootBookingId: id }, {
+      singletonKey: group ? `group:${id}` : id,
+    })
   try {
     await jobs.start()
   } catch (err) {

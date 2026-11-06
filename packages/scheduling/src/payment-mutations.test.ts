@@ -3,8 +3,9 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { findSlots } from './availability.ts'
-import { insertBooking, requireOfferedSlot } from './bookings.ts'
+import { findPublicEventType, findSlots } from './availability.ts'
+import { insertBooking, lockHosts, requireOfferedSlot } from './bookings.ts'
+import { admitGroupSlot } from './group-seat-admission.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { confirmPaymentHold, createPaymentHold } from './payments.ts'
 import { createFixtures } from './testing.ts'
@@ -85,28 +86,26 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       now: ctx.now(),
     }
     if (overdue)
-      await db
-        .transaction()
-        .execute((trx) =>
-          insertBooking(trx, {
-            organizationId: host.organizationId,
-            eventTypeId,
-            start,
-            end: q.end,
-            title: 'Expired',
-            location: null,
-            responses: {},
-            source: 'web',
-            apiKeyId: null,
-            hostUserIds: [host.userId],
-            hostsUseDefaultSchedule: false,
-            attendees: [],
-            notificationSnapshot: notificationSnapshot(null),
-            manageTokenHash: null,
-            paymentHoldExpiresAt: ctx.now().subtract({ minutes: 1 }).toString(),
-          }),
-        )
-    return { ctx, input, q }
+      await db.transaction().execute((trx) =>
+        insertBooking(trx, {
+          organizationId: host.organizationId,
+          eventTypeId,
+          start,
+          end: q.end,
+          title: 'Expired',
+          location: null,
+          responses: {},
+          source: 'web',
+          apiKeyId: null,
+          hostUserIds: [host.userId],
+          hostsUseDefaultSchedule: false,
+          attendees: [],
+          notificationSnapshot: notificationSnapshot(null),
+          manageTokenHash: null,
+          paymentHoldExpiresAt: ctx.now().subtract({ minutes: 1 }).toString(),
+        }),
+      )
+    return { ctx, input, q, host }
   }
   async function disabled(api = createPaymentHold) {
     const { ctx, input } = await fixture()
@@ -136,6 +135,102 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       .execute()
     expect(rows.map((r) => r.status)).toEqual(['expired'])
   }
+  async function groupAdmission(api = admitGroupSlot) {
+    const { ctx, q, host } = await fixture(true)
+    const eventTypeId = await createFixtures(db).eventType(host.organizationId, host.userId, {
+      slug: 'group-copy',
+      durationMinutes: 30,
+    })
+    await db
+      .updateTable('event_types')
+      .set({ booking_mode: 'group', group_capacity: 2 })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const event = await findPublicEventType(db, host.handle, 'group-copy')
+    if (!event) throw new Error('Missing fixture')
+    await expect(
+      db.transaction().execute(async (trx) => {
+        await lockHosts(trx, [host.userId])
+        const slot = await api(trx, {
+          event,
+          start: q.start,
+          end: q.end,
+          now: ctx.now(),
+          snapshot: notificationSnapshot(null),
+          bookerEmail: 'group-copy@example.com',
+        })
+        if (!slot) throw new Error('Missing group slot')
+        return insertBooking(trx, {
+          organizationId: host.organizationId,
+          eventTypeId,
+          start: q.start,
+          end: q.end,
+          title: 'Group',
+          location: slot.location,
+          locationOption: slot.locationOption,
+          groupSlotId: slot.id,
+          responses: {},
+          source: 'web',
+          apiKeyId: null,
+          hostUserIds: [host.userId],
+          hostsUseDefaultSchedule: false,
+          attendees: [
+            {
+              name: 'Synthetic',
+              email: 'group-copy@example.com',
+              timeZone: 'UTC',
+              locale: null,
+              isBooker: true,
+            },
+          ],
+          notificationSnapshot: notificationSnapshot(null),
+        })
+      }),
+    ).resolves.toHaveProperty('id')
+  }
+  it('detects missing group admission cleanup in an isolated source copy', async () => {
+    await groupAdmission()
+    const mutant = await copy(
+      './group-seat-admission.ts',
+      'admitGroupSlot',
+      'await expirePaymentHolds({ db, hostUserId: hostId })',
+      '',
+    )
+    await expect(
+      groupAdmission(mutant.admitGroupSlot as typeof admitGroupSlot),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function notificationPolicy(api = createPaymentHold) {
+    const { ctx, input, q } = await fixture()
+    await db
+      .updateTable('event_types')
+      .set({ notifications: JSON.stringify({ reminders: [], followUps: [] }) })
+      .where('id', '=', q.eventTypeId)
+      .execute()
+    const { id } = await api(ctx, input)
+    const row = await db
+      .selectFrom('bookings')
+      .select('notification_snapshot')
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()
+    expect(row.notification_snapshot).toEqual({
+      version: 1,
+      executionMode: 'configurable',
+      notifications: { reminders: [], followUps: [] },
+    })
+  }
+  it('detects substituting default reminders for the event policy', async () => {
+    await notificationPolicy()
+    const mutant = await copy(
+      './payments.ts',
+      'createPaymentHold',
+      'createNotificationSnapshot(model.notifications)',
+      "createNotificationSnapshot({ reminders: [{ id: 'default-24h', offsetMinutes: 1440, recipients: { invitee: true, guests: true, host: true } }], followUps: [] })",
+    )
+    await expect(
+      notificationPolicy(mutant.createPaymentHold as typeof createPaymentHold),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
   it('detects disabled flag removal in an isolated source copy', async () => {
     await disabled()
     const mutant = await copy(

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
+import { groupFixture, occupiedSlot } from './group-seats-fixtures.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { seedEarly } from './upgrade-path-seed-early.ts'
@@ -11,7 +12,7 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0062_payment_holds.sql'
-const predecessor = '0060_calcom_import_state.sql'
+const predecessor = '0061_group_slot_resources.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
 
 interface Table {
@@ -78,6 +79,26 @@ async function seedPredecessor(directory: string) {
       source_fingerprint,target_fingerprint,policy,contract_version)
       SELECT source.id,'booking','101',imported.id,repeat('b',64),repeat('c',64),
         'local_only_read_only',1 FROM source,imported`)
+    const group = await groupFixture(owned.pool)
+    const { slot } = await occupiedSlot(group)
+    await owned.pool.query(
+      `WITH message AS (
+      INSERT INTO group_slot_host_messages (group_slot_id,kind,rule_id,revision,due_at,expires_at,
+        state,attempts,next_attempt_at)
+      VALUES ($1,'calendar','calendar',2,'2030-01-01T01:02:03.123456Z',
+        '2030-01-02T01:02:03.654321Z','sent',1,'2030-01-01T01:02:03.123456Z') RETURNING id
+    ) INSERT INTO group_slot_host_mail_receipts (message_id,revision,outcome,created_at)
+      SELECT id,2,'sent','2030-01-01T01:02:04.123456Z' FROM message`,
+      [slot],
+    )
+    await owned.pool.query(
+      `INSERT INTO group_slot_conferences
+      (group_slot_id,organization_id,organizer_user_id,provider,invitation_organizer_name,
+        invitation_organizer_email,state,attempts,next_attempt_at,updated_at)
+      VALUES ($1,$2,$3,'google_meet','Shared organizer','shared@example.test','pending',1,
+        '2030-01-01T01:02:03.123456Z','2030-01-01T01:02:03.654321Z')`,
+      [slot, group.organization, group.host],
+    )
     return owned
   } catch (error) {
     await owned?.drop()
@@ -136,6 +157,25 @@ interface Guard {
 }
 
 const guards: Guard[] = [
+  {
+    name: 'paid confirmed insert requires payment reference',
+    mutate: (source) =>
+      source.replace(
+        "(status <> 'confirmed' OR payment_hold_expires_at IS NULL OR payment_reference IS NOT NULL)",
+        'true',
+      ),
+    check: async ({ pool, booking }) => {
+      await expect(
+        pool.query(
+          `INSERT INTO bookings
+        (organization_id,event_type_id,start_at,end_at,title,source,status,payment_hold_expires_at)
+        SELECT organization_id,event_type_id,start_at,end_at,title,source,'confirmed',payment_hold_expires_at
+        FROM bookings WHERE id=$1`,
+          [booking],
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'bookings_payment_hold_shape' })
+    },
+  },
   {
     name: 'refund obligation only on released holds',
     mutate: (source) =>
@@ -281,7 +321,13 @@ const guards: Guard[] = [
   },
   {
     name: 'paid confirmation requirement',
-    mutate: (source: string) => source.replace('NEW.payment_reference IS NULL OR ', ''),
+    mutate: (source: string) =>
+      source
+        .replace('NEW.payment_reference IS NULL OR ', '')
+        .replace(
+          "(status <> 'confirmed' OR payment_hold_expires_at IS NULL OR payment_reference IS NOT NULL)",
+          'true',
+        ),
     check: async ({ pool, booking }: HoldFixture) => {
       await expect(
         pool.query("UPDATE bookings SET status='confirmed' WHERE id=$1", [booking]),
@@ -411,7 +457,7 @@ describe.skipIf(!serverUrl)('pending-payment migration upgrade', () => {
     60_000,
   )
 
-  it('preserves populated 0060 tuples, matches fresh installation and reruns without writes', async () => {
+  it('preserves populated 0061 tuples, matches fresh installation and reruns without writes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-payment-upgrade-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -419,7 +465,10 @@ describe.skipIf(!serverUrl)('pending-payment migration upgrade', () => {
       upgraded = await seedPredecessor(directory)
       const tables = await inventory(upgraded.pool)
       const before = await records(upgraded.pool, tables)
-      expect(before['public.bookings']).toHaveLength(9)
+      expect(before['public.bookings']).toHaveLength(10)
+      expect(before['public.group_slot_host_messages']).toHaveLength(1)
+      expect(before['public.group_slot_host_mail_receipts']).toHaveLength(1)
+      expect(before['public.group_slot_conferences']).toHaveLength(1)
       expect(before['public.booking_hosts']?.length).toBeGreaterThan(0)
       expect(before['public.booking_notifications']).toHaveLength(12)
       expect(before['public.import_items']).toHaveLength(1)

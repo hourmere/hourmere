@@ -124,6 +124,7 @@ function copiedBooking(change?: readonly [string, string]) {
     toIso: (value: Temporal.Instant) => value.toString(),
     insertBooking: async () => ({ id: 'synthetic-booking', manageToken: null }),
     prepareBookingConference: noop,
+    admitGroupSlot: noop,
     loadBooking: async () => ({}),
     pgError: () => ({}),
   }
