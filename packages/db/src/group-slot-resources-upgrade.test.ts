@@ -14,9 +14,13 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
     let old: TestDatabase | undefined, fresh: TestDatabase | undefined
     try {
       for (const name of await readdir(migrationsDir))
-        if (name.endsWith('.sql') && name < '0060')
+        if (name.endsWith('.sql') && name < '0061')
           await copyFile(join(migrationsDir, name), join(directory, name))
       old = await createTestDatabase(serverUrl as string, directory)
+      expect(
+        (await old.pool.query('SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1'))
+          .rows,
+      ).toEqual([{ name: '0060_calcom_import_state.sql' }])
       const f = await groupFixture(old.pool)
       const location = { kind: 'link', url: 'https://example.test/shared' }
       const ids = await transaction(old.pool, async (client) => {
@@ -45,7 +49,7 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const slots = (
         await old.pool.query('SELECT to_jsonb(s)::text AS row FROM group_slots s ORDER BY id')
       ).rows
-      await runMigrations(old.pool)
+      expect(await runMigrations(old.pool)).toEqual(['0061_group_slot_resources.sql'])
       expect(
         (
           await old.pool.query(
@@ -87,5 +91,5 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       await fresh?.drop()
       await rm(directory, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 })

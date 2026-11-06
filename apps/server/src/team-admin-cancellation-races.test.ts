@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
@@ -27,6 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as availability from '../../../packages/scheduling/src/availability.ts'
 import * as bookingPage from '../../../packages/scheduling/src/booking-page.ts'
 import * as conferences from '../../../packages/scheduling/src/conferences.ts'
+import * as groupSeatAdmission from '../../../packages/scheduling/src/group-seat-admission.ts'
 import * as hosts from '../../../packages/scheduling/src/hosts.ts'
 import * as notificationSettings from '../../../packages/scheduling/src/notification-settings.ts'
 import * as questions from '../../../packages/scheduling/src/questions.ts'
@@ -72,10 +73,13 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
     {
       createHash,
       randomBytes,
+      importedBookingIds,
+      isImportedBooking,
       sql,
       ...availability,
       ...bookingPage,
       ...conferences,
+      ...groupSeatAdmission,
       ...hosts,
       ...notificationSettings,
       ...questions,
@@ -600,7 +604,14 @@ describe.skipIf(!bootstrap)(
         const source = guestLocks[action]
         const row = action === 'cancel' ? 'row' : 'old'
         const following = `    const ${row} = await lockManagedBooking(trx, hash)`
-        const copy = await guestRoutesCopy(`${source}\n${following}`, `${following}\n${source}`)
+        const groupLock =
+          action === 'cancel'
+            ? '    await lockGroupBooking(trx, target.id)'
+            : '    await lockGroupBooking(trx, target.id, start, durationMinutes)'
+        const copy = await guestRoutesCopy(
+          `${source}\n${groupLock}\n${following}`,
+          `${following}\n${source}\n${groupLock}`,
+        )
         await expect(verifyGuestRace(action, 'admin', copy)).rejects.toMatchObject({
           name: 'AssertionError',
           actual: 'booking locked before organization',

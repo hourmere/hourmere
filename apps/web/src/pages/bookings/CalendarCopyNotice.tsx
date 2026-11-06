@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged } from '../../api/errors.ts'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
@@ -23,7 +24,7 @@ export function CalendarCopyNotice({
   const callback = useRef(onChange)
   callback.current = onChange
   const request = useRef<AbortController | null>(null)
-  const state = booking.calendarCopy
+  const state = isReadOnlyBooking(booking) ? undefined : booking.calendarCopy
   const copyStatus = state?.status
   const lifecycle = `${booking.id}:${booking.status}:${booking.start}:${booking.end}`
   const currentLifecycle = useRef(lifecycle)

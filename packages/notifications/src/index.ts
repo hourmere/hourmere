@@ -4,7 +4,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
-import type { Db, Json } from '@hourmere/db'
+import { type Db, importedBookingCondition, isImportedBooking, type Json } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import {
   type BookingEmailKind,
@@ -168,6 +168,7 @@ export async function enqueueBookingNotifications(
   if (!transaction.isTransaction) {
     throw new Error('enqueueBookingNotifications needs the transaction that writes the booking')
   }
+  if (await isImportedBooking(transaction as Db, event.bookingId)) return
   await enqueueGroupHostMail(transaction as Db, event.bookingId, now)
   const send = (kind: NotificationKind, startAfter?: Temporal.Instant) =>
     queue.enqueue(
@@ -594,6 +595,7 @@ export async function sendOnce(
   let suppression: { reason: SuppressionReason; recipientHash: string } | undefined
   try {
     const outcome = await deps.db.transaction().execute(async (trx) => {
+      if (await isImportedBooking(trx, key.bookingId)) throw new Overtaken()
       if (key.verifiedHost) {
         // Parent protection before the notification's booking FK, matching user-deletion
         // order. Hold verification/address stable until this bounded SMTP attempt ends.
@@ -1101,6 +1103,7 @@ export async function conferenceNotificationAllowed(
   kind: NotificationKind,
   configurable = false,
 ) {
+  if (await isImportedBooking(db, bookingId)) return false
   if (kind === 'cancelled') return true
   const row = await db
     .selectFrom('bookings as b')
@@ -1169,6 +1172,7 @@ async function claimConferenceNotification(
       .innerJoin('booking_notification_conference_context as c', 'c.booking_id', 'b.id')
       .select(['n.booking_id', 'n.kind', 'n.attempts'])
       .where('n.delivered', '=', false)
+      .where((eb) => eb.not(importedBookingCondition(eb.ref('n.booking_id'))))
       .where('n.skipped_at', 'is', null)
       .where('n.exhausted_at', 'is', null)
       .where('n.attempts', '<', CONFERENCE_NOTIFICATION_ATTEMPTS)

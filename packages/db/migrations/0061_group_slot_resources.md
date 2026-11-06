@@ -18,7 +18,7 @@ release before enabling group service callers. Group mode remains absent from pu
 creation/configuration surfaces in this service-layer release. Use the documented
 backup/restore procedure for rollback.
 
-The upgrade test starts at migration 0059 with two occupied seats, a shared location,
+The upgrade test starts at migration 0060 with two occupied seats, a shared location,
 private responses and host occupancy. It verifies preservation, location backfill,
 immutable/shared option enforcement, fresh-schema equality and a no-op rerun. All SQL
 runs against owned throwaway test databases.

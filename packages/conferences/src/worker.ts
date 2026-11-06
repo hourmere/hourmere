@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Db } from '@hourmere/db'
+import { type Db, isImportedBooking } from '@hourmere/db'
 import type { ConferenceResult, ConferenceWork } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { conferenceEncryptionKey } from './credentials.ts'
@@ -52,6 +52,8 @@ function interpreted(meeting: ZoomMeeting, c: ConferenceWork): ConferenceResult 
 /** The caller's durable root claim commits before this callback can make its sole POST. */
 export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMeetingsClient) {
   return async (c: ConferenceWork, signal: AbortSignal): Promise<ConferenceResult> => {
+    if (await isImportedBooking(deps.db, c.rootBookingId))
+      return failure('imported_booking_read_only', c)
     if (c.booking.status === 'cancelled' && !c.createStarted && !c.meetingId)
       return { cancelled: true }
     if (!deps.zoom || !c.connectionId || !c.externalUserId) return failure('needs_reauth', c)

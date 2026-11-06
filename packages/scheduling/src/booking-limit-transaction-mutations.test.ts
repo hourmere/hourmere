@@ -1,6 +1,7 @@
 import * as Crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import * as HourmereDb from '@hourmere/db'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
@@ -30,6 +31,7 @@ type Change = readonly [string, string]
 const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
+  '@hourmere/db': HourmereDb,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
   './conferences.ts': Conferences,

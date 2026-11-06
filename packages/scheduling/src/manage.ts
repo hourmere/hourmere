@@ -9,6 +9,7 @@ import {
   selectDurationMinutes,
 } from './availability.ts'
 import {
+  assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
   type Booking,
   getHostBooking,
@@ -112,6 +113,7 @@ async function listBookingSlots(
   }: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
   asInvitee = false,
 ): Promise<SlotView[]> {
+  await assertBookingLocallyManaged(ctx.db, booking.id)
   const now = ctx.now()
   if (booking.status === 'cancelled') {
     throw new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')

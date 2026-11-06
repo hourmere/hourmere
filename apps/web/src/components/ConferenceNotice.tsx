@@ -1,5 +1,6 @@
 import { displayConferenceUrl } from '@hourmere/core/conference-url'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { isReadOnlyBooking } from '../api/booking-policy.ts'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { isOrganizationContextChanged } from '../api/errors.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -46,8 +47,9 @@ export function ConferenceNotice({
     setRetrying(false)
     return () => retryRequest.current?.abort()
   }, [lifecycle])
+  const readOnly = isReadOnlyBooking(booking) || isReadOnlyBooking(current)
   const status = current.conference?.status
-  const canRead = Boolean(manageToken) || host
+  const canRead = !readOnly && (Boolean(manageToken) || host)
   useEffect(() => {
     const forced = refresh !== consumedRefresh.current
     consumedRefresh.current = refresh
@@ -131,7 +133,7 @@ export function ConferenceNotice({
     }
   }
 
-  if (!current.conference) return null
+  if (readOnly || !current.conference) return null
   const cancelled = current.status === 'cancelled'
   const zoom = current.conference.provider === 'zoom'
   const url = displayConferenceUrl(current.conference.provider, current.location?.url)
