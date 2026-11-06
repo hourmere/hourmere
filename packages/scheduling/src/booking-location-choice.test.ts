@@ -158,7 +158,11 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
     expect(result.booking.location).toEqual({ kind: 'in_person', address: 'Private office' })
   }
   it.each([
-    ['resolved choice persistence', 'location: choice.location,', 'location: current.location,'],
+    [
+      'resolved choice persistence',
+      'location: groupSlot ? groupSlot.location : choice.location,',
+      'location: current.location,',
+    ],
     [
       'explicit option selection',
       '...(input.locationOptionId !== undefined && { optionId: input.locationOptionId }),',
@@ -182,7 +186,12 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
     expect((await snapshot(result.booking.id)).location_option).toEqual(options[1])
   }
   it.each([
-    ['creation snapshot', 'locationOption: choice.locationOption,', 'locationOption: null,', false],
+    [
+      'creation snapshot',
+      'locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,',
+      'locationOption: null,',
+      false,
+    ],
     ['reschedule snapshot', 'locationOption: old.location_option,', 'locationOption: null,', true],
   ] as const)('detects lost %s', async (_name, before, after, move) => {
     await verifySnapshot(Bookings, move)
