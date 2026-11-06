@@ -81,7 +81,7 @@ export function openTimeSnippetRoutes(
             400: 'invalid_request, invalid_event_type_selector, ambiguous_event_type_slug, invalid_slug, invalid_range, range_too_long, invalid_count, invalid_duration, invalid_locale, invalid_time_zone',
             403: 'insufficient_role',
             404: 'slot_snippets_disabled, event_type_not_found',
-            409: 'no_available_slots',
+            409: 'no_available_slots, calendar_sync_unavailable',
           }),
         },
       }),

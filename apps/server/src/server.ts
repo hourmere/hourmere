@@ -278,7 +278,9 @@ export function productTools({
       successRedirectPolicy,
     }),
     ...oneTimeLinkTools({ db, publicUrl }),
-    ...openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    ...(slotSnippetsEnabled
+      ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
+      : []),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },

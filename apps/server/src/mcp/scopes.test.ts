@@ -85,7 +85,7 @@ const denial = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
 }
-const catalog = productTools({ db: {} as Db })
+const catalog = productTools({ db: {} as Db, slotSnippetsEnabled: true })
 function principal(scope: ApiKeyScope): McpCaller {
   return {
     kind: 'api_key',

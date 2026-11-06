@@ -311,6 +311,12 @@ limited to MCP tools and do not authenticate REST requests.
 
 ### API key scopes
 
+Keys have one immutable scope: `full`, `read` or `bookings`. The web creation form defaults
+to `bookings` for AI agents; `read` suits analytics/reporting, and **Full account access**
+(`full`) also permits account configuration changes. Existing roles, ownership and host
+visibility still apply. Neither `read` nor `bookings` removes existing visible attendee
+details or meeting links, and `bookings` can manage previously created bookings you host.
+
 `POST /api/v1/open-time-snippets` is explicitly classified as a booking read: `read`,
 `bookings` and `full` keys may call it with personal-owner or team-owner/admin permission.
 It reads availability and formats ordinary reusable public links without minting a
@@ -318,12 +324,6 @@ capability, reserving a time or changing configuration. The shared service also 
 MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
 [request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
 for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
-
-Keys have one immutable scope: `full`, `read` or `bookings`. The web creation form defaults
-to `bookings` for AI agents; `read` suits analytics/reporting, and **Full account access**
-(`full`) also permits account configuration changes. Existing roles, ownership and host
-visibility still apply. Neither `read` nor `bookings` removes existing visible attendee
-details or meeting links, and `bookings` can manage previously created bookings you host.
 
 Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
 `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.

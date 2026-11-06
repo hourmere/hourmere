@@ -8525,7 +8525,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description no_available_slots */
+            /** @description no_available_slots, calendar_sync_unavailable */
             409: {
                 headers: {
                     [name: string]: unknown;

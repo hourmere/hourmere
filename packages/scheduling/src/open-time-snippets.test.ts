@@ -100,6 +100,19 @@ describe.skipIf(!serverUrl)('agent open-time snippets', () => {
     ).rejects.toMatchObject({ code: 'slot_snippets_disabled' })
   }
   it('requires the explicit instance flag', () => verifyFlag())
+  async function verifyEmail(module = Snippets) {
+    const s = await setup()
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', s.user.id)
+      .execute()
+    await expect(module.generateOpenTimeSnippet(s.ctx, s.input, options)).rejects.toMatchObject({
+      code: 'insufficient_role',
+    })
+  }
+  it('requires a verified email', () => verifyEmail())
+
   async function verifyOwner(module = Snippets) {
     const s = await setup()
     const other = await createTestUser(db)
@@ -142,6 +155,30 @@ describe.skipIf(!serverUrl)('agent open-time snippets', () => {
     ).rejects.toMatchObject({ code: 'insufficient_role' })
   }
   it('permits team owners/admins but rejects ordinary members', () => verifyTeam())
+  async function verifyOrganization(module = Snippets) {
+    const s = await setup()
+    const other = await createTestUser(db)
+    const teamA = await createTestTeam(db, [{ user: s.user, role: 'admin' }])
+    const teamB = await createTestTeam(db, [{ user: other, role: 'owner' }])
+    // Matching public slugs ensure a removed organization predicate can reach real slots.
+    await fixtures.eventType(teamA.id, null, {
+      slug: 'shared',
+      hosts: [{ userId: s.user.id }],
+    })
+    const foreign = await fixtures.eventType(teamB.id, null, {
+      slug: 'shared',
+      title: 'Private team B title',
+      hosts: [{ userId: other.id }],
+    })
+    const ctx = testContext(db, teamA.as(s.user), s.ctx.now)
+    for (const eventTypeId of [foreign, s.eventTypeId]) {
+      await expect(
+        module.generateOpenTimeSnippet(ctx, { ...range, eventTypeId }, options),
+      ).rejects.toMatchObject({ code: 'event_type_not_found' })
+    }
+  }
+  it('confines team administrators to the acting organization', () => verifyOrganization())
+
   it('rejects unknown roles even alongside admin and ambiguous team slugs', async () => {
     const s = await setup()
     const team = await createTestTeam(db, [{ user: s.user, role: 'admin,unknown' }])
@@ -407,6 +444,8 @@ describe.skipIf(!serverUrl)('agent open-time snippets', () => {
     for (const [replacement, verify] of [
       [['!options.slotSnippetsEnabled', 'false'], verifyFlag],
       [['if (!membership)', 'if (false)'], verifyOwner],
+      [[".where('u.emailVerified', '=', true)", ''], verifyEmail],
+      [[".where('organization_id', '=', ctx.principal.organization.id)", ''], verifyOrganization],
       [["!roles.includes('owner') && !roles.includes('admin')", 'false'], verifyTeam],
       [['MAX_OPEN_TIME_SNIPPET_RANGE_DAYS * 24', '100 * 24'], verifyRange],
       [['count < 1 || count > 10', 'count < 0 || count > 11'], verifyRange],

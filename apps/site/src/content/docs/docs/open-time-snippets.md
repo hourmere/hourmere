@@ -110,6 +110,8 @@ booking-page preferences.
   successful empty snippet. Widen or move the range within its bound, or report that no
   times were found. Permission, loading or availability errors do not establish that
   the host has missing configuration.
+- A temporarily unavailable host calendar returns `409 calendar_sync_unavailable`.
+  Retry shortly; this error does not mean there are no available times.
 - A disabled instance flag returns `404 slot_snippets_disabled`. Inactive/deleted events
   return `404 event_type_not_found`; unavailable public configuration cannot generate a
   usable snippet. Hidden active events are allowed.
