@@ -25,6 +25,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   through the editor, REST, MCP or CLI, with the booking URL shown once.
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
   and optional host notes, with delivery limits and configuration examples.
+- [Open-time snippets for agents](/docs/open-time-snippets): draft an email with current
+  alternatives and direct booking links through REST, MCP or CLI.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
