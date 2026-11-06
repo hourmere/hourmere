@@ -23,6 +23,7 @@ const payload = new Function(
   'eventId',
   'eventType',
   'now',
+  'requestId',
   `return (${payloadExpression}\n})`,
 )(
   {
@@ -38,6 +39,8 @@ const payload = new Function(
   'event-id',
   'booking.created',
   { toString: () => 'instant' },
+  // Created/cancelled recipes do not carry reschedule-request metadata.
+  null,
 )
 function fields(value: Record<string, unknown>, prefix = ''): string[] {
   return Object.entries(value).flatMap(([key, child]) => {
