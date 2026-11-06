@@ -151,6 +151,8 @@ headers. Hourmere does not keep sent signatures; copy them from that run's input
 - `Hourmere webhook: duplicate_webhook_event` and no second action run: deduplication works.
 - `replay_cache_unavailable`, or the actions run again: the cache did not deduplicate for
   your integration. Rely on downstream deduplication by event ID.
+- `stale_webhook_timestamp`: more than an hour passed since the original delivery. Repeat
+  the check with a new synthetic booking.
 - `invalid_webhook_signature`: the copy was not exact, so the check is inconclusive. If the
   bundle log does not show the raw request, this check cannot be run; rely on downstream
   deduplication by event ID.

@@ -453,6 +453,7 @@ describe('Hourmere REST hooks', () => {
     await expect(
       App.triggers.booking_created.operation.perform(z, delivery().bundle),
     ).resolves.toHaveLength(1)
+    expect(z.cache.get).toHaveBeenCalledWith(claimKey)
     expect(z.console.log.mock.calls).toEqual([['Hourmere webhook: replay_cache_unavailable']])
   })
   it('accepts the same event for different subscriptions', async () => {

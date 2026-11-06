@@ -1,7 +1,8 @@
 const { version, dependencies } = require('./package.json')
 const { baseUrl, request, publicPath } = require('./lib.js')
-// The CLI requires an exact core pin, so this equals the installed core version. Reading
-// it here keeps the definition loadable without the separately licensed platform install.
+// The CLI requires an exact core pin; npm ci installs core at that version and
+// test/app.test.ts asserts they match. Reading the pin keeps the definition loadable
+// without the separately licensed platform install.
 const platformVersion = dependencies['zapier-platform-core']
 const hooks = require('./hooks.js')
 

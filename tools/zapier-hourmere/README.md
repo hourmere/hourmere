@@ -23,7 +23,9 @@ root installs do not download Zapier's Platform Agreement–licensed dependencie
 `package.json` instead of loading the package, so the root contract test runs without
 the Zapier packages.
 The `overrides` keep development-only transitive packages on releases at least two weeks
-old; they do not change any production dependency.
+old; they do not change any production dependency. When you bump `zapier-platform-*`,
+check that no production package now matches an override, and compare the lock's
+production versions and integrity hashes before and after.
 
 Official references checked for this implementation:
 
@@ -56,7 +58,8 @@ The test suite uses `zapier-platform-core`'s `createAppTester`, synthetic fixtur
 mocked HTTP, with real network access disabled. Contract tests generate Hourmere's OpenAPI
 document without a database in the root Node.js 26 test runner. `build:verify` checks the
 CLI-built production dependency tree against the package lockfile without uploading, then
-deletes `build/build.zip` and `build/source.zip` whether the check passes or fails.
+deletes `build/build.zip` and `build/source.zip` whether the check passes or fails. If you
+interrupt it, delete those two files yourself.
 Validation runs with `DISABLE_ZAPIER_ANALYTICS=1` and
 `NO_UPDATE_NOTIFIER=1`, using `zapier-platform validate --without-style --skip-build` to skip remote
 style validation. These commands do not log in, register, push or create tokens.

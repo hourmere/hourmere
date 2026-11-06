@@ -52,7 +52,7 @@ npm run build
 These need only the root install. `npm test` includes the Zapier app's OpenAPI contract
 test, which loads the app definition without the Zapier Platform packages. Install those
 only if you change `tools/zapier-hourmere`. CI's separate `zapier-compatibility` job runs
-these, plus offline validation and the build check, on Node.js 22:
+the commands below, plus offline validation and the build check, on Node.js 22:
 
 ```sh
 npm ci --ignore-scripts --prefix tools/zapier-hourmere
