@@ -26,7 +26,7 @@ Official sources: [SSO docs](https://better-auth.com/docs/plugins/sso), [OIDC](h
 
 ### Recommendation
 
-Wrap, conditionally; do not expose stock plugin routes or ship SSO with 1.7.12 unchanged. Reuse established protocol parsing/crypto, account/session integration and transaction-aware resolveUser; Hourmere owns organization/provider policy, encrypted configuration, exact identity binding, domain lifecycle, enforcement and audit. OIDC requires a reviewed protocol adapter/maintained upstream patch for nonce, algorithm policy, iat-age validation, guarded fetch and JWKS cache; merely adding a /api/v1 facade cannot supply these missing seams. Require proof in a separate implementation foundation step; if safe hooks/patch cannot be maintained, select a maintained OIDC RP library behind the same interface rather than write cryptography. SAML may wrap plugin validation with hardened settings and signed-assertion fixtures, but encrypted-assertion and missing-ID paths require explicit acceptance. Leave feature disabled until all negative protocol and egress checks pass. First coordinate a separate Better Auth family security upgrade (at least fixes in 1.7.16, then re-evaluate selected final version); this docs PR must not change dependencies.
+Wrap, conditionally; do not expose stock plugin routes or ship SSO with 1.7.12 unchanged. Reuse established protocol parsing/crypto, account/session integration and transaction-aware resolveUser; Hourmere owns organization/provider policy, encrypted configuration, exact identity binding, domain lifecycle, enforcement and audit. OIDC requires a reviewed protocol adapter/maintained upstream patch for nonce, algorithm policy, iat-age validation, guarded fetch and JWKS cache; merely adding a /api/v1 facade cannot supply these missing seams. Establish that these seams are feasible in the Upgrade step of the implementation sequence; if safe hooks/patch cannot be maintained, select a maintained OIDC RP library behind the same interface rather than write cryptography. SAML may wrap plugin validation with hardened settings and signed-assertion fixtures, but encrypted-assertion and missing-ID paths require explicit acceptance. Each protocol stays hard-off in code until its complete path exists and its negative protocol and egress checks have passed (see Rollout gating). First coordinate a separate Better Auth family security upgrade (at least fixes in 1.7.16, then re-evaluate selected final version); this docs PR must not change dependencies.
 
 ### Source evidence matrix
 
@@ -39,7 +39,7 @@ Wrap, conditionally; do not expose stock plugin routes or ship SSO with 1.7.12 u
 | JWKS | createRemoteJWKSet constructed inside validateOIDCIdToken each callback, guarded remote fetch; no application-level shared cache, no discovered signing-algorithm policy passed. | Cache per provider/issuer/JWKS URL with bounded freshness and controlled unknown-kid refresh, no stale success after key failure; concurrency/rotation tests. |
 | SSRF | fetchOIDCEndpoint and native response helper revalidate endpoints at fetch, redirects manual then rejected. Discovery uses same helper. DNS lookup result not connection-pinned; failures return; trustedOrigins bypasses private-host checks. No exposed custom fetch in options. | Reuse Hourmere outbound guard at actual connection for discovery/token/UserInfo/JWKS/metadata, deadlines and size limits; do not equate CORS/redirect origins to egress trust. |
 | SAML validation | samlify SP parseLoginResponse, exactly one plaintext/encrypted assertion count, additional namespace/ID-aware assertion signature check when wantAssertionsSigned true; audience/recipient/destination binding; provider references locked/rechecked. index.mjs 1190–1255, 2848–2966. | Require signed assertion (response may also sign), strict XML fixture tests for wrapping/duplicate IDs/external entities, fixed ACS/issuer/audience, use authenticated subtree only. |
-| SAML timestamps | clockSkew defaults 300000 ms. requireTimestamps default false; permissive missing condition path warns. | Require valid bounded NotBefore AND NotOnOrAfter and SubjectConfirmationData expiry; future implementation owns tested numeric policy. |
+| SAML timestamps | clockSkew defaults 300000 ms. requireTimestamps default false; permissive missing condition path warns. | Require valid bounded NotBefore AND NotOnOrAfter and SubjectConfirmationData expiry; the acceptance deadline and limits are pinned below, and the SAML verifier step owns the signed fixtures. |
 | SAML replay | validateInResponseTo atomically consumes verification value and checks provider/reference; default validation on/IdP-initiated false. Assertion reserveVerificationValue uses assertionId identifier, expires NotOnOrAfter + skew, fallback TTL if absent. Missing extracted assertion ID only warns. | Keep correlation on; require assertion ID and strict expiry, database atomic uniqueness across replicas, reject missing ID and expired request. |
 | RelayState/browser binding | generated generic server state with provider reference; parse skips state cookie check because cross-site POST drops Lax cookies. Invalid supplied RelayState rejected but absent RelayState can use InResponseTo. | Require issued opaque RelayState and browser-bound pending login completion; do not treat request correlation alone as browser binding. A same-site completion hop with original browser nonce is a defensible design. |
 | Encryption | createSP wires encPrivateKey and encrypted-assertion settings; binding content decrypted for validation. Registration config/private keys serialized as JSON text. | Supported in dependency but encrypted assertions require fixture-tested algorithm allowlist; envelope-encrypt client secrets/private keys at rest, decrypt only transiently. Never set trustEmailVerified globally. |
@@ -63,10 +63,10 @@ Read upstream GitHub advisory API on 2026-11-06. SSO-specific advisories and add
 | [GHSA-prpr-5gj3-qqhg](https://github.com/better-auth/better-auth/security/advisories/GHSA-prpr-5gj3-qqhg) | four domain/provider deletion/SAML/SLO takeover flaws | 1.6.21 or 1.7.0-beta.10 | outside affected range |
 | [CVE-2026-53515 / GHSA-gv74-j8m3-fg5f](https://github.com/better-auth/better-auth/security/advisories/GHSA-gv74-j8m3-fg5f) | ordinary members register org provider | 1.6.11 or 1.7.0-beta.4 | outside affected range |
 | [CVE-2026-53513 / GHSA-5rr4-8452-hf4v](https://github.com/better-auth/better-auth/security/advisories/GHSA-5rr4-8452-hf4v) | SSRF registration | 1.6.11 | outside affected range |
-| [GHSA-fmh4-wcc4-5jm3](https://github.com/better-auth/better-auth/security/advisories/GHSA-fmh4-wcc4-5jm3) | high: invitation acceptance by an unverified account | 1.7.16 | affected range `>= 1.6.14, < 1.7.16` includes evaluated version |
+| [CVE-2026-53514 / GHSA-fmh4-wcc4-5jm3](https://github.com/better-auth/better-auth/security/advisories/GHSA-fmh4-wcc4-5jm3) | high: invitation acceptance by an unverified account | 1.7.16 | affected range `>= 1.6.14, < 1.7.16` includes evaluated version |
 | [GHSA-hwq2-v29r-p69r](https://github.com/better-auth/better-auth/security/advisories/GHSA-hwq2-v29r-p69r) | email-change links act on a later owner of the old address | 1.7.16 | affected range `>= 1.4.0, < 1.7.16` includes evaluated version |
 
-No CVE IDs reported by upstream API for the first three; do not invent them. This is a dated inventory, not a security certification.
+The upstream API reports no CVE ID for the first three rows or for GHSA-hwq2; do not invent them. This is a dated inventory, not a security certification.
 
 **Newer core issues matter despite SSO-specific patches:** November 3 advisories [GHSA-9hm7-xhfp-cx58](https://github.com/better-auth/better-auth/security/advisories/GHSA-9hm7-xhfp-cx58) (unverified OAuth email), [GHSA-fvxx-76fc-893x](https://github.com/better-auth/better-auth/security/advisories/GHSA-fvxx-76fc-893x) (revoked sessions cached/secondary storage) and [GHSA-c85h-5mrr-mgx4](https://github.com/better-auth/better-auth/security/advisories/GHSA-c85h-5mrr-mgx4) (padded owner invitation role) list stable patch 1.7.16, and their ranges include 1.7.12. Actual Hourmere exploitability is not established by this design evaluation; coordinate family upgrade separately before shipping SSO.
 
@@ -104,11 +104,14 @@ exact domain per instance, with organization identity and verification generatio
 Pending unverified challenges never reserve a domain or block another team. An
 unexpired verified claim cannot be evicted. Expired claims remain suspended and
 exclusive until explicit retirement: an instance operator verifies a fresh TXT
-challenge for the requesting team, records old/new team IDs and proof timestamps in
-an audited offline retirement transaction, notifies the old team's owners, and retires
-only the expired generation under the domain lock. The requesting team must then
+challenge for the requesting team and runs the domain-retirement maintenance command,
+which records old/new team IDs and proof timestamps in one audited transaction,
+notifies the old team's owners, and retires only the expired generation under the
+domain lock. Operator maintenance commands run in the server container against the
+instance database, like the migration command; they are not HTTP, MCP or product CLI
+operations and are outside the interface-parity inventory. The requesting team must then
 complete a new ordinary challenge; retirement does not transfer trust, identities or
-membership. The operator runbook and race tests ship in Domains. This documented
+membership. The command, its runbook and race tests ship in Domain lifecycle. This documented
 support path also covers abandoned teams; no cooperation from the old team is needed.
 Automatic domain transfers remain deferred. Ambiguous multi-tenant domains require
 invitation-only access.
@@ -139,43 +142,54 @@ Identity is `(organization, provider ID, validated issuer/entity ID, immutable s
 SAML requires a stable persistent NameID or an explicitly pinned immutable attribute.
 Transient NameIDs and email-as-subject are unsupported. Email changes do not change
 identity. A conflicting subject/user binding fails closed and needs explicit recovery.
-`unlinkSsoAccount` removes only the caller's exact link after fresh independent local
-proof. `removeSsoIdentityLink` lets an owner/admin with fresh administration proof
-retire a specified member link after verifying the person's recovery request out of
-band. Both require the link's expected generation, revoke all affected browser and
-delegated proofs atomically, and audit/notify the affected person. Neither reassigns
+`unlinkSsoAccount` removes only the caller's exact link after independent local proof
+(see Fresh proof). `removeSsoIdentityLink` lets an owner or admin with fresh
+administration proof retire another person's link after verifying that person's
+recovery request out of band. An admin may retire only member and admin links; an
+owner's link can be retired only by another owner, and nobody retires their own link
+this way. Both require the link's expected generation, revoke that person's browser
+proofs and delegations for the link atomically, and audit/notify the affected person;
+other members' proofs and delegations are untouched. Neither reassigns
 a subject, creates a replacement binding or grants membership. The member next signs
 in through an existing local method and performs `linkSsoAccount` with the new IdP
 subject; enforcement allows only this narrow enrollment path until it succeeds.
 Conflicts with another user's binding require its explicit retirement, never email
-matching or a direct database edit. Protect last-owner/recovery continuity and refuse
-unlink when the caller has no independently proven remaining sign-in method.
+matching or a direct database edit. Unlinking or link retirement never changes
+ownership or recovery ownership, which relies on mailbox proof, not on an SSO link.
+Refuse unlink when the caller has no independently proven remaining sign-in method.
 
-For OIDC, require the actual boolean `email_verified: true` in validated claims;
-missing, false, strings and UserInfo-only unbound email are not verification.
-If UserInfo is needed, its `sub` must match the validated ID token. Do not infer
-verification from domain ownership. SAML has no standard `email_verified` claim:
-its signed email attribute is an IdP assertion, not mailbox proof. Require separate
-Hourmere email proof on initial enrollment and whenever the email changes. For
-OIDC without verified email, offer the same separate proof flow; never coerce the
-claim to true to satisfy the current user-create hook.
+Hourmere never treats an IdP's email statement as mailbox proof. An OIDC
+`email_verified` claim, whatever its value, and a SAML email attribute are recorded
+only as IdP assertions; UserInfo is used only when its `sub` matches the validated
+ID token, and domain ownership never implies verification. Every first
+enrollment of an IdP subject, OIDC or SAML, proves the mailbox through Hourmere,
+including when `email_verified` is `true`. A linked identity whose asserted email
+differs from the address last proven for that link must prove the new mailbox before
+its sign-in completes. Never coerce the claim to true to satisfy the current
+user-create hook.
 
 An existing magic-link/Google/Microsoft account with the same email is **not**
 automatically linked to a newly configured enterprise IdP, even on a verified domain.
 The person first authenticates through an existing method, then explicitly starts a
 session-bound link ceremony and proves the IdP subject. Require fresh independent
-mailbox/existing-method proof; an SSO session from that same provider cannot approve
-its own first link. Freeze both identities and the session in the pending attempt;
-compare again in the completion transaction. Reject email mismatch, provider change,
-logout, stale session, conflicting links and concurrent attempts with different users.
+local proof (a Hourmere mailbox proof, see Fresh proof); an SSO session from that same
+provider cannot approve its own first link. Freeze both identities and the session in
+the pending attempt; compare again in the completion transaction. Reject email
+mismatch, provider change, logout, stale session, conflicting links and concurrent
+attempts with different users.
 Do not enable the disabled general `/api/auth/link-social` route to implement this.
-An unlinked IdP subject whose email matches an existing account creates neither a
-second user nor an automatic link. Return the same generic pending outcome used for
-an unknown email: “Complete mailbox verification; if you already have an account,
-sign in using your existing method to link it.” Before mailbox proof, status, timing
-and response shape do not disclose whether an account exists. After proof, an existing
-account must complete that independent sign-in/link ceremony; only an eligible new
-account can proceed through the separate admission transaction.
+
+An unlinked IdP subject never creates a second user or an automatic link. Whether or
+not its email matches an existing account, and whatever `email_verified` says, the
+callback stores a frozen pending result and returns one generic outcome: “Complete
+mailbox verification; if you already have an account, sign in using your existing
+method to link it.” Status, response shape, timing (mail is queued, never sent inline)
+and the emailed message are identical in every case. A team administrator who creates
+an IdP subject for someone else's address therefore learns nothing about whether a
+Hourmere account exists; only the holder of that mailbox sees the next step. After the
+mailbox proof is consumed, an existing account must complete that independent
+sign-in/link ceremony; only an eligible new account can proceed through the separate
+admission transaction.
 
 New users need mailbox proof and instance signup eligibility as well as team admission.
 Retain `maySignUp`, database signup triggers, first-user serialization and the
@@ -203,8 +217,9 @@ not instantly. Local removal takes effect on the next authorization check.
 ## Enforcement, recovery and delegated clients
 
 `requireSso` is an organization access rule, not an instance-wide replacement for
-magic links. Every team-scoped read/write checks current membership, policy revision
-and a live provider-bound proof, except the narrowly listed recovery operations below. A session authenticated by Google for a personal
+magic links. Every team-scoped read/write checks current membership and a live
+provider-bound proof (current trust generation, link generation and deadline), except
+the narrowly listed recovery operations below. A session authenticated by Google for a personal
 space does not satisfy team SSO; switching active space does not manufacture proof.
 Initial enrollment has a separate narrow exception: the caller's own `/api/v1/me`
 required-provider/attempt summary, auth initiation, mailbox proof, `unlinkSsoAccount`
@@ -214,65 +229,139 @@ without an existing SSO proof. They expose no team data or administrator configu
 This allows an unlinked member to obtain the proof enforcement requires; successful
 linking still grants no team access until the SSO/admission checks pass.
 Check both `/api/v1` and native Better Auth team routes and shared services; middleware
-alone does not protect trusted calls, transactions or queued operations.
+alone does not protect trusted calls, transactions or queued operations. A stored
+`requireSso` policy is enforced whatever the rollout constants or settings say (see
+Rollout gating); no deployment toggle bypasses it.
 
-Enabling enforcement requires a verified domain, enabled tested provider, a successful
-owner SSO test against the exact current revision, and an enrolled recovery owner.
-Only an owner can change enforcement/recovery or retire the last usable provider
-while enforcement is active; admins can prepare replacements. Concurrent policy,
-provider and membership changes serialize and increment the policy generation.
-Already-running writes recheck authority in their committing transaction.
+Enabling enforcement requires a verified domain, an enabled tested provider, a successful
+owner SSO test against the exact current revision, and at least one accepted recovery
+owner; a pending nomination does not count. Only an owner can change enforcement/recovery
+or retire the last usable provider while enforcement is active; admins can prepare
+replacements. Policy, provider, recovery and membership changes serialize under the
+organization lock, and already-running writes recheck authority in their committing
+transaction. Two counters keep that serialization separate from proof validity:
 
-Designate a current owner for break-glass access. After fresh magic-link mailbox proof,
-an explicit recovery ceremony issues only recovery authority: inspect configuration,
-repair/test a provider and turn off enforcement. It does not grant bookings, member
-exports or MCP access without SSO. Record and notify every recovery start/use through
-the audit/outbox system; logs never include the email capability. Enrollment is tested
-before enforcement. The last recovery owner cannot leave until another is enrolled.
-Recovery authority bypasses only the SSO-proof requirement (never owner, session,
+- `policyRevision` is the optimistic-concurrency revision of the team's SSO policy and
+  recovery state. `setSsoPolicy`, `configureSsoRecovery`, `acceptSsoRecoveryEnrollment`
+  and `useSsoRecovery` take it as `expectedRevision`; no proof or delegation stores or
+  checks it. Providers have their own `revision` and domains their own generation.
+- `trustGeneration` is stored in every browser proof and delegation and checked on every
+  use. It increments only when enforcement is turned off, a team provider's trust
+  configuration (secret, certificates, endpoints, algorithms) changes, or a provider is
+  disabled or deleted. Turning enforcement on does not increment it: proofs and bindings
+  from an unchanged provider already meet what enforcement requires.
+
+Membership changes (invitations, JIT admissions, other members' departures, role
+changes), admission-mode changes, recovery-owner changes and successful domain renewals
+never change `trustGeneration`, so they never invalidate another member's proof or
+30-day delegation lease. A member's own removal, unlink or link retirement ends only that
+member's proofs and delegations, through the membership check and the link generation.
+
+### Recovery
+
+A team has one or more recovery owners: current owners who accepted a nomination (see
+the recovery contract below). Enforcement requires at least one. Acceptance adds a
+recovery owner and never replaces another. A recovery owner stops being one only by
+ceasing to be an owner (leaving, removal or demotion); while enforcement is active, the
+last recovery owner cannot do so until another has accepted (`sso_recovery_required`).
+There is no separate withdrawal operation in the first version.
+
+After a fresh mailbox proof (see Fresh proof), an explicit recovery ceremony issues only recovery
+authority: inspect configuration, repair/test a provider and turn off enforcement. It
+does not grant bookings, member exports or MCP access without SSO. Record every recovery
+start/use in the audit journal and notify the team's owners through the existing
+notification jobs; logs never include the email capability. Recovery authority bypasses
+only the SSO-proof requirement and satisfies fresh administration (never owner, session,
 Origin or expected-team checks) for `listSsoProviders`, `getSsoPolicy`,
 `updateSsoProvider`, `createSsoProvider`, `testSsoProvider`, `activateSsoProvider`
 and `setSsoPolicy` with `requireSso: false`. `useSsoRecovery` itself accepts the
-independent owner mailbox proof without SSO. It cannot enable JIT, alter membership,
-bind delegations or change the recovery owner. Each repair write consumes its recovery
-authority; a subsequent repair/test/activation requires another mailbox ceremony.
-A test callback can finish only its already-bound test intent, and grants no wider
-access. Read-only inspection does not consume authority but observes its expiry.
-If that mailbox is lost, an instance operator uses an audited offline recovery procedure
-against that instance; document it before release. No global public bypass secret.
+independent owner mailbox proof without SSO, and only a recovery owner can use it. It
+cannot enable JIT, alter membership, bind delegations or change recovery owners. Each
+repair write consumes its recovery authority; a subsequent repair/test/activation
+requires another mailbox ceremony, so updating, testing and re-activating a broken
+provider takes three ceremonies. A test callback can finish only its already-bound test
+intent, and grants no wider access. Read-only inspection does not consume authority but
+observes its expiry.
 
-API keys and MCP OAuth grants are not exempt. Before enforcement they retain existing
-scope rules. On enforcement/policy change, existing credentials have no SSO proof and
+If every recovery owner's mailbox is lost, an instance operator runs the offline
+recovery maintenance command against that instance (maintenance commands run as
+described under domain retirement). It only turns the named team's enforcement off,
+which increments `trustGeneration`, records a `system` audit event and notifies the
+team's owners. It ships with its runbook in the Operator recovery step, before any
+operator setting can enable a protocol. No global public bypass secret.
+
+### Delegated clients
+
+API keys and MCP OAuth grants are not exempt. Without enforcement they retain existing
+scope rules. While enforcement is on, an unbound key or grant has no SSO proof and
 cannot act in that team. A person can bind/rebind an owned key or OAuth grant to the
-team in a fresh SSO browser session; the record stores provider, subject binding,
-policy generation and an absolute proof expiry of binding time plus
-`ssoDelegationLifetime` (30 days), capped by credential expiry and any validated
+team after an SSO step-up (see Fresh proof). Binding is allowed before enforcement is
+turned on, so automation can be prepared, and survives turning it on. The record stores
+provider, subject binding, `trustGeneration` and an absolute proof expiry of binding
+time plus `ssoDelegationLifetime` (30 days), capped by credential expiry and any validated
 IdP session deadline. This is a separate delegated authorization lease, not an
 extension of the browser's 8-hour proof or session. It allows unattended CLI/MCP work
 without an 8-hour browser rebind; the tradeoff is up to 30 days before IdP-only
 revocation is detected without SCIM. Check current domain verification on every use:
 successful scheduled renewal preserves the lease, but lapse invalidates it permanently
-and requires rebind. All local/provider/policy/subject revocations below still apply.
+and requires rebind. A member's own removal, unlink or link retirement, a
+`trustGeneration` change and domain lapse or deletion end delegations; logout and
+browser-proof expiry do not, and turning the protocol's setting off suspends them.
 MCP access/refresh tokens cannot extend it. Reauthorize through the browser after expiry; a machine client gets stable
 `sso_required`, never an interactive redirect. Personal/other-team access remains
 subject to its own policy. No service-account exemption ships in the first version.
 A `full` key still cannot configure the IdP or approve its own SSO binding.
 
-Fresh administration measures a verified authentication event, not session creation
-or ID-token `iat`. OIDC step-up sends `max_age=0` and validates signed `auth_time`
-against the fresh-administration window and transaction start (with skew); SAML sends
-`ForceAuthn=true` and requires a signed AuthnStatement `AuthnInstant` within that
-window. An IdP that cannot prove freshness requires an independent fresh Hourmere
-mailbox confirmation bound to the same transaction in addition to valid SSO. Silent
-IdP SSO, rolling sessions and refresh tokens cannot renew administration freshness.
-First linking/recovery always uses independent local proof as specified above.
+### Fresh proof
+
+Every SSO write except `revokeSsoDelegation` requires proof that is fresh for that exact
+request; the HTTP retry contract is under Proposed REST, MCP and CLI contracts. The
+proof methods are `mailbox` (a Hourmere mailbox proof through the Mailbox proof pair)
+and `sso` (an SSO step-up). The methods a write requires:
+
+- **Fresh administration** (provider, domain, test, activation, policy, recovery
+  nomination and identity-link removal writes):
+  - On a team without active enforcement, including a team with no provider yet:
+    `mailbox`. Before enforcement no SSO authority exists for the team, and the person's
+    mailbox is the authority that already signs them in. This bootstrap rule lets Drafts
+    and Domains run as soon as the Fresh proof step exists, before any SSO path.
+  - On a team with active enforcement: `sso` through an enabled team provider where the
+    caller has a link. If the IdP cannot prove a fresh authentication event, the
+    attempt also requires `mailbox`; mailbox proof never replaces SSO there. An owner
+    or admin without a link first links through the enrollment exception above.
+    Recovery authority replaces this proof only for the recovery operations listed
+    above.
+- **Independent local proof** (`linkSsoAccount`, `unlinkSsoAccount`,
+  `acceptSsoRecoveryEnrollment`, `useSsoRecovery`): always `mailbox`, so first linking,
+  unlinking and recovery never depend on a working or already-linked IdP.
+- **Delegation binding** (`bindSsoDelegation`): always `sso` through the provider whose
+  link the binding records, with the same mailbox fallback; mailbox alone never creates
+  a delegated SSO lease.
+
+An SSO step-up measures a verified authentication event, not session creation or
+ID-token `iat`. OIDC step-up sends `prompt=login` and `max_age=0` and requires a signed
+numeric `auth_time` no earlier than attempt creation minus `oidcClockSkew`, no later
+than now plus `oidcClockSkew`, and at most `freshAdministrationProof` before the
+callback. SAML
+step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
+within the same bounds, using `clockSkew`. A missing or out-of-window value is the case
+where the IdP cannot prove freshness. The result must come from the attempt's own user
+and that user's existing link at that provider; it is recorded on the pending attempt
+and creates no session, browser proof or link. It expires at the earlier of attempt
+expiry and the authentication instant plus `freshAdministrationProof`. Silent IdP SSO,
+rolling sessions and refresh tokens never renew freshness.
+
+### Browser proof
 
 Browser proof is separate from the ordinary Better Auth session: rolling session refresh
 cannot extend it. Its deadline is the earliest of the absolute SSO lifetime, session
 expiry, domain proof expiry and any validated earlier IdP session deadline. ID token
-expiry governs callback acceptance, not continuing refresh-token use. Logout,
-provider disable/delete, subject unlink, domain expiry, local member removal and
-policy changes invalidate affected proofs. A server-side generation check avoids
+expiry governs callback acceptance, not continuing refresh-token use. Logout ends that
+session's proof. A member's own removal, unlink or link retirement ends that member's
+proofs. A `trustGeneration` change ends every proof of the team. Domain expiry or
+deletion ends the proofs it bounds. Turning a protocol's setting off suspends that protocol's proofs (see
+Rollout gating). Nothing else ends a proof; in particular other members' membership
+changes do not. A server-side generation check avoids
 waiting for cached cookies or OAuth token expiry. Recheck queued authenticated work
 before acting; durable booking notification/calendar reconciliation continues under
 its existing booking lifecycle and is not arbitrarily deleted on member logout.
@@ -287,7 +376,9 @@ organization, configuration revision and allowed return path. Consume state atom
 before exchanging a code; retries never exchange it twice. Require an ID token and
 validate its signature, exact `iss`, `aud` (including `azp` for multiple audiences),
 `exp`, `iat`, optional `nbf`, nonce and nonempty stable `sub`. Reject future `iat`
-beyond skew and tokens older than the transaction acceptance window. Neither decoding
+beyond skew and tokens older than the transaction acceptance window. When present,
+`auth_time` must be a signed number not later than now plus skew; only step-up relies
+on it (see Fresh proof). Neither decoding
 a JWT nor successful UserInfo retrieval substitutes for this validation.
 OIDC uses `oidcClockSkew` (30 seconds), matching the evaluated core verifier's
 hard-coded tolerance. Apply the same 30 seconds to Hourmere-owned `iat`/`nbf` checks
@@ -377,16 +468,25 @@ clear a required secret. Do not log tokens, assertions, XML, discovery bodies, D
 challenge values or provider error descriptions. Audit encrypted-key rotation and
 support operator key backup/restore without printing material.
 
-The forthcoming audit service must record actor and authentication method, team,
-provider/configuration generation, safe outcome/reason and correlation ID for:
-provider create/edit/test/enable/disable/delete and secret/certificate rotation;
+SSO audit uses the `audit_events` journal being built separately in
+[PR #246](https://github.com/hourmere/hourmere/pull/246): an append-only table written by one
+INSERT in the same transaction as the change it records, with a closed actor/credential
+set and per-action detail allow-lists enforced by the application and the database.
+The Audit actions step starts only after that journal is on main and builds no
+substitute; `organization_operations` does not cover these events. It adds SSO action
+names and allow-listed details (authentication method, provider ID and configuration
+revision, safe outcome/reason code, correlation ID; never secrets, tokens, assertions,
+raw subjects or mailbox capabilities) for: provider
+create/edit/test/enable/disable/delete and secret/certificate rotation;
 domain challenge/verification/renewal/expiry/release; link/unlink/conflict; SSO
 success/failure and rejected replay; JIT admission/refusal; enforcement and delegated
-binding changes; proof revocation; recovery enrollment/use; member/SCIM suspension
-and reinstatement. Use durable transactional intent with redacted security-failure
-events. Do not block emergency recovery on a third-party audit sink; retain a local
-record for later delivery. Audit integration is a release dependency, not a claim that
-`organization_operations` already covers all these events.
+binding changes; proof revocation; recovery enrollment/use; operator maintenance
+commands; member/SCIM suspension and reinstatement. Each later step records the events
+of the writes it builds inside that write's transaction. Security failures, which have
+no business transaction, are redacted and written in a short transaction of their own,
+with a bounded count per provider and source so failed attempts cannot flood the
+journal. The journal is local to the instance database, so emergency recovery never
+waits for a third-party audit sink.
 
 ## Pinned operational limits
 
@@ -403,6 +503,7 @@ Other transport/resource limits must be selected with fixtures before their rele
 | `ssoProofLifetime` | 28800 | seconds |
 | `ssoDelegationLifetime` | 2592000 | seconds |
 | `freshAdministrationProof` | 300 | seconds |
+| `ssoRecoveryNominationLifetime` | 259200 | seconds |
 | `domainChallengeLifetime` | 86400 | seconds |
 | `domainRecheckInterval` | 86400 | seconds |
 | `domainVerificationLifetime` | 604800 | seconds |
@@ -430,7 +531,8 @@ by its operationId of `{ "exemption": "browser-session-only", "reason": "..." }`
 Use the concrete reason in the table, a nonempty single line. The shared
 `authenticated` security (session OR API key) does not qualify. Runtime must classify
 these as `session_only`, reject any Authorization header even with a valid cookie,
-require exact same-origin requests and enforce actual fresh proof, not just document it.
+require exact same-origin requests and enforce the fresh-proof retry contract below,
+not just document it.
 
 Require `X-Expected-Organization-Id` for session writes, current verified team role,
 revision checks and transaction-time authority checks using the existing organization
@@ -441,11 +543,26 @@ All table paths have prefix `/api/v1/team/sso`. `P` means `{providerId}` and `D`
 `{domainId}` (UUIDs), expanded literally in OpenAPI. Reads expose open objects and
 open status strings, UTC RFC3339 timestamps and camelCase fields. List uses the
 repository cursor conventions; unknown fields/statuses must be tolerated. All writes
-use strict input schemas and safe `{error, message?, field?}` failures. Use
-`team_management_access_denied`, `organization_context_changed`, `sso_required`,
-`sso_configuration_changed`, `sso_domain_unverified`, `sso_test_required`,
-`sso_recovery_required` and `sso_provider_not_found` as stable domain codes;
-use shared HTTP 400/401/403/404/409/429 conventions. No raw IdP error is returned.
+use strict input schemas and safe `{error, message?, field?}` failures; only
+`sso_reauthentication_required` adds fields, as the existing member-removal 409 adds `handling`.
+Use shared HTTP 400/401/403/404/409/429 conventions. No raw IdP error is returned.
+The stable domain codes are exactly:
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `team_management_access_denied` | 403 | Existing uniform refusal: no current owner/admin browser session (owner for owner-only writes), an Authorization header, or an inaccessible team |
+| `organization_context_changed` | 409 | Existing: `X-Expected-Organization-Id` is missing or is not the session's current team |
+| `sso_disabled` | 404 | The protocol is off (see Rollout gating); returned before any lookup, write or rate-limit count, identically for known and unknown IDs |
+| `sso_required` | 403 | An enforced team needs a live SSO proof or delegation the caller lacks; machine clients get it without redirects |
+| `sso_reauthentication_required` | 403 | The write needs fresh proof; the body adds `attemptId`, `proofMethods` and `expiresAt` |
+| `sso_configuration_changed` | 409 | An expected provider revision, `policyRevision`, domain generation, link generation or `trustGeneration` no longer matches |
+| `sso_domain_unverified` | 409 | A new link, JIT admission, provider activation or enforcement needs an unexpired verified domain |
+| `sso_test_required` | 409 | Activation or enforcement needs a passed test for the exact current provider revision (an owner's, for enforcement) |
+| `sso_recovery_required` | 409 | Enforcement needs at least one accepted recovery owner, or the last recovery owner of an enforced team tries to leave or lose the owner role |
+| `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response |
+
+The existing leave, member-removal and role-change operations gain
+`sso_recovery_required` as an additive error code for the last recovery owner.
 
 | Method/path | operationId | MCP / CLI or session exemption reason |
 |---|---|---|
@@ -460,7 +577,7 @@ use shared HTTP 400/401/403/404/409/429 conventions. No raw IdP error is returne
 | POST `/providers/P/test` | `testSsoProvider` | Session: the test binds the current administrator and browser to a configuration revision. |
 | POST `/providers/P/activation` | `activateSsoProvider` | Session: enabling/disabling authentication authority requires interactive administrator proof. |
 | PUT `/policy` | `setSsoPolicy` | Session: enforcement/admission changes require interactive proof and owner authority for enforcement. |
-| POST `/recovery` | `configureSsoRecovery` | Session: enrollment binds a current owner after independent mailbox proof. |
+| POST `/recovery` | `configureSsoRecovery` | Session: nominating a recovery owner requires interactive owner proof; the nominee accepts separately. |
 | POST `/recovery/{enrollmentId}/accept` | `acceptSsoRecoveryEnrollment` | Session: the nominated owner must independently prove their own mailbox and consent. |
 | POST `/recovery/use` | `useSsoRecovery` | Session: recovery grants narrow authority to the freshly mailbox-authenticated enrolled owner. |
 | POST `/providers/P/link` | `linkSsoAccount` | Session: explicit self-linking requires independent local proof and a browser-bound IdP ceremony. |
@@ -475,51 +592,91 @@ OAuth `mcp:tools`, subject to SSO enforcement. Ordinary members get their own re
 provider/proof summary through an additive session-only `/api/v1/me` projection,
 not administrator inventories. No first-release machine write changes SSO trust.
 
-Create accepts `{protocol, displayName, domainIds, oidc? , saml?}`; OIDC has issuer,
+Every write except `revokeSsoDelegation` accepts an optional opaque `proofAttemptId` in
+its strict input for the fresh-proof retry below. DELETE operations carry their strict
+JSON body, which OpenAPI 3.1 permits. Create accepts `{protocol, displayName, domainIds,
+oidc?, saml?, proofAttemptId?}`; OIDC has issuer,
 clientId and write-only clientSecret; SAML has explicit entityId, SSO URL, trusted
 signing certificates and an optional metadata import URL/document. Server-generated
 callback URLs cannot be supplied by the caller. Return `{provider}` with id, protocol,
 revision, enabled, safe display fields and validation/test status; never echo secrets,
-raw metadata or identities. New providers are disabled. Update/delete require
-`expectedRevision`; trust edits invalidate tests, pending attempts and live proofs.
+raw metadata or identities. New providers are disabled. Update takes `{expectedRevision,
+displayName?, domainIds?, oidc?, saml?, proofAttemptId?}` and delete takes
+`{expectedRevision, proofAttemptId?}`; trust edits invalidate tests, pending attempts
+and live proofs.
 A changed identity tuple requires a replacement provider. Retired deletion is idempotent
-for an authorized known tombstone. Activation takes `{expectedRevision, enabled}`.
+for an authorized known tombstone. Activation takes `{expectedRevision, enabled,
+proofAttemptId?}`.
 
-Domain challenge takes `{domain}` and returns `{domain: {id, name, status}, txtName,
-txtValue, expiresAt}` once; repeated creation rotates rather than recovering the value.
-Verify/delete require expected generation. Domains are organization-owned and providers
+Domain challenge takes `{domain, proofAttemptId?}` and returns `{domain: {id, name,
+status}, txtName, txtValue, expiresAt}` once; repeated creation rotates rather than
+recovering the value. Verify/delete take `{expectedGeneration, proofAttemptId?}`.
+Domains are organization-owned and providers
 reference their IDs; the provider inventory includes safe domain status/generation.
-Test/link returns a bounded authorization URL and attempt ID; completion is via protocol
+Test takes `{expectedRevision, proofAttemptId?}` and link takes `{proofAttemptId?}`.
+Test/link returns a bounded authorization URL and its own ceremony attempt ID;
+completion is via protocol
 callback and status is observed in provider inventory or the caller's `/me` projection.
 Tests do not provision members, link accounts or elevate a session automatically.
 
-Policy takes `{expectedRevision, requireSso, admission}` with `admission` restricted to
-`invitation_only` or `jit`. Recovery enrollment takes `{expectedRevision, ownerUserId}`
+Policy takes `{expectedRevision, requireSso, admission, proofAttemptId?}` with
+`admission` restricted to `invitation_only` or `jit`. Recovery enrollment takes
+`{expectedRevision, ownerUserId, proofAttemptId?}`
 and creates a pending nomination, never an active recovery owner. Return an opaque
 enrollment ID and notify the nominated current owner with an inert app link. Only that
-owner can call `acceptSsoRecoveryEnrollment` with `{expectedRevision}` and their own
-fresh independent mailbox proof bound to that enrollment. Acceptance rechecks owner
-role, nominating owner authority and policy revision, atomically consumes the nomination,
-and audits/notifies both owners. Nomination expires after `authenticationAttemptLifetime`;
-rejection/expiry leaves the old recovery owner intact. Self-nomination follows the same
-acceptance ceremony. `useSsoRecovery` takes `{expectedRevision}` and fresh mailbox proof. Recovery authority expires with the fresh-administration window and
+owner can call `acceptSsoRecoveryEnrollment` with `{expectedRevision, proofAttemptId?}`
+and their own fresh independent mailbox proof bound to that enrollment. Acceptance
+rechecks owner role, nominating owner authority and `policyRevision`, atomically
+consumes the nomination, adds the nominee as a recovery owner, and audits/notifies both
+owners. A nomination expires after `ssoRecoveryNominationLifetime` (72 hours), long
+enough for a nominee in another time zone or away over a weekend; the nomination
+itself grants nothing, and acceptance still needs a mailbox proof no older than
+`freshAdministrationProof`. A new nomination of the same owner replaces their pending
+one; expiry adds nobody and leaves existing recovery owners intact. Self-nomination
+follows the same acceptance ceremony. `useSsoRecovery` takes `{expectedRevision,
+proofAttemptId?}` and fresh mailbox proof. Recovery authority expires with the
+fresh-administration window and
 is single-use for a policy repair mutation; retry requires a new ceremony. These proofs
 are distinct from IdP authentication. Delegation binding takes `{credentialKind,
-credentialId, expectedPolicyRevision}`, verifies ownership and current team binding,
-and returns redacted metadata/expiry; revoke accepts only an owned binding. Existing
+credentialId, expectedTrustGeneration, proofAttemptId?}`, verifies ownership and current team binding,
+and returns redacted metadata/expiry; revoke accepts only an owned binding and needs no
+fresh proof, because it only withdraws authority. Existing
 key/OAuth inventory responses gain additive binding summaries for the owner's UI.
 A key/grant cannot be rebound to a different organization by this operation.
-Unlink/remove take `{expectedLinkGeneration}` and use the exact provider/link scope;
+Unlink/remove take `{expectedLinkGeneration, proofAttemptId?}` and use the exact
+provider/link scope;
 self unlink never accepts another user ID. The caller's `/me` includes own opaque link
 IDs; owner/admin provider inventory includes team-scoped opaque link IDs for explicit
 recovery selection without exposing raw subjects or mailbox capabilities.
+
+**Fresh-proof retry.** For every write that needs fresh proof (see Fresh proof), after
+session, role, Origin, expected-team and strict input validation and before any
+mutation, a request without a satisfied `proofAttemptId` returns
+`403 sso_reauthentication_required` with `{error, message?, attemptId, proofMethods,
+expiresAt}`. `proofMethods` is an open string list; the first-release values are
+`mailbox` and `sso`. The pending attempt freezes user, session, team, operationId, the
+canonical input digest (excluding `proofAttemptId`), the required methods and an expiry
+of `authenticationAttemptLifetime`; it grants no authority and changes no configuration.
+The caller satisfies `mailbox` through the Mailbox proof pair and `sso` through sign-in
+initiation with `intent: "step_up"` and that `attemptId`, then repeats the exact
+operation and input with `proofAttemptId`. The committing transaction rechecks authority
+and revisions, consumes the attempt once and executes only the frozen operation. If the
+attempt is valid but a method is still unsatisfied (for example a step-up that could
+not prove freshness added `mailbox`), the response is 403 again with the same
+`attemptId` and the remaining methods. Any other unusable `proofAttemptId` (unknown,
+expired, consumed, bound to another user, session, team or operation, or a different
+input digest) is treated as absent: a new attempt is returned and the old one is not
+consumed. Recovery use and nominee acceptance need no prior recovery authority. Proof
+completion never executes an operation. MCP and CLI never receive this response, because
+no machine write changes SSO trust.
 
 Mailbox proof is an authentication protocol surface, outside `/api/v1` and the product
 interface-parity inventory, like sign-in/callback below; it has no MCP/CLI equivalent:
 `POST /api/auth/sso/mailbox-proof/send` and
 `POST /api/auth/sso/mailbox-proof/consume`, owned by Mailbox proof. Send takes an opaque
 pending attempt ID and returns the same generic acknowledgement whether delivery is
-eligible or not. The server selects the frozen mailbox; callers cannot substitute it.
+eligible or not; delivery is queued, never sent inline. The server selects the frozen
+mailbox; callers cannot substitute it.
 Consume takes that attempt ID and the emailed one-use token, requires the original
 browser binding and exact Origin, and stores proof on the attempt rather than issuing
 a standalone login/session. Store only token digests; rate-limit send/consume by attempt,
@@ -530,19 +687,8 @@ pre-session browser cookie; authenticated link, step-up, recovery enrollment and
 use additionally bind the existing session/user and intended operation/revision. These
 protocol endpoints are the explicit auth exception, not session-only product writes.
 GET email links only show an inert confirmation page; consumption requires POST.
-Every SAML initial enrollment, OIDC missing verified email, email change, and fallback
-step-up uses this pair. Pending recovery and step-up attempts are created by the
-corresponding initiating operation: after session/role/Origin/context checks but before
-any mutation, a missing fresh proof yields `403 sso_reauthentication_required` with
-an opaque `attemptId`, frozen operation/input digest and expiry. This response creates
-only a pending attempt, no authority or configuration change. The caller sends and
-consumes mailbox proof for that ID, then repeats the exact operation/input with
-`proofAttemptId`; the committing transaction rechecks authority/revision, consumes
-the proof once and rejects changed input. For step-up, the attempt must additionally
-contain valid SSO authentication; mailbox proof cannot replace it. Recovery use and
-nominee acceptance use independent local proof as specified, without a circular
-requirement for prior recovery authority. Proof consumption never executes an
-arbitrary supplied operation.
+Every first enrollment of an IdP subject (OIDC or SAML), every changed linked email,
+every `mailbox` fresh proof and every step-up fallback uses this pair.
 
 Protocol endpoints are outside `/api/v1`, as existing Better Auth sign-in already is:
 `POST /api/auth/sign-in/sso`, OIDC `GET /api/auth/sso/callback/{providerId}` and
@@ -559,15 +705,30 @@ initiation uses the dedicated auth protocol adapter, same as Google/Microsoft; i
 requires exact Origin even without a cookie. This is the existing auth exception,
 not a product configuration call bypassing the generated client. GET links open an
 inert sign-in page; GET never consumes recovery or creates an authentication attempt.
+
+Sign-in initiation takes the strict input `{providerId, intent, attemptId?, returnTo?}`.
+`intent: "sign_in"` starts a new browser-bound authentication attempt and takes no
+`attemptId`. `intent: "step_up"` requires the existing session, the `attemptId` of that
+session's pending fresh-proof attempt listing `sso`, and an enabled provider of the
+attempt's team where the caller has a link. It requests a fresh authentication (OIDC
+`prompt=login` and `max_age=0`; SAML `ForceAuthn="true"`), and its callback records the
+result on that attempt as specified under Fresh proof, without a session, proof or link.
+Provider tests and self-link ceremonies get their authorization URL from
+`testSsoProvider` and `linkSsoAccount`, which create their own bound attempts.
+`returnTo` is an optional relative `/app` path checked by the safe-redirect rule below.
+
 When OIDC callback needs mailbox proof, it stores a short-lived frozen validated result
 bound to the original browser/attempt, without creating a session or retaining tokens.
 After mailbox consumption, same-origin `POST /api/auth/sso/oidc/complete` with `attemptId`
 atomically consumes that pending result and its proof, rechecks provider/domain/policy
 and admission, and finishes only the original sign-in/link intent. It cannot re-exchange
 a code, accept caller-supplied claims or bypass existing-account independent linking.
-The OIDC sign-in step owns this auth-protocol exception for linked identities; self-link
-and admission extend it in their later steps (no MCP/CLI surface), including
-wrong-browser, expiry, double completion and concurrent removal tests.
+Ownership (all auth-protocol exceptions, no MCP/CLI surface): OIDC sign-in owns
+initiation and callback for linked identities; OIDC completion owns
+`POST /api/auth/sso/oidc/complete` for linked identities, with its wrong-browser,
+expiry, double-completion and concurrent-removal tests; OIDC self-link and OIDC
+admission extend completion to their intents with the same tests; OIDC step-up adds
+`intent: "step_up"`. The SAML steps mirror this ownership for SAML providers.
 SAML POST callbacks use protocol correlation/signatures rather than same-origin CSRF
 requirements intended for admin JSON. Return only safe redirects under `/app`, the
 fixed sign-in error page, or the exact internal SAML completion route
@@ -577,11 +738,11 @@ fixed sign-in error page, or the exact internal SAML completion route
 
 Operators configure canonical HTTPS `PUBLIC_URL`, working SMTP for independent email
 proof/recovery, credential encryption keys, trusted proxy settings and optional private
-IdP destinations. Proposed `SSO_OIDC_ENABLED` and `SSO_SAML_ENABLED` default false until
-acceptance; they are rollout switches available to all instances. Turning a protocol
-flag off suspends its proofs and new sign-ins but does not remove team enforcement.
-Operators must repair it or use recovery; a deployment toggle must not bypass policy.
-No configuration described here is available in the current release.
+IdP destinations. Which protocols an operator can turn on follows Rollout gating below:
+until a protocol's setting step, no configuration can enable it; from then on
+`SSO_OIDC_ENABLED` or `SSO_SAML_ENABLED` does, on every instance. A setting turned off
+never bypasses a team's enforcement policy. No configuration described here is
+available in the current release.
 
 Known compatibility limitations:
 - Keycloak SAML response-only signing is insufficient: enable **Sign assertions**
@@ -589,9 +750,11 @@ Known compatibility limitations:
   fixture must verify the pinned version's defaults (documents on, assertions off)
   and demonstrate rejection before enabling assertion signing; see [Keycloak's
   signing settings](https://www.keycloak.org/docs/latest/server_admin/index.html#_client_saml).
-- Microsoft Entra ID OIDC does not emit the standard `email_verified` claim, so
-  every Entra user takes Hourmere's mailbox-proof path when email proof is required.
-  Domain verification (`xms_edov`) does not substitute for mailbox ownership; see
+- Microsoft Entra ID OIDC does not emit the standard `email_verified` claim. This
+  changes nothing, because Hourmere proves the mailbox of every first enrollment for
+  every IdP. Domain verification (`xms_edov`) does not substitute for mailbox
+  ownership. Entra emits `auth_time` only as a configured optional claim; without it,
+  every Entra step-up also needs mailbox proof. See
   [Microsoft's optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 - Private IdPs still require HTTPS: `SSO_PRIVATE_TARGETS` permits private routing,
   not plaintext transport. `http://keycloak:8080` on a compose network is refused;
@@ -604,15 +767,15 @@ across certificate rotation. Rotate provider secrets through the browser after t
 a new revision. Back up encrypted configuration and the operator encryption key
 separately; key loss prevents login and requires recovery/reconfiguration.
 
-The acceptance task uses an owned local Keycloak container/realm and synthetic users,
-its own disposable database/volumes and free ports other than shared development ports.
-Pin the Keycloak image/version at that task, record its digest and import a non-secret
-realm fixture. Configure distinct OIDC and SAML clients, exact callbacks, verified and
+The Keycloak OIDC and Keycloak SAML steps use an owned local Keycloak container/realm,
+synthetic users, their own disposable database/volumes and free ports other than shared
+development ports. Pin the Keycloak image/version in the Keycloak OIDC step, record its
+digest and import a non-secret realm fixture. Configure distinct OIDC and SAML clients, exact callbacks, verified and
 unverified email personas, multiple subjects with the same email, and a disabled user.
 A narrowly scoped private-target exception permits that fixture's exact host/port;
 DNS TXT is faked deterministically in tests. Never query a real enterprise IdP or SMTP.
 Browser processes require an escalated shell or CI. Stop only owned PIDs/containers
-and delete only named fixture resources created by the task; retain no tokens/assertions.
+and delete only named fixture resources created by the step; retain no tokens/assertions.
 
 Acceptance must exercise OIDC and SAML happy paths, personal magic-link/Google/Microsoft
 coexistence using the repo's fakes, explicit link consent, JIT/invitation distinction,
@@ -624,53 +787,134 @@ unsupported result. Public booking/manage-link behavior remains unchanged by tea
 authenticated reschedule/cancel and team reads require the same SSO policy. Exercise
 UTC expiry across DST boundaries without changing scheduling's time-zone semantics.
 
+## Rollout gating
+
+Releases are tagged from any commit on main: the release workflow only checks that the
+tagged commit is an ancestor of `origin/main` (`scripts/release.ts`). No operator
+setting may therefore enable an SSO path before that path is complete. Each protocol
+has exactly two mechanisms, defined here once and used by every row of the
+implementation sequence:
+
+| Mechanism | Definition |
+|---|---|
+| Hard-off | Server composition passes `ssoOidcEnabled: false` or `ssoSamlEnabled: false` from a code constant. No environment variable, configuration file or database row can change it; `SSO_OIDC_ENABLED` and `SSO_SAML_ENABLED` are not read before their setting steps. Integration, jsdom and Keycloak tests enable a protocol only by injecting `true` into the app, service or in-process fixture server under test, as existing `slotSnippetsEnabled` tests do; the production entry point passes no such argument. |
+| Setting | The protocol's setting step replaces its constant with one operator setting: `SSO_OIDC_ENABLED` in the OIDC setting step, `SSO_SAML_ENABLED` in the SAML setting step. Unset or `false` means off, `true` means on, and any other value fails startup. The final Acceptance and defaults step makes unset mean `true`; an explicit `false` still opts out. |
+
+Each plan row states, per protocol, `hard-off`, `setting introduced (default false)` or
+`setting (default false)`; only the last row changes both defaults to true. A protocol's
+setting step comes after that protocol has, end to end: sign-in with the member sign-in
+UI, linking and unlinking, admission, step-up, team, native and delegated enforcement,
+recovery enrollment and use (break-glass) with its UI, the operator recovery command,
+its negative/cryptographic corpus (OIDC verifier and OIDC step-up, or SAML verifier and
+SAML step-up, plus Transport's egress negatives) and its Keycloak acceptance.
+`setSsoPolicy` with `requireSso: true` is therefore never reachable through an operator
+setting before `useSsoRecovery` and the operator recovery command exist.
+
+**Hard-off behaviour.** Every SSO path of that protocol is unreachable; while both
+protocols are hard-off, so are the protocol-neutral SSO operations (policy, domains,
+recovery, mailbox proof, links and delegations). Each REST operation, MCP tool, CLI
+command and auth-protocol endpoint returns `404 sso_disabled` before any lookup, write or
+rate-limit count, identically for known and unknown IDs. `GET /api/v1/instance` reports
+`ssoOidcEnabled`/`ssoSamlEnabled` as `false`, `/me` adds no SSO fields, the web shows no
+SSO navigation or sign-in option, and the domain recheck worker is not scheduled. Two
+things work in every state: a stored `requireSso` policy is enforced from Team
+enforcement onward (no product path can store one while hard-off), and the operator
+maintenance commands, which only remove trust, run.
+
+**Setting-off behaviour** (unset or `false` after the setting step). Operations that add
+trust through that protocol return `404 sso_disabled`: sign-in initiation, callbacks,
+ACS, metadata and completion; provider create, update, test and `activateSsoProvider`
+with `enabled: true`; linking, step-up and delegation binding. While no protocol is on,
+domain challenge and verification, `setSsoPolicy` with `requireSso: true` or
+`admission: "jit"`, and recovery nomination and acceptance are refused too. That
+protocol's pending attempts cannot complete. Its browser proofs and delegations are
+suspended, not revoked: they do not satisfy enforcement while off and are accepted again
+if the setting returns before their own deadline, which nothing extends. Stored policy is
+unchanged, so an enforced team's members lose team access while personal spaces are
+unaffected. Trust-reducing and recovery operations stay available, each with its normal
+proof: reads, `useSsoRecovery`, `setSsoPolicy` with `requireSso: false`,
+`activateSsoProvider` with `enabled: false`, `deleteSsoProvider`, `deleteSsoDomain`,
+`unlinkSsoAccount`, `removeSsoIdentityLink`, `revokeSsoDelegation` and the operator
+commands. SSO step-up through that protocol is unavailable, so on an enforced team the
+owner first uses recovery to read the configuration and turn enforcement off; the
+team's remaining writes then use mailbox fresh administration. After a setting step the
+domain recheck worker keeps running even while the setting is off, so verification
+state stays current.
+
 ## Implementation sequence
 
 Every row is approximately one working day; if a release gate needs an upstream fix,
 stop that protocol's rollout rather than compressing its security work. Dependencies
-refer only to earlier rows. Each endpoint name below refers to the exact inventory
-above; “none” means no new REST, MCP or CLI operation. All migrations are future work
-with predecessor-data/fresh/no-op tests and newly allocated numbers. Each implementation
-PR includes its OpenAPI/parity/client changes, behavioral negatives/source mutations,
-translations and user docs for the surfaces it adds.
+refer only to earlier rows, and each acceptance check tests only what its row or an
+earlier row builds. Where a check needs stored state that a later row's operation
+writes (an enforced or JIT policy before `setSsoPolicy`, a SAML provider before its
+configuration fields), the test seeds that row directly. External prerequisites are
+named in the row that waits for them: the patched Better Auth family in Upgrade and the
+audit journal of PR #246 in Audit actions. Each endpoint name below refers to the exact
+inventory above; “none” means no new REST, MCP or CLI operation. All migrations are
+future work with predecessor-data/fresh/no-op tests and newly allocated numbers. Each
+implementation PR includes its OpenAPI/parity/client changes, behavioral
+negatives/source mutations, translations and user docs for the surfaces it adds.
+Flag states use only the Rollout gating vocabulary. Every acceptance cell ends with its
+Off check, run with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true` in the
+environment for each protocol that is still hard-off: everything the row adds stays
+unreachable as specified under Rollout gating.
 
 | Step | Builds; endpoint / MCP / CLI ownership | Dependencies | Flag state | Acceptance checks |
 |---|---|---|---|---|
-| Upgrade | Coordinated Better Auth family security upgrade and rerun source evaluation; none | Accepted design | Both off | Regression suite; patched advisory versions; pre-session extension feasibility established |
-| Data | Provider/domain revisions, identity links, attempts, replay/proof/delegation rows and removal tombstones; none | Upgrade | Both off | Realistic predecessor preservation, fresh/no-op migration, identity/domain uniqueness races, AAD tamper, bounded pools |
-| Transport | Extract pinned outbound transport and operator private-target policy; none | Data | Both off | DNS rebinding/mixed answers, socket pinning, timeout/size/redirect negatives, secret redaction |
-| Drafts | `listSsoProviders`, `getSsoPolicy`, `createSsoProvider`, `updateSsoProvider`, `deleteSsoProvider`; `list_sso_providers` / `sso providers list`, `get_sso_policy` / `sso policy` | Transport | Both off | Exact session exemptions, bearer+cookie refusal, scope/role/context/revision races, ciphertext-only storage |
-| Domains | `createSsoDomainChallenge`, `verifySsoDomain`, `deleteSsoDomain`; no MCP/CLI writes; renewal worker and audited offline expired-claim retirement runbook | Drafts | Both off | Pending challenges never reserve; active claim cannot be evicted; expired-claim retirement/verify races, notification/audit; challenge rotation, exact subdomains, outages/expiry, no personal-account capture |
-| OIDC verifier | PKCE/state/nonce, strict ID token verification and bounded JWKS cache; none | Domains | Both off | Invalid/missing claims and algorithm, issuer mix-up, replay/concurrency, future iat, rotation/outage; OIDC 30-second tolerance distinct from SAML clockSkew |
-| Mailbox proof | `POST /api/auth/sso/mailbox-proof/send` and `/consume`; auth-protocol exception, no MCP/CLI; reusable attempt-bound enrollment/step-up/recovery proof | OIDC verifier | Both off | Missing session enrollment, exact Origin/browser binding, send enumeration resistance, token digest/rotation/expiry, consume race, wrong user/mailbox/intent; fake mail only |
-| OIDC sign-in | `POST /api/auth/sign-in/sso`, `GET /api/auth/sso/callback/{providerId}` and `POST /api/auth/sso/oidc/complete` for already-linked identities only; auth-protocol exception | Mailbox proof | OIDC fixture-only opt-in; SAML off | Atomic state/code use, identity/config revision checks before session, no unlinked provisioning, safe redirects; disabled drafts refused outside bound test intent |
-| OIDC provider test | `testSsoProvider`; no MCP/CLI write; bound test intent through existing start/callback | OIDC sign-in | OIDC fixture-only opt-in; SAML off | Disabled draft only for initiating admin/exact revision/browser; no account creation/link/admission; independent proof; test receipt invalidated on change |
-| OIDC self-link | `linkSsoAccount`, additive session-only `/api/v1/me` own-attempt/link/proof summary; no MCP/CLI write | OIDC provider test | OIDC fixture-only opt-in; SAML off | Frozen independent local identity and explicit consent; Entra/missing email_verified mailbox ceremony; wrong session/email/conflicting subject rejected; no team access before admission |
-| OIDC admission | Extend callback/completion resolver and existing explicit invitation acceptance; no new operations | OIDC self-link | OIDC test-only opt-in; SAML off | Generic unlinked same-email outcome; no duplicate user/automatic linking; signup/first-user transaction, invitation role/expiry/inviter, JIT capacity, removal races/tombstones |
-| Identity recovery | `unlinkSsoAccount`, `removeSsoIdentityLink`; no MCP/CLI writes; extend own/provider summaries with scoped opaque link IDs | OIDC admission | OIDC test-only opt-in; SAML off | Self-only independent proof; admin freshness/team boundary; exact generation race; revoked browser/delegated proofs; conflict retirement then explicit re-link under enforcement; last-owner/recovery continuity |
-| Browser enforcement | Session proof and native/v1/shared-service checks and enforcement of the existing `/me` own-proof summary; no new write operations | Identity recovery | OIDC test-only opt-in; SAML off | Policy revision/expiry, personal isolation, native/trusted-call bypass negatives, transaction-time removal checks; enrollment/mailbox/self-unlink exceptions expose no team data |
-| Delegation binding | `bindSsoDelegation`, `revokeSsoDelegation`; additive owned key/grant summaries; no MCP/CLI writes | Browser enforcement | OIDC test-only opt-in; SAML off | Own same-team credential only; fresh proof; 30-day absolute ceiling independent of browser expiry; current domain renewal/lapse; revoke and binding races |
-| Delegation enforcement | OAuth consent/token/refresh and MCP authorization checks using binding service; no new operations | Delegation binding | OIDC test-only opt-in; SAML off | Existing unbound keys denied; OAuth resume; refresh never extends delegation; 30-day expiry/removal/policy races; stable sso_required without redirects |
-| Recovery enrollment | `configureSsoRecovery`, `acceptSsoRecoveryEnrollment`; no MCP/CLI writes; owner continuity | Delegation enforcement | OIDC test-only opt-in; SAML off | Pending nomination cannot enable enforcement; second owner explicitly accepts with own mailbox proof; wrong owner/session/revision, expiry/consumption races; last recovery owner protected |
-| Policy and activation | `setSsoPolicy`, `activateSsoProvider`; durable audit events/outbox adapter; no MCP/CLI writes; owner checks without recovery bypass yet | Recovery enrollment | OIDC test-only opt-in; SAML off | Tested exact revision/domain/accepted recovery prerequisites; last-provider guard; audit persistence; normal enforcement authorization; audit service required before release |
-| Recovery use | `useSsoRecovery`; add narrow recovery-authority checks to existing configuration/test/policy/activation operations; no MCP/CLI writes | Policy and activation | OIDC operator opt-in; SAML off | Fresh owner mailbox proof; single-use race; recovery authority can call setSsoPolicy {requireSso:false} or activateSsoProvider exactly once per ceremony; subsequent write requires new ceremony; cannot enable JIT or access team data; expired/non-owner refusal |
-| Setup UI | Provider/domain/test/activation forms using prior endpoints; no new operations | Recovery use | OIDC opt-in; SAML off | en/zh-CN admin strings; jsdom revisions, neutral loading/error/403 |
-| Member UI | Sign-in, explicit self-link/unlink and mailbox confirmation using Mailbox proof/OIDC self-link/Identity recovery endpoints; no new operations | Setup UI | OIDC opt-in; SAML off | en/zh-CN sign-in; shipped public locales where applicable; jsdom consent, email proof send/consume, stale intent, generic same-email outcome, personal-account coexistence |
-| Recovery UI | Recovery enrollment/acceptance/use, subject-conflict retirement, enforcement/delegation forms using prior endpoints; no new operations | Member UI | OIDC opt-in; SAML off | Second owner consent, owner-only narrow recovery, reauthentication, unlink/relink path, delegation expiry, en/zh-CN and jsdom denied/unknown state |
-| SAML verifier | XML/signature/time/recipient/destination and durable request/replay validation; none | Recovery UI | OIDC opt-in; SAML off | Duplicate IDs/wrapping/XXE/unsigned assertions; expired/audience/request mismatch, parallel replay; encrypted input rejected; Entra 70-minute Conditions/5-minute bearer and AD FS 60-minute Conditions accepted before minimum bearer/Conditions/IssueInstant+600 deadline; exact boundary/replay retention |
-| SAML ACS and completion | `POST /api/auth/sso/saml2/sp/acs/{providerId}`, GET/POST `/api/auth/sso/saml2/complete`; auth-protocol exception; already-linked fixture identities only | SAML verifier | OIDC opt-in; SAML fixture-only opt-in | Cross-site POST pending result cannot mint session; original browser required; forged/missing RelayState, request/assertion replay, wrong browser, expired completion; no unsolicited login/SLO |
-| SAML configuration and test | `GET /api/auth/sso/saml2/sp/metadata/{providerId}`; auth-protocol read; extend existing config/test/start operations; no new v1 write | SAML ACS and completion | OIDC opt-in; SAML test-only opt-in | Stable entity ID/exact ACS, guarded metadata parsing, signed assertion setting, certificate rotation including absent KeyInfo, revision-bound admin tests without enrollment |
-| SAML identity and admission | Extend existing link, mailbox proof, callback completion, own summary and admission services; no new operations | SAML configuration and test | Both opt-in | Every initial enrollment proves Hourmere mailbox; immutable subject/independent self-link; invitation/JIT/closed-signup parity, same-email outcome, conflict/unlink recovery, removal races, ForceAuthn/fallback step-up |
-| SAML UI | Extend provider form with metadata/certificate controls; no new operations | SAML identity and admission | Both opt-in | jsdom redaction, rotation/revision conflicts, unknown readiness, locales; endpoint implementations already present |
-| Keycloak OIDC | Owned local fixture and OIDC browser/delegation/recovery acceptance; no product operations | SAML UI | Both opt-in | Synthetic end-to-end sign-in/coexistence, key rotation/outage and cleanup; browser escalation/CI |
-| Keycloak SAML | Local SAML browser acceptance plus cryptographic negative corpus; no product operations | Keycloak OIDC | Both opt-in | Verify pinned-version signing defaults and Sign assertions ON; ACS/RelayState, replay across processes, signing rotation; logout/deprovision limitation demonstrated |
-| Release docs | Publish operator/REST/MCP/CLI guides, backup/recovery drill and limitations; no product operations | Keycloak SAML | Both remain opt-in until acceptance approves defaults | Final required CI green; self-host parity; operator can recover without IdP; no unimplemented settings advertised |
+| Hard-off guard | Code constants `ssoOidcEnabled = false` and `ssoSamlEnabled = false` in server composition (no environment variable), the shared `404 sso_disabled` guard, test injection and additive `ssoOidcEnabled`/`ssoSamlEnabled` in `GET /api/v1/instance`; none | Accepted design | OIDC hard-off; SAML hard-off | Injected `true` reaches a guarded test route only in tests; mutations flipping either constant fail real assertions; OpenAPI/types for the additive fields. Off: `/instance` reports both `false`; OpenAPI paths, MCP tools, CLI commands and web routes otherwise unchanged |
+| Upgrade | Coordinated Better Auth family security upgrade and rerun source evaluation; none | Hard-off guard | OIDC hard-off; SAML hard-off | Regression suite; patched advisory versions; pre-session validation hook or replacement adapter feasibility established. Off: no SSO plugin route registered |
+| Configuration storage | Providers with encrypted configuration and `revision`, team policy with `policyRevision` and `trustGeneration`, domain claims with generations, recovery owners and nominations; none | Upgrade | OIDC hard-off; SAML hard-off | Realistic predecessor preservation, fresh/no-op migration, one active claim per domain under concurrent inserts, AAD tamper (ciphertext moved between organization/provider/revision fails), bounded pools. Off: tables only; no route, worker or read uses them |
+| Identity storage | Identity links with link generations, pending attempts (sign-in, test, link, fresh proof) with frozen operation/input digests, mailbox token digests, replay cache, browser proofs, delegation bindings and admission tombstones; none | Configuration storage | OIDC hard-off; SAML hard-off | Predecessor preservation, fresh/no-op migration, `(organization, provider, issuer, subject)` uniqueness race, replay-key uniqueness across two connections, proofs and bindings store `trustGeneration` and link generation, tombstones survive member deletion, bounded pools. Off: tables only |
+| Transport | Extract pinned outbound transport and operator `SSO_PRIVATE_TARGETS` policy; none | Identity storage | OIDC hard-off; SAML hard-off | DNS rebinding/mixed answers, socket pinning, timeout/size/redirect negatives, secret redaction; webhook delivery unchanged. Off: no SSO caller; the allowlist routes nothing |
+| Audit actions | Prerequisite: the `audit_events` journal of PR #246 is on main; this step does not start, and builds no substitute, before it is. SSO action names and detail allow-lists in the application and database check, plus the redacted security-failure writer; none | Transport | OIDC hard-off; SAML hard-off | Each SSO action accepts only its allow-listed details and extra keys fail in the application and database; event and change commit or roll back together; failure events bounded per provider/source; no secret, token, assertion, raw subject or mailbox capability recorded. Off: no SSO action emitted; existing audit actions unchanged |
+| Mailbox proof | `POST /api/auth/sso/mailbox-proof/send` and `/consume`; auth-protocol exception, no MCP/CLI; reusable attempt-bound proof for every intent | Audit actions | OIDC hard-off; SAML hard-off | Test-seeded attempts of each intent; missing-session enrollment, exact Origin/browser binding, identical queued send response and message whether or not delivery is eligible, token digest/rotation/expiry, consume race, wrong user/mailbox/intent; fake mail only. Off: both endpoints `404 sso_disabled` |
+| Fresh proof | Shared fresh-proof gate: pending attempt, `403 sso_reauthentication_required` with `attemptId`/`proofMethods`/`expiresAt`, strict `proofAttemptId` retry, `mailbox` for teams without enforcement, and enforced-team mode requiring `sso` (unsatisfiable until a step-up row); none | Mailbox proof | OIDC hard-off; SAML hard-off | On a test-only operation: 403 before any mutation and attempt only; retry succeeds once; changed input/user/session/team/operation gets a new attempt and leaves the old one unconsumed; consumption race; `freshAdministrationProof` and attempt-expiry boundaries; Authorization header refused; on a seeded enforced team mailbox-only proof is refused. Off: no new route |
+| Drafts | `listSsoProviders`, `getSsoPolicy`, `createSsoProvider`, `updateSsoProvider`, `deleteSsoProvider` with OIDC fields; `list_sso_providers` / `sso providers list`, `get_sso_policy` / `sso policy` | Fresh proof | OIDC hard-off; SAML hard-off | Exact session exemptions, bearer+cookie refusal, scope/role/context/revision races, ciphertext-only storage; a team's first provider created with mailbox fresh administration; `proofAttemptId` in the strict schemas; audit events. Off: all five operations and both MCP tools/CLI commands `sso_disabled` before lookup; `protocol: "saml"` `sso_disabled` while SAML is hard-off |
+| Domains | `createSsoDomainChallenge`, `verifySsoDomain`, `deleteSsoDomain`; no MCP/CLI writes | Drafts | OIDC hard-off; SAML hard-off | Pending challenges never reserve; an active claim cannot be evicted; challenge rotation, exact subdomains, DNS outage is unknown, no personal-account capture; mailbox fresh administration; audit events. Off: three operations `sso_disabled` |
+| Domain lifecycle | Scheduled recheck worker (renewal, freeze on failure, suspension at expiry) and the domain-retirement maintenance command with its runbook; no product operations | Domains | OIDC hard-off; SAML hard-off | Renewal success/failure/unknown, exact expiry boundary, retirement/verify races under the domain lock, old-team owner notification and `system` audit event, retirement transfers no trust/identity/membership. Off: worker not scheduled; the command only removes trust and runs in every state |
+| OIDC verifier | PKCE/state/nonce, strict ID token verification including signed `auth_time`, bounded JWKS cache; none | Domain lifecycle | OIDC hard-off; SAML hard-off | OIDC negative corpus: invalid/missing claims and algorithm, `none`/HMAC confusion, issuer mix-up, replay/concurrency, future `iat`/`auth_time`, unknown/duplicate key IDs, ignored `jku`/`x5u`, rotation/outage; 30-second tolerance distinct from SAML `clockSkew`. Off: no caller |
+| OIDC sign-in | `POST /api/auth/sign-in/sso` (`intent: "sign_in"`) and `GET /api/auth/sso/callback/{providerId}` for already-linked identities, with browser proof issuance; auth-protocol exception | OIDC verifier | OIDC hard-off; SAML hard-off | Atomic state/code use; identity/config revision checks before session; proof deadline is the earliest of lifetime/session/domain/IdP deadline and rolling refresh never extends it; unlinked subjects stop at the identical generic outcome, with or without `email_verified` or an existing account, and get no account, link, session or stored result until OIDC admission; safe redirects; disabled drafts refused; audit. Off: both endpoints `sso_disabled` |
+| OIDC completion | `POST /api/auth/sso/oidc/complete` and frozen pending-result storage for linked identities whose asserted email changed (mailbox proof first); auth-protocol exception | OIDC sign-in | OIDC hard-off; SAML hard-off | No tokens retained; wrong browser, expiry, double completion, concurrent member removal and provider deletion; no code re-exchange or caller-supplied claims; proof bound to the attempt. Off: `sso_disabled` |
+| OIDC provider test | `testSsoProvider`; no MCP/CLI write; bound test intent through existing start/callback | OIDC completion | OIDC hard-off; SAML hard-off | Disabled draft only for initiating admin/exact revision/browser; mailbox fresh administration; no account creation/link/admission; test receipt invalidated on change; owner receipts recorded. Off: `sso_disabled` |
+| OIDC self-link | `linkSsoAccount`, additive session-only `/api/v1/me` own-attempt/link/proof summary; no MCP/CLI write | OIDC provider test | OIDC hard-off; SAML hard-off | Independent mailbox proof through the fresh-proof retry; frozen local identity and explicit consent; first link proves the mailbox even with `email_verified: true`; wrong session/email/conflicting subject rejected; link-intent completion wrong browser/expiry/double/concurrent removal; no team access before admission. Off: `sso_disabled`; `/me` adds no SSO fields |
+| OIDC admission | Pending results for unlinked subjects; extend the callback/completion resolver and existing explicit invitation acceptance; no new operations | OIDC self-link | OIDC hard-off; SAML hard-off | Generic outcome identical in status, shape, timing class and email for every combination of existing account and `email_verified`; after proof an existing account gets only the link path; no duplicate user/automatic linking; signup/first-user transaction, invitation role/expiry/inviter, JIT capacity under a seeded JIT policy, removal races/tombstones. Off: extended endpoints still `sso_disabled` |
+| Identity recovery | `unlinkSsoAccount`, `removeSsoIdentityLink`; no MCP/CLI writes; extend own/provider summaries with scoped opaque link IDs | OIDC admission | OIDC hard-off; SAML hard-off | Self-only with independent mailbox proof; admin mailbox fresh administration and team boundary; admins retire only member/admin links and an owner's link needs another owner; exact generation race; that person's browser proofs revoked and other members' untouched; conflict retirement then explicit re-link; refusal without a remaining independent sign-in method; audit/notify. Off: `sso_disabled` |
+| OIDC step-up | `intent: "step_up"` on sign-in initiation with `prompt=login`/`max_age=0`, signed `auth_time` check, binding to the pending attempt and mailbox fallback; enables the fresh-proof gate's enforced-team mode for OIDC; no new operations | Identity recovery | OIDC hard-off; SAML hard-off | On a seeded enforced team, provider, domain, test and link-removal writes accept OIDC step-up and refuse mailbox-only proof; missing `auth_time` (Entra default) adds `mailbox`; stale/future `auth_time`, silent SSO, other user/subject/provider/team, expired/consumed attempt and changed retry input refused; no session, proof or link created. Off: `step_up` `sso_disabled` |
+| Team enforcement | Browser-proof checks on every team-scoped `/api/v1` read/write, enrollment exceptions and the `/me` own-proof summary; no new write operations | OIDC step-up | OIDC hard-off; SAML hard-off | Seeded `requireSso` policy: personal isolation; proof expiry and `trustGeneration`/link-generation checks; other members' proofs survive invitations, JIT admissions, departures and role changes; enrollment/mailbox/self-unlink exceptions expose no team data; conflict retirement then explicit re-link under enforcement. Off: without a stored policy team routes behave as today; a seeded policy is enforced even with the constant false |
+| Native enforcement | Native Better Auth team routes, trusted calls, shared services, transactions and queued work; no new operations | Team enforcement | OIDC hard-off; SAML hard-off | Native/trusted-call bypass negatives, transaction-time removal checks, queued work rechecked before acting, booking lifecycle unchanged. Off: as Team enforcement |
+| Delegation binding | `bindSsoDelegation`, `revokeSsoDelegation`; additive owned key/grant summaries; no MCP/CLI writes | Native enforcement | OIDC hard-off; SAML hard-off | Own same-team credential only; SSO step-up required and mailbox-only refused; 30-day ceiling independent of browser expiry and capped by credential expiry; domain renewal keeps and lapse ends the lease; unlink or link removal revokes that member's delegations only; revoke and binding races. Off: `sso_disabled` |
+| Delegation enforcement | OAuth consent/token/refresh and MCP authorization checks using the binding service; no new operations | Delegation binding | OIDC hard-off; SAML hard-off | Seeded enforcement: unbound keys denied; OAuth resume; refresh never extends delegation; 30-day expiry, removal and provider trust-change races; other members' changes leave leases intact; stable `sso_required` without redirects. Off: without a stored policy key/OAuth behavior unchanged |
+| Recovery enrollment | `configureSsoRecovery`, `acceptSsoRecoveryEnrollment`; no MCP/CLI writes; last-recovery-owner guard on leave, removal and role change | Delegation enforcement | OIDC hard-off; SAML hard-off | Nominee accepts with own mailbox proof; acceptance adds and never replaces; wrong owner/session/revision; 72-hour expiry boundary and consumption races; expiry adds nobody and a new nomination replaces the pending one; a recovery owner's unlink or link removal leaves recovery ownership intact; on a seeded enforced team the last recovery owner cannot leave, be removed or be demoted (`sso_recovery_required`); audit/notify both owners. Off: `sso_disabled` |
+| Policy and activation | `setSsoPolicy`, `activateSsoProvider`; no MCP/CLI writes; owner checks without recovery bypass yet | Recovery enrollment | OIDC hard-off; SAML hard-off | Enforcement needs a verified domain, an enabled provider, an owner test of the exact revision and an accepted recovery owner; a pending nomination cannot enable enforcement; last-provider guard; `trustGeneration` increments on enforcement off, provider trust change and disable, never on enforcement on, admission or membership changes, so a binding made before enforcement keeps working; once enforced, every fresh-administration write requires OIDC step-up; audit events. Off: `sso_disabled` |
+| Recovery use | `useSsoRecovery`; narrow recovery-authority checks on the seven listed operations; no MCP/CLI writes | Policy and activation | OIDC hard-off; SAML hard-off | Fresh recovery-owner mailbox proof; single-use race; reads do not consume authority and observe expiry; update, test and re-activation of a broken provider take three ceremonies; `createSsoProvider` and `setSsoPolicy {requireSso: false}` each consume one; a test callback finishes only its bound intent; cannot enable JIT, alter membership, bind delegations, change recovery owners or read team data; expired, non-owner and non-recovery-owner refusal. Off: `sso_disabled` |
+| Operator recovery | Offline recovery maintenance command that turns one team's enforcement off, and its runbook; no product operations | Recovery use | OIDC hard-off; SAML hard-off | Runs only in the server container against the instance database; unknown team refused; changes only `requireSso`, increments `trustGeneration`, writes a `system` audit event and notifies owners; idempotent; race with concurrent `setSsoPolicy`. Off: only removes trust, so it runs in every state |
+| Setup UI | Provider/domain/test/activation forms and the fresh-proof prompt (mailbox and step-up) using prior endpoints; no new operations | Operator recovery | OIDC hard-off; SAML hard-off | en/zh-CN admin strings; jsdom revisions, `sso_reauthentication_required` retry for both methods, neutral loading/error/403. Off: no navigation entry; settings routes show not-found; no SSO request |
+| Member UI | Sign-in, explicit self-link/unlink and mailbox confirmation using Mailbox proof, OIDC self-link and Identity recovery endpoints; no new operations | Setup UI | OIDC hard-off; SAML hard-off | en/zh-CN sign-in; shipped public locales where applicable; jsdom consent, email proof send/consume, stale intent, generic same-email outcome, personal-account coexistence. Off: sign-in page shows no SSO option |
+| Recovery UI | Recovery nomination, acceptance and use flows and the broken-provider repair sequence using prior endpoints; no new operations | Member UI | OIDC hard-off; SAML hard-off | Second-owner consent within 72 hours, owner-only narrow recovery, one ceremony per repair write, en/zh-CN, jsdom denied/unknown state. Off: no recovery entry |
+| Enforcement UI | Enforcement/admission policy form, identity-link retirement and delegation bind/revoke forms using prior endpoints; no new operations | Recovery UI | OIDC hard-off; SAML hard-off | Prerequisite messages, admins cannot retire an owner's link, unlink/relink path, delegation expiry, step-up prompts; en/zh-CN, jsdom denied/unknown state. Off: no enforcement entry |
+| Keycloak OIDC | Owned local fixture; OIDC browser, delegation and recovery acceptance through the in-process fixture server with injected `ssoOidcEnabled: true`; no product operations | Enforcement UI | OIDC hard-off; SAML hard-off | Synthetic end-to-end sign-in, link, admission, coexistence, enforcement, step-up and recovery; tampered state/nonce and replayed code refused; key rotation/outage; cleanup; browser escalation/CI. Off: the same fixture without injection shows no SSO option |
+| OIDC setting | Replace `ssoOidcEnabled` with `SSO_OIDC_ENABLED` (unset = false); `.env.example`, README and `/instance` effective state; no new operations | Keycloak OIDC | OIDC setting introduced (default false); SAML hard-off | `true` runs the full OIDC flow with environment-derived config; an invalid value fails startup; each setting-off effect has a test (trust-adding operations refused, proofs and delegations suspended and accepted again before their deadline, stored enforcement kept, recovery and trust-reducing operations available); `SSO_SAML_ENABLED=true` still changes nothing. Off: unset or `false` passes every earlier off check unchanged |
+| SAML verifier | XML/signature/time/recipient/destination and durable request/replay validation; none | OIDC setting | OIDC setting (default false); SAML hard-off | SAML negative corpus: duplicate IDs/wrapping/XXE/unsigned assertions/response-only signature, expired/audience/request mismatch, parallel replay, encrypted input rejected; Entra 70-minute Conditions/5-minute bearer and AD FS 60-minute Conditions accepted before the minimum bearer/Conditions/IssueInstant+600 deadline; exact boundary/replay retention. Off: no caller |
+| SAML start | `intent: "sign_in"` for SAML providers on `POST /api/auth/sign-in/sso`: HTTP-Redirect AuthnRequest persisting request ID, browser-binding digest, opaque RelayState handle and expiry before redirect; no new operations | SAML verifier | OIDC setting (default false); SAML hard-off | Persisted before redirect; RelayState carries no URL or identity; binding cookie set; request expiry; no IdP-initiated path. Off: SAML providers `sso_disabled` while OIDC works |
+| SAML ACS and completion | `POST /api/auth/sso/saml2/sp/acs/{providerId}`, GET/POST `/api/auth/sso/saml2/complete` and browser proof issuance for already-linked fixture identities; auth-protocol exception | SAML start | OIDC setting (default false); SAML hard-off | Cross-site POST pending result cannot mint a session; original browser required; forged/missing RelayState, request/assertion replay, wrong browser and expired completion with deadline recheck refused; no unsolicited login/SLO. Off: `sso_disabled` |
+| SAML configuration and test | `GET /api/auth/sso/saml2/sp/metadata/{providerId}` (auth-protocol read); SAML fields on `createSsoProvider`/`updateSsoProvider` and SAML `testSsoProvider`; no new v1 operation | SAML ACS and completion | OIDC setting (default false); SAML hard-off | Stable entity ID/exact ACS, guarded metadata parsing, signed-assertion setting, certificate rotation including absent KeyInfo, revision-bound admin tests without enrollment, fresh administration. Off: `protocol: "saml"` and metadata `sso_disabled` |
+| SAML self-link | SAML `linkSsoAccount` and own summary, with mailbox proof on every initial SAML enrollment; no new operations | SAML configuration and test | OIDC setting (default false); SAML hard-off | Persistent NameID or pinned immutable attribute only, transient NameID refused; independent mailbox proof and explicit consent; changed asserted email needs mailbox proof; link-intent completion wrong browser/expiry/double/concurrent removal. Off: `sso_disabled` |
+| SAML admission | SAML completion resolver for unlinked subjects and invitation acceptance; no new operations | SAML self-link | OIDC setting (default false); SAML hard-off | Identical generic outcome with and without an existing account; invitation/JIT/closed-signup parity with OIDC; no duplicate user/automatic linking; removal races/tombstones. Off: extended endpoints still `sso_disabled` |
+| SAML identity recovery | SAML links in `unlinkSsoAccount`/`removeSsoIdentityLink` and SAML conflict handling; no new operations | SAML admission | OIDC setting (default false); SAML hard-off | Owner-link rule, exact generation race, that person's SAML browser proofs revoked and others untouched, conflict retirement then re-link under seeded enforcement. Off: `sso_disabled` for SAML links |
+| SAML step-up | `intent: "step_up"` for SAML with `ForceAuthn="true"`, signed `AuthnInstant` check, binding to the pending attempt and mailbox fallback; enables enforced-team mode and delegation binding through SAML; no new operations | SAML identity recovery | OIDC setting (default false); SAML hard-off | On a seeded SAML-enforced team every fresh-administration write and delegation binding accepts SAML step-up and refuses mailbox-only proof; missing or old `AuthnInstant` (an IdP ignoring ForceAuthn) adds `mailbox`; replayed assertion and other user/subject/provider refused; unlink or link removal revokes that member's SAML-bound delegations; no session, proof or link created. Off: `sso_disabled` |
+| SAML UI | Provider form metadata/certificate controls and SAML sign-in, link and step-up entries; no new operations | SAML step-up | OIDC setting (default false); SAML hard-off | jsdom redaction, rotation/revision conflicts, unknown readiness, en/zh-CN and public locales. Off: SAML controls hidden |
+| Keycloak SAML | Local SAML browser acceptance through the in-process fixture server with injected `ssoSamlEnabled: true`; no product operations | SAML UI | OIDC setting (default false); SAML hard-off | Pinned-version signing defaults (documents on, assertions off) rejected, then accepted with Sign assertions ON; ACS/RelayState, ForceAuthn step-up, replay across two processes, signing rotation; logout/deprovision limitation demonstrated. Off: without injection no SAML option |
+| SAML setting | Replace `ssoSamlEnabled` with `SSO_SAML_ENABLED` (unset = false); `.env.example`, README and `/instance` effective state; no new operations | Keycloak SAML | OIDC setting (default false); SAML setting introduced (default false) | `true` runs the full SAML flow with environment-derived config; an invalid value fails startup; each SAML setting-off effect has a test; OIDC behavior unchanged. Off: unset or `false` passes every earlier SAML off check |
+| Release docs | Publish operator/REST/MCP/CLI guides, both settings and their off effects, the backup/recovery drill including both operator commands, and limitations; no product operations | SAML setting | OIDC setting (default false); SAML setting (default false) | Self-host parity; operator can recover without the IdP; examples match registered tools/commands; no unimplemented settings advertised. Off: docs describe both settings as off by default |
+| Acceptance and defaults | Independent end-to-end acceptance; unset `SSO_OIDC_ENABLED` and `SSO_SAML_ENABLED` now mean `true`; `.env.example`, README and every documented default updated | Release docs | Both settings; this step changes both defaults to true | Default configuration end to end; upgrading an instance without SSO configuration only adds SSO navigation and sign-in options; full gates and final required CI green. Off: explicit `false` passes every off check |
 
 ## Out of scope and remaining decisions
 
 No product implementation, migration or dependency change lands with this design.
 SCIM, IdP group role mapping, service accounts, IdP-initiated SAML, SAML SLO, encrypted
-assertions, automatic domain transfers, wildcard domain claims and global forced SSO
+assertions, automatic domain transfers, wildcard domain claims, a separate
+recovery-owner withdrawal operation and global forced SSO
 are deferred. IdP deactivation is not immediate local revocation without SCIM; absolute
 proof expiry bounds that delay. Private IdP reachability remains operator-controlled.
 A successful provider test does not prove all accounts have valid immutable identifiers.
@@ -678,7 +922,9 @@ A successful provider test does not prove all accounts have valid immutable iden
 Acceptance must confirm the wrapper's pre-session interception and guarded transport
 are feasible on the upgraded plugin. If not, retain Better Auth for local sessions and
 replace the affected federation path with a maintained protocol adapter; record that
-choice and its negative tests before activating it. Audit service availability is an
-external release dependency. Confirm the conservative no-automatic-linking policy,
-invitation-only default and expiring delegated proof policy with the project lead;
+choice and its negative tests before activating it. The audit journal of PR #246 is an
+external prerequisite of the Audit actions step. Confirm the conservative
+no-automatic-linking policy, invitation-only default, expiring delegated proof policy,
+mailbox fresh administration for teams without enforcement and the 72-hour recovery
+nomination with the project lead;
 these are proposed safe defaults, not existing customer behavior.

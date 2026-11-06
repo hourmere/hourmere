@@ -94,6 +94,7 @@ The website at hourmere.com is separate from your Hourmere instance.
 ## More guides
 
 Explore these detailed guides:
+
 - [CLI](/docs/cli): use the booking tools
   from a terminal with an API key.
 - [Booking webhooks](/docs/webhooks):
