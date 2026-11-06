@@ -608,7 +608,7 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 
 The November 2026 security update pins the Better Auth family, including its schema
 CLI, to 1.7.16. This is the smallest release containing the published November 3
-security fixes, including [unverified OAuth email claims](https://github.com/better-auth/better-auth/security/advisories/GHSA-9hm7-xhfp-cx58),
+security fixes, including [unverified sign-in email claims](https://github.com/better-auth/better-auth/security/advisories/GHSA-9hm7-xhfp-cx58),
 [cached session revocation](https://github.com/better-auth/better-auth/security/advisories/GHSA-fvxx-76fc-893x)
 and [padded organization roles](https://github.com/better-auth/better-auth/security/advisories/GHSA-c85h-5mrr-mgx4).
 It requires no new database migration. Use the upgrade procedure below to rebuild
@@ -616,8 +616,8 @@ and restart every application role. Hourmere stores sessions in PostgreSQL and d
 not enable Better Auth secondary storage or cookie caching, so there is no session
 cache to migrate or clear.
 
-Google and Microsoft sign-in no longer accept false email-verification claims encoded
-as strings. Microsoft users whose provider does not confirm their address must use
+Both sign-in providers now reject false email-verification claims encoded as strings.
+Microsoft users whose provider does not confirm their address must use
 an email link or configure the verified email claims described in
 [configuration](/docs/configuration). Social token and signing-key requests now reject
 HTTP redirects; provider/proxy endpoints must return their response directly.
