@@ -44,6 +44,7 @@ The website at hourmere.com is separate from your Hourmere instance.
   Conditional email and webhook actions are not available yet, including for self-hosters.
   During implementation, generated API-key/MCP scope tables, OpenAPI and CLI help may list
   operations before enablement; those entries will document their disabled behavior.
+  Docker Compose may also forward workflow settings that have no effect until then.
   Existing reminders, follow-ups and signed booking webhooks keep their current behavior.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
