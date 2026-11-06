@@ -75,6 +75,7 @@ import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
+import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -92,6 +93,7 @@ import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { oneTimeBookingRoutes } from './routes/one-time-bookings.ts'
 import { oneTimeLinkRoutes } from './routes/one-time-links.ts'
+import { openTimeSnippetRoutes } from './routes/open-time-snippets.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
@@ -220,6 +222,7 @@ export function productRoutes({
       successRedirectPolicy,
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
+    openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
@@ -236,6 +239,7 @@ export function productTools({
   db,
   waitlistSecret,
   publicUrl,
+  slotSnippetsEnabled = false,
   followUpHostNotesEnabled,
   successRedirectPolicy,
   notify,
@@ -247,6 +251,7 @@ export function productTools({
 }: {
   db: Db
   waitlistSecret?: string | undefined
+  slotSnippetsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -277,6 +282,9 @@ export function productTools({
       successRedirectPolicy,
     }),
     ...oneTimeLinkTools({ db, publicUrl }),
+    ...(slotSnippetsEnabled
+      ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
+      : []),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
@@ -689,6 +697,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           : {}),
         tools: productTools({
           db,
+          slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
           waitlistSecret: config.BETTER_AUTH_SECRET,
           publicUrl: config.PUBLIC_URL,
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,

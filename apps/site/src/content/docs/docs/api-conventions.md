@@ -6,6 +6,16 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Open-time snippet generation
+
+`POST /api/v1/open-time-snippets` reads current availability and returns direct links with
+plain-text and HTML snippets. It is explicitly classified for `read`, `bookings` and `full`
+API keys: it creates no booking, reserved time or one-time capability and changes no
+configuration. Personal-owner or team-owner/admin permission is still required.
+`SLOT_SNIPPETS_ENABLED` gates generation as it gates the admin picker; hidden active
+events remain eligible. The [agent guide](/docs/open-time-snippets#request-and-response-reference)
+defines its input, response, 31-elapsed-day maximum, defaults, and known limitations.
+
 ## Imported local bookings
 
 Protected booking reads may return `source: "import"` and
@@ -313,6 +323,14 @@ to `bookings` for AI agents; `read` suits analytics/reporting, and **Full accoun
 (`full`) also permits account configuration changes. Existing roles, ownership and host
 visibility still apply. Neither `read` nor `bookings` removes existing visible attendee
 details or meeting links, and `bookings` can manage previously created bookings you host.
+
+`POST /api/v1/open-time-snippets` is explicitly classified as a booking read: `read`,
+`bookings` and `full` keys may call it with personal-owner or team-owner/admin permission.
+It reads availability and formats ordinary reusable public links without minting a
+capability, reserving a time or changing configuration. The shared service also serves
+MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
+[request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
+for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
 
 Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
 `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.

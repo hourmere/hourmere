@@ -123,6 +123,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('PUT', '/api/v1/event-types/{id}/waitlist', 'other_write', 'key'),
   rest('GET', '/api/v1/event-types/{id}/waitlist/entries', 'other_read', 'key'),
   rest('DELETE', '/api/v1/event-types/{id}/waitlist/entries/{entryId}', 'other_write', 'key'),
+  rest('POST', '/api/v1/open-time-snippets', 'booking_read', 'key'),
   rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links', 'other_read', 'key'),
   rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_write', 'key'),
   rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'other_read', 'key'),
@@ -281,6 +282,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('get_schedule', 'other_read', ['GET /api/v1/schedules/{id}']),
   mcp('create_event_type', 'other_write', ['POST /api/v1/event-types']),
   mcp('update_event_type', 'other_write', ['PATCH /api/v1/event-types/{id}']),
+  mcp('generate_open_time_snippet', 'booking_read', ['POST /api/v1/open-time-snippets']),
   mcp('create_one_time_link', 'booking_write', [
     'POST /api/v1/event-types/{eventTypeId}/one-time-links',
   ]),
@@ -349,6 +351,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('remove-waitlist-entry', 'remove_waitlist_entry'),
   cli('join-waitlist', 'join_waitlist'),
   cli('resend-waitlist-verification', 'resend_waitlist_verification'),
+  cli('open-time-snippet', 'generate_open_time_snippet'),
   cli('one-time-links create', 'create_one_time_link'),
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),

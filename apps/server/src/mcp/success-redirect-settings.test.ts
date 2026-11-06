@@ -87,6 +87,7 @@ function productSourceCopy(change?: Change): Factory {
     catalogTools: () => [],
     integrationTools: () => [],
     oneTimeLinkTools: () => [],
+    openTimeSnippetTools: () => [],
     waitlistTools: () => [],
     brandingTools: () => [],
   }
