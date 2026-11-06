@@ -10,11 +10,12 @@ webhook receiver or automatic refund worker. Existing booking interfaces remain 
 
 ## Operator note
 
-`PAID_BOOKINGS_ENABLED` defaults to `false`. Keep it disabled for normal operation; enabling
-it permits internal hold creation but does not enable a working paid-booking product.
-It is a rollout safeguard available to every self-hosted instance, with no subscription
-or license requirement. Disabling creation does not discard existing reservations:
-local expiry continues to release them safely.
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
+adapter. It has no runtime effect in this release: setting it to `true` does not permit
+hold creation or enable payment collection. Internal tests explicitly opt in through
+the service context. Existing holds expire regardless of this environment setting.
+The planned rollout safeguard will be available to every self-hosted instance, with no
+subscription or license requirement.
 
 An unpaid reservation holds capacity for 30 elapsed minutes and requires at least that
 much time before the meeting starts. It can become confirmed only

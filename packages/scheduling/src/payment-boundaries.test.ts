@@ -3,7 +3,10 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { bookingPageQuery } from './booking-page.ts'
 import * as bookings from './bookings.ts'
+import { DomainError } from './errors.ts'
+import { isUuid } from './internal.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { cancelPaymentHold, confirmPaymentHold } from './payments.ts'
 import { createTestUser, testContext } from './testing.ts'
@@ -33,6 +36,18 @@ async function copy(before: string, after: string): Promise<typeof bookings> {
     ...Object.keys(bindings),
     `${source.replace(/\bexport /g, '')}; return { getHostBooking, cancelHostBooking, rescheduleHostBooking }`,
   )(...Object.values(bindings))
+}
+
+function copyPage(): typeof bookingPageQuery {
+  let source = readFileSync(new URL('./booking-page.ts', import.meta.url), 'utf8')
+  const predicate = "eb('b.payment_confirmed_at', 'is not', null)"
+  expect(source.includes(predicate)).toBe(true)
+  source = stripTypeScriptTypes(source.replace(predicate, "eb('b.status', '=', 'confirmed')"))
+  return new Function(
+    'DomainError',
+    'isUuid',
+    `${source.replace(/^import .*\n/gm, '').replace(/\bexport /g, '')}; return bookingPageQuery`,
+  )(DomainError, isUuid)
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('payment foundation transport boundaries', () => {
@@ -101,6 +116,60 @@ describe.skipIf(!process.env.DATABASE_URL)('payment foundation transport boundar
   it('hides pending and unpaid-cancelled holds from existing booking reads', async () => {
     await hidden()
   })
+  async function visibleAfterCancellation(api = bookings) {
+    const { ctx, id } = await fixture()
+    await confirmPaymentHold(ctx, id, `pi_${id.replaceAll('-', '')}`)
+    await db
+      .updateTable('bookings')
+      .set({ status: 'cancelled', cancelled_at: new Date() })
+      .where('id', '=', id)
+      .execute()
+    await expect(api.getHostBooking(ctx, id)).resolves.toMatchObject({ id })
+    expect(
+      (await bookings.listHostBookings(ctx, { status: 'cancelled' })).data.map((row) => row.id),
+    ).toContain(id)
+  }
+  it('keeps confirmed then cancelled holds visible in lists and details', async () => {
+    await visibleAfterCancellation()
+  })
+  it('detects hiding confirmed then cancelled holds through host details', async () => {
+    await expect(
+      visibleAfterCancellation(
+        await copy(
+          "eb('b.payment_confirmed_at', 'is not', null)",
+          "eb('b.status', '=', 'confirmed')",
+        ),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function pageHistory(read = bookingPageQuery) {
+    const { ctx, id } = await fixture()
+    const rows = () =>
+      read(db, { status: 'cancelled' })
+        .query.select('b.id')
+        .where('b.organization_id', '=', ctx.principal.organization.id)
+        .execute()
+    await cancelPaymentHold(ctx, id)
+    expect(await rows()).toEqual([])
+    const paid = await fixture()
+    await confirmPaymentHold(paid.ctx, paid.id, `pi_${paid.id.replaceAll('-', '')}`)
+    await db
+      .updateTable('bookings')
+      .set({ status: 'cancelled', cancelled_at: new Date() })
+      .where('id', '=', paid.id)
+      .execute()
+    const history = await read(db, { status: 'cancelled' })
+      .query.select('b.id')
+      .where('b.organization_id', '=', paid.ctx.principal.organization.id)
+      .execute()
+    expect(history.map((row) => row.id)).toEqual([paid.id])
+  }
+  it('keeps paid history and hides unpaid cancellation in the shared list/export query', async () => {
+    await pageHistory()
+  })
+  it('detects current-status filtering in the shared list/export query', async () => {
+    await expect(pageHistory(copyPage())).rejects.toMatchObject({ name: 'AssertionError' })
+  })
   it('refuses ordinary cancellation and rescheduling of confirmed paid bookings', async () => {
     await protectedMutation()
   })
@@ -110,8 +179,13 @@ describe.skipIf(!process.env.DATABASE_URL)('payment foundation transport boundar
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects exposing unpaid-cancelled holds through host details', async () => {
-    const before =
-      ".where((eb) =>\n      eb.or([eb('b.payment_hold_expires_at', 'is', null), eb('b.status', '=', 'confirmed')]),\n    )"
-    await expect(hidden(await copy(before, ''))).rejects.toMatchObject({ name: 'AssertionError' })
+    await expect(
+      hidden(
+        await copy(
+          "eb('b.payment_confirmed_at', 'is not', null)",
+          "eb('b.payment_hold_expires_at', 'is not', null)",
+        ),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 })

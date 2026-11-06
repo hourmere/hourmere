@@ -275,7 +275,7 @@ interface ManagedTarget {
  */
 async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget | undefined> {
   const { rows } = await sql<{ id: string; from_email: boolean }>`
-    SELECT id, false AS from_email FROM bookings WHERE manage_token_hash = ${hash} AND (payment_hold_expires_at IS NULL OR status='confirmed')
+    SELECT id, false AS from_email FROM bookings WHERE manage_token_hash = ${hash} AND (payment_hold_expires_at IS NULL OR payment_confirmed_at IS NOT NULL)
     UNION ALL
     SELECT booking_id, true FROM booking_notifications
      WHERE manage_token_hash = ${hash} AND outcome = 'sent'`.execute(db)
@@ -1273,6 +1273,7 @@ async function publicBooking(
           ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
           : current.eligibleHostUserIds
         for (const hostUserId of candidates) {
+          await expirePaymentHolds({ db: trx, hostUserId })
           try {
             const slots = await findSlots(trx, {
               eventTypeId: current.id,
@@ -1968,7 +1969,10 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
     .where('b.id', '=', id)
     .where('b.status', 'in', ['confirmed', 'cancelled'])
     .where((eb) =>
-      eb.or([eb('b.payment_hold_expires_at', 'is', null), eb('b.status', '=', 'confirmed')]),
+      eb.or([
+        eb('b.payment_hold_expires_at', 'is', null),
+        eb('b.payment_confirmed_at', 'is not', null),
+      ]),
     )
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)

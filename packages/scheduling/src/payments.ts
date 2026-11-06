@@ -33,7 +33,7 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
   const invitee = validateInvitee(input.invitee)
   const event = await findPublicEventType(ctx.db, input.handle, input.slug)
   if (!event) throw new DomainError('not_found', 'event_type_not_found')
-  const key = `payment:${input.idempotencyKey}`
+  const key = input.idempotencyKey
   const fingerprint = createHash('sha256')
     .update(canonicalJson({ ...input, start: input.start.toString() }))
     .digest()
@@ -45,7 +45,7 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       .selectFrom('bookings')
       .select(['id', 'status', 'payment_hold_expires_at', 'idempotency_fingerprint'])
       .where('organization_id', '=', event.organizationId)
-      .where('idempotency_key', '=', key)
+      .where('payment_idempotency_key', '=', key)
       .where('api_key_id', 'is', null)
       .where('oauth_consent_id', 'is', null)
       .forUpdate()
@@ -124,7 +124,6 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       responses,
       source: 'web',
       apiKeyId: null,
-      idempotency: { key, fingerprint },
       hostUserIds: current.hostUserIds,
       hostsUseDefaultSchedule: false,
       attendees: [invitee],
@@ -132,6 +131,11 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       manageTokenHash: null,
       paymentHoldExpiresAt: expiresAt,
     })
+    await trx
+      .updateTable('bookings')
+      .set({ payment_idempotency_key: key, idempotency_fingerprint: fingerprint })
+      .where('id', '=', id)
+      .execute()
     return { id, status: 'pending_payment', expiresAt }
   })
 }

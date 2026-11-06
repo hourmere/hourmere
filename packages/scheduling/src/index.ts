@@ -164,6 +164,12 @@ export {
   revokeManagedOneTimeBookingLink,
   revokeOneTimeBookingLink,
 } from './one-time-links.ts'
+export {
+  type GenerateOpenTimeSnippetInput,
+  generateOpenTimeSnippet,
+  MAX_OPEN_TIME_SNIPPET_RANGE_DAYS,
+  type OpenTimeSnippetOptions,
+} from './open-time-snippets.ts'
 export { expirePaymentHolds } from './payment-expiry.ts'
 export { FakePaymentProvider, type PaymentProvider } from './payment-provider.ts'
 export {
@@ -173,12 +179,6 @@ export {
   PAYMENT_HOLD_MINUTES,
   type PaymentContext,
 } from './payments.ts'
-export {
-  type GenerateOpenTimeSnippetInput,
-  generateOpenTimeSnippet,
-  MAX_OPEN_TIME_SNIPPET_RANGE_DAYS,
-  type OpenTimeSnippetOptions,
-} from './open-time-snippets.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

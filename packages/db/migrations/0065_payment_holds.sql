@@ -4,7 +4,14 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_status_check
   CHECK (status IN ('confirmed','cancelled','pending_payment','expired'));
 ALTER TABLE bookings ADD COLUMN payment_hold_expires_at timestamptz,
   ADD COLUMN payment_reference text,
+  ADD COLUMN payment_confirmed_at timestamptz,
+  ADD COLUMN payment_idempotency_key text,
+  ADD COLUMN payment_pii_erased_at timestamptz,
   ADD COLUMN payment_refund_required boolean NOT NULL DEFAULT false;
+ALTER TABLE bookings DROP CONSTRAINT bookings_check2;
+ALTER TABLE bookings ADD CONSTRAINT bookings_idempotency_shape CHECK (
+  (num_nonnulls(idempotency_key,payment_idempotency_key)=0 AND idempotency_fingerprint IS NULL)
+  OR (num_nonnulls(idempotency_key,payment_idempotency_key)=1 AND idempotency_fingerprint IS NOT NULL));
 ALTER TABLE bookings ADD CONSTRAINT bookings_payment_hold_shape CHECK (
   (status NOT IN ('pending_payment','expired') OR payment_hold_expires_at IS NOT NULL)
   AND (payment_hold_expires_at IS NULL OR (isfinite(payment_hold_expires_at) AND payment_hold_expires_at <= start_at AND group_slot_id IS NULL AND source <> 'import'))
@@ -12,6 +19,9 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_payment_hold_shape CHECK (
   AND (status <> 'confirmed' OR payment_hold_expires_at IS NULL OR payment_reference IS NOT NULL)
   AND (NOT payment_refund_required OR (payment_reference IS NOT NULL AND status IN ('expired','cancelled'))));
 CREATE UNIQUE INDEX bookings_payment_reference ON bookings(payment_reference) WHERE payment_reference IS NOT NULL;
+CREATE UNIQUE INDEX bookings_payment_idempotency_key ON bookings(organization_id,payment_idempotency_key) WHERE payment_idempotency_key IS NOT NULL;
+CREATE INDEX bookings_payment_pii_due ON bookings(payment_hold_expires_at,id)
+  WHERE status IN ('expired','cancelled') AND payment_confirmed_at IS NULL AND payment_pii_erased_at IS NULL;
 CREATE INDEX bookings_payment_hold_due ON bookings(payment_hold_expires_at) WHERE status='pending_payment';
 CREATE OR REPLACE FUNCTION booking_host_slot() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
@@ -95,3 +105,39 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+-- Record successful confirmation once; cancellation must not hide paid booking history.
+CREATE FUNCTION mark_payment_confirmation() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+  IF TG_OP='UPDATE' AND OLD.payment_confirmed_at IS NOT NULL THEN
+    NEW.payment_confirmed_at := OLD.payment_confirmed_at;
+  ELSIF NEW.payment_hold_expires_at IS NOT NULL AND NEW.status='confirmed' THEN
+    NEW.payment_confirmed_at := clock_timestamp();
+  ELSE
+    NEW.payment_confirmed_at := NULL;
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER bookings_payment_confirmation_marker BEFORE INSERT OR UPDATE ON bookings
+FOR EACH ROW EXECUTE FUNCTION mark_payment_confirmation();
+
+-- Retention may erase the location snapshot of an old unpaid terminal hold only.
+CREATE OR REPLACE FUNCTION booking_location_option_defaults() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.location_option IS DISTINCT FROM OLD.location_option AND NOT (
+      NEW.location_option IS NULL AND OLD.payment_hold_expires_at IS NOT NULL
+      AND OLD.payment_confirmed_at IS NULL AND OLD.status IN ('expired','cancelled')
+      AND OLD.payment_hold_expires_at <= clock_timestamp()-interval '7 days'
+      AND NEW.payment_pii_erased_at IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'booking location option is immutable' USING ERRCODE = '23514';
+    END IF;
+  ELSIF NEW.location_option IS NULL AND NEW.location IS NOT NULL THEN
+    NEW.location_option := jsonb_build_object('id', 'legacy') || NEW.location;
+  END IF;
+  RETURN NEW;
+END $$;
+

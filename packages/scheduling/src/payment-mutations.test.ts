@@ -6,9 +6,16 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { findPublicEventType, findSlots } from './availability.ts'
-import { canonicalJson, insertBooking, lockHosts, requireOfferedSlot } from './bookings.ts'
+import {
+  canonicalJson,
+  createPublicBooking,
+  insertBooking,
+  lockHosts,
+  requireOfferedSlot,
+} from './bookings.ts'
 import { admitGroupSlot } from './group-seat-admission.ts'
 import { notificationSnapshot } from './notification-settings.ts'
+import { eraseUnpaidHoldPersonalData, expirePaymentHolds } from './payment-expiry.ts'
 import { confirmPaymentHold, createPaymentHold } from './payments.ts'
 import { createFixtures, weekdays } from './testing.ts'
 
@@ -241,7 +248,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     const row = await db
       .updateTable('bookings')
       .set({
-        idempotency_key: `payment:${input.idempotencyKey}`,
+        payment_idempotency_key: input.idempotencyKey,
         idempotency_fingerprint: fingerprint,
       })
       .where('event_type_id', '=', q.eventTypeId)
@@ -393,6 +400,228 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     )
     await expect(
       admission(mutant.requireOfferedSlot as typeof requireOfferedSlot),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function keyIsolation(api = createPaymentHold) {
+    const { ctx, input } = await fixture()
+    const hold = await api(ctx, input)
+    const ordinary = {
+      ...input,
+      start: input.start.add({ hours: 1 }),
+      idempotencyKey: `payment:${input.idempotencyKey}`,
+    }
+    await expect(createPublicBooking(ctx, ordinary)).resolves.toHaveProperty(
+      'booking.status',
+      'confirmed',
+    )
+    await expect(
+      createPublicBooking(ctx, { ...input, start: input.start.add({ hours: 2 }) }),
+    ).resolves.toHaveProperty('booking.status', 'confirmed')
+    expect((await api(ctx, input)).id).toBe(hold.id)
+    // Also reserve the former prefix first, then create a distinct payment hold.
+    const second = await fixture()
+    await createPublicBooking(second.ctx, {
+      ...second.input,
+      idempotencyKey: `payment:${second.input.idempotencyKey}`,
+    })
+    await createPublicBooking(second.ctx, {
+      ...second.input,
+      start: second.input.start.add({ hours: 2 }),
+    })
+    await expect(
+      api(second.ctx, { ...second.input, start: second.input.start.add({ hours: 1 }) }),
+    ).resolves.toHaveProperty('status', 'pending_payment')
+  }
+  it('isolates hold keys from ordinary anonymous booking keys in both creation orders', async () => {
+    await keyIsolation()
+    const mutant = await copy(
+      './payments.ts',
+      'createPaymentHold',
+      'payment_idempotency_key: key, idempotency_fingerprint: fingerprint',
+      "idempotency_key: 'payment:' + key, idempotency_fingerprint: fingerprint",
+    )
+    await expect(
+      keyIsolation(mutant.createPaymentHold as typeof createPaymentHold),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function retention(api = eraseUnpaidHoldPersonalData) {
+    const { ctx, host, q } = await fixture()
+    const make = async (days: number, status: 'expired' | 'cancelled' | 'pending_payment') => {
+      const { id } = await db.transaction().execute((trx) =>
+        insertBooking(trx, {
+          organizationId: host.organizationId,
+          eventTypeId: q.eventTypeId,
+          start: q.start,
+          end: q.end,
+          title: 'Private Invitee',
+          location: { kind: 'in_person', address: 'Private place' },
+          responses: { private: 'Private answer' },
+          source: 'web',
+          apiKeyId: null,
+          hostUserIds: [],
+          hostsUseDefaultSchedule: false,
+          attendees: [
+            {
+              name: 'Private Invitee',
+              email: 'private@example.com',
+              timeZone: 'UTC',
+              locale: null,
+              isBooker: true,
+            },
+          ],
+          notificationSnapshot: notificationSnapshot(null),
+          manageTokenHash: null,
+          paymentHoldExpiresAt: ctx
+            .now()
+            .subtract({ hours: days * 24 })
+            .toString(),
+        }),
+      )
+      if (status !== 'pending_payment')
+        await db
+          .updateTable('bookings')
+          .set({ status, cancelled_at: status === 'cancelled' ? sql`clock_timestamp()` : null })
+          .where('id', '=', id)
+          .execute()
+      return id
+    }
+    const oldExpired = await make(8, 'expired')
+    const oldCancelled = await make(8, 'cancelled')
+    const recent = await make(6, 'expired')
+    const pending = await make(8, 'pending_payment')
+    const confirmed = await db
+      .insertInto('bookings')
+      .values({
+        organization_id: host.organizationId,
+        event_type_id: q.eventTypeId,
+        start_at: q.start.toString(),
+        end_at: q.end.toString(),
+        title: 'Confirmed private',
+        location: JSON.stringify({ kind: 'in_person', address: 'Confirmed private place' }),
+        source: 'web',
+        status: 'confirmed',
+        manage_token_hash: null,
+        payment_hold_expires_at: ctx
+          .now()
+          .subtract({ hours: 8 * 24 })
+          .toString(),
+        payment_reference: `pi_retention_${host.userId.replaceAll('-', '')}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_attendees')
+      .values({
+        booking_id: confirmed.id,
+        name: 'Confirmed private',
+        email: 'confirmed@example.com',
+        time_zone: 'UTC',
+        is_booker: true,
+      })
+      .execute()
+    await db
+      .updateTable('bookings')
+      .set({ status: 'cancelled', cancelled_at: sql`clock_timestamp()` })
+      .where('id', '=', confirmed.id)
+      .execute()
+    for (const id of [recent, confirmed.id])
+      await expect(
+        db
+          .updateTable('bookings')
+          .set({ location_option: null, payment_pii_erased_at: sql`clock_timestamp()` })
+          .where('id', '=', id)
+          .execute(),
+      ).rejects.toMatchObject({ code: '23514' })
+    await expect(api(db)).resolves.toBeGreaterThanOrEqual(2)
+    for (const id of [oldExpired, oldCancelled]) {
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select(['title', 'responses', 'location', 'payment_pii_erased_at'])
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        title: 'Unpaid booking',
+        responses: {},
+        location: null,
+        payment_pii_erased_at: expect.any(Date),
+      })
+      expect(
+        await db
+          .selectFrom('booking_attendees')
+          .select('id')
+          .where('booking_id', '=', id)
+          .execute(),
+      ).toHaveLength(0)
+    }
+    for (const id of [recent, pending, confirmed.id]) {
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('payment_pii_erased_at')
+            .where('id', '=', id)
+            .executeTakeFirstOrThrow()
+        ).payment_pii_erased_at,
+      ).toBeNull()
+      expect(
+        await db
+          .selectFrom('booking_attendees')
+          .select('id')
+          .where('booking_id', '=', id)
+          .execute(),
+      ).toHaveLength(1)
+    }
+    expect(await api(db)).toBe(0)
+    // The worker's global expiry path drains overdue holds and then erases their old PII.
+    await expirePaymentHolds({ db })
+    expect(
+      (
+        await db
+          .selectFrom('bookings')
+          .select('payment_pii_erased_at')
+          .where('id', '=', pending)
+          .executeTakeFirstOrThrow()
+      ).payment_pii_erased_at,
+    ).toBeInstanceOf(Date)
+  }
+  it.each([
+    [
+      'retention deadline',
+      "AND b.payment_hold_expires_at <= clock_timestamp() - interval '7 days'",
+      '',
+    ],
+    ['terminal status', "b.status IN ('expired','cancelled')", 'true'],
+    ['title clearance', "title='Unpaid booking'", 'title=b.title'],
+    ['answer clearance', "responses='{}'::jsonb", 'responses=b.responses'],
+    ['location clearance', 'location=NULL,', 'location=b.location,'],
+  ])('detects missing %s in a retention source copy', async (_name, before, after) => {
+    const mutant = await copy('./payment-expiry.ts', 'eraseUnpaidHoldPersonalData', before, after)
+    await expect(
+      retention(mutant.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  it('preserves previously confirmed holds during retention in a source copy', async () => {
+    const mutant = await copy(
+      './payment-expiry.ts',
+      'eraseUnpaidHoldPersonalData',
+      'AND b.payment_confirmed_at IS NULL',
+      '',
+    )
+    await expect(
+      retention(mutant.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  it('erases only terminal unpaid hold personal data after seven days and preserves audit', async () => {
+    await retention()
+    const mutant = await copy(
+      './payment-expiry.ts',
+      'eraseUnpaidHoldPersonalData',
+      'DELETE FROM booking_attendees a USING due WHERE a.booking_id=due.id',
+      'DELETE FROM booking_attendees a USING due WHERE false',
+    )
+    await expect(
+      retention(mutant.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 })

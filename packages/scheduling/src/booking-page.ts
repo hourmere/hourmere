@@ -102,7 +102,10 @@ export function bookingPageQuery(db: Db, input: ListBookingsInput) {
     .selectFrom('bookings as b')
     .where('b.status', 'in', ['confirmed', 'cancelled'])
     .where((eb) =>
-      eb.or([eb('b.payment_hold_expires_at', 'is', null), eb('b.status', '=', 'confirmed')]),
+      eb.or([
+        eb('b.payment_hold_expires_at', 'is', null),
+        eb('b.payment_confirmed_at', 'is not', null),
+      ]),
     )
     // start_at with its microseconds, for the cursor (node-postgres Dates have milliseconds).
     .select((eb) =>

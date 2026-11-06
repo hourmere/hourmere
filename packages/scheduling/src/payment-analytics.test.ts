@@ -9,10 +9,10 @@ import { DomainError } from './errors.ts'
 import { validTimeZone } from './internal.ts'
 import { createTestUser, testContext } from './testing.ts'
 
-function copy(before: string): typeof getBookingActivity {
+function copy(before: string, after = ''): typeof getBookingActivity {
   let source = readFileSync(new URL('./analytics.ts', import.meta.url), 'utf8')
   expect(source.includes(before)).toBe(true)
-  source = stripTypeScriptTypes(source.replace(before, '').replace(/^import .*\n/gm, ''))
+  source = stripTypeScriptTypes(source.replaceAll(before, after).replace(/^import .*\n/gm, ''))
   return new Function(
     'sql',
     'DomainError',
@@ -53,10 +53,34 @@ describe.skipIf(!process.env.DATABASE_URL)('unconfirmed payment activity', () =>
   it('does not count unconfirmed holds as booking creation or cancellation', async () => {
     await verify()
   })
-  it.each([
-    "AND (b.payment_hold_expires_at IS NULL OR b.status = 'confirmed')",
-    'AND b.payment_hold_expires_at IS NULL',
-  ])('detects removal of activity predicate %s', async (before) => {
-    await expect(verify(copy(before))).rejects.toMatchObject({ name: 'AssertionError' })
+  it('detects removal of unpaid activity visibility predicates', async () => {
+    await expect(
+      verify(copy('AND (b.payment_hold_expires_at IS NULL OR b.payment_confirmed_at IS NOT NULL)')),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function paidCancellation(read = getBookingActivity) {
+    const user = await createTestUser(db)
+    const ctx = testContext(db, user.principal)
+    const row = await sql<{ id: string }>`INSERT INTO bookings
+      (organization_id,title,start_at,end_at,source,status,created_at,payment_hold_expires_at,payment_reference)
+      VALUES (${user.principal.organization.id}::uuid,'Paid booking','2040-01-01T10:00Z',
+        '2040-01-01T10:30Z','web','confirmed','2026-10-01T10:00Z','2040-01-01T09:00Z',
+        ${`pi_${user.id}`}) RETURNING id`.execute(db)
+    await sql`UPDATE bookings SET status='cancelled',cancelled_at='2026-10-01T10:01Z'
+      WHERE id=${row.rows[0]?.id}::uuid`.execute(db)
+    const activity = await read(ctx, {
+      startDate: '2026-10-01',
+      endDate: '2026-10-01',
+      timeZone: 'UTC',
+    })
+    expect(activity.totals).toEqual({ created: 1, rescheduled: 0, cancelled: 1 })
+  }
+  it('counts creation and cancellation of a previously confirmed paid booking', async () => {
+    await paidCancellation()
+  })
+  it('detects using current status instead of durable confirmation for activity', async () => {
+    await expect(
+      paidCancellation(copy('b.payment_confirmed_at IS NOT NULL', "b.status = 'confirmed'")),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 })

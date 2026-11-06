@@ -69,6 +69,9 @@ describe.skipIf(!url)('payment holds', () => {
     ])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1)
+    expect(results.find((r) => r.status === 'rejected')).toMatchObject({
+      reason: { code: 'slot_unavailable' },
+    })
     const winner = results.find((r) => r.status === 'fulfilled')
     expect(winner?.status).toBe('fulfilled')
     expect(
@@ -260,7 +263,7 @@ describe.skipIf(!url)('payment holds', () => {
     await db
       .updateTable('bookings')
       .set({
-        idempotency_key: `payment:${input.idempotencyKey}`,
+        payment_idempotency_key: input.idempotencyKey,
         idempotency_fingerprint: fingerprint,
       })
       .where('id', '=', id)

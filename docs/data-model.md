@@ -1474,8 +1474,9 @@ legacy compatibility, recipient policy and reply limitations.
 
 ## Pending-payment foundation
 
-Migration `0062_payment_holds.sql` adds `pending_payment` and `expired` booking states,
-nullable `payment_hold_expires_at` and `payment_reference`, and a default-false
+Migration `0065_payment_holds.sql` adds `pending_payment` and `expired` booking states,
+nullable `payment_hold_expires_at`, `payment_reference`, `payment_confirmed_at`,
+`payment_idempotency_key`, `payment_pii_erased_at`, and a default-false
 `payment_refund_required` marker. Existing bookings retain their state and data. The
 PaymentIntent reference is unique when present; credentials and card data are never stored.
 An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy atomically;
@@ -1485,6 +1486,13 @@ holds. Group seats and imported bookings cannot carry payment holds. See the
 [paid-booking design](payments.md) for the internal-only rollout boundary, future refund
 ledger/retention and operator responsibilities. Stop old app and worker processes before
 migration and restart all roles together.
+
+Paid hold confirmation records an immutable `payment_confirmed_at` timestamp through a database
+trigger. Booking lists, details and activity include hold-backed rows only after this marker
+is present, including paid bookings later cancelled. Unconfirmed terminal holds remain hidden.
+Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
+unique index, so they cannot collide with ordinary booking idempotency keys.
+
 ## Group slots and independent seats
 
 A group event is a single-host event with `booking_mode = 'group'` and a capacity

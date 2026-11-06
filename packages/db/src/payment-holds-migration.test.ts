@@ -11,7 +11,7 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0062_payment_holds.sql'
+const migration = '0065_payment_holds.sql'
 const predecessor = '0061_group_slot_resources.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
 
@@ -157,6 +157,74 @@ interface Guard {
 }
 
 const guards: Guard[] = [
+  {
+    name: 'location erasure cannot bypass unpaid retention age',
+    mutate: (source) =>
+      source.replace("AND OLD.payment_hold_expires_at <= clock_timestamp()-interval '7 days'", ''),
+    check: async ({ pool, booking }) => {
+      const row = (
+        await pool.query(
+          `INSERT INTO bookings
+        (organization_id,event_type_id,start_at,end_at,title,source,status,cancelled_at,payment_hold_expires_at,location_option)
+        SELECT organization_id,event_type_id,start_at,end_at,title,source,'cancelled',now(),payment_hold_expires_at,
+          '{"id":"private","kind":"in_person","address":"Private address"}'::jsonb
+        FROM bookings WHERE id=$1 RETURNING id`,
+          [booking],
+        )
+      ).rows[0]
+      await expect(
+        pool.query(
+          'UPDATE bookings SET location_option=NULL,payment_pii_erased_at=now() WHERE id=$1',
+          [row.id],
+        ),
+      ).rejects.toMatchObject({ code: '23514' })
+    },
+  },
+
+  {
+    name: 'durable payment confirmation marker survives cancellation',
+    mutate: (source) =>
+      source.replace(
+        'NEW.payment_confirmed_at := OLD.payment_confirmed_at;',
+        'NEW.payment_confirmed_at := NULL;',
+      ),
+    check: async ({ pool, booking }) => {
+      await pool.query(
+        "UPDATE bookings SET status='confirmed',payment_reference='pi_marker' WHERE id=$1",
+        [booking],
+      )
+      const before = (
+        await pool.query('SELECT payment_confirmed_at FROM bookings WHERE id=$1', [booking])
+      ).rows[0]
+      expect(before.payment_confirmed_at).toBeInstanceOf(Date)
+      await pool.query(
+        "UPDATE bookings SET status='cancelled',cancelled_at=now(),payment_confirmed_at=NULL WHERE id=$1",
+        [booking],
+      )
+      expect(
+        (await pool.query('SELECT payment_confirmed_at FROM bookings WHERE id=$1', [booking]))
+          .rows[0],
+      ).toEqual(before)
+    },
+  },
+  {
+    name: 'unpaid holds cannot acquire a confirmation marker',
+    mutate: (source) =>
+      source.replace(
+        'NEW.payment_confirmed_at := NULL;',
+        'NEW.payment_confirmed_at := clock_timestamp();',
+      ),
+    check: async ({ pool, booking }) => {
+      await pool.query(
+        "UPDATE bookings SET status='cancelled',cancelled_at=now(),payment_confirmed_at=now() WHERE id=$1",
+        [booking],
+      )
+      expect(
+        (await pool.query('SELECT payment_confirmed_at FROM bookings WHERE id=$1', [booking])).rows,
+      ).toEqual([{ payment_confirmed_at: null }])
+    },
+  },
+
   {
     name: 'hold deadline cannot exceed meeting start',
     mutate: (source) => source.replace('payment_hold_expires_at <= start_at AND ', ''),

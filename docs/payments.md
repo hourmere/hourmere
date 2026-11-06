@@ -12,11 +12,13 @@ Internal creation supports personal, individual event types with one host only. 
 team, collective, round-robin and group events, guests, waitlist conversion and automatic
 conference or phone locations. One-time-link checkout is not exposed. The server reads
 `PAID_BOOKINGS_ENABLED` (default false); a future trusted adapter must pass that setting to
-`createPaymentHold`. No public route or payment provider is configured by enabling it.
+`createPaymentHold`. This environment setting is reserved and has no runtime effect in
+this release; setting it to true does not permit hold creation. Internal tests opt in
+through the service context. No public route or payment provider is configured by enabling it.
 
 `pending_payment` can transition to `confirmed`, `expired` or `cancelled`. The immutable
 `payment_hold_expires_at` deadline and host exclusion protect capacity. Confirmation records
-a unique `payment_reference`; late success records `payment_refund_required=true` without
+a unique `payment_reference` and an immutable `payment_confirmed_at` marker; late success records `payment_refund_required=true` without
 reoccupying the slot. Confirmation invokes the injected notifier at most once; the complete
 checkout confirmation delivery contract below still needs the later adapter. Ordinary
 booking cancel/reschedule paths reject paid rows because refund-aware lifecycle handling
@@ -137,10 +139,17 @@ reuse the same intent and provider idempotency key. Expired/cancelled remains te
 if the refund is pending, failed or disputed. A fresh booking requires a fresh attempt and
 ordinary availability checks. Never silently charge again on retry.
 
+Confirmed paid bookings remain visible in booking lists, details, exports and activity
+analytics after cancellation. Visibility uses the durable confirmation marker, not the
+current status; never-confirmed terminal holds stay hidden. Refund-aware cancellation
+and rescheduling are still future work.
+
 ## Idempotency and incoming events
 
 Keep the booking request key and normalized input fingerprint. Identical retries return
 the same hold/deadline or terminal outcome; changed input with a retained key is a conflict.
+Hold request keys use a dedicated `payment_idempotency_key` column and organization-scoped
+unique index, separate from ordinary booking keys; equal strings cannot collide.
 Use distinct persisted keys for Session creation and each refund purpose, derived from opaque
 random local identities, never email addresses. Retain local deduplication longer than
 Stripe's key cache: Stripe may prune API v1 idempotency keys after at least 24 hours. An
@@ -235,6 +244,19 @@ refund obligation. Stripe's own retention is governed separately by the operator
 account; deleting a local reference does not delete the provider record. Implement and test
 this ledger/retention policy before enabling real checkout; it is not shipped here.
 
+The shipped foundation also erases personal data from never-confirmed `expired` or
+`cancelled` holds once their original hold deadline is at least **seven days** old.
+The minute expiry worker processes at most 500 retention candidates per run, using database
+time and row locks. It deletes attendee rows (including names, email, time zones and locale), clears booking
+title, responses, location and its snapshot, cancellation reason, success redirect and manage
+token hash, and records `payment_pii_erased_at`; the audit row, request digest/key and payment
+reference/refund obligation remain. Confirmed-then-cancelled bookings are excluded by the
+durable confirmation marker. This policy applies even when hold creation is disabled;
+without a running worker, cleanup resumes when the worker returns. Admission-time expiry
+only releases capacity and does not run retention work. A cancelled hold's deadline is
+at most 30 minutes after creation, so retention ends within seven days and 30 minutes of
+cancellation, subject to worker availability and bounded backlog processing.
+
 The foundation expiry sweep is local-only and atomic. The later payment reconciler claims
 bounded work using durable leases, commits before provider I/O, then compares the lease and
 current state when applying results. Use finite request deadlines and bounded retry backoff;
@@ -249,8 +271,9 @@ operation, refund backlog and terminal failures without contact or credential lo
 
 Today, run the real-Postgres hold tests with the fake provider and a throwaway database.
 Do not configure production Stripe keys: this release has no Stripe adapter or endpoint.
-`PAID_BOOKINGS_ENABLED=false` remains the default unless deliberately exercising the
-foundation. Disabling it prevents new holds; existing holds continue to expire.
+`PAID_BOOKINGS_ENABLED=false` remains the default. This reserved setting has no runtime
+effect yet. Internal tests explicitly opt in through the service context; disabling that
+context prevents new holds. Existing holds continue to expire regardless of either setting.
 
 Once the adapter and endpoint are implemented, an operator can test with their own Stripe
 sandbox/test-mode account, isolated database and synthetic attendees. Use matching test keys
