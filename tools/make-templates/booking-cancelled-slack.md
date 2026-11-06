@@ -8,11 +8,11 @@ Manual recipe; [read setup and verification first](README.md). Its sibling
    workspace policy. No Hourmere runtime API key is needed.
 2. Add **Webhooks > Custom webhook**, name `Hourmere booking cancelled`. Apply the
    README's request-header, JSON pass-through and verification settings, including
-   its production relay prerequisite. Register only `booking.cancelled`.
+   its native Data store secret, HMAC and **Keep data confidential = Yes** steps. Register only `booking.cancelled`.
 3. After signature verification add **JSON > Parse JSON**, with the README data
-   structure. Filter `type` **Equal to** `booking.cancelled`,
-   `data.organizationId` **Equal to** the intended organization ID, and
-   `data.status` **Equal to** `cancelled`.
+   structure. Filter `payload:type` **Equal to** `booking.cancelled`,
+   `payload:data.organizationId` **Equal to** the intended organization ID, and
+   `payload:data.status` **Equal to** `cancelled`.
 4. Enable sequential processing. Check your durable successful-delivery receipt
    store for the original `Webhook-Id`; skip an already recorded success.
 5. Add **Slack > Send a Message**, select the connection and the intended channel.
@@ -40,3 +40,51 @@ This announces cancellation snapshots; it does not cancel a booking. A reschedul
 does not trigger it. Delayed or out-of-order delivery can announce an older event,
 so the text uses the immutable booking ID and times. The receipt store and provider
 connections are operator configuration, not provisioned by this offline recipe.
+
+## Validated field references
+
+The `hourmere-fields` block declares API field paths for offline validation;
+`body:`, `query:`, `response:STATUS:` and `payload:` in mappings label their source
+and are not literal field-name prefixes to enter in Make.
+
+```hourmere-fields
+{
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks",
+      "body": [
+        "url",
+        "events",
+        "isActive"
+      ],
+      "response": {
+        "201": [
+          "webhook.id",
+          "secret"
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/webhooks/{id}",
+      "body": [
+        "isActive"
+      ]
+    }
+  ],
+  "webhookPayloadFields": [
+    "id",
+    "type",
+    "occurredAt",
+    "data.bookingId",
+    "data.organizationId",
+    "data.eventTypeId",
+    "data.start",
+    "data.end",
+    "data.status",
+    "data.source",
+    "data.rescheduledFromId"
+  ]
+}
+```

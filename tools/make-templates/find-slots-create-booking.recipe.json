@@ -6,22 +6,38 @@
   "requests": [
     {
       "method": "GET",
-      "path": "/api/v1/public/{handle}/{slug}/slots"
+      "path": "/api/v1/public/{handle}/{slug}/slots",
+      "query": ["start", "end", "durationMinutes"],
+      "response": {
+        "200": ["data", "data.start"],
+        "400": ["error", "field"]
+      }
     },
     {
       "method": "POST",
-      "path": "/api/v1/public/{handle}/{slug}/bookings"
+      "path": "/api/v1/public/{handle}/{slug}/bookings",
+      "headers": ["Idempotency-Key"],
+      "body": [
+        "start",
+        "durationMinutes",
+        "invitee",
+        "invitee.name",
+        "invitee.email",
+        "invitee.timeZone",
+        "responses"
+      ],
+      "response": {
+        "201": ["booking.id", "manageToken"],
+        "200": ["booking.id", "manageToken"],
+        "400": ["error", "field"],
+        "409": ["error"]
+      }
     }
   ],
-  "connections": [
-    {
-      "kind": "make-keychain",
-      "purpose": "Bookings-scope Hourmere key in HTTP v4 Credentials."
-    }
-  ],
+  "connections": [],
   "settings": {
     "documentation": "find-slots-create-booking.md",
-    "apiKeyScope": "bookings",
+    "apiKeyScope": "none; public endpoints use no API key",
     "signatureVerification": "Not applicable: outbound REST requests."
   }
 }

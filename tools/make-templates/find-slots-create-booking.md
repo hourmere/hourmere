@@ -3,26 +3,25 @@
 Manual recipe for a personal booking page. The sibling `.recipe.json` is an offline
 validation manifest, not a Make blueprint. Use a currently enabled event type with
 no required custom questions for the minimal body below; otherwise include its
-required `responses` using the existing public event-type contract.
+required `body:responses` using the existing public event-type contract.
 
 ## Credentials and input
 
-Create a key at `/app/api-keys` with **Bookings** scope. It can also manage existing
-authorized bookings, so use an appropriate account. Save its one-time value directly
-in **HTTP v4 > Make a request > Authentication type = API key > Credentials > Add**:
+Use **Authentication type = No authentication** on both HTTP modules. Public
+slot lookup and booking creation need no API key; sending none is the least-privilege
+setup. Do not create or store an Hourmere API key in Make for these templates.
+A leaked `bookings` key could list, cancel and reschedule every booking in its
+organization, including exposing invitee data. It adds no capability or attribution
+here: these public bookings are recorded with source `web` and no API-key ID.
 
-| Keychain field | Setting |
-| --- | --- |
-| Name | `Hourmere bookings` |
-| Key | `Bearer ` followed by the newly created key, entered only in this credential dialog |
-| API key placement | In the header |
-| API key parameter name | `Authorization` |
-| Restrict requests to service URLs | On |
-| Allowed service origins | Your exact Hourmere HTTPS origin |
-
-Do not put authorization in module Headers, query parameters, JSON bodies, variables
-or exported files. Make documents these fields in its
-[API-key keychain guide](https://apps.make.com/api-key-authentication-type).
+Open **Scenario settings** (gear icon) and enable **Keep data confidential = Yes**
+before the first run. With **Parse response = Yes**, Make otherwise stores the
+complete response, including `manageToken`, and invitee inputs in execution history.
+This setting removes processed payloads from those logs and limits troubleshooting;
+it does not remove your durable intent records or grant protection from Make's
+platform or people with access to the scenario and stores. Restrict that access,
+retain intent data only for the recovery period you need, and delete completed
+records according to your retention policy. See [Make scenario settings](https://help.make.com/scenario-settings).
 
 Prepare one durable booking-intent record containing: personal `handle`, `slug`,
 range `start` and `end` (ISO instants with offsets), invitee name/email/IANA time zone,
@@ -34,8 +33,8 @@ time; manual scheduling is sufficient for this recipe.
 
 ## Request settings
 
-Use **HTTP v4 > Make a request** for both modules. Choose the `Hourmere bookings`
-Credentials, **Parse response = Yes**, **Return error if HTTP request fails = No**,
+Use **HTTP v4 > Make a request** for both modules. Choose
+**Authentication type = No authentication**, **Parse response = Yes**, **Return error if HTTP request fails = No**,
 **Allow redirects = No**, **Share cookies with other HTTP modules = No**, and
 **Timeout = 30** seconds. Leave pagination unset. Returning status responses as data
 lets the router inspect both status and `Retry-After`; transport failures still
@@ -44,30 +43,30 @@ need the error handler below. These are choices using the
 
 1. **Availability module**: Method `GET`; URL
    `{{HOURMERE_BASE_URL}}/api/v1/public/{handle}/{slug}/slots`, substituting the
-   encoded personal handle and slug. Query parameters `start` and `end` map to
-   the input range; optional `durationMinutes` maps to the selected duration.
-   Headers and body are empty. A 200 response has a `data` array of slots.
-   Add a filter for status 200 and a nonempty `data` array; stop with “No slots
+   encoded personal handle and slug. Query parameters `query:start` and `query:end` map to
+   the input range; optional `query:durationMinutes` maps to the selected duration.
+   Headers and body are empty. A 200 response has a `response:200:data` array of slots.
+   Add a filter for status 200 and a nonempty `response:200:data` array; stop with “No slots
    available” on an empty array. For this recipe select the first slot, persist
-   its `start`, and submit that exact instant. Do not reconstruct local wall time
+   its `response:200:data.start`, and submit that exact instant. Do not reconstruct local wall time
    (especially across DST). A slot is an offer, not a reservation.
 2. **Create module**: Method `POST`; URL
    `{{HOURMERE_BASE_URL}}/api/v1/public/{handle}/{slug}/bookings`. Add the sole custom
-   header `Idempotency-Key` mapped from the persisted record. Set **Body content
+   header `headers:Idempotency-Key` mapped from the persisted record. Set **Body content
    type = application/JSON**, **Body input method = Data structure**. Define:
 
    | Field | Type | Mapping |
    | --- | --- | --- |
-   | `start` | Text | Persisted selected slot start |
-   | `durationMinutes` | Number, optional | Same duration as availability; omit if not selected |
-   | `invitee` | Collection | Nested fields below |
-   | `invitee.name` | Text | Input invitee name |
-   | `invitee.email` | Text | Input invitee email |
-   | `invitee.timeZone` | Text | Input IANA time zone |
+   | `body:start` | Text | Persisted selected slot start |
+   | `body:durationMinutes` | Number, optional | Same duration as availability; omit if not selected |
+   | `body:invitee` | Collection | Nested fields below |
+   | `body:invitee.name` | Text | Input invitee name |
+   | `body:invitee.email` | Text | Input invitee email |
+   | `body:invitee.timeZone` | Text | Input IANA time zone |
 
    Use the data structure so mapped strings are JSON-escaped. Do not send `end`
    or an invented `source` value. Success is 201; a matching idempotent replay is
-   200. Save the booking ID. The original creation's management token is sensitive
+   200. Save `response:201:booking.id` (or `response:200:booking.id` on replay). The original creation's `response:201:manageToken` management token is sensitive
    and not recoverable by replay; keep it out of logs and downstream messages.
 
 ## Status routes and recovery
@@ -79,10 +78,10 @@ sanitized failure for review and stops without booking or retrying.
 
 | Status | Exact route behavior |
 | --- | --- |
-| 409 | Store the response `error`; stop. For `slot_taken`, `slot_unavailable` or `booking_changed`, obtain fresh availability and explicit selection before creating a new intent/key. For `idempotency_key_reused`, fix the reused-key/input mismatch; never retry blindly. |
-| 400 or 422 | Mark intent `needs-correction`; record `error` and optional `field`, then stop. Correct input deliberately before creating a new intent. Current Hourmere booking validation uses 400; 422 is a defensive route, not a claimed documented response. |
+| 409 | Store `response:409:error`; stop. For `slot_taken`, `slot_unavailable` or `booking_changed`, obtain fresh availability and explicit selection before creating a new intent/key. For `idempotency_key_reused`, fix the reused-key/input mismatch; never retry blindly. |
+| 400 or 422 | Mark intent `needs-correction`; record `response:400:error` and optional `response:400:field` for Hourmere validation, then stop. Correct input deliberately before creating a new intent. Current Hourmere booking validation uses 400; 422 is a defensive route, not a claimed documented response. |
 | 429 | Read the case-insensitive `Retry-After` response header. Hourmere returns delay seconds. Persist `nextAttemptAt = response receipt time + delay`, the unchanged request body, and the same key. Stop this execution. |
-| 401 or 403 | Stop for credential/scope review; do not fall back to anonymous requests. |
+| 401 or 403 | Stop for access-policy review; do not add a key or retry automatically. |
 | Other status, including 5xx | Store an uncertain outcome for review; no automatic fresh-key retry. |
 
 For the 429 route, accept only a nonnegative integer delay. For a missing or malformed
@@ -94,7 +93,10 @@ later, schedule a separate due-record consumer using that timestamp and preserve
 the same bounded-attempt rule. A POST retry must not rerun slot selection or change
 its body. A GET retry can repeat the original range.
 
-Enable **Store incomplete executions = Yes**. Right-click each HTTP module, choose
+Enable **Store incomplete executions = Yes**. Incomplete executions can retain
+sensitive invitee inputs and responses already processed even when ordinary execution
+logs are confidential. Restrict their visibility and delete them after reconciliation;
+confidential mode does not mean zero platform storage. Right-click each HTTP module, choose
 **Add error handler > Retry**, and set **Automatically complete execution = No**.
 For transport errors, review and resume the incomplete execution with its saved
 inputs; an uncertain POST must retain the same idempotency key and body. Never use
@@ -103,6 +105,71 @@ Resume to turn failure into a synthetic successful booking. Make documents this
 `Retry-After` behavior is assumed.
 
 No Make account, provider connection or live booking was created for this recipe.
-The durable input/receipt store is operator configuration. Public availability and
-booking also work without a key, but this recipe uses the scoped keychain; a supplied
-invalid or disallowed key is rejected. No new REST, MCP or CLI capability is added.
+The durable input/receipt store is operator configuration. No Hourmere API key is
+used by this recipe. No new REST, MCP or CLI capability is added.
+
+## Validated field references
+
+The `hourmere-fields` block declares API field paths for offline validation;
+`body:`, `query:`, `response:STATUS:` and `payload:` in mappings label their source
+and are not literal field-name prefixes to enter in Make.
+
+```hourmere-fields
+{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/public/{handle}/{slug}/slots",
+      "query": [
+        "start",
+        "end",
+        "durationMinutes"
+      ],
+      "response": {
+        "200": [
+          "data",
+          "data.start"
+        ],
+        "400": [
+          "error",
+          "field"
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/public/{handle}/{slug}/bookings",
+      "headers": [
+        "Idempotency-Key"
+      ],
+      "body": [
+        "start",
+        "durationMinutes",
+        "invitee",
+        "invitee.name",
+        "invitee.email",
+        "invitee.timeZone",
+        "responses"
+      ],
+      "response": {
+        "201": [
+          "booking.id",
+          "manageToken"
+        ],
+        "200": [
+          "booking.id",
+          "manageToken"
+        ],
+        "400": [
+          "error",
+          "field"
+        ],
+        "409": [
+          "error"
+        ]
+      }
+    }
+  ],
+  "webhookPayloadFields": []
+}
+```
