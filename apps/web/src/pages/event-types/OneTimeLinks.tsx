@@ -10,16 +10,9 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { randomHex } from '../../random.ts'
 import { useMe, useSession } from '../../session.tsx'
+import { ONE_TIME_LINK_EXPIRIES } from './one-time-link-options.ts'
 
 type Link = Schemas['OneTimeBookingLink']
-
-const EXPIRIES = [
-  { value: '', label: 'Never' },
-  { value: '1', label: 'In 1 hour' },
-  { value: '24', label: 'In 1 day' },
-  { value: '168', label: 'In 7 days' },
-  { value: '720', label: 'In 30 days' },
-] as const
 
 const STATE_LABELS: Record<Link['state'], MessageKey> = {
   active: 'Active',
@@ -296,7 +289,7 @@ function OneTimeLinkManager({ event }: { event: EventType }) {
           >
             {(props) => (
               <select {...props} value={expiry} onChange={(e) => setExpiry(e.target.value)}>
-                {EXPIRIES.map((option) => (
+                {ONE_TIME_LINK_EXPIRIES.map((option) => (
                   <option key={option.value} value={option.value}>
                     {t(option.label)}
                   </option>
