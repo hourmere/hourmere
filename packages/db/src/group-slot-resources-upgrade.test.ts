@@ -49,7 +49,12 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const slots = (
         await old.pool.query('SELECT to_jsonb(s)::text AS row FROM group_slots s ORDER BY id')
       ).rows
-      expect(await runMigrations(old.pool)).toEqual(['0061_group_slot_resources.sql'])
+      // Pin this upgrade proof to its target migration, independently of later additions.
+      await copyFile(
+        join(migrationsDir, '0061_group_slot_resources.sql'),
+        join(directory, '0061_group_slot_resources.sql'),
+      )
+      expect(await runMigrations(old.pool, directory)).toEqual(['0061_group_slot_resources.sql'])
       expect(
         (
           await old.pool.query(
@@ -82,9 +87,9 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
         insertSeat(client, f, ids.slot, 'third@example.test', { location }),
       )
       const after = await snapshotSchema(old.pool)
-      await runMigrations(old.pool)
+      expect(await runMigrations(old.pool, directory)).toEqual([])
       expect(await snapshotSchema(old.pool)).toEqual(after)
-      fresh = await createTestDatabase(serverUrl as string)
+      fresh = await createTestDatabase(serverUrl as string, directory)
       expect(await snapshotSchema(fresh.pool)).toEqual(after)
     } finally {
       await old?.drop()

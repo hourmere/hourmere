@@ -69,6 +69,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
+| `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -161,3 +163,12 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 `[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
+
+## Attendee attendance access
+
+`get_booking_attendees` and `set_attendee_no_show` require the caller to host the booking
+in the current organization, for API keys of every scope and MCP OAuth alike. Team
+owner/admin status does not grant access to bookings hosted by other members through
+MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
+Non-host team administrators must use a browser session. See the
+[no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.

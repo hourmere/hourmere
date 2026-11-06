@@ -132,6 +132,10 @@
     "exemption": "browser-session-only",
     "reason": "Selecting an MCP OAuth grant's organization requires the user's browser consent flow."
   },
+  "setAttendeeNoShow": {
+    "mcp": "set_attendee_no_show",
+    "cli": "set-no-show"
+  },
   "setEventTypeNotifications": {
     "mcp": "set_event_type_notifications",
     "cli": "set-event-notifications"

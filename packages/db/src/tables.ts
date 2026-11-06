@@ -263,6 +263,8 @@ export interface BookingAttendees {
   is_booker: Generated<boolean>;
   locale: string | null;
   name: string;
+  no_show_marked_at: Timestamp | null;
+  no_show_marked_by: string | null;
   time_zone: string;
 }
 

@@ -92,6 +92,7 @@ export default defineConfig({
             { label: 'Open-time snippets', link: '/docs/open-time-snippets' },
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },
+            { label: 'Marking no-shows', link: '/docs/no-shows' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },
             { label: 'Interface languages', link: '/docs/interface-languages' },
