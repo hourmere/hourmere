@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
+import { offlineShell } from './pwa/build.ts'
 
 export default defineConfig(({ mode }) => {
   // The API server's port: PORT from the environment or the repository's .env, as the server
@@ -9,7 +10,7 @@ export default defineConfig(({ mode }) => {
   const apiPort = loadEnv(mode, repoRoot, '').PORT || '3000'
 
   return {
-    plugins: [react()],
+    plugins: [react(), offlineShell()],
     build: {
       // Lightning CSS rewrites container ranges despite this target; esbuild preserves
       // min-width queries for Safari 16.0–16.3, which ignores range syntax.
