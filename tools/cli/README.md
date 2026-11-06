@@ -120,6 +120,36 @@ invitee authority. These commands act immediately and can send notifications. Ca
 never automatically retried. After a lost booking response, inspect the instance and reuse
 the retained request and idempotency key; **rescheduling is not idempotent**.
 
+## Draft open-time email snippets
+
+Save a request such as the following to `snippet-request.json`, using future instants:
+
+```json
+{
+  "slug": "intro",
+  "from": "2026-11-09T00:00:00-08:00",
+  "to": "2026-11-16T00:00:00-08:00",
+  "count": 3,
+  "displayTimeZone": "America/Los_Angeles",
+  "locale": "en"
+}
+```
+
+```sh
+hourmere open-time-snippet --json --input snippet-request.json
+# From a source checkout:
+npm run --silent cli -- open-time-snippet --json --input snippet-request.json
+```
+
+Use exactly one of `eventTypeId` or `slug`; `from`/`to` are offset-bearing instants spanning
+at most 31 elapsed days. `count` defaults to 3 and accepts 1–10. Optional `durationMinutes`
+is supplied in JSON; omitted language and display zone use the caller's profile defaults.
+`--json` makes the normal JSON output explicit. The response includes `slots` with direct
+links, `text` and `html` for your draft. Generation sends no mail and reserves no time.
+`read`, `bookings` and `full` keys work with personal-owner or team-owner/admin permission,
+when the operator enables `SLOT_SNIPPETS_ENABLED`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for
+response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
+
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.
@@ -155,7 +185,7 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 ## Commands
 
 `whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,
-`set-event-notifications`, `schedules`, `schedule`, `slots`, `book`, `list`, `reschedule`,
+`set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `reschedule`,
 `cancel`, `retry-meeting`, `retry-calendar-copy`.
 
 `one-time-links create`, `one-time-links list` and `one-time-links revoke` manage private

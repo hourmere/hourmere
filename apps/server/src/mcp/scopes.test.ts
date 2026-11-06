@@ -34,6 +34,7 @@ const all = [
   'create_one_time_link',
   'list_one_time_links',
   'revoke_one_time_link',
+  'generate_open_time_snippet',
   'list_calendar_connections',
   'list_conference_connections',
   'get_event_type_waitlist',
