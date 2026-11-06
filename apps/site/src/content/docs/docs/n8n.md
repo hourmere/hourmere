@@ -57,8 +57,8 @@ connectivity and authentication, not permission for every operation.
 
 | Operation | Accepted scopes | Recommended scope |
 |---|---|---|
-| Credential test; list event types; find available slots; get/list bookings | `read`, `bookings`, `full` | `read` for reporting |
-| Create, cancel or reschedule a booking | `bookings`, `full` | `bookings` |
+| Credential test; list event types; find available slots; get/list bookings | `read`, `bookings` or `full` | `read` for reporting |
+| Create, cancel or reschedule a booking | `bookings` or `full` | `bookings` |
 | Activate/deactivate Hourmere Trigger | `full` | Separate `full` credential for the trigger |
 
 Existing organization and host permissions still apply. A trigger needs an organization

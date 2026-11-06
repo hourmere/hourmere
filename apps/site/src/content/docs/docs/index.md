@@ -42,7 +42,6 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - The [n8n community node](/docs/n8n) is not yet published to npm or available on n8n Cloud.
   Self-hosters can install its local package; downstream effects need durable idempotency.
-
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
