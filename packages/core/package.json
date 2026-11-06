@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./reserved": "./src/reserved.ts",
     "./embed": "./src/embed.ts",
+    "./embed-snippet": "./src/embed-snippet.ts",
     "./language": "./src/language.ts",
     "./locales": "./src/locales.ts",
     "./conference-url": "./src/conference-url.ts",
