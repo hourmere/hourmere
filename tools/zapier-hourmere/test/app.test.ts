@@ -33,13 +33,22 @@ const api = () => nock(baseUrl, { reqheaders: { authorization: `Bearer ${authDat
 const run = (fn: unknown, inputData = {}, extra = {}) =>
   appTester(fn, { authData, inputData, ...extra })
 
-beforeAll(() => nock.disableNetConnect())
+beforeAll(() => {
+  if (!nock.isActive()) nock.activate()
+  nock.disableNetConnect()
+})
 afterEach(() => {
   const pending = nock.pendingMocks()
   nock.cleanAll()
   expect(pending).toEqual([])
 })
-afterAll(() => nock.enableNetConnect())
+afterAll(() => {
+  nock.cleanAll()
+  nock.enableNetConnect()
+  // Permitting requests alone leaves Nock's global HTTP interception installed.
+  nock.restore()
+  expect(nock.isActive()).toBe(false)
+})
 
 describe('Hourmere Zapier authentication and reads', () => {
   it('tests even an empty account with an authenticated cheap read', async () => {
