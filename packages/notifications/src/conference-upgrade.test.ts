@@ -141,6 +141,7 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
               ical_version: 1,
               ical_organizer_name: 'Synthetic Host',
               ical_organizer_email: 'host@example.test',
+              import_questions: null,
             })
           }
         if (table === 'event_types')

@@ -2,6 +2,8 @@ import { Kysely, PostgresDialect } from 'kysely'
 import pg from 'pg'
 import type { DB } from './tables.ts'
 
+export { importedBookingCondition } from './imported-booking-condition.ts'
+export { importedBookingIds, isImportedBooking } from './imported-bookings.ts'
 export { runMigrations } from './migrate.ts'
 export type * from './tables.ts'
 

@@ -134,3 +134,50 @@ export interface AvailabilityInput {
   /** Current time. The engine never reads the clock itself. */
   readonly now: Temporal.Instant
 }
+
+/** Stable ordering shared by the pure engine and the team service's aggregation. */
+export const AVAILABILITY_REASON_CODES = [
+  'past',
+  'duration_not_offered',
+  'outside_working_hours',
+  'off_slot_grid',
+  'minimum_notice',
+  'booking_window',
+  'calendar_busy',
+  'buffer_before',
+  'buffer_after',
+  'daily_limit',
+  'weekly_limit',
+  'monthly_limit',
+  'host_conflict',
+  'collective_member_unavailable',
+  'no_eligible_round_robin_host',
+] as const
+
+export type AvailabilityReasonCode = (typeof AVAILABILITY_REASON_CODES)[number]
+
+/**
+ * Only a code and a nonempty blocking influence clipped to the candidate slot.
+ * Buffer influence can overlap the slot even when the underlying meeting does
+ * not. Never copy calendar/booking objects, identifiers or descriptive metadata.
+ */
+export interface AvailabilityReason {
+  readonly code: AvailabilityReasonCode
+  readonly interval: InstantInterval
+  /** Added by the service only for callers allowed to manage a team event type. */
+  readonly hostUserId?: string
+}
+
+export interface ExplainedSlot extends Slot {
+  readonly status: 'available' | 'unavailable'
+  readonly reasons: readonly AvailabilityReason[]
+}
+
+export interface ExplainAvailabilityInput extends AvailabilityInput {
+  /** Bookings that block this host but do not count toward this event's booking limits. */
+  readonly blockingBookings?: readonly ExistingBooking[]
+  /** Additional starts to evaluate, e.g. another team member's interval grid. */
+  readonly candidateStarts?: readonly Temporal.Instant[]
+  /** Optional positive candidate budget, enforced before computing any reasons. */
+  readonly maximumCandidates?: number
+}

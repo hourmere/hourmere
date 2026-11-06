@@ -1,5 +1,15 @@
 [API conventions](https://hourmere.com/docs/api-conventions).
 
+### Booking source compatibility
+
+`Booking.source` adds `"import"` to the response values `"web"`, `"embed"`, `"api"`
+and `"mcp"`. It identifies locally imported bookings, which remain managed in the
+original system and carry `managementPolicy: "local_only_read_only"`. This is a
+response enum expansion within `/api/v1`: clients with exhaustive source switches or
+closed response validators must add `"import"` before reading imported bookings.
+Regenerate clients from the current OpenAPI document; do not infer write permissions
+from source attribution. Imported booking mutations return `imported_booking_read_only`.
+
 ### Validation error fields
 
 An optional `field` string identifies a stable validation field name. Known values are

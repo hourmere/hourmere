@@ -327,10 +327,12 @@ export function createFixtures(db: Db) {
     {
       eventTypeId = null,
       status = 'confirmed',
+      source = 'api',
       attendee = { name: 'Invitee', email: 'invitee@example.com' },
     }: {
       eventTypeId?: string | null
       status?: 'confirmed' | 'cancelled'
+      source?: 'api' | 'import'
       attendee?: { name: string; email: string } | null
     } = {},
   ): Promise<string> {
@@ -345,8 +347,12 @@ export function createFixtures(db: Db) {
           start_at: start,
           end_at: end,
           title: 'Fixture booking',
-          manage_token_hash: createHash('sha256').update(unique()).digest(),
-          source: 'api',
+          manage_token_hash:
+            source === 'import' ? null : createHash('sha256').update(unique()).digest(),
+          source,
+          // Older-schema migration fixtures use this helper too. Only imported
+          // fixtures require the new historical question snapshot column.
+          ...(source === 'import' ? { import_questions: '[]' } : {}),
         })
         .returning('id')
         .executeTakeFirstOrThrow()

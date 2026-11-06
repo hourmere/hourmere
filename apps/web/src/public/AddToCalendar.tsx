@@ -1,13 +1,21 @@
 import { useId } from 'react'
+import { isReadOnlyBooking } from '../api/booking-policy.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import { type CalendarEvent, googleCalendarUrl, icsDataUrl, outlookCalendarUrl } from './ics.ts'
 
 /** Download an .ics file, or open the event in Google Calendar or Outlook. Nothing secret in any. */
-export function AddToCalendar({ event }: { event: CalendarEvent }) {
+export function AddToCalendar({
+  event,
+  booking,
+}: {
+  event: CalendarEvent
+  booking?: { source?: string; managementPolicy?: string }
+}) {
   const { t } = useI18n()
 
   const headingId = useId()
+  if (booking && isReadOnlyBooking(booking)) return null
   return (
     <section className="add-to-calendar" aria-labelledby={headingId}>
       <h2 id={headingId}>{t('Add to your calendar')}</h2>
@@ -46,11 +54,20 @@ export function AddToCalendar({ event }: { event: CalendarEvent }) {
  * The invitee's manage link, shown once: the token exists only in this page's memory (the
  * API returns it once and stores only its hash), never in the address bar or in storage.
  */
-export function ManageLink({ token, intro }: { token: string; intro: string }) {
+export function ManageLink({
+  token,
+  intro,
+  booking,
+}: {
+  token: string
+  intro: string
+  booking?: { source?: string; managementPolicy?: string }
+}) {
   const { t, ui, locale } = useI18n()
 
   const headingId = useId()
   const inputId = useId()
+  if (booking && isReadOnlyBooking(booking)) return null
   const url = `${window.location.origin}/booking#token=${encodeURIComponent(token)}`
   return (
     <section className="panel manage-link" aria-labelledby={headingId}>

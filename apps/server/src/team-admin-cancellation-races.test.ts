@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
@@ -72,6 +72,8 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
     {
       createHash,
       randomBytes,
+      importedBookingIds,
+      isImportedBooking,
       sql,
       ...availability,
       ...bookingPage,

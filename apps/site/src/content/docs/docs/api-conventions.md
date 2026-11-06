@@ -16,6 +16,26 @@ configuration. Personal-owner or team-owner/admin permission is still required.
 events remain eligible. The [agent guide](/docs/open-time-snippets#request-and-response-reference)
 defines its input, response, 31-elapsed-day maximum, defaults, and known limitations.
 
+## Imported local bookings
+
+Protected booking reads may return `source: "import"` and
+`managementPolicy: "local_only_read_only"`. These local busy records remain managed in the
+original system. Host cancellation, rescheduling and provider retries return the stable
+`imported_booking_read_only` conflict. Private management capabilities are unavailable,
+including stale receipts; no new manage link or ICS can be issued. The local import CLI
+is documented in the [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md);
+it adds no network import endpoint.
+
+### Booking source compatibility
+
+`Booking.source` adds `"import"` to the response values `"web"`, `"embed"`, `"api"`
+and `"mcp"`. It identifies locally imported bookings, which remain managed in the
+original system and carry `managementPolicy: "local_only_read_only"`. This is a
+response enum expansion within `/api/v1`: clients with exhaustive source switches or
+closed response validators must add `"import"` before reading imported bookings.
+Regenerate clients from the current OpenAPI document; do not infer write permissions
+from source attribution. Imported booking mutations return `imported_booking_read_only`.
+
 ## One-time link administration
 
 One-time links use the authenticated event-type subresource
