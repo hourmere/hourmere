@@ -131,24 +131,26 @@ and leap years without substituting a numbered date.
 ## Availability and interactions
 
 Reject the entire series if any occurrence fails. Preview lists every requested occurrence
-and its safe availability result. Preview holds nothing: Hourmere has no booking-hold
-mechanism, preview writes no row, and available entries are informational, not an offer
-to submit a subset. Invitees may change the first start, pattern or count and preview
-again. No automatic skip, available-subset checkout or per-date alternative search.
-A stale checkout returns a conflict and offers a fresh preview without losing form data.
-Readiness errors, loading and unauthorized responses remain unknown, never “missing setup.”
+and its safe availability result. Preview holds nothing: it writes no row and creates no
+hold (Hourmere's only holds are the internal paid-booking `pending_payment` holds of the
+[paid-booking foundation](payments.md), which series never create), and available entries
+are informational, not an offer to submit a subset. Invitees may change the first start,
+pattern or count and preview again. No automatic skip, available-subset checkout or per-date
+alternative search. A stale checkout returns a conflict and offers a fresh preview without
+losing form data. Readiness errors, loading and unauthorized responses remain unknown, never
+“missing setup.”
 
 | Existing behavior | Series decision |
 | --- | --- |
-| Daily/weekly/monthly limits | Each occurrence consumes one booking. Compute cumulative proposed counts against active bookings of this event in each host's effective schedule zone (Monday-based weeks and calendar months), not the recurrence/display zone. Check all periods before any insert. |
-| Buffers and busy times | Apply ordinary exclusions and buffers to every occurrence and to pairs within the proposed set; other event types/imports still block time. |
+| Daily/weekly/monthly limits | Each occurrence consumes one booking. Compute cumulative proposed counts against this event's occupying bookings (confirmed, and single-booking `pending_payment` holds before their deadline, as the slot engine counts them) in each host's effective schedule zone (Monday-based weeks and calendar months), not the recurrence/display zone. Check all periods before any insert. |
+| Buffers and busy times | Apply ordinary exclusions and buffers to every occurrence and to pairs within the proposed set; other event types, imports and unexpired payment holds still block time, sharing the slot engine's hold-deadline rules. |
 | Minimum notice and window | Re-evaluate each occurrence against one fresh clock sampled after locks. All must pass; later dates cannot escape the current window. |
 | One-time links | Unsupported for series initially: no series route or MCP mode exists under `/book/{token}`, and one-time-link metadata omits `recurrence`, so no link is consumed. Their existing single-booking semantics are unchanged. |
 | Group seats | Unsupported, including creating a new slot or joining an occupied slot. Do not silently treat a series as one seat/slot. |
 | Round-robin | One host for the entire series, chosen from hosts eligible and available for every occurrence. Never choose a different host per date. If intersections are empty, fail even if each date has some host. Apply existing fair selection once among whole-series candidates and advance fairness once on successful commit, never preview/replay. Existing least-recently-assigned rotation measures assignments, not booked minutes: a 12-date series can load one host twelve times more than a single booking. Mitigate with cumulative host limits and an owner-lowered maxOccurrences; explicitly document that equal meeting-count distribution is not guaranteed. Do not pretend repeated timestamp advances solve this skew. |
 | Collective | The same complete pinned required-host set attends every occurrence; all must pass. Missing/currently invalid membership fails closed. |
 | Waitlist | No series waitlist or redemption token initially; reject a waitlist token on series creation with `recurrence_not_supported`. Existing single-slot waitlists remain unchanged. Cancelled occurrences reach waitlists through the existing booking-change scan signals, as any cancelled booking does. |
-| Paid bookings | Hourmere has no paid bookings today. A future payment feature must define series charging and refunds before it can combine with recurrence; never charge once or partly refund an atomic series. |
+| Paid bookings | Unsupported. The paid-booking foundation ([design](payments.md)) has no public checkout or price setting yet and creates `pending_payment` holds only through an internal service. Series never create holds. Once paid event settings exist, series admission refuses paid events with `recurrence_not_supported` until a design defines series charging and refunds; whichever of paid event settings and series admission ships second adds that refusal and its test. Never charge once or partly refund an atomic series. |
 | Imported bookings | Continue to block availability. Never attach imported read-only rows to a new series or allow series operations to bypass `imported_booking_read_only`. No inference of imported recurrence. |
 | Cal.com importer | A source event with Cal.com `recurringEvent` keeps its existing `event_recurring` **activation blocker** (packages/import-calcom/src/events.ts), not a warning: its draft stays inactive until the owner's activation review, and the importer never writes Hourmere `recurrence`. Cal.com's yearly, 1–20 interval and 32-count rules are not partially mapped. Source bookings from a Cal.com series stay independent read-only imported bookings under the existing `recurringOccurrencesComplete` owner decision. After activation an owner may enable Hourmere recurrence explicitly. No step downgrades or removes this blocker; step 7 documents it. |
 | Guests, duration, location | Respect current opt-ins and validation; snapshot the same choices per occurrence. |
@@ -190,7 +192,9 @@ the first four items, step 2a.2 the last three.
 - Add nullable `series_occurrence_id` to `bookings`. Every successor in an existing
   reschedule chain retains that occurrence ID. A partial unique index on occurrence ID
   where status is confirmed permits at most one live version; cancelled predecessors
-  remain ordinary history. An occurrence can be cancelled without deleting its row.
+  remain ordinary history. Series members are only ever `confirmed` or `cancelled`: paid
+  events are refused, so no member is `pending_payment` or `expired`. An occurrence can be
+  cancelled without deleting its row.
 - `booking_series_receipts`: UUIDv7 ID, organization, operation kind, authority-scope
   digest, idempotency key/fingerprint, series ID and bounded affected occurrence/result
   IDs. Unique `(organization_id, authority_scope, operation_kind, idempotency_key)`.
@@ -443,20 +447,20 @@ shown only on the series manage page and host series detail. A link update is sk
 no member remains confirmed and not started.
 
 Regular link updates are due no earlier than 60 minutes after the previous series mail of
-this series, measured from the ledger `sent_at` of its last copy (written after SMTP
-accepts it). All link updates, regular or urgent, are limited to at most 3 per series in any
-rolling day, so no recipient receives more than 3. A link update that reports a member starting within the next 60
-minutes is urgent: it is due at once, ignoring the spacing, and still counts toward the
-daily cap. Members are at least 7 days apart, so a series has at most one urgent member in
-any hour. Before the first copy, under the existing mail-budget lock, the urgent update
-checks every invitee recipient's rolling-hour ledger count. It is sent only if each count is
-at most the recipient hourly limit minus 1 minus the admission cap (2 with defaults), which
-keeps room for one cancellation per series the cap allows. Otherwise the whole update waits
-for the regular spacing, and the series page shows the link. Changes beyond the daily cap
-wait until the rolling day allows another. The series pages always show each member's
-current state, so mail can lag them by up to an hour, or by up to a day once three link
-updates have been sent in a rolling day. Never send a per-occurrence `confirmed` or
-`conference_failed` mail for a series root.
+this series, measured from the ledger `sent_at` of its last copy (written after SMTP accepts
+it). All link updates, regular or urgent, are limited to at most 3 per series in any rolling
+day, so no recipient receives more than 3. A link update that reports a member starting
+within the next 60 minutes is urgent: it is due at once, ignoring the spacing, and still
+counts toward the daily cap. Members are at least 7 days apart, so a series has at most one
+urgent member in any hour. Before the first copy, under the existing mail-budget lock, the
+urgent update checks every invitee recipient's rolling-hour ledger count. It is sent only if
+each count is at most the recipient hourly limit minus 1 minus the admission cap (2 with
+defaults), which keeps room for one cancellation per series the cap allows. Otherwise the
+whole update waits for the regular spacing, and the series page shows the link. Changes
+beyond the daily cap wait until the rolling day allows another. The series pages always show
+each member's current state, so mail can lag them by up to an hour, or by up to a day once
+three link updates have been sent in a rolling day. Never send a per-occurrence `confirmed`
+or `conference_failed` mail for a series root.
 
 ### Mail budget proof
 
@@ -783,7 +787,7 @@ restores admission with the retained event settings.
 | Step (about one day each) | Earlier dependencies | Owned deliverable and REST / MCP / CLI operations | Concrete acceptance checks | Admission |
 | --- | --- | --- | --- | --- |
 | 1a. Rule expansion | None | Pure rule normalization/expansion, the hard-off admission constant and its code-only test overrides (service dependency and `startServer` option); no environment variable, REST routes, MCP tools or CLI commands. | Weekly/fortnightly/monthly ordinals, leap year, gap, both first-slot fold offsets and Lord Howe; governing-zone determinism before host choice; fixed count/horizon and unsupported combinations; config test that `RECURRING_BOOKINGS_ENABLED=true` in the environment changes nothing and that apps/server/src/index.ts passes no override. | Hard-off |
-| 1b. Batch availability | 1a | Explicit-start fact loader/check shared with single-booking rules; no REST routes, MCP tools or CLI commands. | Cumulative host-zone daily/week/month limits, buffers, common round-robin host and unknown freshness; 96 evaluations, at most 32 reads/10000 rows, abort at 5000 ms; dense benchmark with measured evidence required before revising a budget. | Hard-off |
+| 1b. Batch availability | 1a | Explicit-start fact loader/check shared with single-booking rules; no REST routes, MCP tools or CLI commands. | Cumulative host-zone daily/week/month limits, buffers, unexpired payment holds blocking and expired ones not, common round-robin host and unknown freshness; 96 evaluations, at most 32 reads/10000 rows, abort at 5000 ms; dense benchmark with measured evidence required before revising a budget. | Hard-off |
 | 2a.1. Series schema | 1a | First new migration: `event_types.recurrence` and its revision, `booking_series`, `booking_series_occurrences`, `bookings.series_occurrence_id`, composite FKs and the deferred root trigger; regenerated DB types. No REST routes, MCP tools or CLI commands. | Populated predecessor upgrade preserves realistic data; fresh install and no-op rerun; cross-org/member and duplicate-active-ordinal violations fail; an incomplete series fails at commit; existing single bookings remain valid. | Hard-off |
 | 2a.2. Receipt, notification and admission tables | 2a.1 | Second new migration: `booking_series_receipts`, `booking_series_notifications` (receipts and outbox) and `booking_series_admissions`; admission purge added to the existing `notification-email-cleanup` job; regenerated DB types. No REST routes, MCP tools or CLI commands. | Upgrade, fresh install and no-op rerun; receipt and notification uniqueness; cross-org references fail; the purge deletes only admission rows older than two days; only digests and HMACs are stored, never raw tokens or IPs. | Hard-off |
 | 2b. Atomic creation service | 1b, 2a.2 | Transaction-aware insertion, request fingerprint, replay receipts, admission lock and counter, and one existing booking.created webhook per occurrence; automatic-conference events refused with `recurrence_not_supported` until 4b.3; no REST routes, MCP tools or CLI commands. | Concurrent series/single admission; same/different-key replay; replay answered at the cap; conflicts, validation failures and rollbacks write no admission row; failure at first/middle/final insertion leaves zero rows/jobs/webhooks; one host for all round-robin dates and documented fairness update; no external I/O under locks. | Hard-off |
