@@ -78,6 +78,15 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Upgrade the Better Auth family and schema CLI from 1.7.12 to 1.7.16 for
+  GHSA-9hm7-xhfp-cx58 (unverified OAuth email), GHSA-fvxx-76fc-893x (revoked
+  cached sessions) and GHSA-c85h-5mrr-mgx4 (padded organization owner roles),
+  including the other fixes in the November security release. Google and Microsoft
+  sign-in reject false email-verification claims, including the string `"false"`.
+  No database migration is needed. Rebuild and restart all application roles;
+  Hourmere uses PostgreSQL sessions without secondary storage or cookie caching.
+  Social token/JWKS requests now reject redirects, and invalid MCP client-metadata
+  responses fail with `invalid_client`. See the self-hosting upgrade notes.
 - All-day Google events block their dates in each host's availability schedule zone,
   including collective and round-robin hosts, when the calendar uses another zone.
   Exclusive end dates and daylight-saving transitions are preserved; timed events remain
