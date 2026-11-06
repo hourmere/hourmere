@@ -21,9 +21,9 @@ function check(source: string, values = facts) {
   const text = prose(source)
   expect(text).toContain(`${values.days} elapsed days`)
   expect(text).toMatch(
-    new RegExp(`(?:${values.min}–${values.max}|from ${values.min} to ${values.max})`),
+    new RegExp(`(?:${values.min}–${values.max}|from ${values.min} to ${values.max})(?!\\d)`),
   )
-  expect(text).toMatch(new RegExp(`default(?:s to)? ${values.defaults}`))
+  expect(text).toMatch(new RegExp(`default(?:s to)? ${values.defaults}(?!\\d)`))
 }
 
 describe('open-time snippet documentation facts', () => {
@@ -39,8 +39,10 @@ describe('open-time snippet documentation facts', () => {
         ['default 3', 'default 4'],
         ['defaults to 3', 'defaults to 4'],
       ] as const) {
-        if (prose(source).includes(before))
-          expect(() => check(prose(source).replaceAll(before, after))).toThrow(assertion)
+        // Digit boundary: other limits on the same page (e.g. "from 1 to 1000") must not count.
+        const exact = new RegExp(`${before}(?!\\d)`, 'g')
+        if (prose(source).match(exact))
+          expect(() => check(prose(source).replace(exact, after))).toThrow(assertion)
       }
     },
   )

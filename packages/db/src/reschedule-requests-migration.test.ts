@@ -46,11 +46,13 @@ describe.skipIf(!serverUrl)('reschedule request migration', () => {
           )
         ).rows
       const before = await snapshot()
-      const expectedUpgrades = migrations.filter((name) => name >= migration)
-      expect(expectedUpgrades[0]).toBe(migration)
-      expect(await runMigrations(owned.pool)).toEqual(expectedUpgrades)
+      // This checkpoint verifies only this migration; later migrations have their own
+      // populated predecessor tests and may add booking columns.
+      expect(migrations).toContain(migration)
+      await copyFile(join(migrationsDir, migration), join(directory, migration))
+      expect(await runMigrations(owned.pool, directory)).toEqual([migration])
       expect(await snapshot()).toEqual(before)
-      expect(await runMigrations(owned.pool)).toEqual([])
+      expect(await runMigrations(owned.pool, directory)).toEqual([])
       await owned.pool.query(
         `INSERT INTO booking_reschedule_requests(booking_id,idempotency_key,expires_at,created_at) VALUES($1,$2,'2030-01-02T09:00Z',now())`,
         [booking, randomUUID()],

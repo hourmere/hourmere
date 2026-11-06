@@ -703,3 +703,25 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
 reschedule retry semantics remain unchanged.
+
+## Configure booking limits
+
+MCP `create_event_type` and `update_event_type` accept `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns all three
+settings. Updates take a flat object with `id` alongside changed fields.
+Configuration writes require a `full` API key and the usual ownership or team
+owner/admin permissions; MCP OAuth retains its organization and role checks.
+
+Each ceiling is a whole number from 1 to 1000, or `null` for no ceiling. Omitted
+update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
+time zones, Monday-based weeks, calendar months and counting rules. Lowering a
+ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

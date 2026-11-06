@@ -28,7 +28,7 @@ includes PostgreSQL 18.
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `PRIVACY_POLICY_URL` | Unset | This instance operator's privacy policy. Absolute HTTP(S) URL, at most 2048 characters, without credentials, whitespace or control characters. Empty hides the privacy link. |
 | `TERMS_URL` | Unset | This instance operator's terms. Same URL rules as `PRIVACY_POLICY_URL`. Empty hides the terms link. |
-| `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions, protects sign-in tokens and derives the recipient mail-accounting HMAC key. Changing it signs people out and resets recipient mail counters; instance counts remain. |
+| `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions, protects sign-in tokens and derives the recipient mail-accounting HMAC key. Changing it signs people out, resets recipient mail counters and clears all waitlist entries (including contact details and pending work); instance counts remain. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
@@ -428,3 +428,10 @@ for public apps; its private/development apps do not trigger those notifications
 ## Automatic Google Meet
 
 `GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See [automatic Google Meet](/docs/automatic-google-meet) for pending/failure and notification semantics.
+
+## Paid-booking foundation
+
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
+adapter. It has no runtime effect in this release: setting it to `true` does not permit
+hold creation or enable payment collection. Existing holds expire regardless of this
+setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).

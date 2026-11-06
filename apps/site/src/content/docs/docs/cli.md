@@ -358,3 +358,26 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
 reschedule retry semantics remain unchanged.
+
+## Configure booking limits
+
+Use `hourmere create-event --input event-request.json` or
+`hourmere update-event --input event-update.json` with a `full` API key. Put
+`maxBookingsPerDay`, `maxBookingsPerWeek` and `maxBookingsPerMonth` in the JSON file;
+updates include `id` alongside changed fields. `--input -` reads the same JSON from
+stdin. Read the saved settings with `hourmere event --input event-query.json`, where
+the query contains `id`.
+
+Each ceiling is a whole number from 1 to 1000, or `null` for no ceiling. Omitted
+update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
+time zones, Monday-based weeks, calendar months and counting rules. Lowering a
+ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.
