@@ -17,6 +17,10 @@ const Instance = z
     }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
+    slotSnippetsEnabled: z.boolean().optional().openapi({
+      description:
+        'Whether hosts may copy open times; enable only after direct-slot pages are live',
+    }),
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
@@ -41,6 +45,7 @@ export function instanceRoutes({
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
+  slotSnippetsEnabled = false,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -52,6 +57,7 @@ export function instanceRoutes({
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
+  slotSnippetsEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -64,6 +70,7 @@ export function instanceRoutes({
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     followUpHostNotesEnabled,
+    slotSnippetsEnabled,
     signIn: {
       email: true,
       google: socialProviders.google !== undefined,

@@ -83,7 +83,7 @@ type Lookup =
 
 function Invitation({ me, search }: { me: Me; search: string }) {
   const { t, ui } = useI18n()
-  const { accept: acceptSession, beginContextSwitch, refresh, signOut } = useSession()
+  const { accept: acceptSession, beginContextSwitch, refresh, signOut, setNotice } = useSession()
   const navigate = useNavigate()
   const params = new URLSearchParams(search)
   const id = params.get('invitationId')
@@ -167,7 +167,7 @@ function Invitation({ me, search }: { me: Me; search: string }) {
     return () => controller.abort()
   }, [id, valid, version, me.user.id, me.user.email])
 
-  async function confirmContext(teamId: string) {
+  async function confirmContext(teamId: string, joinedTeamName?: string) {
     if (!mounted.current) return true
     if (mounted.current) setCheckingContext(true)
     try {
@@ -181,7 +181,14 @@ function Invitation({ me, search }: { me: Me; search: string }) {
         current.organization.personal
       )
         throw new Error('The joined team could not be confirmed')
-      if (mounted.current) navigate(PATHS.home, { replace: true })
+      if (joinedTeamName !== undefined) {
+        setNotice({
+          path: PATHS.eventTypes,
+          message: msg('You joined {team}.', { team: joinedTeamName }),
+          joinedTeam: { userId: current.user.id, organizationId: teamId },
+        })
+      }
+      navigate(joinedTeamName !== undefined ? PATHS.eventTypes : PATHS.home, { replace: true })
       acceptSession(current)
     } catch {
       if (!mounted.current) return true
@@ -207,7 +214,10 @@ function Invitation({ me, search }: { me: Me; search: string }) {
     try {
       await acceptInvitation(id)
       if (mounted.current) setAction('accepted')
-      reconcile = await confirmContext(lookup.invitation.organizationId)
+      reconcile = await confirmContext(
+        lookup.invitation.organizationId,
+        lookup.invitation.organizationName,
+      )
     } catch (err) {
       reconcile = !mounted.current
       if (mounted.current) {
@@ -256,7 +266,10 @@ function Invitation({ me, search }: { me: Me; search: string }) {
     let reconcile = false
     setError('')
     try {
-      reconcile = await confirmContext(lookup.invitation.organizationId)
+      reconcile = await confirmContext(
+        lookup.invitation.organizationId,
+        lookup.invitation.organizationName,
+      )
     } finally {
       release()
       handoffRelease.current = null

@@ -34,7 +34,7 @@ This example renders a message only; it does not send one.
 | `invitationId: string` | Invitation UUID; the only variable accepted in the join URL. |
 | `teamName: string` | User-controlled team display name. |
 | `inviterName: string` | User-controlled inviter display name; pass the name, without an email-address fallback. |
-| `expiresAt: Date \| string` | The invitation expiry instant: Better Auth's direct API returns `Date` objects; HTTP JSON uses ISO timestamps with a time-zone offset. Both bodies show the same UTC timestamp. |
+| `expiresAt: Date \| string` | The invitation expiry instant: Better Auth's direct API returns `Date` objects; HTTP JSON uses ISO timestamps with a time-zone offset. Both bodies show the same localized date and time at minute precision, explicitly labeled UTC because the invitee's time zone is unknown. |
 | `language?: unknown` | An explicit language chosen by the inviter. |
 | `defaultLanguage?: unknown` | An optional instance language supplied by the caller; no new environment setting is added. |
 
