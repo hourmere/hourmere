@@ -20,6 +20,7 @@ import {
   dispatchConferenceNotifications,
   sendBookingNotification,
 } from '../../packages/notifications/src/index.ts'
+import { deliverWaitlistEmail } from '../../packages/notifications/src/waitlist.ts'
 import { validateSuccessRedirect } from '../../packages/scheduling/src/success-redirect.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 import {
@@ -47,6 +48,9 @@ export interface FixtureApp {
   personalPath: string
   configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
+  configureWaitlist: (kind: 'personal' | 'team') => Promise<string>
+  openWaitlistVerification: (page: Page) => Promise<void>
+  waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
@@ -98,6 +102,7 @@ export interface FixtureApp {
 export interface FixtureOptions {
   uiAudit: boolean
   notificationEditor: boolean
+  slotSnippets: boolean
 }
 export const test = base.extend<{
   app: FixtureApp
@@ -106,11 +111,13 @@ export const test = base.extend<{
   multiHostMeet: boolean
   uiAudit: boolean
   notificationEditor: boolean
+  slotSnippets: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
   uiAudit: [false, { option: true }],
   notificationEditor: [false, { option: true }],
+  slotSnippets: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -125,7 +132,10 @@ export const test = base.extend<{
     },
     { auto: true },
   ],
-  app: async ({ context, automaticMeet, multiHostMeet, uiAudit, notificationEditor }, use) => {
+  app: async (
+    { context, automaticMeet, multiHostMeet, uiAudit, notificationEditor, slotSnippets },
+    use,
+  ) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error(
@@ -433,6 +443,7 @@ export const test = base.extend<{
         EMBED_ALLOWED_ORIGINS: parentUrl,
         ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
         ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
+        ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
         ...(automaticMeet && {
           GOOGLE_MEET_ENABLED: 'true',
           GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
@@ -469,6 +480,7 @@ export const test = base.extend<{
       let auditCookie: string | undefined
       let auditSessionId: string | undefined
       let auditOAuthQuery: string | undefined
+      let waitlistEventId: string | undefined
       await use({
         url,
         parentUrl,
@@ -493,6 +505,108 @@ export const test = base.extend<{
             .where('organization_id', '=', host.organizationId)
             .where('slug', '=', 'call')
             .execute()
+        },
+        configureWaitlist: async (kind) => {
+          const organizationId = kind === 'team' ? team : host.organizationId
+          const event = await db
+            .selectFrom('event_types')
+            .select('id')
+            .where('organization_id', '=', organizationId)
+            .where('slug', '=', 'call')
+            .executeTakeFirstOrThrow()
+          waitlistEventId = event.id
+          const schedule = await db
+            .selectFrom('schedules')
+            .select('id')
+            .where('user_id', '=', host.userId)
+            .where('is_default', '=', true)
+            .executeTakeFirstOrThrow()
+          // One real working interval, occupied by an ordinary booking. Every
+          // visible range is empty after the normal availability calculation.
+          const day = Temporal.Now.plainDateISO('UTC').add({ days: 2 })
+          await db
+            .updateTable('schedules')
+            .set({ weekly_hours: '{}' })
+            .where('id', '=', schedule.id)
+            .execute()
+          await db
+            .insertInto('schedule_overrides')
+            .values({
+              schedule_id: schedule.id,
+              date: day.toString(),
+              intervals: JSON.stringify([{ start: '09:00', end: '09:30' }]),
+            })
+            .execute()
+          await f.booking(organizationId, [host.userId], `${day}T09:00:00Z`, `${day}T09:30:00Z`, {
+            eventTypeId: event.id,
+            attendee: null,
+          })
+          await db
+            .updateTable('event_types')
+            .set({ waitlist_enabled: true })
+            .where('id', '=', event.id)
+            .execute()
+          return day.toString()
+        },
+        openWaitlistVerification: async (page) => {
+          if (!waitlistEventId) throw new Error('Waitlist fixture is not configured')
+          const outboxes = await db
+            .selectFrom('waitlist_verification_outbox as o')
+            .innerJoin('waitlist_entries as e', 'e.id', 'o.entry_id')
+            .select('o.id')
+            .where('e.event_type_id', '=', waitlistEventId)
+            .where('o.state', '=', 'pending')
+            .execute()
+          for (const outbox of outboxes)
+            await deliverWaitlistEmail(
+              {
+                db,
+                secret: authSecret,
+                publicUrl: url,
+                smtpConfigured: true,
+                mailer: {
+                  send: async (message) => {
+                    sent.push(message)
+                  },
+                },
+              },
+              { kind: 'verification', id: outbox.id },
+            )
+          const line = sent
+            .flatMap((message) => message.text.split('\n'))
+            .find((value) => value.startsWith(`${url}/booking/waitlist/verify#`))
+          if (!line) throw new Error('Verification email was not accepted by the fixture mail sink')
+          const link = new URL(line)
+          // Pass the private fragment through page memory before the production
+          // confirmation script executes. The navigation URL and network stay
+          // capability-free, including Playwright's failure call logs.
+          await page.addInitScript(
+            ({ path, fragment }) => {
+              if (location.pathname === path) history.replaceState(null, '', path + fragment)
+            },
+            { path: '/booking/waitlist/verify', fragment: link.hash },
+          )
+          await page.goto(`${url}/booking/waitlist/verify`)
+        },
+        waitlistState: async () => {
+          if (!waitlistEventId) throw new Error('Waitlist fixture is not configured')
+          const entries = await db
+            .selectFrom('waitlist_entries')
+            .select('status')
+            .where('event_type_id', '=', waitlistEventId)
+            .orderBy('id')
+            .execute()
+          const outboxes = await db
+            .selectFrom('waitlist_verification_outbox as o')
+            .innerJoin('waitlist_entries as e', 'e.id', 'o.entry_id')
+            .select('o.state')
+            .where('e.event_type_id', '=', waitlistEventId)
+            .execute()
+          return {
+            states: entries.map((entry) => entry.status),
+            acceptedEmails: outboxes.filter((outbox) => outbox.state === 'accepted').length,
+            messages: sent.length,
+          }
         },
         screenshotState: async () => {
           if (auditState || automaticMeet)

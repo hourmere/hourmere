@@ -222,23 +222,36 @@ export function TeamMembers({
             <ul className="stack">
               {state.data.members.map((member) => (
                 <li key={member.id}>
-                  <span className="user-content">
-                    <BreakableText>
-                      {member.user.name.trim() || t('Unnamed team member')}
-                    </BreakableText>
-                  </span>
-                  {' · '}
-                  <span className="user-content">
-                    <BreakableText>
-                      {member.role
-                        .split(',')
-                        .map((value) => {
-                          const role = value.trim()
-                          return Object.hasOwn(labels, role) ? labels[role] : role
-                        })
-                        .join(', ')}
-                    </BreakableText>
-                  </span>
+                  <div>
+                    <span className="user-content">
+                      <BreakableText>
+                        {member.user.name.trim() || t('Unnamed team member')}
+                      </BreakableText>
+                    </span>
+                    {member.userId === currentUserId && (
+                      <>
+                        {' · '}
+                        <span className="badge">{t('You')}</span>
+                      </>
+                    )}
+                    {' · '}
+                    <span className="user-content">
+                      <BreakableText>
+                        {member.role
+                          .split(',')
+                          .map((value) => {
+                            const role = value.trim()
+                            return Object.hasOwn(labels, role) ? labels[role] : role
+                          })
+                          .join(', ')}
+                      </BreakableText>
+                    </span>
+                  </div>
+                  {canManage && member.user.email && (
+                    <div className="hint user-content">
+                      <BreakableText>{member.user.email}</BreakableText>
+                    </div>
+                  )}
                   <TeamMemberRoleButton
                     key={`${organizationId}:${member.id}:${role}:${currentUserId}`}
                     organizationId={organizationId}

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
 import * as react from 'react'
-import { type ComponentType, useEffect, useRef } from 'react'
+import { type ComponentType, useEffect, useRef, useState } from 'react'
 import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
@@ -61,6 +61,9 @@ function mutate(source: string, before: string, after = '') {
 }
 
 const common = {
+  EventEmbedAction: () => null,
+  HostSlotPicker: () => null,
+  verifySlotPickerAccess: async () => {},
   ...paths,
   Link,
   CopyButton,
@@ -91,6 +94,9 @@ function share(source: string, role: 'owner' | null = 'owner') {
     ...common,
     useEffect,
     useRef,
+    useState,
+    useLoad: () => [{ status: 'loading' }],
+    loadInstance: () => {},
     useTeamManagementAccess: () => ({ status: 'ready', role }),
   })
 }
@@ -471,7 +477,7 @@ describe('team sharing production-source negative controls', () => {
       event: EVENT,
       item: { ...CHECK, summary: 'configuration_blocked' as const },
     },
-    { guard: '    !inactive &&', event: { ...EVENT, isActive: false }, item: CHECK },
+    { guard: '!inactive &&', event: { ...EVENT, isActive: false }, item: CHECK },
     { guard: '!needsActivation', event: { ...EVENT, roundRobinActive: false }, item: CHECK },
   ])('detects removal of share $guard', ({ guard, event, item }) => {
     assertShareHidden(shareFunction, event, item)

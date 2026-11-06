@@ -1116,9 +1116,14 @@ stored settings or changing default reminders.
 ## Internal full-booking waitlists
 
 Migration 0051 adds an opt-in `waitlist_enabled` flag, defaulting to false without importing
-historical booking contacts. The internal services support personal and team individual
-event types with exactly one eligible host. Public join UI, administration summaries and general REST/MCP/CLI operations
-are separate work. The delivery layer sends encrypted verification intents and availability
+historical booking contacts. The services support personal and team individual
+event types with exactly one eligible host. Hosts opt in from the event-type editor,
+REST, MCP or CLI. Public pages offer enrollment after a successful empty availability
+query for the selected date or visible range, including direct hidden links and approved
+embeds. The initial bounded automatic month advance still looks for free times before
+offering a waitlist for the final visible empty range; selected dates and manually browsed
+months stay in place. Waitlists use the event's default meeting length; invitees choosing another length
+must switch to that default to join. The delivery layer sends encrypted verification intents and availability
 candidates through the shared mail pipeline, without a new schema migration.
 
 `waitlist_entries` keeps fixed UTC preference windows and consent, with pending verification,
@@ -1136,6 +1141,13 @@ well as the fifteen-minute resend cooldown and one hundred pending/live entries 
 mailbox/IP HMACs for two elapsed days. IPv4-mapped socket addresses normalize to IPv4;
 IPv6 zone identifiers are stripped and other IPv6 addresses share their /64 bucket. The
 service accepts only an IP resolved by a trusted transport and stores no raw address.
+Every well-formed, publicly eligible join or resend records an IP/event request before
+mailbox-state decisions, including duplicates, cooldowns and suppressed admissions.
+A request-only row uses a separate per-request digest in the required email-hash column;
+only an admitted verification generation replaces that digest with the mailbox HMAC.
+Mailbox budgets therefore count generations, while IP and event budgets count requests
+regardless of whether the address is listed. IP refusals remain 429; event refusals remain
+the same generic 202. The shared ledger survives removal and retains no readable contacts.
 Admission holds the accounting-key fence, then an event share lock compatible with ordinary
 bookings. Availability computation precedes the instance-wide admission fence, which covers
 only expiry, rolling budgets, duplicate/capacity checks and the bounded write. Database time
@@ -1180,6 +1192,27 @@ minimal terminal metadata within seven days. Rotating the accounting secret reti
 erases old entries/ciphertext/capabilities before admission or workers resume. Old secrets
 are not retained; mailbox limits and slot dedupe cannot span that explicit key-rotation
 exception. Existing global send accounting remains unchanged.
+
+Waitlist settings contain only `enabled`, default false. Omitted PATCH settings preserve
+the current value; the editor sends them only when they differ from its session baseline.
+Protected event-type configuration includes the setting. The narrow settings endpoint and
+paginated entries list require the personal owner or a current team owner/admin.
+Ordinary team configuration visibility does not authorize access to contacts. The public
+form discloses before consent that authorized managers can see the submitted email, name
+and requested period. This approved contact-list scope supersedes the design contract’s
+earlier aggregate-only host-view proposal; it adds no export or manual enrollment. Entries
+include retained email/name, state, UTC preference window and display zone, creation time
+and the latest SMTP-accepted notification time. Cleanup preserves exactly the newest
+non-null acceptance receipt per retained entry; older receipts still use bounded cleanup,
+and the final receipt cascades with the entry at terminal state plus seven elapsed days.
+A null value means no retained accepted notice. Pending and active entries show
+“Not notified yet”; notified or booked entries with no retained timestamp show the
+unknown-time wording because historical receipts may have been purged. Cleared contact data stays null; no token,
+digest or encrypted payload is returned. Host removal is idempotent for retained entries,
+immediately erases live contacts and pending work, and sends no removal email. Existing
+retention and terminal-state cleanup remain unchanged. API keys need `read` or `full` for
+settings/list reads and `full` for settings/removal writes; public join and explicit resend
+retain the same admission limits through REST, MCP and CLI.
 
 The populated 0049 predecessor test verifies historical contacts, management hashes,
 reschedule chains, calendars, conferences, mail ledgers and retained jobs byte-for-byte,

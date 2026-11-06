@@ -90,6 +90,30 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     expect(whole.handleOverflow, 'short path handle unclipped').toBe(false)
     expect(whole.slugOverflow, 'short path slug unclipped').toBe(false)
     expect(whole.linkLines, 'short path link lines').toBe(1)
+    const more = page
+      .getByRole('button', {
+        name: locale === 'zh-CN' ? /的更多操作$/ : /^More actions for /,
+      })
+      .first()
+    await more.focus()
+    await page.keyboard.press('ArrowDown')
+    const embed = page.getByRole('menuitem', {
+      name: locale === 'zh-CN' ? '嵌入' : 'Embed',
+      exact: true,
+    })
+    await expect(embed).toBeFocused()
+    await embed.press('Enter')
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(
+      dialog.getByRole('textbox', {
+        name: locale === 'zh-CN' ? '嵌入代码' : 'Embed code',
+        exact: true,
+      }),
+    ).toHaveValue(/hourmere-embed\.js/)
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(more).toBeFocused()
     await useLongBookingSlug(page, app)
     for (const width of [1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })

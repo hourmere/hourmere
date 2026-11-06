@@ -86,6 +86,7 @@ const eventKeys = [
   'location',
   'questions',
   'notifications',
+  'waitlist',
   'successRedirect',
   'isActive',
   'isHidden',
@@ -455,6 +456,8 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       keys(question, ['id', 'type', 'label', 'required', 'options'])
     expect(item.conferenceOrganizer).toBeNull()
     expect(item.notifications).toEqual(DEFAULT_NOTIFICATIONS)
+    keys(item.waitlist, ['enabled'])
+    expect(item.waitlist).toEqual({ enabled: false })
     expect(item.successRedirect).toBeNull()
     expect(JSON.stringify(item)).not.toContain(privateMarker)
   }

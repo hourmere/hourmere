@@ -33,7 +33,9 @@ import * as slotLink from './slot-link.ts'
 import * as time from './time.ts'
 import * as validation from './validation.ts'
 import * as visitorZone from './visitor-time-zone.ts'
+import * as waitlistJoin from './WaitlistJoin.tsx'
 import * as waitlistLink from './waitlist-link.ts'
+import * as waitlistWindow from './waitlist-window.ts'
 
 const source = readFileSync('apps/web/src/public/BookingPage.tsx', 'utf8')
 const API = '/api/v1/public/ada/intro'
@@ -115,7 +117,9 @@ function pageCopy(text = source): Pages {
     './time.ts': time,
     './validation.ts': validation,
     './visitor-time-zone.ts': visitorZone,
+    './WaitlistJoin.tsx': waitlistJoin,
     './waitlist-link.ts': waitlistLink,
+    './waitlist-window.ts': waitlistWindow,
   })
 }
 
@@ -189,6 +193,35 @@ async function fill() {
 }
 
 describe('public direct-slot protection source-copy controls', () => {
+  it.each([
+    [
+      'neutral direct-slot status',
+      "noticeRole={directFlow ? 'status' : 'alert'}",
+      'noticeRole="alert"',
+    ],
+    ['waitlist offer', 'renderWaitlist={', 'renderWaitlist={false &&'],
+  ])('detects losing the %s after an unavailable direct slot', async (_name, before, after) => {
+    async function assertion(text: string) {
+      fakeApi(
+        routes({
+          [`GET ${API}`]: () => json(200, { ...EVENT, waitlist: { enabled: true } }),
+          [`GET ${API}/slots`]: () => json(200, { data: [] }),
+        }),
+      )
+      const view = display(text)
+      try {
+        await settled()
+        await screen.findByText('No available times this month.')
+        expect(screen.queryByText(UNAVAILABLE)?.getAttribute('role')).toBe('status')
+        expect(screen.queryByRole('button', { name: 'Join the waitlist' })).not.toBeNull()
+        expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(assertion, before, after)
+  })
+
   it('detects bypassing the fresh exact-interval availability read', async () => {
     async function assertion(text: string) {
       fakeApi(routes({ [`GET ${API}/slots`]: () => json(200, { data: [] }) }))

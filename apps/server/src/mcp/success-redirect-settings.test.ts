@@ -87,6 +87,7 @@ function productSourceCopy(change?: Change): Factory {
     catalogTools: () => [],
     integrationTools: () => [],
     oneTimeLinkTools: () => [],
+    waitlistTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),

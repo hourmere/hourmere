@@ -70,6 +70,14 @@ booking page or copy its full link there; unsaved address changes cannot be copi
 published link. When setup or enablement needs attention, the panel links to the relevant
 settings. Round-robin pools still require a separate explicit activation after saving.
 
+When the operator enables `SLOT_SNIPPETS_ENABLED` (off by default), saved event views
+let personal owners and team owners/admins pick 1–10 open alternatives for one meeting
+length and copy a plain-text or rich-text email snippet. The picker checks ordinary
+public availability again before every copy; no time is reserved. Hidden event links
+can be forwarded. Enable this setting only after public direct-slot booking pages are
+deployed on the same instance. Email language and display zone affect labels only;
+the booking page keeps the invitee’s own preferences.
+
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
@@ -249,6 +257,8 @@ without the recipient or link.
 Team invitation links open `/app/join?invitationId=<uuid>`. Sign in with the exact email
 address that received the invitation; email-link and enabled social sign-in return to that
 page. Signing in does not join the team: review the team and signed-in account, then choose **Join team**.
+After joining, the event types page confirms the team name and links to your default
+availability. Dismiss this one-time notice, navigate away or reload to clear it.
 If you used a different account, **Change account** signs you out while keeping the invitation
 for your next sign-in. Invitation details remain restricted to the verified recipient.
 An existing member can open the team without accepting again.
@@ -321,6 +331,13 @@ operation table and the required stop-before-upgrade procedure.
 
 For terminal scripts, the dependency-free [CLI](https://hourmere.com/docs/cli) supports configuration discovery,
 slots, booking, host history, rescheduling and cancellation with the same API key.
+
+Personal and single-host team event types can enable a booking waitlist in the event editor.
+Invitees join for an unavailable date or period and confirm their email before receiving
+availability notifications. Eligible invitees are notified together, subject to mail limits;
+nothing is reserved and the first successful ordinary booking wins. Waitlists use the default
+meeting length. Hosts can view and remove their event's entries; team contacts are restricted
+to owners/admins. REST, MCP and CLI provide the same settings, list and removal operations.
 
 Configure event-type reminders and follow-ups through REST, MCP
 `set_event_type_notifications` or CLI `set-event-notifications` with `full` scope.

@@ -84,6 +84,31 @@ function row(name: string) {
 }
 
 describe('selected team host member setup', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps the %s readiness note above the host rows at the full panel width',
+    async (language) => {
+      chooseLanguage(language)
+      server()
+      render(<Editor />)
+      await screen.findByLabelText(PEER.name)
+      const note = screen.getByText(
+        language === 'zh-CN'
+          ? '配置检查不保证有可约时段。当前可约时间以预约页为准。'
+          : 'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+        { exact: false },
+      )
+      expect(note.tagName).toBe('P')
+      expect(note.classList.contains('hint')).toBe(true)
+      expect(note.parentElement).toBe(
+        screen.getByRole('region', { name: language === 'zh-CN' ? '主持人' : 'Hosts' }),
+      )
+      expect(note.closest('fieldset')).toBeNull()
+      expect(note.compareDocumentPosition(document.getElementById('hosts') as HTMLElement)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+    },
+  )
+
   it.each(['owner', 'admin', 'member, admin'])(
     'shows coarse peer reasons and member guidance for %s without private settings',
     async (role) => {

@@ -116,6 +116,14 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
       zh ? '23 小时 59 分钟' : '23 h 59 min',
     )
     expect(table.querySelector('thead th:nth-child(2)')?.classList.contains('nowrap')).toBe(true)
+    const note = table.querySelector('caption')
+    expect(note?.textContent).toBe(
+      zh
+        ? '配置检查不保证有可约时段。当前可约时间以预约页为准。'
+        : 'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+    )
+    expect(note?.parentElement).toBe(table)
+    expect(note?.nextElementSibling).toBe(table.querySelector('thead'))
   })
 
   it('labels API key metadata and keeps revocation reachable', async () => {

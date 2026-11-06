@@ -7,7 +7,7 @@ import { interfaceLanguage } from '@hourmere/core/language'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import * as availability from './availability.ts'
 import { createPublicBooking } from './bookings.ts'
@@ -117,6 +117,9 @@ describe.skipIf(!serverUrl)('waitlist admission lock scope', { timeout: 20000 },
   })
   afterAll(async () => {
     await testDb?.drop()
+  })
+  beforeEach(async () => {
+    await db.deleteFrom('waitlist_verification_requests').execute()
   })
 
   async function setup() {

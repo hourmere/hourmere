@@ -70,6 +70,30 @@ export async function assertHosts(
     throw invalidHosts()
 }
 
+/**
+ * Read host membership without creating an exclusion-bearing row for every seat.
+ * Keep lifecycle filtering at the caller: cancelled seat history still has a host.
+ * This relation does not grant access or replace current membership checks.
+ */
+export function resolvedBookingHosts(db: Db) {
+  return db
+    .selectFrom('booking_hosts')
+    .select(['booking_id', 'user_id'])
+    .where('booking_id', 'is not', null)
+    .$narrowType<{ booking_id: string }>()
+    .unionAll(
+      db
+        .selectFrom('bookings as seat')
+        .innerJoin('group_slots as slot', 'slot.id', 'seat.group_slot_id')
+        .innerJoin('booking_hosts as host', (join) =>
+          join
+            .onRef('host.group_slot_id', '=', 'slot.id')
+            .onRef('host.user_id', '=', 'slot.host_user_id'),
+        )
+        .select(['seat.id as booking_id', 'host.user_id']),
+    )
+}
+
 /** Missing original hosts fail closed even after auth.user cascades booking_hosts. */
 export async function bookingHostIds(
   db: Db,
@@ -79,7 +103,7 @@ export async function bookingHostIds(
   lock = false,
 ): Promise<string[]> {
   const hosts = await db
-    .selectFrom('booking_hosts')
+    .selectFrom(resolvedBookingHosts(db).as('host'))
     .select('user_id')
     .where('booking_id', '=', bookingId)
     .orderBy('user_id')

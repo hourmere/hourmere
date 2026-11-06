@@ -111,13 +111,16 @@ async function assertEditor(
 }
 
 describe('after-booking editor source-copy mutation controls', () => {
-  it('detects re-sending untouched targets on unrelated edits', () => {
+  it('detects re-sending untouched targets while waitlist settings change', () => {
     detects(form, 'delete body.successRedirect', 'void 0', (source) => {
       const value = buildForm(source)
       const baseline = { ...value.emptyDraft(), successRedirectUrl: 'https://localhost/stale' }
-      expect(value.toPatchInput({ ...baseline, title: 'Changed' }, baseline)).not.toHaveProperty(
-        'successRedirect',
+      const changed = value.toPatchInput(
+        { ...baseline, title: 'Changed', waitlistEnabled: true },
+        baseline,
       )
+      expect(changed.waitlist).toEqual({ enabled: true })
+      expect(changed).not.toHaveProperty('successRedirect')
     })
   })
 
@@ -128,13 +131,13 @@ describe('after-booking editor source-copy mutation controls', () => {
       'true',
       (source) => {
         const value = buildForm(source)
-        const baseline = value.emptyDraft()
-        expect(
-          value.toPatchInput(
-            { ...baseline, successRedirectUrl: 'https://target.example' },
-            baseline,
-          ).successRedirect?.url,
-        ).toBe('https://target.example')
+        const baseline = { ...value.emptyDraft(), waitlistEnabled: true }
+        const changed = value.toPatchInput(
+          { ...baseline, successRedirectUrl: 'https://target.example' },
+          baseline,
+        )
+        expect(changed.successRedirect?.url).toBe('https://target.example')
+        expect(changed).not.toHaveProperty('waitlist')
       },
     )
   })
