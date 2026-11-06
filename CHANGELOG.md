@@ -80,8 +80,12 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 - Upgrade the Better Auth family and schema CLI from 1.7.12 to 1.7.16 for
   GHSA-9hm7-xhfp-cx58 (unverified OAuth email), GHSA-fvxx-76fc-893x (revoked
-  cached sessions) and GHSA-c85h-5mrr-mgx4 (padded organization owner roles),
-  including the other fixes in the November security release. Google and Microsoft
+  cached sessions), GHSA-c85h-5mrr-mgx4 (padded organization owner roles),
+  GHSA-fmh4-wcc4-5jm3 (organization invitations accepted by an unverified account)
+  and GHSA-hwq2-v29r-p69r (email-change links after the address changes hands),
+  including the other fixes in the November security release. Hourmere already
+  required a verified email before accepting an invitation, so GHSA-fmh4 was blocked
+  by its own check as well; change-email is not enabled, so GHSA-hwq2 does not apply. Google and Microsoft
   sign-in reject false email-verification claims, including the string `"false"`.
   No database migration is needed. Rebuild and restart all application roles;
   Hourmere uses PostgreSQL sessions without secondary storage or cookie caching.
