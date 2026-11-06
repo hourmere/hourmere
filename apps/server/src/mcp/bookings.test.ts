@@ -479,6 +479,65 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     return { host, key, booked }
   }
 
+  it('requests another time through MCP with host permission and replay safety', async () => {
+    const { key, booked } = await hostedBooking()
+    const input = {
+      bookingId: booked.booking.id,
+      idempotencyKey: randomUUID(),
+      note: 'Could you choose a new time?',
+    }
+    expect(errorOf(await call('request_reschedule', input, agent.key)).error).toBe(
+      'booking_not_found',
+    )
+    const result = ok<{
+      id: string
+      status: string
+      pendingReschedule: { id: string; note: string }
+    }>(await call('request_reschedule', input, key.key))
+    expect(result).toMatchObject({
+      id: booked.booking.id,
+      status: 'confirmed',
+      pendingReschedule: { note: input.note },
+    })
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'bad\tcontrol' }, key.key)),
+    ).toMatchObject({
+      error: 'invalid_request',
+      message: 'note: must not contain control characters other than LF',
+    })
+    expect(ok(await call('request_reschedule', input, key.key))).toEqual(result)
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'Changed' }, key.key)).error,
+    ).toBe('idempotency_key_reused')
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'x'.repeat(2001) }, key.key))
+        .error,
+    ).toBe('invalid_request')
+  })
+
+  it.each(['pick', 'cancel'])(
+    'forwards the request generation for an idempotent invitee %s',
+    async (action) => {
+      const { key, booked } = await hostedBooking()
+      const pending = ok<{ pendingReschedule: { id: string } }>(
+        await call(
+          'request_reschedule',
+          { bookingId: booked.booking.id, idempotencyKey: randomUUID() },
+          key.key,
+        ),
+      )
+      const args = {
+        manageToken: booked.manageToken,
+        rescheduleRequestId: pending.pendingReschedule.id,
+        ...(action === 'pick' ? { start: '2026-11-02T10:00:00Z' } : {}),
+      }
+      const tool = action === 'pick' ? 'reschedule_booking' : 'cancel_booking'
+      const first = ok<Record<string, unknown>>(await call(tool, args))
+      const replay = ok<Record<string, unknown>>(await call(tool, args))
+      expect(replay).toEqual(action === 'pick' ? { ...first, manageToken: null } : first)
+    },
+  )
+
   describe('rescheduling as the host', () => {
     it('applies the configured invitee cap without limiting host moves or cancellation', async () => {
       const { key, booked } = await hostedBooking()

@@ -94,5 +94,9 @@
   "phone.hostCallsYou": "电话通话 — 主持人将拨打你的号码 {number}",
   "phone.hostCallsInvitee": "电话通话 — 主持人将致电预约人",
   "phone.inviteeCallsYou": "电话通话 — 预约人将拨打你的号码 {number}",
-  "phone.callHost": "电话通话 — 请拨打主持人的号码 {number}"
+  "phone.callHost": "电话通话 — 请拨打主持人的号码 {number}",
+  "rescheduleRequest.subject": "请选择其他时间：{event}",
+  "rescheduleRequest.introduction": "{host} 请你选择其他时间。在你选择新时间或取消之前，原预约时段会继续保留。此请求将于 {expiry} 到期；到期后，原预约仍然有效。",
+  "rescheduleRequest.expiredSubject": "改期请求已到期：{event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} 未在请求到期前选择新时间。原预约仍然有效。"
 }

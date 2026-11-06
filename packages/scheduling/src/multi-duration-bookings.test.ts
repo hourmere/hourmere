@@ -5,6 +5,7 @@ import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourm
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import * as availability from './availability.ts'
 import * as bookingPage from './booking-page.ts'
 import {
@@ -101,6 +102,7 @@ function sourceCopy(change?: Change): Api {
     importedBookingIds,
     isImportedBooking,
     sql,
+    z,
     ...availability,
     ...bookingPage,
     ...conferences,

@@ -1471,6 +1471,58 @@ sending mailbox before its first SMTP invitation; later versions reuse that iden
 See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
 legacy compatibility, recipient policy and reply limitations.
 
+## Host requests for another time
+
+Migration 0064 adds `booking_reschedule_requests`. A host of a confirmed future booking
+may ask its booker to choose another time, optionally including a plain-text note.
+Imported read-only records and group-seat bookings refuse this action. Authorization is
+identical to host rescheduling; being a team administrator alone does not grant it.
+
+Pending reschedule is an overlay (`Booking.pendingReschedule`), not a new booking status:
+the booking remains `confirmed`, its original time remains blocked, and calendar entries,
+conferences and reminders remain in force. Releasing the slot immediately would silently
+remove an agreed meeting before the invitee accepts a replacement. A request therefore
+never promises that any alternative slot is reserved.
+
+`RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48` bounds a request's life to the earlier of 48 elapsed
+hours after creation and the original booking's start. Elapsed time makes the timeout
+unambiguous across DST changes. Expiry leaves the original booking intact and queues a host
+notice; it never cancels or moves the booking. Workers may deliver the notice later. A
+second request replaces the first; superseded jobs cannot send a new obsolete invitation.
+
+The invitee uses the ordinary private management link to select an available time or
+cancel. Picks use the existing transactional reschedule path and all its current rules:
+notice, window, limits, buffers, calendar conflicts and required collective/round-robin
+hosts. Calendar writeback, conferences, reminders and host pick confirmations consequently
+follow the same path as any invitee reschedule. Requests add no exception to reschedule
+limits. A host can still cancel or move the original booking while a request is pending.
+
+Request rows record `pending`, `replaced`, `picked`, `cancelled` or `expired`; terminal
+states retain their identity for replay. Requests serialize with booking mutations. A
+request's UUID idempotency key is scoped to its booking: the same normalized input returns
+the current booking without another email; changed input fails with
+`idempotency_key_reused`. Replaying an old key never replaces a newer request.
+The optional `rescheduleRequestId` on managed pick/cancel identifies the displayed request.
+The web interface submits it. A matching pick replay returns its saved successor without a
+new token; a matching cancellation replay returns the cancelled booking. A replaced,
+expired or differently answered request fails with `reschedule_request_changed`. Keep the
+existing private email link when replay returns `manageToken: null`.
+
+Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
+controls are removed, other controls (including tabs) are rejected, and the result must be
+well-formed Unicode of at most 2000 UTF-16 code units. The sender defensively normalizes
+stored text and HTML-escapes it. Notes appear only in the request email body, never its
+subject, headers or webhook payload. Request mail uses existing invitee mail budgets and
+bounded retry/deduplication rules. The follow-up-note feature switch does not disable this
+separate request capability. Self-hosting includes the complete feature.
+
+Webhook subscriptions add `booking.reschedule_requested` and
+`booking.reschedule_request_expired`. Their payload retains `status: confirmed` and includes
+`requestId`; delivery uniqueness includes this identity so replacing a request can produce
+another event. Existing subscriptions and retained deliveries are preserved by migration.
+Deploy web and worker code together after applying the migration; old writers use the
+previous delivery uniqueness constraint.
+
 ## Pending-payment foundation
 
 Migration `0065_payment_holds.sql` adds `pending_payment` and `expired` booking states,

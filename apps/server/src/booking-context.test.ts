@@ -20,7 +20,13 @@ const bootstrap = process.env.DATABASE_URL
 const origin = 'http://localhost:4389'
 const secret = 'synthetic-booking-context-session-secret-0000000'
 const NOW = Temporal.Instant.from('2030-11-01T12:00:00Z')
-const actions = ['cancel', 'reschedule', 'conference/retry', 'calendar-copy/retry'] as const
+const actions = [
+  'cancel',
+  'reschedule',
+  'request-reschedule',
+  'conference/retry',
+  'calendar-copy/retry',
+] as const
 type Action = (typeof actions)[number]
 const refused = {
   error: 'organization_context_changed',
@@ -182,7 +188,13 @@ describe.skipIf(!bootstrap)('organization-bound host booking writes', () => {
         ...(expected === undefined ? {} : { [EXPECTED_ORGANIZATION_HEADER]: expected }),
         ...headers,
       },
-      body: JSON.stringify(action === 'reschedule' ? { start: '2030-11-05T09:00:00Z' } : {}),
+      body: JSON.stringify(
+        action === 'reschedule'
+          ? { start: '2030-11-05T09:00:00Z' }
+          : action === 'request-reschedule'
+            ? { idempotencyKey: randomUUID() }
+            : {},
+      ),
     })
   }
   async function snapshot(f: Fixture) {
@@ -246,6 +258,7 @@ describe.skipIf(!bootstrap)('organization-bound host booking writes', () => {
       const after = await snapshot(f)
       if (action === 'conference/retry') expect(after.conference.state).toBe('pending')
       else if (action === 'calendar-copy/retry') expect(after.copy.state).toBe('pending')
+      else if (action === 'request-reschedule') expect(after.booking.status).toBe('confirmed')
       else expect(after.booking.status).toBe('cancelled')
     },
   )

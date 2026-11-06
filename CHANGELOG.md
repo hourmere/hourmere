@@ -197,6 +197,11 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Upgrade notes
 
+- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
+  and worker process before applying the migration, then restart every role with the new
+  code. The webhook delivery uniqueness constraint changes to include the request identity;
+  old booking writers cannot use it after migration. Do not run mixed application versions.
+
 These notes apply to existing installations of the development source tree. Back up the
 full database (`auth`, `public` and `pgboss`), deployment configuration and original secrets
 before upgrading. Review [self-hosting recovery guidance](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore);

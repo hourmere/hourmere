@@ -94,5 +94,9 @@
   "phone.hostCallsYou": "Appel — l’hôte vous appellera au {number}",
   "phone.hostCallsInvitee": "Appel — l’hôte appellera la personne invitée",
   "phone.inviteeCallsYou": "Appel — la personne invitée vous appellera au {number}",
-  "phone.callHost": "Appel — appelez l’hôte au {number}"
+  "phone.callHost": "Appel — appelez l’hôte au {number}",
+  "rescheduleRequest.subject": "Choisissez un autre créneau : {event}",
+  "rescheduleRequest.introduction": "{host} vous demande de choisir un autre créneau. Votre réservation initiale reste réservée jusqu’à ce que vous choisissiez un nouveau créneau ou annuliez. Cette demande expire le {expiry} ; à son expiration, la réservation initiale est maintenue.",
+  "rescheduleRequest.expiredSubject": "Demande de report expirée : {event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} n’a pas choisi de nouveau créneau avant l’expiration de la demande. La réservation initiale est maintenue."
 }

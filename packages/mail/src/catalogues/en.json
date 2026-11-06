@@ -94,5 +94,9 @@
   "phone.hostCallsYou": "Phone call — the host will call you at {number}",
   "phone.hostCallsInvitee": "Phone call — the host will call the invitee",
   "phone.inviteeCallsYou": "Phone call — the invitee will call you at {number}",
-  "phone.callHost": "Phone call — call the host at {number}"
+  "phone.callHost": "Phone call — call the host at {number}",
+  "rescheduleRequest.subject": "Choose another time: {event}",
+  "rescheduleRequest.introduction": "{host} asks you to choose another time. Your original booking stays reserved until you pick a new time or cancel. This request expires at {expiry}; if it expires, your original booking stays in place.",
+  "rescheduleRequest.expiredSubject": "Reschedule request expired: {event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} did not choose a new time before the request expired. The original booking remains in place."
 }

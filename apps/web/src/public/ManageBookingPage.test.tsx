@@ -109,6 +109,45 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each(['cancel', 'reschedule'] as const)(
+    'answers the displayed request generation when choosing %s',
+    async (action) => {
+      const requestId = '01900000-0000-7000-8000-0000000000c1'
+      const api = manageServer(
+        managed({
+          pendingReschedule: { id: requestId, expiresAt: '2026-11-02T14:00:00Z', note: null },
+        }),
+      )
+      const user = userEvent.setup()
+      renderApp(`/booking#token=${TOKEN}`)
+      await screen.findByText(
+        'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
+      )
+      if (action === 'cancel') {
+        await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
+        await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
+      } else {
+        await user.click(screen.getByRole('button', { name: 'Reschedule' }))
+        await user.click(
+          await screen.findByRole('button', { name: 'Tuesday, November 3, available' }),
+        )
+        await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+        await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+      }
+      await waitFor(() => expect(api.to(`POST /api/v1/bookings/manage/${action}`)).toHaveLength(1))
+      expect(api.to(`POST /api/v1/bookings/manage/${action}`)[0]?.body).toMatchObject({
+        rescheduleRequestId: requestId,
+      })
+      await waitFor(() =>
+        expect(
+          screen.queryByText(
+            'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
+          ),
+        ).toBeNull(),
+      )
+    },
+  )
+
   it('keeps the reschedule label muted and separated from the title outside a host identity', async () => {
     manageServer()
     renderApp(`/booking#token=${TOKEN}&action=reschedule`)

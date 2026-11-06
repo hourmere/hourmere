@@ -146,6 +146,10 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    reschedule_request_changed:
+      'This request has expired or changed. Reload your booking to choose what to do next.',
+    booking_group_seat_unsupported: 'Group-seat bookings do not support reschedule requests.',
+
     imported_booking_read_only:
       'This imported booking is read-only and managed in the original system.',
     location_options_conflict:

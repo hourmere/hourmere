@@ -765,6 +765,7 @@ describe('CLI transport and arguments', () => {
     ['book', 'create_booking'],
     ['list', 'list_bookings'],
     ['reschedule', 'reschedule_booking'],
+    ['request-reschedule', 'request_reschedule'],
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],

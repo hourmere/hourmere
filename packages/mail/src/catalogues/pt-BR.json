@@ -94,5 +94,9 @@
   "phone.hostCallsYou": "Ligação — o anfitrião ligará para você no {number}",
   "phone.hostCallsInvitee": "Ligação — o anfitrião ligará para a pessoa convidada",
   "phone.inviteeCallsYou": "Ligação — a pessoa convidada ligará para você no {number}",
-  "phone.callHost": "Ligação — ligue para o anfitrião no {number}"
+  "phone.callHost": "Ligação — ligue para o anfitrião no {number}",
+  "rescheduleRequest.subject": "Escolha outro horário: {event}",
+  "rescheduleRequest.introduction": "{host} pede que você escolha outro horário. Sua reserva original fica mantida até você escolher um novo horário ou cancelar. Esta solicitação expira em {expiry}; após a expiração, a reserva original é mantida.",
+  "rescheduleRequest.expiredSubject": "Solicitação de reagendamento expirada: {event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} não escolheu um novo horário antes de a solicitação expirar. A reserva original é mantida."
 }

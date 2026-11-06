@@ -251,6 +251,31 @@ CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
 
+## Ask an invitee to choose another time
+
+Hosts can send `POST /api/v1/bookings/{id}/request-reschedule` with
+`{"idempotencyKey":"<random UUID>","note":"Could you choose another time?"}`.
+The MCP equivalent is `request_reschedule` with `bookingId` and the same fields;
+CLI users run `hourmere request-reschedule --input request.json`.
+A `bookings` or `full` API key and existing host permission are required.
+The optional plain-text note is limited to 2000 UTF-16 code units and appears only
+in the email body. Retain the UUID and identical input for safe retries; use a new
+UUID to replace the outstanding request.
+
+The returned booking stays `confirmed`, with optional `pendingReschedule` containing
+`id`, `expiresAt` and `note`. The original time stays booked and blocks availability
+until the invitee uses their normal manage link to pick another time or cancel.
+The request expires after 48 hours or when the original meeting starts, whichever
+comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+cannot receive a request. Picking uses the normal availability rules and reschedule
+limit, calendar updates, conference handling and reminders.
+
+When answering a request through REST or MCP, include `rescheduleRequestId` from
+`pendingReschedule.id` with the managed pick or cancel input. This rejects stale
+replaced requests and makes identical retries safe; a replayed pick returns the
+same successor with `manageToken: null`. Without that field, existing ordinary
+reschedule retry semantics remain unchanged.
+
 ## Configure booking limits
 
 Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and

@@ -314,11 +314,18 @@ export async function getManagedBooking(
   return data
 }
 
-export async function cancelManagedBooking(token: string, reason: string): Promise<Booking> {
+export async function cancelManagedBooking(
+  token: string,
+  reason: string,
+  rescheduleRequestId?: string,
+): Promise<Booking> {
   const { data } = await call(() =>
     api.POST('/api/v1/bookings/manage/cancel', {
       params: { header: { 'x-manage-token': token } },
-      body: reason ? { reason } : {},
+      body: {
+        ...(reason ? { reason } : {}),
+        ...(rescheduleRequestId ? { rescheduleRequestId } : {}),
+      },
     }),
   )
   return data
@@ -327,11 +334,12 @@ export async function cancelManagedBooking(token: string, reason: string): Promi
 export async function rescheduleManagedBooking(
   token: string,
   start: string,
+  rescheduleRequestId?: string,
 ): Promise<BookingWithToken> {
   const { data } = await call(() =>
     api.POST('/api/v1/bookings/manage/reschedule', {
       params: { header: { 'x-manage-token': token } },
-      body: { start },
+      body: { start, ...(rescheduleRequestId ? { rescheduleRequestId } : {}) },
     }),
   )
   return data

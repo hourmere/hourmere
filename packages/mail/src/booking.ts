@@ -452,6 +452,61 @@ export function followUpEmail(
   return { ...render(recipient.email, content), sensitive: true }
 }
 
+/** A request is informational: it changes neither calendar invitations nor meeting links. */
+export function rescheduleRequestEmail(
+  meeting: BookingEmailMeeting,
+  recipient: BookingEmailRecipient,
+  options: {
+    expired?: boolean
+    expiresAt: Temporal.Instant
+    hostNote?: string | undefined
+    bookingUrl?: string | undefined
+  },
+): MailMessage {
+  const language = interfaceLanguage(recipient.locale) ?? 'en'
+  const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
+  const event = singleLine(meeting.eventName)
+  const host = meetingHosts(meeting, language)
+  const invitee = singleLine(meeting.inviteeName)
+  const note = multiLine(normalizeFollowUpHostNote(options.hostNote ?? ''))
+  const expired = options.expired === true
+  const content: Content = {
+    language,
+    subject: t(expired ? 'rescheduleRequest.expiredSubject' : 'rescheduleRequest.subject', {
+      event,
+    }),
+    intro: expired
+      ? t('rescheduleRequest.expiredIntroduction', { invitee })
+      : t('rescheduleRequest.introduction', {
+          host,
+          expiry: formatMailDateTime(
+            options.expiresAt.toZonedDateTimeISO(recipient.timeZone),
+            { dateStyle: 'full', timeStyle: 'long' },
+            language,
+          ),
+        }),
+    fields: [
+      field(t('What'), event),
+      field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
+      field(t('Host'), host),
+    ],
+    answers: [],
+    hostNote: !expired && note ? { label: t('followUp.hostNote'), text: note } : undefined,
+    manageLinks: !expired && recipient.role === 'attendee' ? recipient.manageLinks : undefined,
+    bookingUrl:
+      expired && recipient.role === 'host' && options.bookingUrl
+        ? linkableUrl(options.bookingUrl)
+        : undefined,
+    receivedWhy: t(
+      recipient.role === 'host'
+        ? 'You received this email because {invitee} booked a meeting with you via Hourmere.'
+        : 'You received this email because you booked a meeting with {host} via Hourmere.',
+      { host, invitee },
+    ),
+  }
+  return { ...render(recipient.email, content), sensitive: true }
+}
+
 // --- Emails -------------------------------------------------------------------------------
 
 const field = (label: string, text: string) => ({ label, text })

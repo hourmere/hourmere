@@ -24,6 +24,14 @@ this policy even after the event type is edited or the booking is rescheduled. H
 phone numbers remain shared with attendees so they can call the host. Ordinary provider calendar
 copies remain host-only busy-time records and do not currently include meeting locations.
 
+## Requests for another time
+
+[Host reschedule requests](/docs/request-reschedule) send the booker a private management
+link and optional plain-text note in the body only. Guests do not receive the request.
+The ordinary reschedule confirmation tells hosts when a time is chosen; expiry sends a
+host notice while keeping the original booking. Request generations deduplicate delivery
+and superseded requests are skipped. Existing mail budgets and retries apply.
+
 ## Imported local bookings
 
 Cal.com/cal.diy imports use durable `source=import` local-only bookings. Their empty
@@ -68,7 +76,7 @@ before enabling follow-ups.
 
 ### Host notes and hosted email abuse controls
 
-Only follow-ups may include optional `hostNote` plain text. New writes normalize CRLF to
+Within reminder/follow-up settings, only follow-ups may include optional `hostNote` plain text. New writes normalize CRLF to
 LF and strip bidi embedding/isolate controls before checking the 2000 UTF-16 code-unit
 limit. Other control characters, including tabs, are refused; LF is allowed. Notes appear
 only in the body, HTML-escaped and without generated links. Placeholders such as
