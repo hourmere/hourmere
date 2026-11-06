@@ -1,5 +1,30 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Past date overrides ({0})': 'Past date overrides ({0})',
+  'Times are in {0}.': 'Times are in {0}.',
+  'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
+    'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.',
+  'Review latest version': 'Review latest version',
+  'Latest saved version': 'Latest saved version',
+  'Apply my draft to this version': 'Apply my draft to this version',
+  'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
+    'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.',
+  'Could not load the latest version. {0}': 'Could not load the latest version. {0}',
+  'Copy hours from {0}': 'Copy hours from {0}',
+  'Copy to…': 'Copy to…',
+  'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.':
+    'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.',
+  Weekdays: 'Weekdays',
+  'All days': 'All days',
+  'Apply copy': 'Apply copy',
+  'Each date can have only one override.': 'Each date can have only one override.',
+  'Date overrides replace weekly hours on that date. Save changes applies every change on this page.':
+    'Date overrides replace weekly hours on that date. Save changes applies every change on this page.',
+  'No date overrides.': 'No date overrides.',
+  'Date override {0}': 'Date override {0}',
+  'Save schedule details, weekly hours and date overrides together with Save changes.':
+    'Save schedule details, weekly hours and date overrides together with Save changes.',
+
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 
@@ -767,17 +792,9 @@ export const admin = {
     'Give the key a name above, then choose Create key.',
   'Connect a Zoom account to get started.': 'Connect a Zoom account to get started.',
   'Review calendar connection options': 'Review calendar connection options',
-  'Save schedule details and weekly hours here. Save date overrides in their section below.':
-    'Save schedule details and weekly hours here. Save date overrides in their section below.',
-  '. Use Save override to save a date. Select dates to remove, then use Save removals.':
-    '. Use Save override to save a date. Select dates to remove, then use Save removals.',
-  'Save removals': 'Save removals',
-  'Unsaved date override removals': 'Unsaved date override removals',
   'Removal pending save': 'Removal pending save',
   'Undo removal: {0}': 'Undo removal: {0}',
   'Undo removal': 'Undo removal',
-  'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}':
-    'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}',
   '.': '.',
   '{0}–{1}.': '{0}–{1}.',
   '= {0}.': '= {0}.',
@@ -1065,7 +1082,6 @@ export const admin = {
   'Could not disconnect {0} Calendar.': 'Could not disconnect {0} Calendar.',
   'Could not load more bookings. {0}': 'Could not load more bookings. {0}',
   'Could not load the booking.': 'Could not load the booking.',
-  'Could not load the date overrides.': 'Could not load the date overrides.',
   'Could not load the event type.': 'Could not load the event type.',
   'Could not load the schedule.': 'Could not load the schedule.',
   'Could not load your bookings.': 'Could not load your bookings.',
@@ -1077,7 +1093,6 @@ export const admin = {
   'Could not remove it. {0}': 'Could not remove it. {0}',
   'Could not revoke the key. {0}': 'Could not revoke the key. {0}',
   'Could not save the event type. {0}': 'Could not save the event type. {0}',
-  'Could not save the override. {0}': 'Could not save the override. {0}',
   'Could not save the schedule. {0}': 'Could not save the schedule. {0}',
   'Could not save your display name. {0}': 'Could not save your display name. {0}',
   'Could not save your profile. {0}': 'Could not save your profile. {0}',
@@ -1181,7 +1196,6 @@ export const admin = {
   Hours: 'Hours',
   'Hours {0}, from': 'Hours {0}, from',
   'Hours {0}, until': 'Hours {0}, until',
-  'Hours on that date': 'Hours on that date',
   'How far ahead a meeting must be booked.': 'How far ahead a meeting must be booked.',
   'I’ve saved my key': 'I’ve saved my key',
   'In 1 year': 'In 1 year',
@@ -1207,7 +1221,6 @@ export const admin = {
   'Loading calendars…': 'Loading calendars…',
   'Loading event types…': 'Loading event types…',
   'Loading keys…': 'Loading keys…',
-  'Loading overrides…': 'Loading overrides…',
   'Loading schedules…': 'Loading schedules…',
   'Loading the booking…': 'Loading the booking…',
   'Loading your profile…': 'Loading your profile…',
@@ -1256,7 +1269,6 @@ export const admin = {
   'No past bookings yet.': 'No past bookings yet.',
   'No public booking link': 'No public booking link',
   'No upcoming bookings.': 'No upcoming bookings.',
-  'No upcoming date overrides.': 'No upcoming date overrides.',
   None: 'None',
   'Not set': 'Not set',
   'Offer at most {0} options.': 'Offer at most {0} options.',
@@ -1271,9 +1283,6 @@ export const admin = {
   Organization: 'Organization',
   'Organization to connect': 'Organization to connect',
   'Organization:': 'Organization:',
-  'Other hours': 'Other hours',
-  'Other hours on single dates, such as holidays, in':
-    'Other hours on single dates, such as holidays, in',
   'Other video or meeting link': 'Other video or meeting link',
   Past: 'Past',
   'Past bookings': 'Past bookings',
@@ -1300,7 +1309,6 @@ export const admin = {
   'Remove special control characters (tabs and line breaks are fine).':
     'Remove special control characters (tabs and line breaks are fine).',
   'Removed question {0}{1}.': 'Removed question {0}{1}.',
-  'Removed the override for {0}.': 'Removed the override for {0}.',
   'Removing…': 'Removing…',
   Replaced: 'Replaced',
   Required: 'Required',
@@ -1324,7 +1332,6 @@ export const admin = {
   Saturday: 'Saturday',
   'Save changes': 'Save changes',
   'Save display name': 'Save display name',
-  'Save override': 'Save override',
   'Save profile': 'Save profile',
   'Saved.': 'Saved.',
   'Saving…': 'Saving…',
@@ -1403,8 +1410,6 @@ export const admin = {
     'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.',
   'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.':
     'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
-  'This date has an override already; saving replaces it.':
-    'This date has an override already; saving replaces it.',
   'This email address already has an account. {0}':
     'This email address already has an account. {0}',
   'This event type does not exist, or it was deleted.':
@@ -1533,8 +1538,6 @@ export const admin = {
   '{label}, hours {count}, from': '{label}, hours {count}, from',
   '{label}, hours {count}, until': '{label}, hours {count}, until',
   '“{name}” is now your default schedule.': '“{name}” is now your default schedule.',
-  'Added the override for {date}: {hours}.': 'Added the override for {date}: {hours}.',
-  'Replaced the override for {date}: {hours}.': 'Replaced the override for {date}: {hours}.',
   Availability: 'Availability',
   Bookings: 'Bookings',
   Calendars: 'Calendars',

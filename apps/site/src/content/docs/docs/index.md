@@ -15,6 +15,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   startup failures.
 - [Compare scheduling options](/docs/comparison): deployment, agent access and the current
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
+- [Availability and working hours](/docs/availability): copy hours between days and save
+  weekly hours and date overrides together.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
@@ -38,6 +40,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
+  conflict merge; use the combined API for atomic edits with version checks.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

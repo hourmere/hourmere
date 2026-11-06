@@ -77,6 +77,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `get_schedule_availability` | — | `schedule-availability` | `full, read` |
+| `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
