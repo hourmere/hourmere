@@ -1,3 +1,4 @@
+import { inspect } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCalDavDiscovery } from './caldav-discovery.ts'
 import type { CalDavResponse, CalDavTransport } from './caldav-transport.ts'
@@ -48,6 +49,19 @@ describe('CalDAV discovery mock server', () => {
     })
     expect(JSON.stringify(result)).not.toContain(credentials.password)
     expect(transport.mock.calls.map(([r]) => r.depth)).toEqual(['0', '0', '1'])
+    const request = transport.mock.calls[0]?.[0]
+    expect(request?.authorization).toBe(
+      `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`,
+    )
+    for (const render of [
+      (value: unknown) => JSON.stringify(value),
+      (value: unknown) => inspect(value),
+      (value: unknown) => String(value),
+    ]) {
+      expect(render(request)).toContain('[REDACTED]')
+      expect(render(request)).not.toContain(request?.authorization)
+      expect(render(request)).not.toContain(credentials.password)
+    }
   })
   it.each(['http://dav.example.com', 'https://127.0.0.1', 'https://user:pass@dav.example.com'])(
     'refuses unsafe initial URL %s',
@@ -84,17 +98,129 @@ describe('CalDAV discovery mock server', () => {
     expect(transport).toHaveBeenCalledTimes(4)
   })
   it.each([
-    entry.replace('200 OK', '404 Not Found'),
-    entry.replace('/.well-known/caldav', '/wrong'),
-    entry.replace('DAV:', 'urn:evil'),
-    `<!DOCTYPE x [<!ENTITY x "secret">]>${entry}`,
-    entry.replace('/principals/host/', 'https://evil.example.com/'),
-    entry.replace('</d:prop>', `<!--${'x'.repeat(1_048_577)}--></d:prop>`),
-    '<broken>',
-  ])('rejects malformed, failed, misdirected and oversized properties', async (body) => {
+    ['failed property', entry.replace('200 OK', '404 Not Found'), 'invalid_response'],
+    ['wrong namespace', entry.replace('DAV:', 'urn:evil'), 'invalid_response'],
+    ['DTD', `<!DOCTYPE x [<!ENTITY x "secret">]>${entry}`, 'invalid_response'],
+    [
+      'cross-origin principal',
+      entry.replace('/principals/host/', 'https://evil.example.com/'),
+      'destination_refused',
+    ],
+    [
+      'oversized body',
+      entry.replace('</d:prop>', `<!--${'x'.repeat(1_048_577)}--></d:prop>`),
+      'invalid_response',
+    ],
+    ['malformed XML', '<broken>', 'invalid_response'],
+  ])('rejects %s with its specific error', async (_name, body, code) => {
     await expect(
       createCalDavDiscovery(mock([body, principal, calendar])).discover(credentials),
-    ).rejects.toBeDefined()
+    ).rejects.toMatchObject({ code })
+  })
+  it.each([
+    ['https://dav.example.com/remote.php/dav', '/remote.php/dav/'],
+    ['https://dav.example.com', '/context/'],
+  ])('accepts canonical Depth:0 href for %s', async (serverUrl, canonical) => {
+    const transport = mock([
+      response(
+        canonical,
+        '<d:current-user-principal><d:href>principals/host/</d:href></d:current-user-principal>',
+      ),
+      response(
+        `${canonical}principals/host/`,
+        '<c:calendar-home-set><d:href>calendars/</d:href></c:calendar-home-set>',
+      ),
+      calendar,
+    ])
+    const result = await createCalDavDiscovery(transport).discover({ ...credentials, serverUrl })
+    expect(result.principalUrl).toBe(`https://dav.example.com${canonical}principals/host/`)
+    expect(result.calendarHomeUrl).toBe(`${result.principalUrl}calendars/`)
+  })
+  it('selects a trailing-slash match among multiple responses', async () => {
+    const canonical = entry.replace('/.well-known/caldav', '/.well-known/caldav/')
+    const unrelated = response('/wrong/', '').match(/<d:response>[\s\S]*<\/d:response>/)?.[0] ?? ''
+    const transport = mock([
+      canonical.replace('</d:multistatus>', `${unrelated}</d:multistatus>`),
+      principal,
+      calendar,
+    ])
+    await expect(createCalDavDiscovery(transport).discover(credentials)).resolves.toMatchObject({
+      principalUrl: 'https://dav.example.com/principals/host/',
+    })
+  })
+  it.each([
+    [
+      'ambiguous different paths',
+      entry
+        .replace('/.well-known/caldav', '/wrong')
+        .replace(
+          '</d:multistatus>',
+          '<d:response><d:href>/another</d:href></d:response></d:multistatus>',
+        ),
+      'invalid_response',
+    ],
+    [
+      'cross-origin response',
+      entry.replace('/.well-known/caldav', 'https://evil.example.com/context/'),
+      'destination_refused',
+    ],
+  ])('rejects %s in Depth:0 responses', async (_name, body, code) => {
+    await expect(
+      createCalDavDiscovery(mock([body, principal, calendar])).discover(credentials),
+    ).rejects.toMatchObject({ code })
+  })
+  it('requires Depth:0 response hrefs to stay on the request origin even when another origin is trusted', async () => {
+    await expect(
+      createCalDavDiscovery(
+        mock([
+          entry.replace('/.well-known/caldav', 'https://shard.example.com/context/'),
+          principal,
+          calendar,
+        ]),
+        { allowedOrigins: ['https://shard.example.com'] },
+      ).discover(credentials),
+    ).rejects.toMatchObject({ code: 'destination_refused' })
+  })
+  it.each([
+    ['', true],
+    ['<c:supported-calendar-component-set/>', false],
+    [
+      '<c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set>',
+      false,
+    ],
+    [
+      '<c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>',
+      true,
+    ],
+  ])('derives event support from component set %s', async (components, supportsEvents) => {
+    const result = await createCalDavDiscovery(
+      mock([
+        entry,
+        principal,
+        response('/calendar/', `<d:resourcetype><c:calendar/></d:resourcetype>${components}`),
+      ]),
+    ).discover(credentials)
+    expect(result.calendars[0]?.supportsEvents).toBe(supportsEvents)
+  })
+  it.each([
+    ['write', true],
+    ['all', true],
+    ['write-content', true],
+    ['bind', true],
+    ['read', false],
+    ['', false],
+  ])('derives write capability from privilege %s', async (privilege, canWrite) => {
+    const privileges = privilege
+      ? `<d:current-user-privilege-set><d:privilege><d:${privilege}/></d:privilege></d:current-user-privilege-set>`
+      : ''
+    const result = await createCalDavDiscovery(
+      mock([
+        entry,
+        principal,
+        response('/calendar/', `<d:resourcetype><c:calendar/></d:resourcetype>${privileges}`),
+      ]),
+    ).discover(credentials)
+    expect(result.calendars[0]?.canWrite).toBe(canWrite)
   })
   it('does not infer write privileges or event support from other components', async () => {
     const result = await createCalDavDiscovery(

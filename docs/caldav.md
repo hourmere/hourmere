@@ -19,8 +19,13 @@ support other authentication methods; those are outside this adapter's scope.
 `createCalDavCredentialRecord` builds an insertable `calendar_connections` record using
 the existing `caldav` provider and `credentials` bytea column. No migration is needed.
 The encrypted, versioned JSON contains the canonical server URL, username and password.
-The external account identity hashes the canonical server URL/username tuple; it does
-not reveal either input in normal connection metadata. This identifies the submitted
+The external account identity is an unsalted SHA-256 hash of the canonical server
+URL/username tuple. It omits plaintext inputs from connection metadata, but anyone with
+the hash can confirm a guessed provider URL and username offline. This is a stable
+deduplication identifier, not a confidentiality boundary. Keeping the existing hash
+preserves the uniqueness constraint across encryption-key rotation without rewriting
+account identities; confidentiality relies on access controls and encrypted credentials.
+This identifies the submitted
 endpoint/login, not a globally verified person: aliases or different server paths can
 represent the same provider account. A future connection service must reconcile such
 cases using authenticated discovery rather than equating email addresses.
@@ -37,7 +42,10 @@ insertable encrypted record, never a plaintext password; discovery returns metad
 never credentials. Do not put passwords, Authorization headers, XML bodies, provider
 response bodies or credential-bearing URLs into logs, telemetry, error causes, jobs or
 API responses. The internal reader necessarily exposes plaintext to trusted calling
-code; it is not a public API. Keep plaintext lifetime short; JavaScript does not provide
+code; it is not a public API. Decrypted credential objects and discovery request
+objects redact password/Authorization fields under `JSON.stringify`, `util.inspect`
+and `String()`. Direct field access remains usable internally and must not be logged.
+Keep plaintext lifetime short; JavaScript does not provide
 a reliable guarantee of memory zeroization. Back up the encryption key separately from
 the database. Losing it requires reconnecting; rotation must explicitly decrypt and
 re-encrypt records with both keys available, not simply replace the environment value.
@@ -61,20 +69,28 @@ current principal, its calendar home set, then enumerate immediate child collect
 4. `PROPFIND` the accepted home, `Depth: 1`, for collection type, display name,
    component support and privileges. Return calendar collections with explicit
    `supportsEvents` and `canWrite` capability flags. Future selection must exclude
-   collections without verified VEVENT support; discovery does not select them.
+   collections that explicitly exclude VEVENT; discovery does not select them.
 
 These steps follow [RFC 6764 service discovery](https://www.rfc-editor.org/rfc/rfc6764.html),
 [RFC 5397 current principal](https://www.rfc-editor.org/rfc/rfc5397.html), and
 [RFC 4791 CalDAV properties](https://www.rfc-editor.org/rfc/rfc4791.html).
 Do not construct a principal path from an email address or assume a collection is called
-“Default.” Preserve escaped paths and resolve relative hrefs against the response URL.
+“Default.” Preserve escaped paths. Depth:0 accepts a matching response href modulo
+one trailing slash, or a single same-origin response with a canonical context path.
+Resolve subsequent relative property hrefs against that canonical response href.
 The foundation intentionally does not implement DNS SRV/TXT discovery and uses only
 the first returned calendar-home-set href; accounts with multiple homes need further
 adapter work. The result does not establish read access to event bodies.
 
 A 207 response can contain mixed outcomes. Only successful property groups count;
-a missing/denied privilege is unknown, never a grant. Absent `VEVENT` component
-information is not evidence that an arbitrary DAV collection is an event calendar.
+a missing/denied privilege is unknown, never a grant. For a collection explicitly
+marked as a CalDAV calendar, an absent `supported-calendar-component-set` means all
+component types are supported (RFC 4791 §5.2.3), so `supportsEvents` is true. An
+explicit component set must include VEVENT. `canWrite` is an advisory indication of
+advertised DAV `all`, `write`, `write-content` or `bind` privileges, not permission
+for every booking operation; absent privileges produce false (no verified grant).
+In particular, `bind` indicates creation and `write-content` indicates content changes;
+future writes must check the privileges required by their specific operation.
 Parse XML by namespace URI, not by prefix; reject malformed XML, DTDs and external
 entities. Bound body size, nesting, response count, calendar count and redirects.
 `createCalDavDiscovery(transport, { privateTargets, allowedOrigins })` exposes
@@ -123,8 +139,8 @@ depth 32 and 256 calendar collections. The real transport aborts the network ope
 injected transports receive the abort signal and must honor it to release their own
 resources. Serial discovery bounds concurrency. Automatic
 retries are not part of discovery; the caller decides when to try again. Production
-transport errors expose only bounded classifications and optional status, with no raw
-provider exception or response.
+transport errors expose only the bounded `CalDavError.code` classification and a fixed
+message; they carry no HTTP status, raw provider exception or response.
 
 The future connection UX should distinguish these states; these are design meanings,
 not new translated strings or an API contract in this change:
@@ -253,6 +269,15 @@ made during implementation or tests.
 | iCloud | Proposed bootstrap `https://caldav.icloud.com/`; Apple Account login with an app-specific password and 2FA. | Apple's app-password guide confirms the authentication requirements, but the official sources checked do not publish a stable generic CalDAV endpoint/discovery SLA. Treat this hostname as an integration assumption pending authorized acceptance, not an Apple API guarantee. Sharded cross-origin discovery is refused unless exact origins have been operator-approved. |
 | Fastmail | `https://caldav.fastmail.com/`, full Fastmail username and an app password with calendar access. | Basic plans do not include CalDAV. Regional/account paths and capabilities require discovery; there is no tested Hourmere compatibility claim or published request quota here. |
 | Nextcloud | `https://<host>[/installation-prefix]/remote.php/dav/`; dedicated app password recommended and required for the documented 2FA client setup. | Preserve the installation prefix. Correct well-known redirects depend on proxy configuration. Server/app versions, sharing permissions and installed Calendar app matter. Private addresses require operator exceptions; self-signed TLS is rejected unless the operator explicitly trusts its CA through process configuration. |
+
+**Open design decision for the next CalDAV task:** define how iCloud calendar homes
+on `pNN-caldav.icloud.com` will be authorized under the exact-origin credential policy.
+One candidate is a narrowly scoped, code-defined allowlist of Apple-controlled shard
+hosts for connections explicitly identified as iCloud, with tests for lookalike hosts,
+redirects and DNS/address validation. Decide the supported host pattern and trust
+source before enabling iCloud. Do not infer trust from response XML or enable a generic
+suffix wildcard. This foundation implements no such provider exception; operators
+would currently need to approve each exact shard origin.
 
 Apple's [app-specific-password guide](https://support.apple.com/en-us/102654) states that
 2FA is required, permits up to 25 active app passwords, and revokes them when the primary

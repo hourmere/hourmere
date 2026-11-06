@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { CalendarConnections } from '@hourmere/db'
 import type { Insertable } from 'kysely'
 import { z } from 'zod'
+import { redactCalDavField } from './caldav-redaction.ts'
 import { decryptCredential, encryptCredential } from './credentials.ts'
 
 /** Server-only input. Never include this object in logs or public responses. */
@@ -106,7 +107,7 @@ export function readCalDavCredentials(
     ) {
       throw new Error()
     }
-    return { serverUrl, username, password }
+    return redactCalDavField({ serverUrl, username, password }, 'password')
   } catch {
     throw new Error('CalDAV credentials could not be decrypted')
   }

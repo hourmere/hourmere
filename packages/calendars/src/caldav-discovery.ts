@@ -5,6 +5,7 @@ import {
   type CalDavPrivateTarget,
   type CalDavTransport,
   calDavUrl,
+  redactCalDavRequest,
   sendCalDav,
 } from './caldav-transport.ts'
 
@@ -150,14 +151,16 @@ export function createCalDavDiscovery(
               signal.addEventListener('abort', abort, { once: true })
               Promise.resolve()
                 .then(() =>
-                  transport({
-                    url,
-                    depth,
-                    authorization,
-                    privateTargets,
-                    signal,
-                    body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:resourcetype/><d:displayname/><d:current-user-privilege-set/><c:supported-calendar-component-set/></d:prop></d:propfind>',
-                  }),
+                  transport(
+                    redactCalDavRequest({
+                      url,
+                      depth,
+                      authorization,
+                      privateTargets,
+                      signal,
+                      body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:resourcetype/><d:displayname/><d:current-user-privilege-set/><c:supported-calendar-component-set/></d:prop></d:propfind>',
+                    }),
+                  ),
                 )
                 .then(resolveResponse, (error: unknown) =>
                   reject(
@@ -190,16 +193,23 @@ export function createCalDavDiscovery(
         throw new CalDavError('invalid_response')
       }
       function href(root: Element, base: string, uri: string, name: string): string {
-        const values = children(root, DAV, 'response')
-          .filter((r) => {
-            const target = first(r, DAV, 'href')?.text.trim()
-            return target && resolve(target, base) === base
-          })
-          .flatMap(properties)
-          .filter((p) => p.uri === uri && p.name === name)
+        const responses = children(root, DAV, 'response').map((response) => {
+          const target = first(response, DAV, 'href')?.text.trim()
+          if (!target) throw new CalDavError('invalid_response')
+          const url = resolve(target, base)
+          if (new URL(url).origin !== new URL(base).origin)
+            throw new CalDavError('destination_refused')
+          return { response, url }
+        })
+        const selected =
+          responses.find(({ url }) => url === base || url === `${base}/` || `${url}/` === base) ??
+          (responses.length === 1 ? responses[0] : undefined)
+        if (!selected) throw new CalDavError('invalid_response')
+        const values = properties(selected.response).filter((p) => p.uri === uri && p.name === name)
         const value = values.flatMap((p) => children(p, DAV, 'href'))[0]?.text.trim()
         if (!value) throw new CalDavError('invalid_response')
-        return value
+        // Relative property hrefs use the resource's canonical URL, not the bootstrap URL.
+        return resolve(value, selected.url)
       }
       // Explicit DAV paths are preserved; origin-only inputs use RFC 6764 discovery.
       const initial =
@@ -225,19 +235,24 @@ export function createCalDavDiscovery(
         const target = first(response, DAV, 'href')?.text.trim()
         if (!target) throw new CalDavError('invalid_response')
         const privileges = prop(DAV, 'current-user-privilege-set')
+        const components = prop(CAL, 'supported-calendar-component-set')
         calendars.push({
           url: resolve(target, home.url),
           displayName: prop(DAV, 'displayname')?.text.trim() || null,
-          // Missing capability information is unknown, never assumed writable.
-          supportsEvents: Boolean(
-            prop(CAL, 'supported-calendar-component-set')?.children.some(
+          // RFC 4791 section 5.2.3: an absent component set accepts every component.
+          supportsEvents:
+            !components ||
+            components.children.some(
               (n) => n.uri === CAL && n.name === 'comp' && n.attributes.name === 'VEVENT',
             ),
-          ),
           canWrite: Boolean(
             privileges &&
               children(privileges, DAV, 'privilege').some(
-                (p) => first(p, DAV, 'write') || first(p, DAV, 'all'),
+                (p) =>
+                  first(p, DAV, 'write') ||
+                  first(p, DAV, 'all') ||
+                  first(p, DAV, 'write-content') ||
+                  first(p, DAV, 'bind'),
               ),
           ),
         })

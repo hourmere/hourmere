@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { inspect } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const network = vi.hoisted(() => ({ lookup: vi.fn(), request: vi.fn() }))
@@ -6,7 +7,7 @@ vi.mock('node:dns/promises', () => ({ lookup: network.lookup }))
 vi.mock('node:https', () => ({ request: network.request }))
 
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks/private-targets'
-import { sendCalDav } from './caldav-transport.ts'
+import { redactCalDavRequest, sendCalDav } from './caldav-transport.ts'
 
 const input = () => ({
   url: 'https://dav.example.com/',
@@ -39,6 +40,20 @@ function reply(body = 'ok', status = 207) {
   })
 }
 describe('CalDAV pinned transport', () => {
+  it.each([
+    (value: unknown) => JSON.stringify(value),
+    (value: unknown) => inspect(value),
+    (value: unknown) => String(value),
+  ])('redacts request authorization in %s', async (render) => {
+    const request = redactCalDavRequest(input())
+    const output = render(request)
+    expect(output).toContain('[REDACTED]')
+    expect(output).not.toContain('Basic mock')
+    network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
+    reply()
+    await sendCalDav(request)
+    expect(network.request.mock.calls[0]?.[1].headers.authorization).toBe('Basic mock')
+  })
   it.each([
     '127.0.0.1',
     '10.0.0.1',

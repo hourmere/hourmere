@@ -8,6 +8,8 @@ import {
   type WebhookPrivateTarget,
 } from '@hourmere/webhooks/private-targets'
 
+import { redactCalDavField } from './caldav-redaction.ts'
+
 export type CalDavPrivateTarget = WebhookPrivateTarget
 export const CALDAV_MAX_RESPONSE_BYTES = 1_048_576
 export class CalDavError extends Error {
@@ -32,6 +34,9 @@ export interface CalDavRequest {
   depth: '0' | '1'
   signal: AbortSignal
   privateTargets: readonly CalDavPrivateTarget[]
+}
+export function redactCalDavRequest(input: CalDavRequest): CalDavRequest {
+  return redactCalDavField(input, 'authorization')
 }
 export interface CalDavResponse {
   status: number

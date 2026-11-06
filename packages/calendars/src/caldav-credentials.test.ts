@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { inspect } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { createCalDavCredentialRecord, readCalDavCredentials } from './caldav-credentials.ts'
 import { decryptCredential, encryptCredential } from './credentials.ts'
@@ -40,6 +41,19 @@ describe('CalDAV credential records', () => {
     expect(again.external_account_id).toBe(record.external_account_id)
     expect(again.credentials.equals(record.credentials)).toBe(false)
     expect(again.id === record.id).toBe(false)
+  })
+
+  it.each([
+    (value: unknown) => JSON.stringify(value),
+    (value: unknown) => inspect(value),
+    (value: unknown) => String(value),
+  ])('redacts decrypted passwords in %s', (render) => {
+    const record = createCalDavCredentialRecord(key, 'owner', input)
+    const credentials = readCalDavCredentials(key, record)
+    const output = render(credentials)
+    expect(output).toContain('[REDACTED]')
+    expect(output).not.toContain(input.password)
+    expect(credentials.password).toBe(input.password)
   })
 
   it('uses the documented unambiguous provider, owner, row and account binding', () => {
