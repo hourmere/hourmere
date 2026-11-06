@@ -11,7 +11,8 @@ booking detail. The feature is included in self-hosted installations without a p
 ## Who and what the mark describes
 
 A mark belongs to one attendee on one booking, including a guest. It never marks all
-attendees at once. Group seats and their guests remain independent. For a collective
+attendees at once. Group seats remain independent; guests on bookings that allow them
+also have separate marks. Group bookings currently do not accept guests. For a collective
 meeting, all actual booking hosts see and can change the same attendee marks. For a
 round-robin booking, only the assigned booking host has host authority; other pool
 members do not. Current team owners and admins can manage either kind of team booking.
