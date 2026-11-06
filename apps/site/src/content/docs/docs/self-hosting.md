@@ -622,6 +622,31 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 
 ## Upgrade and roll back
 
+The November 2026 security update pins the Better Auth family, including its schema
+CLI, to 1.7.16. This is the smallest release containing the published November 3
+security fixes, including [unverified sign-in email claims](https://github.com/better-auth/better-auth/security/advisories/GHSA-9hm7-xhfp-cx58),
+[cached session revocation](https://github.com/better-auth/better-auth/security/advisories/GHSA-fvxx-76fc-893x),
+[padded organization roles](https://github.com/better-auth/better-auth/security/advisories/GHSA-c85h-5mrr-mgx4),
+[invitations accepted by an unverified account](https://github.com/better-auth/better-auth/security/advisories/GHSA-fmh4-wcc4-5jm3)
+and [email-change links after an address changes hands](https://github.com/better-auth/better-auth/security/advisories/GHSA-hwq2-v29r-p69r).
+Hourmere already requires a verified email before an invitation can be accepted, and it
+does not enable email changes, so the last two were blocked or do not apply.
+It requires no new database migration. Use the upgrade procedure below to rebuild
+and restart every application role. Hourmere stores sessions in PostgreSQL and does
+not enable Better Auth secondary storage or cookie caching, so there is no session
+cache to migrate or clear.
+
+Both sign-in providers now reject false email-verification claims encoded as strings.
+Microsoft users whose provider does not confirm their address must use
+an email link or configure the verified email claims described in
+[configuration](/docs/configuration). Social token and signing-key requests now reject
+HTTP redirects; provider/proxy endpoints must return their response directly.
+Malformed MCP client-metadata responses return `invalid_client`. Better Auth also
+restricts pending-invitation listing to roles allowed to manage invitations;
+Hourmere retains its existing owner/admin management and member-only invitation policy.
+The [upstream release notes](https://github.com/better-auth/better-auth/releases/tag/v1.7.16)
+cover plugins that Hourmere does not enable.
+
 Read the intended release's changes and take the backup above first. Record the current
 branch name or tag before upgrading, alongside the backup's saved commit, and preserve
 its `.env`, host `Caddyfile` customizations and Caddy state. Use
