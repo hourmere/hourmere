@@ -10,6 +10,7 @@ import {
   type Json,
 } from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
+import { z } from 'zod'
 import {
   eventTypeNotFound,
   findOneTimeEventType,
@@ -76,6 +77,7 @@ export interface Attendee {
 
 export interface Booking {
   id: string
+  isGroupSeat?: boolean
   pendingReschedule?: { id: string; expiresAt: string; note: string | null }
   eventTypeId: string | null
   status: BookingStatus
@@ -462,6 +464,7 @@ const pgError = (err: unknown) =>
 
 const BOOKING_COLUMNS = [
   'b.id',
+  'b.group_slot_id',
   'b.event_type_id',
   'b.status',
   'b.start_at',
@@ -481,6 +484,7 @@ const BOOKING_COLUMNS = [
 
 interface BookingRow {
   id: string
+  group_slot_id: string | null
   event_type_id: string | null
   status: string
   start_at: Date
@@ -655,6 +659,7 @@ async function toBookings(
     const location = view ? view.location : r.location
     return {
       id: r.id,
+      ...(r.group_slot_id ? { isGroupSeat: true } : {}),
       eventTypeId: r.event_type_id,
       status: r.status as BookingStatus,
       start: toIso(toInstant(r.start_at)),
@@ -2198,6 +2203,32 @@ async function resolveRescheduleRequest(
     .execute()
 }
 
+/** Share plain-text validation with transports so failures retain the public note path. */
+export const RescheduleRequestNoteSchema = z
+  .string()
+  .max(2000)
+  .superRefine((note, ctx) => {
+    try {
+      validateNotifications({
+        reminders: [],
+        followUps: [
+          {
+            id: 'request',
+            offsetMinutes: 5,
+            recipients: { host: false, invitee: true, guests: false },
+            hostNote: note,
+          },
+        ],
+      })
+    } catch (error) {
+      if (!(error instanceof DomainError) || error.code !== 'invalid_notifications') throw error
+      ctx.addIssue({
+        code: 'custom',
+        message: error.message.replace('notifications.followUps[0].hostNote: ', ''),
+      })
+    }
+  })
+
 /** Host authorization and every lifecycle transition serialize on the original booking. */
 export async function requestReschedule(
   ctx: ServiceContext,
@@ -2207,6 +2238,7 @@ export async function requestReschedule(
   if (!UUID.test(id)) throw bookingNotFound()
   if (!UUID.test(input.idempotencyKey))
     throw new DomainError('invalid', 'invalid_idempotency_key', 'Idempotency key must be a UUID')
+  if (input.note !== undefined) z.object({ note: RescheduleRequestNoteSchema }).parse(input)
   const note =
     input.note === undefined
       ? null

@@ -166,6 +166,12 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     expect((await post(path, 'request-host', { ...input, note: 'x'.repeat(2001) })).status).toBe(
       400,
     )
+    const invalidNote = await post(path, 'request-host', { ...input, note: 'bad\tcontrol' })
+    expect(invalidNote.status).toBe(400)
+    expect(await invalidNote.json()).toMatchObject({
+      error: 'invalid_request',
+      message: 'note: must not contain control characters other than LF',
+    })
     const response = await post(path, 'request-host', input)
     expect(response.status).toBe(200)
     const booking = await response.json()

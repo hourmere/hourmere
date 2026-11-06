@@ -330,13 +330,18 @@ function BookingView({
         />
       )}
 
-      {!readOnly && booking.status === 'confirmed' && !started && (
-        <RequestReschedule
-          booking={booking}
-          expectedOrganizationId={expectedOrganizationId}
-          onChange={updateBooking}
-        />
-      )}
+      {!readOnly &&
+        booking.status === 'confirmed' &&
+        !started &&
+        (booking.isGroupSeat ? (
+          <p className="hint">{t('Group-seat bookings do not support reschedule requests.')}</p>
+        ) : (
+          <RequestReschedule
+            booking={booking}
+            expectedOrganizationId={expectedOrganizationId}
+            onChange={updateBooking}
+          />
+        ))}
 
       {!readOnly && !cancelled && !started && (
         <CancelBooking

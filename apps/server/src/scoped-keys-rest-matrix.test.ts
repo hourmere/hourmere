@@ -616,14 +616,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
+    it('covers the exact 101-operation contract and all 303 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(100)
-      expect(new Set(ids).size).toBe(100)
+      expect(ids).toHaveLength(101)
+      expect(new Set(ids).size).toBe(101)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(300)
+      expect(cases).toHaveLength(303)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

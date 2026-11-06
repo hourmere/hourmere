@@ -14,6 +14,7 @@ import {
   MAX_PAGE_SIZE,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  RescheduleRequestNoteSchema,
   ResponsesSchema,
   requestReschedule,
   rescheduleHostBooking,
@@ -101,6 +102,10 @@ export const Booking = z
     id: z.uuid(),
     eventTypeId: z.uuid().nullable(),
     status: z.enum(['confirmed', 'cancelled']),
+    isGroupSeat: z.boolean().optional().openapi({
+      description:
+        'True for a group-seat booking, which does not support host reschedule requests.',
+    }),
     pendingReschedule: z
       .object({
         id: z.uuid(),
@@ -240,7 +245,7 @@ export const RequestRescheduleBody = z
       description:
         'Retain this random UUID for retries. A new key replaces the current request; changed input with an existing key is refused.',
     }),
-    note: z.string().max(2000).optional().openapi({
+    note: RescheduleRequestNoteSchema.optional().openapi({
       description:
         'Optional plain text, at most 2000 UTF-16 code units, normalized like follow-up host notes. Included only in the email body.',
     }),

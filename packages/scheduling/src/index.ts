@@ -62,6 +62,7 @@ export {
   MAX_PAGE_SIZE,
   type PersonInput,
   RESCHEDULE_REQUEST_TIMEOUT_HOURS,
+  RescheduleRequestNoteSchema,
   requestReschedule,
   rescheduleHostBooking,
   rescheduleManagedBooking,

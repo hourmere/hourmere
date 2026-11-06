@@ -13,7 +13,10 @@ describe.skipIf(!serverUrl)('reschedule request migration', () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-reschedule-predecessor-'))
     const owned = await createTestDatabase(serverUrl as string, undefined, { migrate: false })
     try {
-      for (const file of await readdir(migrationsDir))
+      const migrations = (await readdir(migrationsDir))
+        .filter((name) => name.endsWith('.sql'))
+        .sort()
+      for (const file of migrations)
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(directory, file))
       await runMigrations(owned.pool, directory)
@@ -43,7 +46,9 @@ describe.skipIf(!serverUrl)('reschedule request migration', () => {
           )
         ).rows
       const before = await snapshot()
-      expect(await runMigrations(owned.pool)).toEqual([migration])
+      const expectedUpgrades = migrations.filter((name) => name >= migration)
+      expect(expectedUpgrades[0]).toBe(migration)
+      expect(await runMigrations(owned.pool)).toEqual(expectedUpgrades)
       expect(await snapshot()).toEqual(before)
       expect(await runMigrations(owned.pool)).toEqual([])
       await owned.pool.query(

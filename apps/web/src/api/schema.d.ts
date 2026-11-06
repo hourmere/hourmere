@@ -4204,6 +4204,8 @@ export interface components {
             eventTypeTitle?: string | null;
             /** Format: uuid */
             id: string;
+            /** @description True for a group-seat booking, which does not support host reschedule requests. */
+            isGroupSeat?: boolean;
             location: components["schemas"]["BookingLocation"];
             /**
              * @description Present for imported busy records: managed in the original system, without Hourmere management links, changes, retries, calendar writes or notifications.

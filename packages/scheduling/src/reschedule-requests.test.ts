@@ -13,6 +13,10 @@ import {
   rescheduleManagedBooking,
 } from './bookings.ts'
 import type { BookingEvent, PublicContext, ServiceContext } from './context.ts'
+import {
+  assertManageRequestIsolation,
+  assertOrganizationIsolation,
+} from './reschedule-request-isolation-testing.ts'
 import { createFixtures } from './testing.ts'
 
 const required = <T>(value: T | null | undefined): T => {
@@ -61,6 +65,30 @@ describe.skipIf(!serverUrl)('reschedule requests', () => {
     })
     return { ctx, pub, created, events }
   }
+  it.each(['session', 'api_key'] as const)(
+    'refuses requests for another organization even when the %s caller hosts the booking',
+    async (kind) => {
+      await assertOrganizationIsolation(
+        db,
+        { requestReschedule, cancelManagedBooking, rescheduleManagedBooking },
+        kind,
+      )
+    },
+  )
+  it.each(['pending', 'picked', 'cancelled'] as const)(
+    'scopes picking and cancellation to the manage token booking with a %s request',
+    async (state) => {
+      for (const action of ['pick', 'cancel'] as const) {
+        await assertManageRequestIsolation(
+          db,
+          { requestReschedule, cancelManagedBooking, rescheduleManagedBooking },
+          setup,
+          state,
+          action,
+        )
+      }
+    },
+  )
   it('keeps the original block, sanitizes body note, replaces requests and replays without notifications', async () => {
     const { ctx, created, events } = await setup()
     const key = randomUUID()
@@ -73,6 +101,7 @@ describe.skipIf(!serverUrl)('reschedule requests', () => {
       },
     )
     expect(requested.status).toBe('confirmed')
+    expect(requested.isGroupSeat).toBeUndefined()
     expect(requested.pendingReschedule?.note).toBe('First\nnote')
     expect(requested.pendingReschedule?.expiresAt).toBe(created.booking.start)
     expect(
@@ -108,13 +137,16 @@ describe.skipIf(!serverUrl)('reschedule requests', () => {
         idempotencyKey: randomUUID(),
         note: 'bad\tcontrol',
       }),
-    ).rejects.toMatchObject({ kind: 'invalid' })
+    ).rejects.toMatchObject({
+      name: 'ZodError',
+      issues: [{ path: ['note'], message: 'must not contain control characters other than LF' }],
+    })
     await expect(
       requestReschedule(ctx, created.booking.id, {
         idempotencyKey: randomUUID(),
         note: 'a'.repeat(2001),
       }),
-    ).rejects.toMatchObject({ kind: 'invalid' })
+    ).rejects.toMatchObject({ name: 'ZodError' })
   })
   it('expires once and preserves booking, ignores stale expiry and unauthorized hosts', async () => {
     const { ctx, pub, created, events } = await setup()
@@ -261,6 +293,7 @@ describe.skipIf(!serverUrl)('reschedule requests', () => {
         organization: { ...ctx.principal.organization, id: group.organization },
       },
     }
+    expect((await getHostBooking(groupCtx, required(occupied.bookings[0]))).isGroupSeat).toBe(true)
     await expect(
       requestReschedule(groupCtx, required(occupied.bookings[0]), { idempotencyKey: randomUUID() }),
     ).rejects.toMatchObject({ code: 'booking_group_seat_unsupported' })

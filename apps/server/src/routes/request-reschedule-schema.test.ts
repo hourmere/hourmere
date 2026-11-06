@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { z } from '@hono/zod-openapi'
+import { RescheduleRequestNoteSchema } from '@hourmere/scheduling'
 import { describe, expect, it } from 'vitest'
 import { RequestRescheduleBody } from './bookings.ts'
 
@@ -18,7 +19,11 @@ function sourceCopy(from?: string, to?: string): typeof RequestRescheduleBody {
   )
   if (from) expect(declaration).toContain(from)
   const changed = from ? declaration.replace(from, to ?? '') : declaration
-  return new Function('z', `${changed.replace('export ', '')}; return RequestRescheduleBody`)(z)
+  return new Function(
+    'z',
+    'RescheduleRequestNoteSchema',
+    `${changed.replace('export ', '')}; return RequestRescheduleBody`,
+  )(z, RescheduleRequestNoteSchema)
 }
 
 describe('request reschedule input protections', () => {
@@ -27,7 +32,9 @@ describe('request reschedule input protections', () => {
     verify(sourceCopy())
   })
   it.each([
-    ['note bound', '.max(2000)', ''],
+    // The shared note schema now owns both the bound and plain-text validation.
+    // Disconnecting it must still fail the overlong-note assertion above.
+    ['note bound', 'RescheduleRequestNoteSchema', 'z.string()'],
     ['UUID replay key', '.uuid()', '.string()'],
     ['unknown-field rejection', '.strictObject(', '.object('],
   ])('detects removing %s with a source-copy assertion failure', (_, from, to) => {

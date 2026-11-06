@@ -465,6 +465,12 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       status: 'confirmed',
       pendingReschedule: { note: input.note },
     })
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'bad\tcontrol' }, key.key)),
+    ).toMatchObject({
+      error: 'invalid_request',
+      message: 'note: must not contain control characters other than LF',
+    })
     expect(ok(await call('request_reschedule', input, key.key))).toEqual(result)
     expect(
       errorOf(await call('request_reschedule', { ...input, note: 'Changed' }, key.key)).error,

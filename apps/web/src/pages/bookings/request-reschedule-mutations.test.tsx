@@ -92,3 +92,55 @@ describe('request form source-copy protections', () => {
     await check(source, protection)
   })
 })
+
+function RequestButton() {
+  return <button type="button">Request reschedule</button>
+}
+
+it('detects offering a reschedule request for a group seat in the detail source copy', () => {
+  const detail = readFileSync('apps/web/src/pages/bookings/BookingDetail.tsx', 'utf8')
+  const start = detail.indexOf("      {!readOnly &&\n        booking.status === 'confirmed'")
+  const end = detail.indexOf('\n\n      {!readOnly', start)
+  expect(start).toBeGreaterThan(-1)
+  expect(end).toBeGreaterThan(start)
+  const section = detail.slice(start, end)
+  expect(section.split('booking.isGroupSeat')).toHaveLength(2)
+  function verify(text: string) {
+    const compiled = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        "import {readFileSync} from 'node:fs'; import {transformSync} from 'esbuild'; process.stdout.write(transformSync(readFileSync(0,'utf8'),{loader:'tsx',format:'cjs',jsxFactory:'react.createElement',jsxFragment:'react.Fragment'}).code)",
+      ],
+      { input: `function Copy(){return <>${text}</>}`, encoding: 'utf8' },
+    )
+    const deps = {
+      react,
+      readOnly: false,
+      started: false,
+      booking: booking({ isGroupSeat: true }),
+      expectedOrganizationId: 'organization',
+      updateBooking: () => {},
+      t: (key: string) => key,
+      RequestReschedule: RequestButton,
+    }
+    const Copy = new Function(...Object.keys(deps), `${compiled}; return Copy`)(
+      ...Object.values(deps),
+    ) as react.ComponentType
+    try {
+      render(<Copy />)
+      expect(screen.queryByRole('button', { name: 'Request reschedule' })).toBeNull()
+      expect(
+        screen.queryByText('Group-seat bookings do not support reschedule requests.'),
+      ).not.toBeNull()
+    } finally {
+      cleanup()
+    }
+  }
+  verify(section)
+  expect(() => verify(section.replace('booking.isGroupSeat', 'false'))).toThrowError(
+    expect.objectContaining({ name: 'AssertionError' }),
+  )
+  verify(section)
+})

@@ -1,84 +1,14 @@
 import * as Crypto from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
-import * as HourmereDb from '@hourmere/db'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import * as Kysely from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import * as Availability from './availability.ts'
-import * as BookingPage from './booking-page.ts'
-import * as Conferences from './conferences.ts'
 import type { BookingEvent, PublicContext, ServiceContext } from './context.ts'
-import * as Errors from './errors.ts'
-import * as GroupSeatAdmission from './group-seat-admission.ts'
-import * as Hosts from './hosts.ts'
-import * as NotificationSettings from './notification-settings.ts'
-import * as OneTimeLinks from './one-time-links.ts'
-import * as Questions from './questions.ts'
-import * as RoundRobin from './round-robin.ts'
-import * as SuccessRedirect from './success-redirect.ts'
+import {
+  assertManageRequestIsolation,
+  assertOrganizationIsolation,
+} from './reschedule-request-isolation-testing.ts'
+import { type BookingModule, type Change, sourceCopy } from './reschedule-request-source-copy.ts'
 import { createFixtures } from './testing.ts'
-import * as Text from './text.ts'
-import * as Waitlist from './waitlist.ts'
-import * as WaitlistBooking from './waitlist-booking.ts'
-
-type BookingModule = Pick<
-  typeof import('./bookings.ts'),
-  | 'requestReschedule'
-  | 'expireRescheduleRequest'
-  | 'cancelManagedBooking'
-  | 'rescheduleManagedBooking'
->
-type Change = readonly [string, string]
-const dependencies: Record<string, object> = {
-  'node:crypto': Crypto,
-  kysely: Kysely,
-  '@hourmere/db': HourmereDb,
-  './availability.ts': Availability,
-  './booking-page.ts': BookingPage,
-  './conferences.ts': Conferences,
-  './errors.ts': Errors,
-  './hosts.ts': Hosts,
-  './group-seat-admission.ts': GroupSeatAdmission,
-  './notification-settings.ts': NotificationSettings,
-  './one-time-links.ts': OneTimeLinks,
-  './questions.ts': Questions,
-  './round-robin.ts': RoundRobin,
-  './success-redirect.ts': SuccessRedirect,
-  './text.ts': Text,
-  './waitlist.ts': Waitlist,
-  './waitlist-booking.ts': WaitlistBooking,
-}
-
-/** Only an in-memory source copy changes; dependencies remain the real service modules. */
-function sourceCopy(change?: Change, findSlots = Availability.findSlots): BookingModule {
-  let source = readFileSync(new URL('./bookings.ts', import.meta.url), 'utf8')
-  if (change) {
-    expect(source.includes(change[0]), 'mutation must match source').toBe(true)
-    source = source.replaceAll(...change)
-  }
-  source = stripTypeScriptTypes(source).replace(/^export \{[^}]*\} from '[^']+'\n/gm, '')
-  const bindings: Record<string, unknown> = {}
-  source = source.replace(
-    /^import\s*\{([\s\S]*?)\}\s*from '([^']+)'\n/gm,
-    (_, specifiers: string, specifier: string) => {
-      const module = dependencies[specifier] as Record<string, unknown> | undefined
-      if (!module) throw new Error(`Missing source-copy dependency: ${specifier}`)
-      for (const item of specifiers.split(',')) {
-        const [name, alias] = item.trim().split(/\s+as\s+/)
-        if (!name) continue
-        if (!(name in module)) throw new Error(`Missing source-copy binding: ${name}`)
-        bindings[alias ?? name] = name === 'findSlots' ? findSlots : module[name]
-      }
-      return ''
-    },
-  )
-  return new Function(
-    ...Object.keys(bindings),
-    `${source.replace(/\bexport /g, '')}; return { requestReschedule, expireRescheduleRequest, cancelManagedBooking, rescheduleManagedBooking }`,
-  )(...Object.values(bindings)) as BookingModule
-}
 
 const serverUrl = process.env.DATABASE_URL
 const now = Temporal.Instant.from('2026-11-01T12:00:00Z')
@@ -127,6 +57,53 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
   }
   const cases: { name: string; change: Change; verify: (copy: BookingModule) => Promise<void> }[] =
     [
+      ...(['session', 'api_key'] as const).map((kind) => ({
+        name: `request organization isolation for ${kind}`,
+        change: [
+          ".where('id', '=', id)\n      .where('organization_id', '=', ctx.principal.organization.id)\n      .where((eb) =>",
+          ".where('id', '=', id)\n      .where((eb) =>",
+        ] as Change,
+        verify: (copy: BookingModule) => assertOrganizationIsolation(db, copy, kind),
+      })),
+      ...(['pending', 'picked', 'cancelled'] as const).flatMap((state) =>
+        (['pick', 'cancel'] as const)
+          .filter(
+            (action) =>
+              state === 'pending' || (state === 'picked' ? action === 'pick' : action === 'cancel'),
+          )
+          .map((action) => ({
+            name: `manage token booking scope for ${state} request ${action}`,
+            change: [
+              ".where((eb) =>\n      eb.or([eb('booking_id', '=', bookingId), eb('picked_booking_id', '=', bookingId)]),\n    )",
+              '',
+            ] as Change,
+            verify: (copy: BookingModule) =>
+              assertManageRequestIsolation(db, copy, setup, state, action),
+          })),
+      ),
+      {
+        name: 'group-seat capability marker',
+        change: ['...(r.group_slot_id ? { isGroupSeat: true } : {}),', ''],
+        verify: async (copy) => {
+          const { groupFixture, occupiedSlot } = await import(
+            '../../db/src/group-seats-fixtures.ts'
+          )
+          const group = await groupFixture(owned.pool)
+          const occupied = await occupiedSlot(group)
+          const { ctx } = await setup()
+          const groupCtx: ServiceContext = {
+            ...ctx,
+            principal: {
+              ...ctx.principal,
+              user: { ...ctx.principal.user, id: group.host },
+              organization: { ...ctx.principal.organization, id: group.organization },
+            },
+          }
+          expect(
+            (await copy.getHostBooking(groupCtx, required(occupied.bookings[0]))).isGroupSeat,
+          ).toBe(true)
+        },
+      },
       {
         name: 'host membership authorization',
         change: [".where('booking_hosts.user_id', '=', ctx.principal.user.id)", ''],
@@ -148,8 +125,8 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
         },
       },
       {
-        name: 'plain-text note validation',
-        change: ['hostNote: input.note', "hostNote: ''"],
+        name: 'note validation exposes only the public field path',
+        change: [".replace('notifications.followUps[0].hostNote: ', '')", ''],
         verify: async (copy) => {
           const { ctx, created } = await setup()
           await expect(
@@ -157,7 +134,25 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
               idempotencyKey: Crypto.randomUUID(),
               note: 'bad\tcontrol',
             }),
-          ).rejects.toMatchObject({ kind: 'invalid' })
+          ).rejects.toMatchObject({
+            name: 'ZodError',
+            issues: [
+              { path: ['note'], message: 'must not contain control characters other than LF' },
+            ],
+          })
+        },
+      },
+      {
+        name: 'plain-text note validation',
+        change: ['hostNote: note', "hostNote: ''"],
+        verify: async (copy) => {
+          const { ctx, created } = await setup()
+          await expect(
+            copy.requestReschedule(ctx, created.booking.id, {
+              idempotencyKey: Crypto.randomUUID(),
+              note: 'bad\tcontrol',
+            }),
+          ).rejects.toMatchObject({ name: 'ZodError' })
         },
       },
       {

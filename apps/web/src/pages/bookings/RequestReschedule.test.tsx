@@ -92,12 +92,21 @@ describe('host request reschedule', () => {
     expect(screen.queryByRole('button', { name: 'Request reschedule' })).toBeNull()
   })
 
+  it('explains why group seats cannot request a new time without offering the action', async () => {
+    const api = fixture({}, booking({ isGroupSeat: true }))
+    renderApp(`/app/bookings/${original.id}`)
+    await screen.findByText('Group-seat bookings do not support reschedule requests.')
+    expect(screen.queryByRole('button', { name: 'Request reschedule' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: /Note to the invitee/ })).toBeNull()
+    expect(api.to(`POST ${path}`)).toHaveLength(0)
+  })
+
   it('translates the action and note form into Chinese', async () => {
     fixture({}, original, 'zh-CN')
     const user = userEvent.setup()
     renderApp(`/app/bookings/${original.id}`)
     await user.click(await screen.findByRole('button', { name: '请求改期' }))
-    expect(screen.getByRole('textbox', { name: /给受邀者的留言/ })).toBeDefined()
+    expect(screen.getByRole('textbox', { name: /给受邀人的留言/ })).toBeDefined()
     expect(screen.getByRole('button', { name: '发送请求' })).toBeDefined()
   })
 

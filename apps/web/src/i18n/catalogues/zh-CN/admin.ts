@@ -4,16 +4,16 @@ export const admin = {
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
     '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
 
-  'Waiting for the invitee to choose a new time.': '正在等待受邀者选择新时间。',
-  'Ask the invitee to choose a new time': '请受邀者选择新时间',
+  'Waiting for the invitee to choose a new time.': '正在等待受邀人选择新时间。',
+  'Ask the invitee to choose a new time': '请受邀人选择新时间',
   'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.':
-    '原时间仍会保留。受邀者可以选择其他时间或取消预约。如果在 48 小时内或会议开始前没有回应，原预约保持不变。',
+    '原时间仍会保留。受邀人可以选择其他时间或取消预约。如果在 48 小时内或会议开始前没有回应，原预约保持不变。',
   'The request is saved. The invitee will receive an email, subject to delivery limits.':
-    '请求已保存。受邀者将收到邮件，实际发送受邮件限额约束。',
+    '请求已保存。受邀人将收到邮件，实际发送受邮件限额约束。',
   'Request reschedule': '请求改期',
   'A new request replaces any previous request for this booking.':
     '新请求会替换此预约之前的改期请求。',
-  'Note to the invitee': '给受邀者的留言',
+  'Note to the invitee': '给受邀人的留言',
   'Plain text, up to 2000 characters. Included only in the email body.':
     '最多 2000 个字符，仅限纯文本。留言只会出现在邮件正文中。',
   'Use at most 2000 characters for your note.': '留言最多可输入 2000 个字符。',
