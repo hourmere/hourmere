@@ -33,6 +33,7 @@ import {
   SOURCE_LABELS,
 } from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
+import { RequestReschedule } from './RequestReschedule.tsx'
 import { RescheduleBooking } from './RescheduleBooking.tsx'
 
 type Question = Schemas['Question']
@@ -328,6 +329,19 @@ function BookingView({
           expectedOrganizationId={expectedOrganizationId}
         />
       )}
+
+      {!readOnly &&
+        booking.status === 'confirmed' &&
+        !started &&
+        (booking.isGroupSeat ? (
+          <p className="hint">{t('Group-seat bookings do not support reschedule requests.')}</p>
+        ) : (
+          <RequestReschedule
+            booking={booking}
+            expectedOrganizationId={expectedOrganizationId}
+            onChange={updateBooking}
+          />
+        ))}
 
       {!readOnly && !cancelled && !started && (
         <CancelBooking

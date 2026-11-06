@@ -206,7 +206,11 @@ describe.skipIf(!serverUrl)('team cancellation removed-host security audit', () 
             expect(transaction.isTransaction).toBe(true)
             expect(event).toEqual({ type: 'cancelled', bookingId: id })
             queued.push(id)
-            await calendarBookingNotifier({ enqueue: async () => null })(transaction, event)
+            if (
+              event.type !== 'reschedule_requested' &&
+              event.type !== 'reschedule_request_expired'
+            )
+              await calendarBookingNotifier({ enqueue: async () => null })(transaction, event)
           },
         }),
       { expectedOrganizationId: team.id },
