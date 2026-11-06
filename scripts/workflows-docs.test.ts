@@ -325,6 +325,18 @@ describe('workflow design numeric contracts', () => {
       '`WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team workflow deliveries',
     )
     expect(text).toContain('Step 13d verifies an additive OpenAPI diff')
+    const subscriptionStep = document.split('\n').find((line) => line.startsWith('| 13d.'))
+    expect(subscriptionStep).toContain(
+      'add a new webhooks.events CHECK/cardinality migration with populated/fresh/no-op preservation and DB types',
+    )
+    expect(text).toContain(
+      'Its new migration expands the existing `webhooks.events` CHECK from three to four allowed events and cardinality 1–4, with populated-predecessor preservation, fresh-install, no-op rerun and DB-type checks. Published migration 0017 remains unchanged',
+    )
+    const deliveryStep = document.split('\n').find((line) => line.startsWith('| 13.'))
+    expect(deliveryStep).toContain('webhook_deliveries.event_type CHECK')
+    expect(text).toContain(
+      'Step 13 expands the `webhook_deliveries.event_type` CHECK in its separate outbox migration before any workflow delivery can be inserted',
+    )
   })
 
   it('keeps host-authored workflow text under the existing Cloud abuse policy', () => {
