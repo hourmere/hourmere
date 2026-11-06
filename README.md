@@ -193,13 +193,19 @@ do not add `--build` or pull an application image during this recovery.
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
   unset COMPOSE_FILE &&
-  docker compose up -d --wait &&
+  compose_services=$(docker compose config --services) &&
+  docker compose up -d --wait app db &&
+  if printf '%s\n' "$compose_services" | grep -qx worker; then
+    docker compose up -d --wait --no-deps worker
+  fi &&
   docker compose up -d --wait --force-recreate --no-deps proxy
 )
 ```
 
-The final command also works when the previous revision lacks the helper; it briefly
-restarts the proxy so it binds the prior revision's actual `Caddyfile`. For plain mode,
+Starting app/database and the selected worker explicitly leaves the proxy untouched
+until the final command, avoiding a second HTTPS interruption. Named certificate and
+data volumes are preserved. The final command also works when the previous revision
+lacks the helper; it briefly restarts the proxy so it binds the prior revision's actual `Caddyfile`. For plain mode,
 omit that command and remove the preceding `&&`. Full restore must restore the backed-up
 host `Caddyfile` before creating the proxy, as shown in the self-hosting guide.
 

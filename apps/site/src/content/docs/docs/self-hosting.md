@@ -585,12 +585,18 @@ docker compose build
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
 docker compose cp "$backup_dir/caddy-config/." proxy:/config
-docker compose up -d --wait &&
+compose_services=$(docker compose config --services) &&
+docker compose up -d --wait app db &&
+if printf '%s\n' "$compose_services" | grep -qx worker; then
+  docker compose up -d --wait --no-deps worker
+fi &&
 docker compose up -d --wait --force-recreate --no-deps proxy
 ```
 
-The last command briefly restarts only the proxy and binds the restored host `Caddyfile`,
-including when the backed-up revision predates the upgrade helper. For plain mode, omit
+Starting app/database and the selected worker explicitly leaves the proxy untouched
+until the final command, preserving its restored certificate/data volumes and avoiding
+a second restart. The last command briefly restarts only the proxy and binds the restored
+host `Caddyfile`, including when the backed-up revision predates the upgrade helper. For plain mode, omit
 it and remove the preceding `&&`.
 
 Keep the free `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` selected before the
@@ -735,13 +741,19 @@ restored selection from `.env`, and a failed checkout prevents startup.
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
   unset COMPOSE_FILE &&
-  docker compose up -d --wait &&
+  compose_services=$(docker compose config --services) &&
+  docker compose up -d --wait app db &&
+  if printf '%s\n' "$compose_services" | grep -qx worker; then
+    docker compose up -d --wait --no-deps worker
+  fi &&
   docker compose up -d --wait --force-recreate --no-deps proxy
 )
 ```
 
-The explicit final proxy recreation works even if the old revision has no upgrade helper,
-and briefly interrupts HTTPS while binding that revision's actual host `Caddyfile`. For
+Starting app/database and the selected worker explicitly leaves the proxy untouched
+until the final command, avoiding a second HTTPS interruption. Named certificate and
+data volumes are preserved. The explicit final proxy recreation works even if the old
+revision has no upgrade helper, and briefly interrupts HTTPS while binding that revision's actual host `Caddyfile`. For
 plain mode, omit the final command and remove the preceding `&&`.
 
 For plain mode, remove both lines of the proxy verification before pasting either
