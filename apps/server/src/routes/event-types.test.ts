@@ -27,25 +27,25 @@ const serverUrl = process.env.DATABASE_URL
 
 describe('event type routes in the OpenAPI document', () => {
   it.each(['maxBookingsPerWeek', 'maxBookingsPerMonth'])(
-    'detects a source-copy mutation exposing internal %s configuration',
+    'detects a source-copy mutation dropping public %s configuration',
     (field) => {
       const source = readFileSync(new URL('./event-types.ts', import.meta.url), 'utf8')
       const projection = source.slice(
         source.indexOf('const eventTypeResponse ='),
         source.indexOf('const locationKinds ='),
       )
-      const omitted = `  ${field}: _${field},\n`
-      expect(projection).toContain(omitted)
+      const omitted = `${field}: _${field}, `
+      expect(projection).not.toContain(omitted)
       const verify = (copy: string) => {
         const project = new Function(
           `${stripTypeScriptTypes(copy)}; return eventTypeResponse`,
         )() as (event: Record<string, unknown>) => Record<string, unknown>
         const result = project({ title: 'Intro', [field]: 1 })
         expect(result.title).toBe('Intro')
-        expect(result).not.toHaveProperty(field)
+        expect(result).toHaveProperty(field, 1)
       }
       verify(projection)
-      expect(() => verify(projection.replace(omitted, ''))).toThrow(
+      expect(() => verify(projection.replace('...eventType', `${omitted}...eventType`))).toThrow(
         expect.objectContaining({ name: 'AssertionError' }),
       )
     },
@@ -171,7 +171,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
   })
   const idOf = (answer: { body: unknown }) => (answer.body as { id: string }).id
 
-  it('keeps weekly and monthly configuration internal until transport support is added', async () => {
+  it('returns weekly and monthly configuration on every event response', async () => {
     const user = await createTestUser(t.db)
     const team = await createTestTeam(t.db, [{ user, role: 'owner' }])
     await createFixtures(t.db).schedule(user.id)
@@ -184,24 +184,16 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     }
     const created = await client.post(
       '/api/v1/event-types',
-      body({ schedulingType: 'round_robin', hosts: [{ userId: user.id }], successRedirect }),
+      body({
+        schedulingType: 'round_robin',
+        hosts: [{ userId: user.id }],
+        successRedirect,
+        maxBookingsPerWeek: 3,
+        maxBookingsPerMonth: 8,
+      }),
     )
     expect(created.status).toBe(201)
     const id = idOf(created)
-    await t.db
-      .updateTable('event_types')
-      .set({
-        max_bookings_per_week: 3,
-        max_bookings_per_month: 8,
-      })
-      .where('id', '=', id)
-      .execute()
-    for (const field of ['maxBookingsPerWeek', 'maxBookingsPerMonth']) {
-      expect(
-        (await client.post('/api/v1/event-types', body({ slug: 'new', [field]: 4 }))).status,
-      ).toBe(400)
-      expect((await client.patch(`/api/v1/event-types/${id}`, { [field]: 4 })).status).toBe(400)
-    }
     const listed = await client.get('/api/v1/event-types')
     expect(listed.status).toBe(200)
     const responses = [
@@ -223,8 +215,9 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     for (const [name, response] of responses) {
       expect(response.status, name).toBe(name === 'created event' ? 201 : 200)
       expect(response.body, name).toHaveProperty('successRedirect', successRedirect)
-      expect(response.body, name).not.toHaveProperty('maxBookingsPerWeek')
-      expect(response.body, name).not.toHaveProperty('maxBookingsPerMonth')
+      expect(response.body, name).toHaveProperty('maxBookingsPerWeek', 3)
+      expect(response.body, name).toHaveProperty('maxBookingsPerMonth', 8)
+      expect(response.body, name).not.toHaveProperty('locations')
     }
     expect(
       await t.db
@@ -387,6 +380,8 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       minimumNoticeMinutes: 0,
       bookingWindowDays: null,
       maxBookingsPerDay: null,
+      maxBookingsPerWeek: null,
+      maxBookingsPerMonth: null,
       schedulingType: 'individual',
       roundRobinActive: false,
       conferenceOrganizer: null,

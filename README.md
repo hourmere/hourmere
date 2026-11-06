@@ -35,6 +35,10 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 
+CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
+iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
+available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
+
 ## Development
 
 Requires Node.js 26 and Docker.
@@ -398,6 +402,9 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
   [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
