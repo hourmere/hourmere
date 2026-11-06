@@ -777,7 +777,16 @@ export function serverErrors(
         return field('allowedDurationsMinutes', problem)
       }
       for (const [shorter, longer, message] of BOOKING_LIMIT_PAIRS) {
-        if (detail === `${longer} must be at least ${shorter}`) return field(longer, message)
+        if (detail === `${longer} must be at least ${shorter}`) {
+          const shorterValue = parseWhole(draft[shorter])
+          const longerValue = parseWhole(draft[longer])
+          if (shorterValue === null || longerValue === null || shorterValue <= longerValue)
+            return field(
+              longer,
+              'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
+            )
+          return field(longer, message)
+        }
       }
       if (Object.hasOwn(RULE_MESSAGES, name)) return field(name, RULE_MESSAGES[name] as UiText)
       if (name === 'title') {

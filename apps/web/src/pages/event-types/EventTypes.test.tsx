@@ -772,6 +772,51 @@ describe('editing an event type', () => {
     ])
   })
 
+  it.each(['en', 'zh-CN'] as const)(
+    'explains a concurrent booking limit change in %s without discarding the draft',
+    async (language) => {
+      chooseLanguage(language)
+      const user = userEvent.setup()
+      let current = saved
+      const api = eventTypeServer([saved], {
+        [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: ({ body }) => {
+          const merged = { ...current, ...(body as Partial<EventType>) }
+          expect(merged.maxBookingsPerWeek).toBe(20)
+          expect(merged.maxBookingsPerMonth).toBe(12)
+          return json(400, {
+            error: 'invalid_event_type',
+            message: 'maxBookingsPerMonth must be at least maxBookingsPerWeek',
+          })
+        },
+      })
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      const weekly = await screen.findByLabelText<HTMLInputElement>(
+        language === 'en' ? /Weekly limit/ : /每周上限/,
+      )
+      const monthly = field(language === 'en' ? /Monthly limit/ : /每月上限/)
+      expect(weekly.value).toBe('5')
+      current = { ...saved, maxBookingsPerWeek: 20, maxBookingsPerMonth: 30 }
+      await user.clear(monthly)
+      await user.type(monthly, '12')
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Save changes' : '保存更改' }),
+      )
+      const summary = await screen.findByRole('alert')
+      expect(summary.textContent).toContain(
+        language === 'en'
+          ? 'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.'
+          : '预约上限已在其他地方更改。请重新加载以查看当前上限，再次保存。你的更改尚未保存。',
+      )
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1)
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(
+        'maxBookingsPerWeek',
+      )
+      expect(weekly.value).toBe('5')
+      expect(monthly.value).toBe('12')
+      expect(monthly.getAttribute('aria-invalid')).toBe('true')
+    },
+  )
+
   it('saves metadata for an invitee-phone default without supplying a host number', async () => {
     const user = userEvent.setup()
     const api = eventTypeServer([eventType({ location: { kind: 'phone', askInvitee: true } })])

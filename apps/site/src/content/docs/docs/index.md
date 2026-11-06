@@ -37,7 +37,6 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
-
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

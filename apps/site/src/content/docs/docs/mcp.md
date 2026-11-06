@@ -666,11 +666,15 @@ ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for set
 
 ## Configure booking limits
 
-Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
-`maxBookingsPerMonth`: whole numbers from 1 to 1000, or `null` for no ceiling.
-Omitted update fields preserve the saved setting. Configured allowances must satisfy
+MCP `create_event_type` and `update_event_type` accept `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns all three
+settings. Updates take a flat object with `id` alongside changed fields.
+Configuration writes require a `full` API key and the usual ownership or team
+owner/admin permissions; MCP OAuth retains its organization and role checks.
+
+Each ceiling is a whole number from 1 to 1000, or `null` for no ceiling. Omitted
+update fields preserve the saved setting. Configured allowances must satisfy
 day ≤ week ≤ month, comparing each pair that is set, including day/month without a
-weekly limit. Event-type reads return all three settings. API keys need `full` scope
-for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
-CLI examples, host schedule time zones, Monday-based weeks, calendar months and
-counting rules. Lowering a ceiling does not cancel existing bookings.
+weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
+time zones, Monday-based weeks, calendar months and counting rules. Lowering a
+ceiling does not cancel existing bookings.

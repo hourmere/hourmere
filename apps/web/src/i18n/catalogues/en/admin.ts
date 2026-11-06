@@ -1104,6 +1104,8 @@ export const admin = {
     'Monthly limit must be at least the weekly limit.',
   'Monthly limit must be at least the daily limit.':
     'Monthly limit must be at least the daily limit.',
+  'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.':
+    'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
   'Daily limit': 'Daily limit',
   Date: 'Date',
   'Date overrides': 'Date overrides',

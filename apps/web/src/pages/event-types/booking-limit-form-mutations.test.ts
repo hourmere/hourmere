@@ -92,6 +92,23 @@ const cases: { name: string; change: readonly [string, string]; verify: (copy: C
       ).toHaveProperty('maxBookingsPerMonth'),
   },
   {
+    name: 'concurrent booking limit change warning',
+    change: ['shorterValue <= longerValue)', 'false)'],
+    verify: (copy) =>
+      expect(
+        copy.serverErrors(
+          new RequestError(
+            400,
+            'invalid_event_type',
+            'maxBookingsPerMonth must be at least maxBookingsPerWeek',
+          ),
+          { ...copy.emptyDraft(), maxBookingsPerWeek: '5', maxBookingsPerMonth: '12' },
+        ).fields.maxBookingsPerMonth,
+      ).toBe(
+        'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
+      ),
+  },
+  {
     name: 'server consistency error mapping',
     change: ['return field(longer, message)', 'return field(longer, "Wrong message")'],
     verify: (copy) =>
@@ -102,7 +119,7 @@ const cases: { name: string; change: readonly [string, string]; verify: (copy: C
             'invalid_event_type',
             'maxBookingsPerMonth must be at least maxBookingsPerWeek',
           ),
-          copy.emptyDraft(),
+          { ...copy.emptyDraft(), maxBookingsPerWeek: '20', maxBookingsPerMonth: '12' },
         ).fields.maxBookingsPerMonth,
       ).toBe('Monthly limit must be at least the weekly limit.'),
   },
