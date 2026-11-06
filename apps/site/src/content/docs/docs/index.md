@@ -34,6 +34,11 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- Organization OIDC/SAML SSO is in design and is not available yet. The
+  [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
+  self-hosting, linking, enforcement and the planned implementation sequence.
+  Planned SSO is available to every instance without a paid-plan requirement.
+
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.
