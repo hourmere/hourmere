@@ -483,7 +483,7 @@ export async function joinWaitlist(
   input: JoinWaitlistInput,
 ): Promise<{ accepted: true }> {
   const parsed = parseInput(input)
-  return ctx.db.transaction().execute(async (db) => {
+  const result = await ctx.db.transaction().execute(async (db) => {
     await ensureWaitlistKey(
       db,
       ctx.secret,
@@ -524,7 +524,7 @@ export async function joinWaitlist(
       .where('event_type_id', '=', et.id)
       .where('status', 'in', LIVE)
       .executeTakeFirstOrThrow()
-    if (Number(count.n) >= 100) throw new DomainError('conflict', 'waitlist_full')
+    if (Number(count.n) >= 100) return 'full' as const
     if (!budget.allowed || Number(count.duplicate) > 0) return accepted()
     const expiresAt = new Date(Math.min(now.getTime() + 30 * DAY, parsed.end.getTime()))
     const entry = await db
@@ -550,6 +550,9 @@ export async function joinWaitlist(
     await generation(db, ctx, entry, budget, now)
     return accepted()
   })
+  // Commit the IP/event admission debit even when no entry or email can be created.
+  if (result === 'full') throw new DomainError('conflict', 'waitlist_full')
+  return result
 }
 
 export async function resendWaitlistVerification(
