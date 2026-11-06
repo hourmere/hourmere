@@ -15,6 +15,12 @@
         },
         "booking.rescheduled": {
           "displayName": "预约已改期"
+        },
+        "booking.reschedule_requested": {
+          "displayName": "预约已请求改期"
+        },
+        "booking.reschedule_request_expired": {
+          "displayName": "预约改期请求已过期"
         }
       }
     }

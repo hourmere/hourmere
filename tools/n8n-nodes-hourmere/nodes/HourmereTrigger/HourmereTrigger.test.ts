@@ -5,6 +5,7 @@ import { HourmereTrigger } from './HourmereTrigger.node'
 import {
   claimEvent,
   createReceiptCoordinator,
+  EVENTS,
   MAX_PROCESS_RECEIPTS,
   MAX_RECEIPT_SCOPES,
   MAX_RECEIPTS,
@@ -83,7 +84,7 @@ function delivery(
     response,
     context: {
       getWorkflowStaticData: () => data,
-      getNodeParameter: () => ['booking.created', 'booking.cancelled', 'booking.rescheduled'],
+      getNodeParameter: () => [...EVENTS],
       getRequestObject: () => request,
       getResponseObject: () => response,
       helpers: { returnJsonArray: (json: IDataObject) => [{ json }] },
@@ -198,21 +199,61 @@ describe('Hourmere trigger lifecycle', () => {
     expect(await node.webhookMethods.default.checkExists.call(h.context)).toBe(true)
     expect(h.data).toEqual({ webhookId, webhookSecret: secret })
   })
-  it.each([false, true])(
-    'clears only the deactivated receipt scope even if unreachable: %s',
-    async (unreachable) => {
-      const registration = { webhookId: randomUUID(), webhookSecret: secret }
-      const other = { webhookId: randomUUID(), webhookSecret: secret }
-      const h = hook({ ...registration })
-      expect(claimEvent(h.data, id)).toBe('new')
-      expect(claimEvent({ ...other }, id)).toBe('new')
-      if (unreachable) h.request.mockRejectedValue(new Error('unreachable'))
-      else h.request.mockResolvedValue(undefined)
-      expect(await node.webhookMethods.default.delete.call(h.context)).toBe(!unreachable)
-      expect(h.data.receipts).toBeUndefined()
-      expect(claimEvent({ ...registration }, id)).toBe('new')
-      expect(claimEvent({ ...other }, id)).toBe('duplicate')
-      if (unreachable) expect(h.data).toEqual(registration)
+  it('clears only the successfully deactivated receipt scope', async () => {
+    const registration = { webhookId: randomUUID(), webhookSecret: secret }
+    const other = { webhookId: randomUUID(), webhookSecret: secret }
+    const h = hook({ ...registration })
+    expect(claimEvent(h.data, id)).toBe('new')
+    expect(claimEvent({ ...other }, id)).toBe('new')
+    h.request.mockResolvedValue(undefined)
+    expect(await node.webhookMethods.default.delete.call(h.context)).toBe(true)
+    expect(h.data).toEqual({})
+    expect(claimEvent({ ...registration }, id)).toBe('new')
+    expect(claimEvent({ ...other }, id)).toBe('duplicate')
+  })
+  it('preserves persisted and process replay receipts after failed deactivation and reactivation', async () => {
+    const registration = { webhookId: randomUUID(), webhookSecret: secret }
+    const first = delivery({ ...registration })
+    expect((await node.webhook.call(first.context)).workflowData).toBeDefined()
+    const h = hook(first.data)
+    const retained = structuredClone(h.data)
+    h.request.mockRejectedValueOnce(new Error('unreachable'))
+    expect(await node.webhookMethods.default.delete.call(h.context)).toBe(false)
+    expect(h.data).toEqual(retained)
+    h.request.mockResolvedValueOnce([
+      {
+        id: registration.webhookId,
+        url: h.context.getNodeWebhookUrl('default'),
+        isActive: true,
+        events: ['booking.created'],
+      },
+    ])
+    expect(await node.webhookMethods.default.checkExists.call(h.context)).toBe(true)
+    const replay = delivery(h.data)
+    Object.assign(replay.request, first.request)
+    expect(await node.webhook.call(replay.context)).toEqual({})
+    // Even a stale pre-delivery snapshot cannot erase the in-process receipt.
+    expect(await node.webhook.call(delivery({ ...registration }).context)).toEqual({})
+    // A restarted worker can restore the persisted receipt independently.
+    expect(createReceiptCoordinator()(structuredClone(h.data), id)).toBe('duplicate')
+  })
+  it.each(['booking.reschedule_requested', 'booking.reschedule_request_expired'])(
+    'offers and registers %s',
+    async (event) => {
+      const options = node.description.properties.find(
+        (property) => property.name === 'events',
+      )?.options
+      expect(options).toContainEqual(expect.objectContaining({ value: event }))
+      const h = hook()
+      h.context.getNodeParameter = () => [event]
+      h.request.mockResolvedValue({ webhook: { id: randomUUID() }, secret })
+      expect(await node.webhookMethods.default.create.call(h.context)).toBe(true)
+      expect(h.request).toHaveBeenCalledWith(
+        'hourmereApi',
+        expect.objectContaining({
+          body: expect.objectContaining({ events: [event] }),
+        }),
+      )
     },
   )
   it.each(['replace', 'missing', 'already deleted'])(
@@ -285,17 +326,20 @@ describe('Hourmere trigger lifecycle', () => {
 })
 
 describe('Hourmere trigger delivery and replay', () => {
-  it.each(['booking.created', 'booking.cancelled', 'booking.rescheduled'])(
-    'emits %s without rewriting the snapshot, including DST-spanning instants',
-    async (type) => {
-      const original = payload(type)
-      const d = delivery(undefined, Buffer.from(JSON.stringify(original)))
-      const result = await node.webhook.call(d.context)
-      expect(result.workflowData).toEqual([[{ json: original }]])
-      expect(d.request.readRawBody).toHaveBeenCalledOnce()
-      expect(d.response.status).not.toHaveBeenCalled()
-    },
-  )
+  it.each([
+    'booking.created',
+    'booking.cancelled',
+    'booking.rescheduled',
+    'booking.reschedule_requested',
+    'booking.reschedule_request_expired',
+  ])('emits %s without rewriting the snapshot, including DST-spanning instants', async (type) => {
+    const original = payload(type)
+    const d = delivery(undefined, Buffer.from(JSON.stringify(original)))
+    const result = await node.webhook.call(d.context)
+    expect(result.workflowData).toEqual([[{ json: original }]])
+    expect(d.request.readRawBody).toHaveBeenCalledOnce()
+    expect(d.response.status).not.toHaveBeenCalled()
+  })
   it('rejects unsigned requests with HTTP 401 without claiming or emitting', async () => {
     const d = delivery()
     d.request.headers['webhook-signature'] = ''

@@ -16,7 +16,7 @@ export default defineConfig({
             'packages/*/src/**/*.test.ts',
             'scripts/**/*.test.ts',
             'tools/cli/src/**/*.test.ts',
-            'tools/n8n-nodes-hourmere/**/*.test.ts',
+            'tools/n8n-nodes-hourmere/contract.test.ts',
           ],
           exclude: [...configDefaults.exclude, 'apps/web/**'],
         },

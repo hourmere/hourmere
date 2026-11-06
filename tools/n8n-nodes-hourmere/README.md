@@ -5,13 +5,22 @@ Hourmere booking actions and signed webhook triggers for self-hosted n8n.
 
 ## Installation
 
-Build and pack from the Hourmere repository root (requires its pinned Node.js version):
+Build and pack the standalone package (requires the repository’s pinned Node.js version):
 
 ```sh
+cd tools/n8n-nodes-hourmere
 npm ci --ignore-scripts
-npm run build --workspace n8n-nodes-hourmere
-npm pack --workspace n8n-nodes-hourmere --pack-destination /tmp
+npm run lint
+npm run typecheck
+npm run build
+npm test
+npm pack --ignore-scripts --pack-destination /tmp
 ```
+
+This directory has its own committed `package-lock.json` and is excluded from the root
+npm workspaces. Root installs never download the n8n toolchain. The separate
+`n8n-compatibility` CI job runs the commands above; the root test suite checks the
+OpenAPI contract without requiring this package’s `node_modules`.
 
 Copy the archive to your n8n host. As n8n's operating-system user, install the actual
 archive path in `~/.n8n/nodes`, then restart n8n:
@@ -27,9 +36,14 @@ Docker image excludes this package. Once published, self-hosted n8n owners/admin
 install `n8n-nodes-hourmere` through Settings → Community nodes.
 See the [official manual installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation.md).
 
-Publishing is a separate owner-approved step. The `prepublishOnly` guard refuses
-publication unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; building and packing do
-not publish. Contributors must use `npm install --ignore-scripts` (or `npm ci --ignore-scripts`):
+Publishing is a separate owner-approved step. `publishConfig.registry` points to
+`https://registry.invalid/`, an unresolvable placeholder honored even with scripts disabled.
+The approved publication change must remove that placeholder. The `prepublishOnly` guard
+also refuses publication unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; building and
+packing do not publish. npm dry-runs skip registry access: with `--ignore-scripts`, a
+dry-run can return success even though an actual publication cannot reach this registry.
+
+Contributors must use `npm install --ignore-scripts` (or `npm ci --ignore-scripts`):
 the official CLI requires `eslint-plugin-n8n-nodes-base`, whose preinstall otherwise
 fetches and executes an unpinned `only-allow`. Native toolchain install scripts are
 also unnecessary for this package’s build and tests.
@@ -70,7 +84,8 @@ history. Restrict execution-data access/retention or drop that field before reta
 or forwarding results. Dropping it in a later node does not erase the create node’s
 saved output; restrict or disable execution-data storage as appropriate.
 
-**Hourmere Trigger:** booking created, cancelled and rescheduled. Activation registers a
+**Hourmere Trigger:** booking created, cancelled, rescheduled, reschedule requested and
+reschedule request expired. Activation registers a
 REST webhook; deactivation attempts to delete it. If Hourmere is unreachable, deactivation
 returns false and retains registration details for recovery. Remove the leftover endpoint
 in Hourmere’s webhook settings (or with `DELETE /api/v1/webhooks/{id}`); it continues
@@ -86,7 +101,8 @@ coordination merges separate request
 snapshots and suppresses concurrent redelivery in one process. Limits are 10,000 receipts
 per registration, 100,000 receipts and 1,000 registrations per process. Expired receipts
 are evicted; HTTP 503 occurs only when receipts still inside that window fill a limit.
-Deletion/deactivation clears the registration’s local receipts. n8n static data is
+Successful remote deletion clears the registration’s local receipts. Failed deactivation
+retains the endpoint, secret and receipts together, preventing replay after quick reactivation. n8n static data is
 best-effort, not transactional across workers/restarts.
 Use the event ID with a downstream persistent unique constraint for durable idempotency.
 

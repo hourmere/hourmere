@@ -127,10 +127,6 @@
               "displayName": "降序"
             }
           }
-        },
-        "limit": {
-          "displayName": "条数上限",
-          "description": "最多返回的结果条数。"
         }
       }
     },

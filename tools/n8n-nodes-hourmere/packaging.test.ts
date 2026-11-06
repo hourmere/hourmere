@@ -13,6 +13,10 @@ describe('community package publication', () => {
     expect(manifest.private).toBeUndefined()
   })
 
+  it('blocks the default publication destination even when lifecycle scripts are skipped', () => {
+    expect(manifest.publishConfig).toEqual({ registry: 'https://registry.invalid/' })
+  })
+
   it.each([undefined, '', '0', 'true', '1'])(
     'requires explicit publish approval: %s',
     (approval) => {

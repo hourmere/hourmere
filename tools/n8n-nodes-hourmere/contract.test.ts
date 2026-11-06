@@ -90,7 +90,7 @@ it('keeps trigger registration and lifecycle contracts in generated OpenAPI', ()
   expect(
     resolve(required(required(resolve(body).properties?.events, 'events').items, 'event items'))
       .enum,
-  ).toEqual(expect.arrayContaining([...EVENTS]))
+  ).toEqual([...EVENTS])
   fields(response(create, '201'), ['webhook.id', 'secret'])
   operation('/webhooks/{id}', 'delete')
 })

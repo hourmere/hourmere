@@ -1,7 +1,13 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { IDataObject } from 'n8n-workflow'
 
-export const EVENTS = ['booking.created', 'booking.cancelled', 'booking.rescheduled'] as const
+export const EVENTS = [
+  'booking.created',
+  'booking.rescheduled',
+  'booking.cancelled',
+  'booking.reschedule_requested',
+  'booking.reschedule_request_expired',
+] as const
 export const TIMESTAMP_TOLERANCE_SECONDS = 300
 export const RECEIPT_RETENTION_MS = 2 * TIMESTAMP_TOLERANCE_SECONDS * 1000
 export const MAX_RECEIPTS = 10_000

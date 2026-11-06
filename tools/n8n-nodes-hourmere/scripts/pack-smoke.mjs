@@ -36,7 +36,7 @@ try {
   assert(pack.files.every(({ path }) => !/\.test\.|\.env|mutation/.test(path)))
   const install = join(scratch, 'install')
   // n8n supplies its own workflow peer. Keep this smoke install offline and install
-  // the exact tested peer by linking the workspace copy after the tarball is unpacked.
+  // the exact tested peer by linking the standalone copy after the tarball is unpacked.
   npm(
     [
       'install',

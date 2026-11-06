@@ -17,10 +17,17 @@ an Hourmere instance you already have access to, not the marketing website.
 From an Hourmere source checkout, using the repository's required Node.js version:
 
 ```sh
+cd tools/n8n-nodes-hourmere
 npm ci --ignore-scripts
-npm run build --workspace n8n-nodes-hourmere
-npm pack --workspace n8n-nodes-hourmere --pack-destination /tmp
+npm run lint
+npm run typecheck
+npm run build
+npm test
+npm pack --ignore-scripts --pack-destination /tmp
 ```
+
+The package has its own lockfile and is excluded from root npm workspaces. Root
+installs do not download its toolchain; the separate `n8n-compatibility` CI job checks it.
 
 Copy the resulting `n8n-nodes-hourmere-<version>.tgz` to your n8n host. As the operating-system
 user that runs n8n, install it in n8n's community-node directory, replacing the path below
@@ -124,6 +131,8 @@ uses one of Hourmere's ten webhook endpoints per organization. Supported events 
 - `booking.created`
 - `booking.cancelled`
 - `booking.rescheduled`
+- `booking.reschedule_requested`
+- `booking.reschedule_request_expired`
 
 Every delivery must have a valid HMAC-SHA256 signature over the exact raw body and a
 signed timestamp within five minutes of n8n's clock. Unsigned, tampered and stale requests
@@ -136,10 +145,11 @@ for ten minutes (twice the signature timestamp tolerance). A process-level coord
 merges separate request snapshots to suppress
 concurrent redelivery within one n8n process. Limits are 10,000 receipts per registration,
 100,000 receipts and 1,000 registrations per process. Receipts older than the window
-are evicted; only a flood of receipts still within that window returns 503. Deletion
-or deactivation clears the registration’s local receipt scope. Late redeliveries can
-therefore execute again. These safeguards are best-effort: n8n workflow static
-data is not a transactional receipt store across workers, process crashes or restarts.
+are evicted; only a flood of receipts still within that window returns 503. Successful
+remote deletion clears the registration’s local receipt scope. If deactivation fails,
+the endpoint, secret and receipts remain together so quick reactivation cannot replay
+a captured delivery. Redeliveries beyond the receipt window can execute again. These
+safeguards are best-effort: n8n workflow static data is not a transactional receipt store across workers, process crashes or restarts.
 For durable effects, make the downstream operation idempotent using the event `id` in a
 persistent store with a unique constraint. Do not assume exactly-once workflow execution.
 
@@ -156,7 +166,7 @@ data. Events can arrive out of order. A reschedule carries the new booking ID an
 
 ## Examples
 
-**Keep another system in sync:** activate a trigger for all three events. Use the event
+**Keep another system in sync:** activate a trigger for all five events. Use the event
 `id` as your downstream deduplication key. Match records using `data.bookingId`; for a
 reschedule, link the successor to `data.rescheduledFromId`. Reconcile the latest booking
 state before applying an older event.
@@ -184,11 +194,15 @@ workflows, not all Hourmere configuration endpoints. There is no historical-even
 manual replay or exactly-once delivery guarantee. Protect and retain downstream receipts
 when effects must survive retries, concurrent workers or restarts.
 
-Publishing remains a separate owner-approved step. `prepublishOnly` refuses to publish
-unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; packing does not publish. The workflow
+Publishing remains a separate owner-approved step. `publishConfig.registry` points to
+`https://registry.invalid/`; the approved publication change must remove this unresolvable
+placeholder. It applies even with scripts disabled. `prepublishOnly` additionally refuses
+to publish unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; packing does not publish.
+An npm dry-run skips registry access and can succeed with `--ignore-scripts`; it does
+not demonstrate that publication can reach the configured registry. The workflow
 peer range is `*`, with an exact development pin for builds/tests. Contributors must
-install with `npm install --ignore-scripts` or `npm ci --ignore-scripts`, as CI and Docker
-do. The official CLI requires a lint plugin whose preinstall fetches an unpinned
+install with `npm install --ignore-scripts` or `npm ci --ignore-scripts`, in this package directory, as its CI job
+does. The official CLI requires a lint plugin whose preinstall fetches an unpinned
 `only-allow`; the toolchain’s native install scripts are also unnecessary here.
 
 ### Interface language

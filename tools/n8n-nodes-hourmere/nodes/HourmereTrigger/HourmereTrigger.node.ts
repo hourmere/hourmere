@@ -88,6 +88,11 @@ export class HourmereTrigger implements INodeType {
         options: [
           { name: 'Booking Cancelled', value: 'booking.cancelled' },
           { name: 'Booking Created', value: 'booking.created' },
+          {
+            name: 'Booking Reschedule Request Expired',
+            value: 'booking.reschedule_request_expired',
+          },
+          { name: 'Booking Reschedule Requested', value: 'booking.reschedule_requested' },
           { name: 'Booking Rescheduled', value: 'booking.rescheduled' },
         ],
         default: ['booking.created'],
@@ -162,12 +167,11 @@ export class HourmereTrigger implements INodeType {
       },
       async delete(this: IHookFunctions): Promise<boolean> {
         const data = this.getWorkflowStaticData('node')
-        claimEvent.clear(data)
         try {
           await removeRegistration(this, data)
           return true
         } catch {
-          // Preserve the endpoint identity for recovery; let n8n finish local deactivation.
+          // Keep the endpoint, secret and replay receipts together until remote removal succeeds.
           this.logger.warn(
             'Hourmere webhook deletion failed. Remove the endpoint in Hourmere webhook settings.',
           )

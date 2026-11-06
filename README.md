@@ -51,10 +51,10 @@ npm run dev        # API on :3000, web app on http://localhost:5173
 ```
 
 Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
-The official n8n development CLI requires `eslint-plugin-n8n-nodes-base`, whose
-preinstall would otherwise fetch and execute an unpinned `only-allow` package.
-The n8n toolchain also includes native dependency install scripts; none is needed
-for the Hourmere community node build or tests.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
 
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
 In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
