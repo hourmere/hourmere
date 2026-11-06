@@ -1,3 +1,4 @@
+import '../../i18n/admin.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { translateMessage } from '../../i18n/translate.ts'
@@ -474,5 +475,78 @@ describe('multiple duration draft validation', () => {
     expect(durationToAddProblem('30', [30])).toBe('This duration is already in the list.')
     expect(durationToAddProblem('1440', [30])).toBeNull()
     expect(allowedDurationsProblem([30, 1440], '1440')).toBeNull()
+  })
+})
+
+describe('booking limit drafts', () => {
+  const baseline = draftFromEventType(
+    eventType({
+      maxBookingsPerDay: 2,
+      maxBookingsPerWeek: 5,
+      maxBookingsPerMonth: 10,
+    }),
+  )
+  it('loads and round-trips all limits, tracks edits, and clears optional limits', () => {
+    expect(baseline).toMatchObject({
+      maxBookingsPerDay: '2',
+      maxBookingsPerWeek: '5',
+      maxBookingsPerMonth: '10',
+    })
+    expect(toInput(baseline)).toMatchObject({
+      maxBookingsPerDay: 2,
+      maxBookingsPerWeek: 5,
+      maxBookingsPerMonth: 10,
+    })
+    for (const name of [
+      'maxBookingsPerDay',
+      'maxBookingsPerWeek',
+      'maxBookingsPerMonth',
+    ] as const) {
+      expect(toPatchInput({ ...baseline, title: 'Metadata' }, baseline)).not.toHaveProperty(name)
+      expect(toPatchInput({ ...baseline, [name]: '' }, baseline)).toHaveProperty(name, null)
+      expect(comparable({ ...baseline, [name]: '' })).not.toBe(comparable(baseline))
+    }
+    expect(toPatchInput({ ...baseline, maxBookingsPerWeek: '6' }, baseline)).toHaveProperty(
+      'maxBookingsPerWeek',
+      6,
+    )
+    expect(toPatchInput({ ...baseline, maxBookingsPerMonth: '12' }, baseline)).toHaveProperty(
+      'maxBookingsPerMonth',
+      12,
+    )
+  })
+  it.each(['maxBookingsPerWeek', 'maxBookingsPerMonth'] as const)(
+    'validates optional integer bounds for %s',
+    (name) => {
+      const draft = { ...emptyDraft(), title: 'Intro', slug: 'intro' }
+      for (const value of ['', '1', '1000'])
+        expect(validateDraft({ ...draft, [name]: value })).toEqual({})
+      for (const value of ['0', '1001', '1.5', 'abc', '-1'])
+        expect(validateDraft({ ...draft, [name]: value })).toHaveProperty(name)
+      const errors = serverErrors(
+        new RequestError(400, 'invalid_event_type', `${name} must be an integer from 1 to 1000`),
+        draft,
+      )
+      expect(translateMessage('en', errors.fields[name])).toBe('Enter a number from 1 to 1,000.')
+    },
+  )
+  it.each([
+    ['maxBookingsPerDay', 'maxBookingsPerWeek', 'Weekly limit must be at least the daily limit.'],
+    [
+      'maxBookingsPerWeek',
+      'maxBookingsPerMonth',
+      'Monthly limit must be at least the weekly limit.',
+    ],
+    ['maxBookingsPerDay', 'maxBookingsPerMonth', 'Monthly limit must be at least the daily limit.'],
+  ] as const)('checks %s ≤ %s and maps the server refusal', (shorter, longer, message) => {
+    const draft = { ...emptyDraft(), title: 'Intro', slug: 'intro', [shorter]: '5', [longer]: '4' }
+    expect(renderedDraftErrors(draft)).toEqual({ [longer]: message })
+    expect(validateDraft({ ...draft, [longer]: '5' })).toEqual({})
+    const mapped = serverErrors(
+      new RequestError(400, 'invalid_event_type', `${longer} must be at least ${shorter}`),
+      draft,
+    )
+    expect(mapped).toEqual({ fields: { [longer]: message }, message: null })
+    expect(translateMessage('zh-CN', mapped.fields[longer])).not.toBe(message)
   })
 })

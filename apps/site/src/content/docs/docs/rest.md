@@ -247,3 +247,46 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Ask an invitee to choose another time
+
+Hosts can send `POST /api/v1/bookings/{id}/request-reschedule` with
+`{"idempotencyKey":"<random UUID>","note":"Could you choose another time?"}`.
+The MCP equivalent is `request_reschedule` with `bookingId` and the same fields;
+CLI users run `hourmere request-reschedule --input request.json`.
+A `bookings` or `full` API key and existing host permission are required.
+The optional plain-text note is limited to 2000 UTF-16 code units and appears only
+in the email body. Retain the UUID and identical input for safe retries; use a new
+UUID to replace the outstanding request.
+
+The returned booking stays `confirmed`, with optional `pendingReschedule` containing
+`id`, `expiresAt` and `note`. The original time stays booked and blocks availability
+until the invitee uses their normal manage link to pick another time or cancel.
+The request expires after 48 hours or when the original meeting starts, whichever
+comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+cannot receive a request. Picking uses the normal availability rules and reschedule
+limit, calendar updates, conference handling and reminders.
+
+When answering a request through REST or MCP, include `rescheduleRequestId` from
+`pendingReschedule.id` with the managed pick or cancel input. This rejects stale
+replaced requests and makes identical retries safe; a replayed pick returns the
+same successor with `manageToken: null`. Without that field, existing ordinary
+reschedule retry semantics remain unchanged.
+
+## Configure booking limits
+
+Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`: whole numbers from 1 to 1000, or `null` for no ceiling.
+Omitted update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. Event-type reads return all three settings. API keys need `full` scope
+for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
+CLI examples, host schedule time zones, Monday-based weeks, calendar months and
+counting rules. Lowering a ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

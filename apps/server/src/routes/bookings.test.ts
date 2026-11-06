@@ -136,6 +136,57 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     expect((await request('cancel', {})).status).toBe(200)
   })
 
+  it('requests a new time only for an authenticated host and replays without replacing it', async () => {
+    const f = createFixtures(db)
+    const host = await f.host()
+    const eventTypeId = await f.eventType(host.organizationId, host.userId)
+    const id = await f.booking(
+      host.organizationId,
+      [host.userId],
+      '2026-11-04T15:00Z',
+      '2026-11-04T15:30Z',
+      { eventTypeId },
+    )
+    const principal: Principal = {
+      kind: 'api_key',
+      apiKeyScope: 'bookings',
+      apiKeyId: crypto.randomUUID(),
+      user: { id: host.userId, name: 'Host', email: 'host@example.test' },
+      organization: { id: host.organizationId, name: '', slug: '', personal: true },
+    }
+    principals.set('request-host', principal)
+    principals.set('request-read', { ...principal, apiKeyScope: 'read' })
+    const path = `/api/v1/bookings/${id}/request-reschedule`
+    const input = { idempotencyKey: crypto.randomUUID(), note: 'Please choose another time.' }
+    expect((await post(path, '', input)).status).toBe(401)
+    expect((await post(path, 'bob', input)).status).toBe(404)
+    const read = await post(path, 'request-read', input)
+    expect(read.status).toBe(403)
+    expect(await read.json()).toMatchObject({ error: 'insufficient_scope' })
+    expect((await post(path, 'request-host', { ...input, note: 'x'.repeat(2001) })).status).toBe(
+      400,
+    )
+    const invalidNote = await post(path, 'request-host', { ...input, note: 'bad\tcontrol' })
+    expect(invalidNote.status).toBe(400)
+    expect(await invalidNote.json()).toMatchObject({
+      error: 'invalid_request',
+      message: 'note: must not contain control characters other than LF',
+    })
+    const response = await post(path, 'request-host', input)
+    expect(response.status).toBe(200)
+    const booking = await response.json()
+    expect(booking).toMatchObject({
+      id,
+      status: 'confirmed',
+      start: '2026-11-04T15:00:00.000Z',
+      pendingReschedule: { note: input.note },
+    })
+    const replay = await post(path, 'request-host', input)
+    expect(replay.status).toBe(200)
+    expect(await replay.json()).toEqual(booking)
+    expect((await post(path, 'request-host', { ...input, note: 'Different' })).status).toBe(409)
+  })
+
   it('requires a caller', async () => {
     for (const res of [
       await get('/api/v1/bookings'),

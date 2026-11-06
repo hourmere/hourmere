@@ -17,6 +17,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
+  the editor, REST, MCP or CLI.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
@@ -34,8 +36,29 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
+- [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
+  receive notification when a matching time opens; manage entries in the editor, REST,
+  MCP or CLI. Available in full to self-hosters.
+
 ## Known limitations
 
+- [Booking limits](/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
+- [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
+  single-host types at the default meeting length. Nothing is reserved; the first
+  successful ordinary booking wins, and email delivery is not guaranteed.
+- CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
+  The [design and credential/discovery foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
+  adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
+  is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
+- [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
+  processing, payment settings and automatic refunds are not available.
+- [Requests to choose another time](/docs/request-reschedule) retain the original booking
+  until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
+  bookings do not support requests.
+- [Branding settings](/docs/branding) store a logo and primary colour per space; public
+  booking pages and emails do not apply them yet.
 - [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
   permit one active export per organization. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
@@ -45,7 +68,7 @@ The website at hourmere.com is separate from your Hourmere instance.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
-  in process memory.
+  in process memory, except the additional durable booking-waitlist admission limits.
 - [Microsoft Calendar](/docs/microsoft-calendar) lists calendars only, without busy-time
   synchronization or event writes. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft)
   and calendar connections have not had real-account acceptance.
@@ -68,7 +91,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   [Bundled Caddy](/docs/self-hosting#prepare-the-host) additionally requires ports 80/443,
   an HTTPS host name without a port, and an IPv4-only ingress network.
 - [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
-  uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
+  uses in-process memory at the transport layer; multiple web replicas multiply the limits.
+  Waitlists additionally enforce durable mailbox, event and trusted-IP admission budgets. Run a single web process;
   a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
 - [Public booking pages and emails](/docs/interface-languages) support English,
   Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces support English and

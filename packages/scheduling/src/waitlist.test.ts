@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as availability from './availability.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 import {
   cleanupWaitlist,
@@ -19,6 +22,18 @@ import {
   waitlistRecipientHash,
   waitlistTokenHash,
 } from './waitlist.ts'
+
+async function sourceCopy(file: string, before: string, after: string) {
+  const url = new URL(file, import.meta.url)
+  let source = readFileSync(url, 'utf8')
+  expect(source).toContain(before)
+  source = stripTypeScriptTypes(source.replace(before, after)).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) =>
+      `from '${specifier.startsWith('.') ? new URL(specifier, url).href : specifier.startsWith('node:') ? specifier : import.meta.resolve(specifier)}'`,
+  )
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+}
 
 const serverUrl = process.env.DATABASE_URL
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
@@ -544,6 +559,61 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
     )
   })
 
+  async function assertSmtpPage(api: typeof availability) {
+    const et = await event()
+    const publicContext = { db, now: () => clock }
+    expect((await api.getPublicEventType(publicContext, et)).waitlist).toBeUndefined()
+    expect(
+      (await api.getPublicEventType({ ...publicContext, smtpConfigured: false }, et)).waitlist,
+    ).toBeUndefined()
+    expect(
+      (await api.getPublicEventType({ ...publicContext, smtpConfigured: true }, et)).waitlist,
+    ).toEqual({ enabled: true })
+  }
+  it('only advertises the public waitlist when SMTP is configured', async () =>
+    assertSmtpPage(availability))
+  it('detects removal of SMTP from the public page projection', async () => {
+    const copy = await sourceCopy(
+      './availability.ts',
+      '...(smtpConfigured &&\n      et.waitlistEnabled &&',
+      '...(et.waitlistEnabled &&',
+    )
+    await expect(assertSmtpPage(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  async function assertCapacity(join: typeof joinWaitlist) {
+    const et = await event()
+    await joinWaitlist(ctx, input(et))
+    const first = await entry()
+    await db
+      .insertInto('waitlist_entries')
+      .values(
+        Array.from({ length: 99 }, (_, i) => ({
+          ...first,
+          id: randomUUID(),
+          recipient_hash: waitlistRecipientHash(`capacity-${i}@example.test`, ctx.secret),
+          email: `capacity-${i}@example.test`,
+        })),
+      )
+      .execute()
+    // The same full response for new and existing email addresses avoids membership disclosure.
+    for (const email of ['new@example.test', first.email as string]) {
+      await expect(join(ctx, input(et, email))).rejects.toMatchObject({ code: 'waitlist_full' })
+    }
+  }
+  it('clearly rejects the 101st entry without revealing membership', async () =>
+    assertCapacity(joinWaitlist))
+  it('detects silently accepting full waitlists in a source copy', async () => {
+    const copy = await sourceCopy(
+      './waitlist.ts',
+      "throw new DomainError('conflict', 'waitlist_full')",
+      'return accepted()',
+    )
+    await expect(assertCapacity(copy.joinWaitlist)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
   it('event storage cap is atomic and delayed expiry cannot block replacement', async () => {
     const et = await event()
     await joinWaitlist(ctx, input(et))
@@ -559,10 +629,14 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
         })),
       )
       .execute()
-    await Promise.all([
+    const results = await Promise.allSettled([
       joinWaitlist({ ...ctx, trustedIp: '192.0.2.2' }, input(et, 'two@example.test')),
       joinWaitlist({ ...ctx, trustedIp: '192.0.2.3' }, input(et, 'three@example.test')),
     ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({
+      reason: { code: 'waitlist_full' },
+    })
     expect(
       await db
         .selectFrom('waitlist_entries')

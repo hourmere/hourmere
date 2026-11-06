@@ -72,6 +72,13 @@ the existing status filters retain that meaning. No reschedule-chain identifier 
 
 ## Versioning
 
+Organization branding adds `GET/PATCH /api/v1/branding`, binary
+`POST /api/v1/branding/logo` and protected `GET /api/v1/branding/logo/{hash}`. PATCH
+preserves omitted settings; null clears them. Reads require full/read API keys and
+writes require full, together with personal ownership or a team owner/admin role.
+Session writes require `X-Expected-Organization-Id`. See [branding](/docs/branding) for
+the image envelope, content-hash references and automatic readable text selection.
+
 - Product endpoints live under `/api/v1`. A breaking change means `/api/v2`, not an edit.
 - Within a version, only additive changes: new endpoints, new optional request fields,
   new response fields. Clients must ignore fields they do not know.
@@ -1312,3 +1319,16 @@ Authenticated host reads alone include optional caller-only `calendarCopy` and `
 `POST /api/v1/bookings/{id}/calendar-copy/retry` takes an empty strict object, rechecks original
 host/current verified membership, and reconciles the immutable target. Unconfigured targets
 cannot be bound later. Public/manage responses never expose these fields or invitation snapshots.
+
+## Event-type booking limits
+
+Event-type reads and create/update inputs expose nullable `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`. Each set value must be an integer from
+1 to 1000. Creation defaults omitted fields to null; PATCH preserves omitted fields
+and uses explicit null to clear a ceiling. The merged configuration must satisfy
+day ≤ week, week ≤ month and day ≤ month for each configured pair. Wrong JSON types
+or fractional numbers return `400 invalid_request`; integer bounds and inconsistent
+combinations return `400 invalid_event_type`, through the shared service validation
+used by MCP and CLI. These fields are additive in `/api/v1`;
+clients must continue tolerating unknown response properties. See
+[booking limits](/docs/booking-limits) for period boundaries and counting semantics.

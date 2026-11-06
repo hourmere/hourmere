@@ -337,3 +337,51 @@ with no validated ID remains ambiguous: retry does not issue another POST or ado
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
 requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).
+
+## Ask an invitee to choose another time
+
+Hosts can send `POST /api/v1/bookings/{id}/request-reschedule` with
+`{"idempotencyKey":"<random UUID>","note":"Could you choose another time?"}`.
+The MCP equivalent is `request_reschedule` with `bookingId` and the same fields;
+CLI users run `hourmere request-reschedule --input request.json`.
+A `bookings` or `full` API key and existing host permission are required.
+The optional plain-text note is limited to 2000 UTF-16 code units and appears only
+in the email body. Retain the UUID and identical input for safe retries; use a new
+UUID to replace the outstanding request.
+
+The returned booking stays `confirmed`, with optional `pendingReschedule` containing
+`id`, `expiresAt` and `note`. The original time stays booked and blocks availability
+until the invitee uses their normal manage link to pick another time or cancel.
+The request expires after 48 hours or when the original meeting starts, whichever
+comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+cannot receive a request. Picking uses the normal availability rules and reschedule
+limit, calendar updates, conference handling and reminders.
+
+When answering a request through REST or MCP, include `rescheduleRequestId` from
+`pendingReschedule.id` with the managed pick or cancel input. This rejects stale
+replaced requests and makes identical retries safe; a replayed pick returns the
+same successor with `manageToken: null`. Without that field, existing ordinary
+reschedule retry semantics remain unchanged.
+
+## Configure booking limits
+
+Use `hourmere create-event --input event-request.json` or
+`hourmere update-event --input event-update.json` with a `full` API key. Put
+`maxBookingsPerDay`, `maxBookingsPerWeek` and `maxBookingsPerMonth` in the JSON file;
+updates include `id` alongside changed fields. `--input -` reads the same JSON from
+stdin. Read the saved settings with `hourmere event --input event-query.json`, where
+the query contains `id`.
+
+Each ceiling is a whole number from 1 to 1000, or `null` for no ceiling. Omitted
+update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
+time zones, Monday-based weeks, calendar months and counting rules. Lowering a
+ceiling does not cancel existing bookings.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.

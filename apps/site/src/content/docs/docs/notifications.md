@@ -13,6 +13,14 @@ helper (`@hourmere/notifications`), the `booking_notifications` table, and the b
 services ([`packages/scheduling/src/bookings.ts`](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/bookings.ts)), which queue the jobs in the transaction of
 every booking change, whether it came over REST or MCP (last section).
 
+## Requests for another time
+
+[Host reschedule requests](/docs/request-reschedule) send the booker a private management
+link and optional plain-text note in the body only. Guests do not receive the request.
+The ordinary reschedule confirmation tells hosts when a time is chosen; expiry sends a
+host notice while keeping the original booking. Request generations deduplicate delivery
+and superseded requests are skipped. Existing mail budgets and retries apply.
+
 ## Imported local bookings
 
 Cal.com/cal.diy imports use durable `source=import` local-only bookings. Their empty
@@ -57,7 +65,7 @@ before enabling follow-ups.
 
 ### Host notes and hosted email abuse controls
 
-Only follow-ups may include optional `hostNote` plain text. New writes normalize CRLF to
+Within reminder/follow-up settings, only follow-ups may include optional `hostNote` plain text. New writes normalize CRLF to
 LF and strip bidi embedding/isolate controls before checking the 2000 UTF-16 code-unit
 limit. Other control characters, including tabs, are refused; LF is allowed. Notes appear
 only in the body, HTML-escaped and without generated links. Placeholders such as
@@ -941,7 +949,7 @@ finds a matching opening. Each message has at most three exact suggestions. Ever
 enters the same cohort; there is no hold or priority. Shared mail limits, delivery failures
 and earlier bookings can result in partial delivery. Suppressed slots are never back-filled.
 Verification and availability messages use the ordinary booking-recipient budget and the
-instance cap, without the host/sign-in reserve. SMTP must be configured; private waitlist
+instance cap, without the host/sign-in reserve. SMTP (`SMTP_URL` and `MAIL_FROM`) must be configured; private waitlist
 messages and capabilities are never printed by the development mailer.
 
 The worker scans durable outboxes at startup and every minute in bounded batches; queue
@@ -977,6 +985,6 @@ to one-time booking tokens under `/book/`, `/embed/book/` and `/api/v1/book/`, a
 secret query strings and headers. The bundled Caddy configuration omits the complete URI;
 see [proxy behavior](/docs/self-hosting#proxy-behavior-and-an-existing-proxy).
 
-Public join UI, administration summaries and general REST/MCP/CLI waitlist operations are
-separate work. The minimal mail-link confirmations and optional public-booking attribution
-are available in this delivery layer.
+Public joining, host administration, REST/MCP/CLI operations, mail-link confirmations and
+optional public-booking attribution are available. See [booking waitlists](/docs/booking-waitlist)
+for setup, SMTP requirements, capacity errors and the complete lifecycle.

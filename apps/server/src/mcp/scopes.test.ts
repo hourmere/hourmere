@@ -19,6 +19,7 @@ const all = [
   'find_available_slots',
   'create_booking',
   'reschedule_booking',
+  'request_reschedule',
   'cancel_booking',
   'list_bookings',
   'export_bookings',
@@ -30,6 +31,8 @@ const all = [
   'set_event_type_notifications',
   'list_schedules',
   'get_schedule',
+  'get_branding',
+  'set_branding',
   'create_event_type',
   'update_event_type',
   'create_one_time_link',
@@ -46,6 +49,7 @@ const all = [
   'resend_waitlist_verification',
 ]
 const configurationWrites = new Set([
+  'set_branding',
   'create_event_type',
   'update_event_type',
   'set_event_type_notifications',
@@ -56,6 +60,7 @@ const writes = new Set([
   ...configurationWrites,
   'create_booking',
   'reschedule_booking',
+  'request_reschedule',
   'cancel_booking',
   'retry_conference',
   'retry_calendar_copy',
@@ -66,6 +71,7 @@ const writes = new Set([
   'resend_waitlist_verification',
 ])
 const otherReads = new Set([
+  'get_branding',
   'export_bookings',
   'list_schedules',
   'get_schedule',
@@ -373,6 +379,8 @@ describe('MCP scoped discovery and dispatch', () => {
 
 describe('CLI scope parity', () => {
   const commands = [
+    ['branding get', 'get_branding'],
+    ['branding set', 'set_branding'],
     ['whoami', 'whoami'],
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
@@ -386,6 +394,7 @@ describe('CLI scope parity', () => {
     ['book', 'create_booking'],
     ['list', 'list_bookings'],
     ['reschedule', 'reschedule_booking'],
+    ['request-reschedule', 'request_reschedule'],
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],

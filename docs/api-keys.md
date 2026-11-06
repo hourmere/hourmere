@@ -122,10 +122,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Operation group | `full` | `read` | `bookings` |
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
+| Account settings and configuration writes | Allowed | — | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
 | Browser session operations | — | — | — |
-| Account settings and configuration writes | Allowed | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
 ### REST operations
@@ -133,6 +133,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
+| `GET /api/v1/branding` | Session or API key | `full, read` |
+| `GET /api/v1/branding/logo/{hash}` | Session or API key | `full, read` |
+| `PATCH /api/v1/branding` | Session or API key | `full` |
+| `POST /api/v1/branding/logo` | Session or API key | `full` |
 | `GET /api/v1/book/{token}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
@@ -144,6 +148,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/reschedule` | Session or API key | `full, bookings` |
+| `POST /api/v1/bookings/{id}/request-reschedule` | Session or API key | `full, bookings` |
 | `GET /api/v1/bookings/{id}/slots` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/manage` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/bookings/manage/cancel` | Public or manage token; check a supplied key | `full, bookings` |
@@ -238,6 +243,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -246,6 +253,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |

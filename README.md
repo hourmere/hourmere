@@ -10,6 +10,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 - [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
 - [REST](https://hourmere.com/docs/rest), [MCP](https://hourmere.com/docs/mcp) and
   [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
+- [Booking waitlists](https://hourmere.com/docs/booking-waitlist) for fully booked
+  one-on-one single-host types; everyone eligible can be notified, with no reservation.
 - [CSV booking exports](https://hourmere.com/docs/booking-export) for personal owners and
   team administrators, with bounded streaming and spreadsheet formula protection.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
@@ -34,6 +36,10 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
+
+CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
+iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
+available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
 
 ## Development
 
@@ -402,13 +408,21 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+Organization owners and team admins can store a logo and primary colour through settings,
+REST, MCP and CLI. [Branding settings](https://hourmere.com/docs/branding) include safe image
+uploads and automatic readable button-text selection; public pages and emails do not apply
+the stored theme yet.
+
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
   [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
-  in process memory.
+  in process memory, except the additional durable booking-waitlist admission limits.
 - Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
@@ -421,8 +435,9 @@ and linked operating guides before deploying:
 - Hourmere must be served at the root of its own host name (no path prefix) in every deployment.
   Bundled Caddy additionally requires ports 80/443, an HTTPS host name without a port,
   and an IPv4-only ingress network.
-- Rate limiting uses in-process memory; multiple web replicas multiply the limits. Run a
-  single web process; a separate worker is supported.
+- Rate limiting uses in-process memory at the transport layer; multiple web replicas multiply the limits.
+  Booking waitlists additionally enforce durable mailbox, event and trusted-IP admission
+  budgets in PostgreSQL across replicas. Run a single web process; a separate worker is supported.
 - [Public booking pages and emails](https://hourmere.com/docs/interface-languages) support English,
   Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces support English and
   Simplified Chinese. Missing translations fall back to English; dates follow the active locale.

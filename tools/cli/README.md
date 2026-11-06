@@ -175,6 +175,25 @@ Omitting the list on creation makes a single-length type. Use JSON fields for co
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for editor
 steps, update rules and rescheduling behavior.
 
+## Configure booking limits
+
+`create-event` and `update-event` accept `maxBookingsPerDay`, `maxBookingsPerWeek`
+and `maxBookingsPerMonth` in JSON input, using a `full` API key. Each accepts a whole
+number from 1 to 1000, or `null` to remove its ceiling. Omitted update fields stay
+unchanged; `event` returns all three saved values. For example:
+
+```json
+{ "id": "EVENT_TYPE_ID", "maxBookingsPerWeek": 5, "maxBookingsPerMonth": 20 }
+```
+
+Save this as `event-update.json` and run `hourmere update-event --input event-update.json`.
+Set ceilings must not descend from day to week to month; day must also not exceed month
+when week is unset. Invalid values return the same error codes as REST and MCP; the CLI
+suppresses arbitrary server error text. Counts include confirmed bookings of this event
+type for each active assigned host, using the host schedule’s time zone and local start
+date. ISO weeks start on Monday; months use calendar boundaries. Other event types do
+not consume this allowance. Lowering a ceiling does not cancel existing bookings.
+
 ## Configure an after-booking redirect
 
 `event` reads `successRedirect`; `create-event` and `update-event` accept the same nested
@@ -282,3 +301,21 @@ team owner/admin permissions. The MCP call returns a small pointer; the CLI stre
 its same-instance authenticated REST download without buffering the CSV in memory.
 Files contain attendee personal data; store and share them privately. See
 [CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
+## Organization branding
+
+```sh
+hourmere branding get
+printf '%s' '{"brandPrimaryColor":"#123456"}' | hourmere branding set --input -
+hourmere branding upload --file logo.png --content-type image/png
+```
+
+Reads require `read` or `full` API key scope; writes require `full`. The personal owner
+or team owner/admin must own the key. `branding set` accepts an uploaded `brandLogo`
+SHA-256 reference and/or `brandPrimaryColor` (`#RRGGBB`); omission preserves a field,
+and `null` clears it. Black or white button text is chosen for readable contrast.
+
+`branding upload` sends raw bytes over REST, immediately attaches the image and prints
+the saved settings. PNG, JPEG and WebP are accepted, at most 512 KiB and 2048 pixels per
+side; images are decoded and re-encoded as PNG. SVG and animation are rejected. The
+server enforces all limits. These settings are stored only; public booking pages and
+emails do not yet apply the theme.

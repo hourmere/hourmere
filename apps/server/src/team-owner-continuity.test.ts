@@ -21,6 +21,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { createTeamRolePolicy } from '../../../packages/auth/src/team-role-policy.ts'
 import { createApp } from './app.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
@@ -49,6 +50,7 @@ type Copies = Partial<
 type AuthFactory = (config: AuthConfig) => Auth
 interface SourceCopy {
   createAuth: AuthFactory
+  createTeamRolePolicy?: typeof createTeamRolePolicy
   leaveTeamMember: typeof leaveTeamMember
   memberRemovalRoutes?: typeof memberRemovalRoutes
 }
@@ -110,13 +112,15 @@ async function sourceCopy(mutations: Copies = {}): Promise<SourceCopy> {
     '@hourmere/auth': auth,
     '../team-management.ts': management,
   })
-  const [copiedAuth, copiedService, copiedRemovalRoute] = await Promise.all([
+  const [copiedAuth, copiedService, copiedRemovalRoute, copiedPolicy] = await Promise.all([
     import(auth),
     import(service),
     import(removalRoute),
+    import(policy),
   ])
   return {
     createAuth: copiedAuth.createAuth,
+    createTeamRolePolicy: copiedPolicy.createTeamRolePolicy,
     leaveTeamMember: copiedService.leaveTeamMember,
     memberRemovalRoutes: copiedRemovalRoute.memberRemovalRoutes,
   }
@@ -490,7 +494,36 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     },
   )
 
-  it('detects omitted normalization of native early owner counts with a real HTTP assertion', async () => {
+  async function adapterOwnerNormalization(copy?: SourceCopy) {
+    const f = await fixture(' member , owner ')
+    const policy = (copy?.createTeamRolePolicy ?? createTeamRolePolicy)(db)
+    const stored = await memberships(f)
+    const adapter = policy.adapter({
+      // Read real legacy rows, but inspect Hourmere's adapter output before upstream
+      // consumes it: patched Better Auth now independently trims owner role tokens.
+      findMany: () => memberships(f),
+    } as unknown as Parameters<typeof policy.adapter>[0])
+    const query = { model: 'member' }
+    expect(await adapter.findMany(query)).toEqual(stored)
+    const inspect = policy.handler(async () => {
+      await policy.before({ path: '/organization/leave' } as Parameters<typeof policy.before>[0])
+      expect(await adapter.findMany(query)).toEqual(
+        stored.map((member) => ({
+          ...member,
+          role: member.userId === f.second.user.id ? 'member,owner' : member.role,
+        })),
+      )
+      return new Response(null, { status: 204 })
+    })
+    expect((await inspect(new Request(`${origin}/api/auth/organization/leave`))).status).toBe(204)
+    expect(await memberships(f)).toEqual(stored)
+    expect(await adapter.findMany(query)).toEqual(stored)
+  }
+
+  it('normalizes adapter owner snapshots only in the departure context without rewriting rows', () =>
+    adapterOwnerNormalization())
+
+  it('detects omitted adapter owner normalization independently of the upstream defense', async () => {
     const copy = await sourceCopy({
       policy: [
         [
@@ -499,7 +532,10 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
         ],
       ],
     })
-    await expect(legacyOwnerChange('leave', copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expect(adapterOwnerNormalization(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    // The upgrade adds a second normalization layer; losing ours no longer breaks this HTTP flow.
+    await legacyOwnerChange('leave', copy)
+    await adapterOwnerNormalization()
   })
 
   async function selfRemovalProtection(copy?: SourceCopy) {

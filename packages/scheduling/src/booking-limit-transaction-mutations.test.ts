@@ -6,6 +6,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import * as Zod from 'zod'
 import * as Availability from './availability.ts'
 import * as BookingPage from './booking-page.ts'
 import * as Conferences from './conferences.ts'
@@ -15,6 +16,7 @@ import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
+import * as PaymentExpiry from './payment-expiry.ts'
 import * as Questions from './questions.ts'
 import * as RoundRobin from './round-robin.ts'
 import * as SuccessRedirect from './success-redirect.ts'
@@ -31,6 +33,7 @@ type Change = readonly [string, string]
 const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
+  zod: Zod,
   '@hourmere/db': HourmereDb,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
@@ -40,6 +43,7 @@ const dependencies: Record<string, object> = {
   './hosts.ts': Hosts,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
+  './payment-expiry.ts': PaymentExpiry,
   './questions.ts': Questions,
   './round-robin.ts': RoundRobin,
   './success-redirect.ts': SuccessRedirect,

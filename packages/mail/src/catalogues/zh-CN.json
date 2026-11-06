@@ -89,5 +89,9 @@
   "waitlist.notice.expiry": "这些时段建议将于 {expiry} 过期，但在此期间不会为你预留时段。",
   "waitlist.notice.page": "在预约页面查看当前所有时段：",
   "waitlist.notice.waiting": "如果时段已不可用，你仍会留在候补名单中，直到最初的到期时间。如果已通过其他途径预约，请使用下方链接退出候补。",
-  "waitlist.notice.footer": "你收到此邮件，是因为你已验证了此会议的候补申请。"
+  "waitlist.notice.footer": "你收到此邮件，是因为你已验证了此会议的候补申请。",
+  "rescheduleRequest.subject": "请选择其他时间：{event}",
+  "rescheduleRequest.introduction": "{host} 请你选择其他时间。在你选择新时间或取消之前，原预约时段会继续保留。此请求将于 {expiry} 到期；到期后，原预约仍然有效。",
+  "rescheduleRequest.expiredSubject": "改期请求已到期：{event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} 未在请求到期前选择新时间。原预约仍然有效。"
 }

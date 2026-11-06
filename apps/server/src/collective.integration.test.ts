@@ -155,7 +155,8 @@ describe.skipIf(!serverUrl)(
         db,
         now,
         notify: async (trx, event, at) => {
-          await calendarNotify(trx, event)
+          if (event.type !== 'reschedule_requested' && event.type !== 'reschedule_request_expired')
+            await calendarNotify(trx, event)
           await emailNotify(trx, event, at)
           await webhookNotify(trx, event, at)
         },
@@ -237,6 +238,7 @@ describe.skipIf(!serverUrl)(
         .select(['event_type', 'payload'])
         .where('webhook_id', '=', webhook.id)
         .orderBy('created_at')
+        .orderBy('id')
         .execute()
       expect(deliveries.map((delivery) => delivery.event_type)).toEqual([
         'booking.created',
