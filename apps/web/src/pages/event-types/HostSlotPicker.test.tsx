@@ -21,9 +21,9 @@ afterEach(() => {
 })
 
 const DAY = dateKeyIn(Date.now(), PROFILE.timeZone)
-const slots = (count = 2, minutes = 30): Slot[] =>
+const slots = (count = 2, minutes = 30, day = DAY): Slot[] =>
   Array.from({ length: count }, (_, index) => {
-    const start = Date.parse(`${DAY}T09:00:00.000Z`) + index * 30 * 60_000
+    const start = Date.parse(`${day}T09:00:00.000Z`) + index * 30 * 60_000
     return {
       start: new Date(start).toISOString(),
       end: new Date(start + minutes * 60_000).toISOString(),
@@ -175,29 +175,33 @@ describe('host open-time picker', () => {
     ).toBe('60')
   })
 
-  it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
-    const client = server()
-    renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
-      'fr',
-    )
-    await choose([1, 0])
-    await preview()
-    const urls = textPreview().value.match(/https:\/\/\S+/g)
-    fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
-      target: { value: 'zh-CN' },
-    })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Display time zone' }), {
-      target: { value: 'America/New_York' },
-    })
-    expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
-    expect(textPreview().value).toContain('America/New_York')
-    expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
-    await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
-    expect(
-      screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
-    ).toHaveLength(6)
-  })
+  it.each(['14:59:00', '15:01:00'])(
+    'keeps selected instants and URLs when display settings change and reloads the new zone day at %s UTC',
+    async (time) => {
+      vi.spyOn(Date, 'now').mockReturnValue(Date.parse(`${DAY}T${time}Z`))
+      const client = server(slots(2, 30, dateKeyIn(Date.now(), 'Asia/Tokyo')))
+      renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
+      expect(
+        screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value,
+      ).toBe('fr')
+      await choose([1, 0])
+      await preview()
+      const urls = textPreview().value.match(/https:\/\/\S+/g)
+      fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
+        target: { value: 'zh-CN' },
+      })
+      fireEvent.change(screen.getByRole('combobox', { name: 'Display time zone' }), {
+        target: { value: 'America/New_York' },
+      })
+      expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
+      expect(textPreview().value).toContain('America/New_York')
+      expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
+      await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
+      expect(
+        screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
+      ).toHaveLength(6)
+    },
+  )
 
   it('uses English and UTC without a supported profile and warns before sharing hidden event types', async () => {
     server()
