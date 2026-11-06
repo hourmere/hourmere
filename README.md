@@ -20,7 +20,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `apps/server` | API server (Hono). Serves the built web app in production. |
 | `apps/web` | Web app (React + Vite). Talks to the server only through the public API. |
 | `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |
-| `packages/core` | Scheduling logic with no I/O or framework code, such as the availability engine. |
+| `packages/core` | Scheduling logic with no I/O or framework code, such as the availability engine and its opt-in [explanations](docs/availability-explanations.md). |
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
 | `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |

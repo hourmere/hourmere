@@ -6,6 +6,8 @@ export const common = {
   'Enter a phone number with + and country code, followed by 7–15 digits.':
     '请输入以 + 和国家代码开头、共含 7–15 位数字的电话号码。',
 
+  'This imported booking is read-only and managed in the original system.':
+    '此导入预约为只读记录，请在原系统中管理。',
   'This location is unavailable. Contact the host to book.':
     '此地点暂时无法预约。请联系主持人安排预约。',
   'The host or the team’s owners and admins can see your email, name and requested period.':

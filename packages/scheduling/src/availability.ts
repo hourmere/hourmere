@@ -3,10 +3,15 @@
 // creating and rescheduling bookings, later the MCP server) goes through
 // buildAvailabilityInput, so they all see the same rules.
 import {
+  AVAILABILITY_REASON_CODES,
   type AvailabilityInput,
   AvailabilityInputError,
+  type AvailabilityReason,
   type DateOverride,
   type ExistingBooking,
+  type ExplainAvailabilityInput,
+  type ExplainedSlot,
+  explainAvailability,
   getAvailableSlots,
   type InstantInterval,
   isPublicTeamSlug,
@@ -26,9 +31,11 @@ import {
   requireMeetDestination,
   requireZoomConnection,
 } from './conferences.ts'
-import type { PublicContext } from './context.ts'
+import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { assertCanExplainEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
+import { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
 import {
   type LocationOption,
   type PublicLocationOption,
@@ -77,8 +84,7 @@ const earlier = (a: Temporal.Instant, b: Temporal.Instant) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-export const LOCATION_KINDS = ['google_meet', 'zoom', 'phone', 'in_person', 'link'] as const
-export type LocationKind = (typeof LOCATION_KINDS)[number]
+export { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
 
 /**
  * Where a meeting happens: `event_types.location` as configured, `bookings.location` as
@@ -263,7 +269,7 @@ export async function findPublicTeamEventType(
 async function findTeamEventType(
   db: Db,
   identity: { teamSlug: string; slug: string } | { id: string },
-  options: { lock?: boolean } = {},
+  options: { lock?: boolean; explain?: boolean } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   let query = db
     .selectFrom('auth.organization as o')
@@ -329,7 +335,7 @@ async function findTeamEventType(
       hostUserIds,
       options.lock,
     )
-    if (!eligibleHostUserIds.length) return undefined
+    if (!eligibleHostUserIds.length && !options.explain) return undefined
     if (options.lock) {
       const current = await db
         .selectFrom('event_type_hosts')
@@ -879,6 +885,15 @@ export async function buildAvailabilityInput(
   db: Db,
   query: AvailabilityQuery,
 ): Promise<AvailabilityInput | undefined> {
+  return buildAvailabilityInputForMode(db, query, false)
+}
+
+/** Explanation-only provenance stays out of the default engine input and query plan. */
+async function buildAvailabilityInputForMode(
+  db: Db,
+  query: AvailabilityQuery,
+  explain: boolean,
+): Promise<ExplainAvailabilityInput | undefined> {
   const { eventTypeId, hostUserId, rangeStart, rangeEnd, now, excludeBookingId } = query
   const eventType = await db
     .selectFrom('event_types as et')
@@ -912,6 +927,10 @@ export async function buildAvailabilityInput(
     durationMinutes = toInstant(original.end_at)
       .since(toInstant(original.start_at))
       .total('minutes')
+  } else if (explain && query.durationMinutes !== undefined) {
+    durationMinutes = query.durationMinutes
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440)
+      throw new DomainError('invalid', 'invalid_duration', 'Duration must be 1–1440 whole minutes')
   } else {
     durationMinutes = selectDurationMinutes(
       {
@@ -930,7 +949,8 @@ export async function buildAvailabilityInput(
     .$if(scheduleId !== null, (q) => q.where('id', '=', scheduleId as string))
     .$if(scheduleId === null, (q) => q.where('is_default', '=', true))
     .executeTakeFirst()
-  if (!schedule) return undefined
+  if (!schedule && !explain) return undefined
+  const timeZone = schedule?.time_zone ?? 'UTC'
 
   // Wide enough for anything that can affect a slot in the range: the engine visits one
   // extra local day on each side (UTC offsets stay within ±14 hours), and a booking's
@@ -941,32 +961,25 @@ export async function buildAvailabilityInput(
   // time on the original short window; only this event type needs complete periods.
   // Like the engine, include one local date on each side for zones that have moved
   // backwards across midnight. Calendar arithmetic preserves DST and month lengths.
-  const firstDate = rangeStart
-    .toZonedDateTimeISO(schedule.time_zone)
-    .toPlainDate()
-    .subtract({ days: 1 })
-  const lastDate = rangeEnd.toZonedDateTimeISO(schedule.time_zone).toPlainDate().add({ days: 1 })
+  const firstDate = rangeStart.toZonedDateTimeISO(timeZone).toPlainDate().subtract({ days: 1 })
+  const lastDate = rangeEnd.toZonedDateTimeISO(timeZone).toPlainDate().add({ days: 1 })
   const periodWindows: { start: Temporal.Instant; end: Temporal.Instant }[] = []
   if (eventType.max_bookings_per_week !== null) {
     periodWindows.push({
       start: firstDate
         .subtract({ days: firstDate.dayOfWeek - 1 })
-        .toZonedDateTime(schedule.time_zone)
+        .toZonedDateTime(timeZone)
         .toInstant(),
       end: lastDate
         .add({ days: 8 - lastDate.dayOfWeek })
-        .toZonedDateTime(schedule.time_zone)
+        .toZonedDateTime(timeZone)
         .toInstant(),
     })
   }
   if (eventType.max_bookings_per_month !== null) {
     periodWindows.push({
-      start: firstDate.with({ day: 1 }).toZonedDateTime(schedule.time_zone).toInstant(),
-      end: lastDate
-        .with({ day: 1 })
-        .add({ months: 1 })
-        .toZonedDateTime(schedule.time_zone)
-        .toInstant(),
+      start: firstDate.with({ day: 1 }).toZonedDateTime(timeZone).toInstant(),
+      end: lastDate.with({ day: 1 }).add({ months: 1 }).toZonedDateTime(timeZone).toInstant(),
     })
   }
   const bookingWindow = periodWindows.reduce(
@@ -991,8 +1004,8 @@ export async function buildAvailabilityInput(
   const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
   const windowDates = {
-    start: boundedDate(window.start, schedule.time_zone),
-    end: boundedDate(window.end, schedule.time_zone),
+    start: boundedDate(window.start, timeZone),
+    end: boundedDate(window.end, timeZone),
   }
   // Postgres keeps microseconds, node-postgres Dates milliseconds: blocked time is widened to
   // whole milliseconds in SQL (start down, end up), so converting it never shrinks or empties
@@ -1026,14 +1039,16 @@ export async function buildAvailabilityInput(
     .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
 
   const [overrides, busy, bookings] = await Promise.all([
-    db
-      .selectFrom('schedule_overrides')
-      .select(['date', 'intervals'])
-      .where('schedule_id', '=', schedule.id)
-      .where('date', '>=', boundedDate(window.start))
-      .where('date', '<=', boundedDate(window.end))
-      .orderBy('date')
-      .execute(),
+    schedule
+      ? db
+          .selectFrom('schedule_overrides')
+          .select(['date', 'intervals'])
+          .where('schedule_id', '=', schedule.id)
+          .where('date', '>=', boundedDate(window.start))
+          .where('date', '<=', boundedDate(window.end))
+          .orderBy('date')
+          .execute()
+      : Promise.resolve([]),
     db
       .selectFrom('calendar_busy as cb')
       .innerJoin('calendars as c', 'c.id', 'cb.calendar_id')
@@ -1122,11 +1137,9 @@ export async function buildAvailabilityInput(
       if (row.all_day_start !== null && row.all_day_end !== null) {
         // Resolve both dates separately: a local day can span 23 or 25 hours across DST.
         const start = Temporal.PlainDate.from(row.all_day_start)
-          .toZonedDateTime(schedule.time_zone)
+          .toZonedDateTime(timeZone)
           .toInstant()
-        const end = Temporal.PlainDate.from(row.all_day_end)
-          .toZonedDateTime(schedule.time_zone)
-          .toInstant()
+        const end = Temporal.PlainDate.from(row.all_day_end).toZonedDateTime(timeZone).toInstant()
         return { start: later(start, window.start), end: earlier(end, window.end) }
       }
       return { start: toInstant(row.start), end: toInstant(row.end) }
@@ -1134,6 +1147,7 @@ export async function buildAvailabilityInput(
     // The engine refuses empty intervals, including a local date skipped by a zone change.
     .filter((i) => Temporal.Instant.compare(i.end, i.start) > 0)
   const ownBookings: ExistingBooking[] = []
+  const blockingBookings: ExistingBooking[] | undefined = explain ? [] : undefined
   for (const row of bookings) {
     const booking = {
       start: toInstant(row.start_at),
@@ -1143,6 +1157,8 @@ export async function buildAvailabilityInput(
     }
     if (row.event_type_id === eventTypeId) {
       ownBookings.push(booking)
+    } else if (blockingBookings) {
+      blockingBookings.push(booking)
     } else {
       busyIntervals.push({
         start: booking.start.subtract({ minutes: booking.bufferBeforeMinutes }),
@@ -1153,9 +1169,9 @@ export async function buildAvailabilityInput(
 
   return {
     schedule: {
-      timeZone: schedule.time_zone,
+      timeZone,
       // Validated by the owner-side API when stored, and again by the engine.
-      weeklyHours: schedule.weekly_hours as WeeklyHours,
+      weeklyHours: (schedule?.weekly_hours ?? {}) as WeeklyHours,
       dateOverrides: overrides.map(
         (o): DateOverride => ({
           date: o.date,
@@ -1164,7 +1180,8 @@ export async function buildAvailabilityInput(
       ),
     },
     eventType: {
-      durationMinutes,
+      durationMinutes: explain ? eventType.duration_minutes : durationMinutes,
+      ...(explain && { allowedDurationsMinutes: eventType.allowed_durations_minutes }),
       slotStepMinutes: eventType.slot_step_minutes ?? undefined,
       bufferBeforeMinutes: eventType.buffer_before_minutes,
       bufferAfterMinutes: eventType.buffer_after_minutes,
@@ -1174,6 +1191,7 @@ export async function buildAvailabilityInput(
       maxBookingsPerMonth: eventType.max_bookings_per_month ?? undefined,
       bookingWindowDays: eventType.booking_window_days ?? undefined,
     },
+    ...(explain && { durationMinutes, blockingBookings }),
     busy: busyIntervals,
     bookings: ownBookings,
     rangeStart,
@@ -1277,5 +1295,232 @@ export async function unionRoundRobinSlots(
     )
   return [...offered.values()].sort(
     (a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end),
+  )
+}
+
+/** Engine-only diagnostics. Transports must preserve this explicit safe projection. */
+export interface ExplainEventAvailabilityQuery {
+  eventTypeId: string
+  rangeStart: Temporal.Instant
+  rangeEnd: Temporal.Instant
+  durationMinutes?: number
+}
+
+/**
+ * Explains availability only to event-type managers; unauthorized callers see not_found.
+ * Team host identities require the same current, verified management permission as writes.
+ * Calendar readiness errors remain errors, matching normal availability; stale round-robin
+ * members are omitted only when another member can actually offer a slot in the range.
+ */
+export async function explainEventAvailability(
+  ctx: ServiceContext,
+  query: ExplainEventAvailabilityQuery,
+): Promise<ExplainedSlot[]> {
+  await assertCanExplainEventType(ctx, query.eventTypeId)
+  checkSlotRange(query.rangeStart, query.rangeEnd)
+  if (Temporal.Instant.compare(query.rangeEnd, LATEST_RANGE_END) > 0)
+    throw new DomainError(
+      'invalid',
+      'invalid_range',
+      'The explanation range ends too far in the future',
+    )
+  const identity = await ctx.db
+    .selectFrom('event_types')
+    .select(['owner_user_id', 'organization_id'])
+    .where('id', '=', query.eventTypeId)
+    .executeTakeFirst()
+  if (!identity) throw eventTypeNotFound()
+  const et =
+    identity.owner_user_id === null
+      ? await findTeamEventType(ctx.db, { id: query.eventTypeId }, { explain: true })
+      : await findPersonalEventType(ctx.db, { id: query.eventTypeId })
+  if (!et) throw eventTypeNotFound()
+  const durationMinutes = query.durationMinutes ?? et.durationMinutes
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440)
+    throw new DomainError('invalid', 'invalid_duration', 'Duration must be 1–1440 whole minutes')
+  const step = et.configuredSlotStepMinutes ?? durationMinutes
+  // Explain visits the entire range, including past/notice/window exclusions, and both
+  // the diagnostic day grid and each host's normal working-interval grids.
+  if (
+    (query.rangeEnd.since(query.rangeStart).total('minutes') / step) * et.hostUserIds.length * 2 >
+    MAX_SLOT_CANDIDATES
+  )
+    throw new DomainError('invalid', 'range_too_long', 'Ask for a shorter explanation range')
+  const now = ctx.now()
+  if ((et.locations?.length ?? 0) <= 1 && automaticZoom(et.location)) {
+    if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
+      throw new DomainError('conflict', 'automatic_zoom_host_policy')
+    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
+  }
+  if ((et.locations?.length ?? 0) <= 1 && automaticMeet(et.location)) {
+    if (et.schedulingType === 'round_robin')
+      et.eligibleHostUserIds = await eligibleMeetHosts(
+        ctx.db,
+        et.eligibleHostUserIds,
+        et.id,
+        ctx.automaticMeet,
+      )
+    else
+      await requireMeetDestination(
+        ctx.db,
+        meetOrganizer(et.schedulingType, et.hostUserIds, et.conferenceOrganizerUserId) as string,
+        et.id,
+        ctx.automaticMeet,
+      )
+  }
+  const discloseHosts = et.team !== undefined
+  const hosts = et.schedulingType === 'round_robin' ? et.eligibleHostUserIds : et.hostUserIds
+  const maximumCandidates = Math.floor(MAX_SLOT_CANDIDATES / Math.max(1, hosts.length))
+  const inputs: { hostUserId: string; input: ExplainAvailabilityInput; slots: ExplainedSlot[] }[] =
+    []
+  let stale = false
+  for (const hostUserId of hosts) {
+    try {
+      const input = await buildAvailabilityInputForMode(
+        ctx.db,
+        {
+          ...query,
+          hostUserId,
+          now,
+          useDefaultSchedule: et.schedulingType !== 'individual',
+        },
+        true,
+      )
+      if (!input) continue
+      inputs.push({ hostUserId, input, slots: explainWithinBudget(input, maximumCandidates) })
+    } catch (error) {
+      if (
+        et.schedulingType !== 'round_robin' ||
+        !(error instanceof DomainError) ||
+        error.code !== 'calendar_sync_unavailable'
+      )
+        throw error
+      stale = true
+    }
+  }
+  if (stale && !inputs.some((host) => host.slots.some((slot) => slot.status === 'available')))
+    throw new DomainError(
+      'conflict',
+      'calendar_sync_unavailable',
+      'The host calendars are temporarily unavailable. Try again shortly.',
+    )
+  // An empty eligible pool still has diagnostic candidates, with no invented host facts.
+  const candidates = new Map<string, ExplainedSlot>()
+  const source = inputs.length
+    ? inputs.flatMap((host) => host.slots)
+    : explainWithinBudget(
+        {
+          schedule: { timeZone: 'UTC', weeklyHours: {} },
+          eventType: {
+            durationMinutes: et.durationMinutes,
+            allowedDurationsMinutes: et.allowedDurationsMinutes,
+            slotStepMinutes: step,
+            minimumNoticeMinutes: et.minimumNoticeMinutes,
+          },
+          durationMinutes,
+          rangeStart: query.rangeStart,
+          rangeEnd: query.rangeEnd,
+          now,
+        },
+        maximumCandidates,
+      )
+  for (const slot of source) candidates.set(explanationSlotKey(slot), slot)
+  if (candidates.size > maximumCandidates)
+    throw new DomainError('invalid', 'range_too_long', 'Ask for a shorter explanation range')
+  const candidateStarts = [...candidates.values()].map((slot) => slot.start)
+  const byHost = inputs.map((host) => ({
+    hostUserId: host.hostUserId,
+    slots: new Map(
+      explainWithinBudget({ ...host.input, candidateStarts }, maximumCandidates).map((slot) => [
+        explanationSlotKey(slot),
+        slot,
+      ]),
+    ),
+  }))
+  const result: ExplainedSlot[] = []
+  for (const [key, slot] of candidates) {
+    const hostSlots = byHost.map((host) => ({
+      hostUserId: host.hostUserId,
+      slot: host.slots.get(key) as ExplainedSlot,
+    }))
+    const available =
+      et.schedulingType === 'round_robin'
+        ? hostSlots.some((host) => host.slot.status === 'available')
+        : hostSlots.length > 0 && hostSlots.every((host) => host.slot.status === 'available')
+    const reasons: AvailabilityReason[] = []
+    if (!available) {
+      // An empty pool has no host schedule facts, but these slot-wide reasons remain known.
+      if (!hostSlots.length)
+        for (const reason of slot.reasons)
+          if (
+            reason.code === 'past' ||
+            reason.code === 'duration_not_offered' ||
+            reason.code === 'minimum_notice'
+          )
+            reasons.push({
+              code: reason.code,
+              interval: { start: reason.interval.start, end: reason.interval.end },
+            })
+      for (const host of hostSlots) {
+        for (const reason of host.slot.reasons)
+          reasons.push({
+            code: reason.code,
+            interval: { start: reason.interval.start, end: reason.interval.end },
+            ...(discloseHosts && { hostUserId: host.hostUserId }),
+          })
+      }
+      if (et.schedulingType === 'collective')
+        reasons.push({
+          code: 'collective_member_unavailable',
+          interval: { start: slot.start, end: slot.end },
+        })
+      if (et.schedulingType === 'round_robin')
+        reasons.push({
+          code: 'no_eligible_round_robin_host',
+          interval: { start: slot.start, end: slot.end },
+        })
+    }
+    result.push({
+      start: slot.start,
+      end: slot.end,
+      status: available ? 'available' : 'unavailable',
+      reasons: sortedExplanationReasons(reasons),
+    })
+  }
+  return result.sort(
+    (a, b) => Temporal.Instant.compare(a.start, b.start) || Temporal.Instant.compare(a.end, b.end),
+  )
+}
+
+function explainWithinBudget(input: ExplainAvailabilityInput, maximumCandidates: number) {
+  try {
+    return explainAvailability({ ...input, maximumCandidates })
+  } catch (error) {
+    if (
+      error instanceof AvailabilityInputError &&
+      error.message === 'explain candidate limit exceeded'
+    )
+      throw new DomainError('invalid', 'range_too_long', 'Ask for a shorter explanation range')
+    throw error
+  }
+}
+
+function explanationSlotKey(slot: Slot): string {
+  return `${slot.start.epochNanoseconds}/${slot.end.epochNanoseconds}`
+}
+
+function sortedExplanationReasons(reasons: AvailabilityReason[]): AvailabilityReason[] {
+  const unique = new Map<string, AvailabilityReason>()
+  for (const reason of reasons)
+    unique.set(
+      `${reason.code}/${reason.hostUserId ?? ''}/${reason.interval.start.epochNanoseconds}/${reason.interval.end.epochNanoseconds}`,
+      reason,
+    )
+  return [...unique.values()].sort(
+    (a, b) =>
+      AVAILABILITY_REASON_CODES.indexOf(a.code) - AVAILABILITY_REASON_CODES.indexOf(b.code) ||
+      (a.hostUserId ?? '').localeCompare(b.hostUserId ?? '') ||
+      Temporal.Instant.compare(a.interval.start, b.interval.start) ||
+      Temporal.Instant.compare(a.interval.end, b.interval.end),
   )
 }

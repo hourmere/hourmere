@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Db } from '@hourmere/db'
+import { type Db, importedBookingCondition, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { conferenceJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
@@ -35,6 +35,7 @@ interface ConferenceQueue {
 export function conferenceBookingNotifier(queue: ConferenceQueue) {
   return async (trx: Db, event: { bookingId: string }) => {
     if (!trx.isTransaction) throw Error('Conference jobs require the booking transaction')
+    if (await isImportedBooking(trx, event.bookingId)) return
     const root = await conferenceRoot(trx, event.bookingId)
     if (
       root &&
@@ -83,6 +84,9 @@ export function conferenceDispatchJob(
         .selectFrom('booking_conferences')
         .select('root_booking_id')
         .where('state', '=', 'pending')
+        .where((eb) =>
+          eb.not(importedBookingCondition(eb.ref('booking_conferences.root_booking_id'))),
+        )
         .where('next_attempt_at', '<=', clock(deps))
         .where((eb) => eb.or([eb('lease_until', 'is', null), eb('lease_until', '<=', clock(deps))]))
         .orderBy('next_attempt_at')
@@ -96,6 +100,7 @@ export function conferenceDispatchJob(
 /** Claims no booking/advisory lock; the transaction is finished before provider work. */
 async function claim(deps: CalendarDeps, root: string) {
   return deps.db.transaction().execute(async (trx) => {
+    if (await isImportedBooking(trx, root)) return
     const c = await trx
       .selectFrom('booking_conferences')
       .selectAll()
@@ -688,6 +693,10 @@ export async function retryBookingConference(ctx: ServiceContext, bookingId: str
       )
       .forUpdate()
       .executeTakeFirst()
+    if (!b || b.organization_id !== ctx.principal.organization.id)
+      throw new DomainError('not_found', 'conference_not_found')
+    if (await isImportedBooking(trx, bookingId))
+      throw new DomainError('conflict', 'imported_booking_read_only')
     const c = await trx
       .selectFrom('booking_conferences')
       .selectAll()

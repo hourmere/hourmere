@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
@@ -125,8 +126,8 @@ function BookingDetail({
         loadProfile(signal),
       ])
       if (booking === 'missing' || booking === 'resolve') return booking
-      let questions: Question[] = []
-      if (booking.eventTypeId) {
+      let questions: Question[] = booking.questions ?? []
+      if (booking.eventTypeId && !booking.questions) {
         // The event type may have been deleted since, or belong to another organization's
         // page: the answers are then shown under their ids.
         try {
@@ -200,6 +201,7 @@ function BookingView({
     (a, b) => Number(b.isBooker) - Number(a.isBooker),
   )
   const location = describeLocation(booking.location)
+  const readOnly = isReadOnlyBooking(booking)
   const cancelled = booking.status === 'cancelled'
   const rescheduled = cancelled && Boolean(booking.rescheduledToId)
   const started = new Date(booking.start).getTime() <= Date.now()
@@ -220,6 +222,7 @@ function BookingView({
         title={
           <>
             {ui(bookingTitle(booking))}
+            {readOnly && <span className="badge heading-badge">{t('Imported')}</span>}
             {cancelled && (
               <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
                 {rescheduled ? t('Rescheduled') : t('Cancelled')}
@@ -227,7 +230,11 @@ function BookingView({
             )}
           </>
         }
-        lede={t('Review meeting details and manage this booking.')}
+        lede={t(
+          readOnly
+            ? 'This imported booking is read-only and managed in the original system.'
+            : 'Review meeting details and manage this booking.',
+        )}
       />
       <p className="flash" role="status" tabIndex={-1} ref={statusRef}>
         {ui(status)}
@@ -274,7 +281,7 @@ function BookingView({
           <dt>{t('Booked')}</dt>
           <dd>
             {format.dateTime(booking.createdAt)}
-            {t(', through {0}', { '0': ui(SOURCE_LABELS[booking.source]) })}
+            {t(', through {0}', { '0': ui(SOURCE_LABELS[booking.source] ?? 'Unknown') })}
           </dd>
           {booking.rescheduledFromId && (
             <>
@@ -314,7 +321,7 @@ function BookingView({
         </dl>
       </section>
 
-      {!cancelled && !started && (
+      {!readOnly && !cancelled && !started && (
         <RescheduleBooking
           booking={booking}
           timeZone={timeZone}
@@ -322,7 +329,7 @@ function BookingView({
         />
       )}
 
-      {!cancelled && !started && (
+      {!readOnly && !cancelled && !started && (
         <CancelBooking
           booking={booking}
           expectedOrganizationId={expectedOrganizationId}

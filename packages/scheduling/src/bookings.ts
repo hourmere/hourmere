@@ -2,7 +2,13 @@
 // listed, rescheduled and cancelled by hosts. Availability is always recomputed inside the transaction
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
-import type { Database, Db, Json } from '@hourmere/db'
+import {
+  type Database,
+  type Db,
+  importedBookingIds,
+  isImportedBooking,
+  type Json,
+} from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
 import {
   eventTypeNotFound,
@@ -45,7 +51,7 @@ import {
   oneTimeBookingReplayTarget,
   resolveOneTimeBookingLink,
 } from './one-time-links.ts'
-import { type Responses, validateResponses } from './questions.ts'
+import { parseQuestions, type Question, type Responses, validateResponses } from './questions.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
   type BookingSuccessRedirect,
@@ -58,7 +64,7 @@ import { ensureWaitlistKey } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
-export type BookingSource = 'web' | 'embed' | 'api' | 'mcp'
+export type BookingSource = 'web' | 'embed' | 'api' | 'mcp' | 'import'
 
 export interface Attendee {
   name: string
@@ -85,6 +91,8 @@ export interface Booking {
   calendarCopy?: CalendarCopyStatus
   conferenceCanRetry?: boolean
   responses: Responses
+  /** Original question labels retained for imported answers, in authenticated host reads. */
+  questions?: Question[]
   /** The invitee first, then guests. */
   attendees: Attendee[]
   /** Authenticated host reads only: verified current co-host names; empty means unavailable. */
@@ -96,6 +104,8 @@ export interface Booking {
   cancelledAt: string | null
   cancelReason: string | null
   source: BookingSource
+  /** Imported busy records remain managed in the original system. */
+  managementPolicy?: 'local_only_read_only'
   createdAt: string
   /** Actual round-robin winner; never a pool availability map or private identity. */
   assignedHost?: { name: string; timeZone: string } | null
@@ -273,6 +283,7 @@ async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget
   // One hash in both tables would take 2^256 luck; the booking's own token would win.
   const row = rows.find((r) => !r.from_email) ?? rows[0]
   if (!row) return undefined
+  if (await isImportedBooking(db, row.id)) return undefined
   if (!row.from_email) return { id: row.id, fromEmail: false }
   return { id: await latestInChain(db, row.id), fromEmail: true }
 }
@@ -457,6 +468,7 @@ const BOOKING_COLUMNS = [
   'b.title',
   'b.location',
   'b.responses',
+  'b.import_questions',
   'b.rescheduled_from_id',
   'b.cancelled_at',
   'b.cancel_reason',
@@ -476,6 +488,7 @@ interface BookingRow {
   event_type_title?: string | null
   location: Json | null
   responses: Json
+  import_questions: Json
   rescheduled_from_id: string | null
   cancelled_at: Date | null
   cancel_reason: string | null
@@ -559,6 +572,12 @@ async function toBookings(
     for (const replacement of replacements)
       successors.set(replacement.predecessor_id, replacement.id)
   }
+  // Read immutable import attribution before lifecycle hydration, preserving the
+  // existing snapshot boundary for status, location and retry controls.
+  const imported = await importedBookingIds(
+    db,
+    rows.map((row) => row.id),
+  )
   // Read successor metadata before the lifecycle snapshot so no later successor read
   // can outlive the status, location and conference state returned together below.
   const conferences = await bookingConferenceViews(
@@ -595,7 +614,7 @@ async function toBookings(
   }
   const now = host?.now()
   return rows.map((row) => {
-    const view = conferences.get(row.id)
+    const view = imported.has(row.id) ? undefined : conferences.get(row.id)
     // Cancellation/rescheduling may commit after the first booking read, even moving
     // the conference pointer away. Hydrate lifecycle state for every booking id.
     const r = view
@@ -639,6 +658,9 @@ async function toBookings(
         ? { conferenceCanRetry: view.conferenceCanRetry }
         : {}),
       responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
+      ...(host && imported.has(r.id)
+        ? { questions: parseQuestions(r.import_questions ?? []) }
+        : {}),
       attendees: byBooking.get(r.id) ?? [],
       ...(coHosts.has(r.id) ? { coHosts: coHosts.get(r.id) } : {}),
       rescheduledFromId: r.rescheduled_from_id,
@@ -646,6 +668,7 @@ async function toBookings(
       cancelledAt: r.cancelled_at && toIso(toInstant(r.cancelled_at)),
       cancelReason: r.cancel_reason,
       source: r.source as BookingSource,
+      ...(imported.has(r.id) ? { managementPolicy: 'local_only_read_only' as const } : {}),
       createdAt: toIso(toInstant(r.created_at)),
       ...(r.hosts_use_default_schedule &&
         r.required_host_user_ids.length === 1 && { assignedHost: assigned.get(r.id) ?? null }),
@@ -903,6 +926,16 @@ async function insertBooking(
   return { id, manageToken: token }
 }
 
+export async function assertBookingLocallyManaged(db: Db, id: string): Promise<void> {
+  if (await isImportedBooking(db, id)) {
+    throw new DomainError(
+      'conflict',
+      'imported_booking_read_only',
+      'This imported booking is read-only and managed in the original system.',
+    )
+  }
+}
+
 const bookingCancelled = () =>
   new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
 
@@ -934,6 +967,7 @@ async function cancelLocked(
   origin: BookingOrigin,
   actorUserId: string | null,
 ): Promise<Booking> {
+  await assertBookingLocallyManaged(db, row.id)
   assertChangeable(row, now)
   await db
     .updateTable('bookings')
@@ -1015,7 +1049,7 @@ export interface CreateBookingInput {
  * The booking page is web without a key; agents pass api or mcp with the key they used.
  */
 export interface BookingOrigin {
-  source: BookingSource
+  source: Exclude<BookingSource, 'import'>
   /** The caller's API key. Idempotency keys are scoped to it; null shares one scope. */
   apiKeyId: string | null
   /** OAuth grants have their own retry and audit scope, separate from keys and anonymous callers. */
@@ -1468,6 +1502,7 @@ async function rescheduleLocked(
   carryManageToken = false,
   selectedDuration?: number | undefined,
 ): Promise<BookingWithToken> {
+  await assertBookingLocallyManaged(trx, old.id)
   // The status cannot change while the row is locked; the time check waits for the locks.
   if (old.status === 'cancelled') throw bookingCancelled()
   if (!carryManageToken) await assertInviteeRescheduleAllowed({ ...ctx, db: trx }, old.id)

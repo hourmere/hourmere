@@ -1,6 +1,7 @@
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
+import { runDatabaseCli } from './operator-cli.ts'
 import { parseImportPlan } from './plan.ts'
 import { SourceRefusal } from './schema.ts'
 import { extractSource } from './source.ts'
@@ -98,7 +99,7 @@ function validConfig(value: unknown): value is OperatorConfig {
     (c.sourceConnectionFile === undefined || typeof c.sourceConnectionFile === 'string')
   )
 }
-export async function runCli(
+export async function runParseCli(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
   write: (text: string) => void = (text) => process.stdout.write(`${text}\n`),
@@ -182,6 +183,16 @@ export async function runCli(
     )
     return 1
   }
+}
+export async function runCli(
+  argv: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  write: (text: string) => void = (text) => process.stdout.write(`${text}\n`),
+): Promise<number> {
+  if (argv[0] === 'parse') return runParseCli(argv.slice(1), env, write)
+  if (['preview', 'apply', 'register-source'].includes(argv[0] ?? ''))
+    return runDatabaseCli([...argv], env, write)
+  return runParseCli(argv, env, write)
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   process.exitCode = await runCli(process.argv.slice(2))

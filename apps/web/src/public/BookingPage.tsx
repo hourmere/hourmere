@@ -982,11 +982,16 @@ function Confirmation({
   const embedded = useEmbedded()
   const notified = useRef(false)
   useEffect(() => {
-    if (embedded && !notified.current) {
+    if (
+      embedded &&
+      !notified.current &&
+      confirmed.booking.source !== 'import' &&
+      confirmed.booking.managementPolicy !== 'local_only_read_only'
+    ) {
       notified.current = true
       notifyEmbedBooked()
     }
-  }, [embedded])
+  }, [embedded, confirmed.booking.source, confirmed.booking.managementPolicy])
   const { booking: initialBooking, manageToken, replayed, timeZone } = confirmed
   const [booking, setBooking] = useState(initialBooking)
   const ended = Date.parse(booking.end) <= currentTime()
@@ -1006,6 +1011,15 @@ function Confirmation({
       })
     : hostName
   const title = t('{event} with {host}', { event: event.title, host: hostName })
+  if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only') {
+    return (
+      <PublicLayout>
+        <PublicStatus>
+          {t('This imported booking is read-only and managed in the original system.')}
+        </PublicStatus>
+      </PublicLayout>
+    )
+  }
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
@@ -1082,6 +1096,7 @@ function Confirmation({
         {booking.status === 'confirmed' &&
           (!booking.conference || booking.conference.status === 'ready') && (
             <AddToCalendar
+              booking={booking}
               event={{
                 id: booking.id,
                 title,
@@ -1115,7 +1130,11 @@ function Confirmation({
             ]}
           />
           {manageToken && (
-            <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
+            <ManageLink
+              booking={booking}
+              token={manageToken}
+              intro={t('Use this link to reschedule or cancel.')}
+            />
           )}
           {(canCancel || (!manageToken && replayed)) && (
             <div className="alert alert-info">

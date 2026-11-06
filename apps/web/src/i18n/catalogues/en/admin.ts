@@ -1,5 +1,8 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  Imported: 'Imported',
+  'the original scheduling system': 'the original scheduling system',
+
   'The saved location options cannot be changed here. Keep the location unchanged and try again.':
     'The saved location options cannot be changed here. Keep the location unchanged and try again.',
   'Checking waitlist management access…': 'Checking waitlist management access…',

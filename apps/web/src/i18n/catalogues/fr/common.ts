@@ -5,6 +5,8 @@ export const common = {
   'Enter a phone number with + and country code, followed by 7–15 digits.':
     'Saisissez un numéro avec + et l’indicatif du pays, comprenant 7 à 15 chiffres au total.',
 
+  'This imported booking is read-only and managed in the original system.':
+    'Cette réservation importée est en lecture seule et reste gérée dans le système d’origine.',
   'This location is unavailable. Contact the host to book.':
     'Ce lieu de rendez-vous est indisponible. Contactez l’hôte pour réserver.',
   'The host or the team’s owners and admins can see your email, name and requested period.':
