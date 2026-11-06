@@ -671,25 +671,21 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
       }
     }
   }
-  it('passes real HTTP assertions with unchanged isolated source copies', async () => {
-    const factory = routeCopy()
-    for (const scenario of [
-      'stale',
-      'missing',
-      'invalid',
-      'inaccessible',
-      'read',
-      'read invalid',
-      'key',
-    ] as const)
-      await verifyScenario(factory, scenario)
-    await verifyWait('create', 'switch', factory)
-    await verifyWait('update', 'switch', factory)
-    await verifyFence(factory)
-    for (const space of ['own', 'foreign'] as const)
-      for (const operation of [...operations, 'list', 'deliveries'] as const)
-        await verifyPersonalContext(factory, space, operation)
-  })
+  it.each(['stale', 'missing', 'invalid', 'inaccessible', 'read', 'read invalid', 'key'] as const)(
+    'passes %s HTTP assertions with unchanged isolated source copies',
+    (scenario) => verifyScenario(routeCopy(), scenario),
+  )
+  it.each(['create', 'update'] as const)(
+    '%s rechecks a context switch during its wait with unchanged isolated source copies',
+    (operation) => verifyWait(operation, 'switch', routeCopy()),
+  )
+  it('preserves the native context fence with unchanged isolated source copies', () =>
+    verifyFence(routeCopy()))
+  for (const space of ['own', 'foreign'] as const)
+    it.each([...operations, 'list', 'deliveries'] as const)(
+      `%s preserves ${space} personal context with unchanged isolated source copies`,
+      (operation) => verifyPersonalContext(routeCopy(), space, operation),
+    )
   it.each([
     [
       'own personal-space write recovery',

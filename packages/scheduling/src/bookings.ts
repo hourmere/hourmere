@@ -524,7 +524,7 @@ async function toBookings(
           .onRef('co_member.organizationId', '=', 'co_booking.organization_id'),
       )
       .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
-      .select(['h.booking_id', 'u.name', 'p.handle'])
+      .select(['co_booking.id as booking_id', 'u.name', 'p.handle'])
       .where(
         'h.booking_id',
         'in',
@@ -581,6 +581,7 @@ async function toBookings(
         sql<string>`coalesce(p.time_zone,s.time_zone,'UTC')`.as('time_zone'),
       ])
       .where('h.booking_id', 'in', assignedIds)
+      .$narrowType<{ booking_id: string }>()
       .execute()
     for (const host of hosts)
       assigned.set(host.booking_id, {

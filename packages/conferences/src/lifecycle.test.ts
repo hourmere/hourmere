@@ -993,7 +993,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     await db.deleteFrom('booking_conferences').where('root_booking_id', '=', b.booking.id).execute()
     const host = await db
       .selectFrom('booking_hosts')
-      .selectAll()
+      .select('booking_id')
       .where('booking_id', '=', b.booking.id)
       .executeTakeFirstOrThrow()
     await db
