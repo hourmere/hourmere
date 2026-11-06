@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -318,6 +318,37 @@ it('builds a static-only precache and versions changed shell content', async () 
     expect(second.match(/hourmere-shell-[a-f0-9]{20}/)?.[0]).not.toBe(
       first.match(/hourmere-shell-[a-f0-9]{20}/)?.[0],
     )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('leaves in-memory builds valid without creating output files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hourmere-pwa-memory-build-'))
+  try {
+    await writeFile(join(root, 'index.html'), '<html><body>in-memory shell</body></html>')
+    const buildResult = build({
+      root,
+      configFile: false,
+      publicDir: false,
+      logLevel: 'silent',
+      build: { write: false },
+      plugins: [offlineShell()],
+    })
+    await expect(buildResult).resolves.toHaveProperty('output')
+    const result = await buildResult
+    expect(existsSync(join(root, 'dist'))).toBe(false)
+    expect('output' in result).toBe(true)
+    if ('output' in result) {
+      expect(
+        result.output.some(
+          (file) =>
+            file.fileName === 'index.html' &&
+            file.type === 'asset' &&
+            String(file.source).includes('in-memory shell'),
+        ),
+      ).toBe(true)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }
