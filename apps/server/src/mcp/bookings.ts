@@ -19,6 +19,7 @@ import {
   listPublicTeamSlots,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  prepareBookingExport,
   rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
@@ -482,6 +483,49 @@ export function bookingTools({
     },
   })
 
+  const exportBookings = defineTool({
+    name: 'export_bookings',
+    title: 'Export bookings as CSV',
+    description:
+      'Returns a small authenticated download pointer, never CSV rows. Personal owners export their own bookings; team owners/admins export team bookings. Requires read/full API key scope. Download with the same instance and an authorized API key (OAuth MCP grants cannot authenticate REST). Maximum 366 days, from inclusive and to exclusive. Files contain personal data. Use the CLI export command to stream to a private file or stdout.',
+    input: z.strictObject({
+      from: Instant,
+      to: Instant,
+      timeZone: z.string().max(100).optional(),
+      bom: z.boolean().optional(),
+      status: z.enum(['confirmed', 'cancelled']).optional(),
+      eventTypeId: z.uuid().optional(),
+      hostUserId: z.string().max(255).optional(),
+      endAfter: Instant.optional(),
+      endTo: Instant.optional(),
+      order: z.enum(['asc', 'desc']).optional(),
+    }),
+    output: z.object({
+      downloadPath: z.string(),
+      authentication: z.literal('api_key_or_session'),
+      containsPersonalData: z.literal(true),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      await prepareBookingExport(context(call.caller), args)
+      const query = new URLSearchParams()
+      for (const [key, value] of Object.entries(args)) {
+        if (value !== undefined) query.set(key, String(value))
+      }
+      query.set('expectedOrganizationId', call.caller.organization.id)
+      return {
+        downloadPath: `/api/v1/bookings/export.csv?${query}`,
+        authentication: 'api_key_or_session' as const,
+        containsPersonalData: true as const,
+      }
+    },
+  })
+
   const retryInput = z.strictObject({ bookingId: z.uuid() })
   const retryOutput = z.object({ accepted: z.literal(true) })
   const retryAnnotations = {
@@ -522,6 +566,7 @@ export function bookingTools({
     rescheduleBooking,
     cancelBooking,
     listBookings,
+    exportBookings,
     retryConference,
     retryCalendarCopy,
   ]

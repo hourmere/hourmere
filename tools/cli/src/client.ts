@@ -246,3 +246,55 @@ export async function callTool(options: {
     throw new CliError('request_failed')
   }
 }
+
+/** Stream a same-instance CSV download, awaiting every write for backpressure. */
+export async function downloadCsv(options: {
+  url: URL
+  key: string
+  path: unknown
+  fetch?: typeof fetch
+  write: (chunk: string) => Promise<void>
+}): Promise<void> {
+  if (typeof options.path !== 'string' || !options.path.startsWith('/api/v1/bookings/export.csv?'))
+    throw new CliError('invalid_response')
+  const url = new URL(options.path, options.url)
+  if (
+    url.origin !== options.url.origin ||
+    url.pathname !== '/api/v1/bookings/export.csv' ||
+    url.hash
+  )
+    throw new CliError('invalid_response')
+  try {
+    const response = await (options.fetch ?? fetch)(url, {
+      redirect: 'error',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(300_000),
+      headers: { authorization: `Bearer ${options.key}`, accept: 'text/csv' },
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      throw new CliError('http_error', response.status)
+    }
+    if (response.headers.get('content-type')?.split(';')[0]?.trim() !== 'text/csv') {
+      await response.body?.cancel()
+      throw new CliError('invalid_response')
+    }
+    const reader = response.body?.getReader()
+    if (!reader) throw new CliError('invalid_response')
+    const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        await options.write(decoder.decode(value, { stream: true }))
+      }
+      await options.write(decoder.decode())
+    } finally {
+      await reader.cancel().catch(() => {})
+      reader.releaseLock()
+    }
+  } catch (error) {
+    if (error instanceof CliError) throw error
+    throw new CliError('request_failed')
+  }
+}

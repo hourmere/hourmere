@@ -231,3 +231,24 @@ Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 ## License
 
 GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
+
+### Export bookings
+
+`hourmere export --input export.json --output bookings.csv` streams CSV into a new
+0600 file. Omit `--output` to stream CSV to stdout (including pipes); output writes
+apply backpressure. Existing files are refused. A failed download can leave a partial
+file; remove that file before retrying. The command never retries automatically.
+
+Example `export.json`:
+
+```json
+{"from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","timeZone":"America/Los_Angeles","bom":true}
+```
+
+The range is at most 366 days. Optional `status`, `eventTypeId`, `hostUserId`,
+`endAfter`, `endTo` and `order` match export/list filtering. `bom` defaults to false;
+choose true for Excel. Requires a `read` or `full` key and personal ownership or
+team owner/admin permissions. The MCP call returns a small pointer; the CLI streams
+its same-instance authenticated REST download without buffering the CSV in memory.
+Files contain attendee personal data; store and share them privately. See
+[CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.

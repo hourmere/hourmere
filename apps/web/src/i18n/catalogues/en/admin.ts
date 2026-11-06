@@ -1,5 +1,16 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Export bookings as CSV': 'Export bookings as CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    'Choose a start-time range of at most 366 days. Current booking filters also apply.',
+  'This file contains personal data. Store and share it carefully.':
+    'This file contains personal data. Store and share it carefully.',
+  'CSV times use {zone} and UTC.': 'CSV times use {zone} and UTC.',
+  'Export starts at or after (UTC)': 'Export starts at or after (UTC)',
+  'Export starts before (UTC)': 'Export starts before (UTC)',
+  'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
+  'Download CSV': 'Download CSV',
+
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 

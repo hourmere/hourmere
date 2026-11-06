@@ -19,6 +19,7 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -345,6 +346,7 @@ describe('shared API-key scope policy', () => {
         'reschedule_booking',
         'cancel_booking',
         'list_bookings',
+        'export_bookings',
         'retry_conference',
         'retry_calendar_copy',
         'get_profile',
@@ -371,6 +373,7 @@ describe('shared API-key scope policy', () => {
         'whoami',
         'find_available_slots',
         'list_bookings',
+        'export_bookings',
         'get_profile',
         'list_event_types',
         'get_event_type',
@@ -478,6 +481,22 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "rest('GET', '/api/v1/bookings/export.csv', 'other_read'",
+      "rest('GET', '/api/v1/bookings/export.csv', 'booking_read'",
+    ],
+    ["mcp('export_bookings', 'other_read'", "mcp('export_bookings', 'booking_read'"],
+    ["cli('export', 'export_bookings')", "cli('export', 'list_bookings')"],
+  ] as const)('kills broadened export scope: %s', (before, after) => {
+    const verify = (operation: typeof apiKeyOperation) => {
+      for (const id of ['GET /api/v1/bookings/export.csv', 'mcp:export_bookings', 'cli:export'])
+        expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    }
+    verify(sourceCopyRegistry())
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow()
+  })
+
   it.each([
     [
       "mcp('get_event_type_waitlist', 'other_read'",

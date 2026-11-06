@@ -10,6 +10,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 - [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
 - [REST](https://hourmere.com/docs/rest), [MCP](https://hourmere.com/docs/mcp) and
   [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
+- [CSV booking exports](https://hourmere.com/docs/booking-export) for personal owners and
+  team administrators, with bounded streaming and spreadsheet formula protection.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
   [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
 

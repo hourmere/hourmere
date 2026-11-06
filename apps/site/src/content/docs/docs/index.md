@@ -24,6 +24,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
   and optional host notes, with delivery limits and configuration examples.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
+- [CSV booking export](/docs/booking-export): download a bounded date range for reporting,
+  with personal-owner and team-administrator permissions.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
   choose busy-time calendars and a booking destination.
@@ -32,6 +34,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
+  permit one active export per organization. Files contain personal data; there is no
+  scheduled export or automatic delivery. Answers use a JSON column.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

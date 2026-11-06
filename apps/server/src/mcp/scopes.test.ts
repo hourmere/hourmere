@@ -21,6 +21,7 @@ const all = [
   'reschedule_booking',
   'cancel_booking',
   'list_bookings',
+  'export_bookings',
   'retry_conference',
   'retry_calendar_copy',
   'get_profile',
@@ -64,6 +65,7 @@ const writes = new Set([
   'resend_waitlist_verification',
 ])
 const otherReads = new Set([
+  'export_bookings',
   'list_schedules',
   'get_schedule',
   'list_calendar_connections',

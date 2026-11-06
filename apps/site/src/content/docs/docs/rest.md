@@ -137,6 +137,11 @@ The personal and `/api/v1/public/teams/{handle}/{slug}` endpoints share this con
 
 ## Create and manage one booking
 
+For reporting, [export bookings as CSV](/docs/booking-export) using
+`GET /api/v1/bookings/export.csv`. A `read` or `full` key and a bounded date range are
+required. Personal owners can export their own bookings; team owners/admins can export
+their team's bookings. Ordinary team membership does not grant export access.
+
 Bookings send email to the host/invitee when workers are enabled. Additional guests require
 the host to enable `allowGuests` on the event type (off by default, at most ten). Otherwise
 nonempty `guests` return `400 guests_not_allowed`. Existing guests keep receiving updates

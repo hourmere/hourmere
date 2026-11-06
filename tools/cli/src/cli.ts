@@ -1,6 +1,14 @@
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
-import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version } from './client.ts'
+import {
+  CliError,
+  callTool,
+  downloadCsv,
+  endpoint,
+  isObject,
+  MAX_INPUT_BYTES,
+  version,
+} from './client.ts'
 
 export const COMMANDS = {
   whoami: 'whoami',
@@ -21,6 +29,7 @@ export const COMMANDS = {
   slots: 'find_available_slots',
   book: 'create_booking',
   list: 'list_bookings',
+  export: 'export_bookings',
   reschedule: 'reschedule_booking',
   cancel: 'cancel_booking',
   'retry-meeting': 'retry_conference',
@@ -49,6 +58,8 @@ After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-include-invitee-personal-data true|false,
                --success-redirect-allow-embed-parent true|false, or --clear-success-redirect.
 Invitee name/email become visible to the target website and its analytics when enabled.
+Export: export --input FILE|- [--output FILE] streams CSV to a new private file or stdout.
+Requires read/full scope; input: from, to (maximum 366 days), timeZone, optional filters and bom.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
@@ -210,7 +221,7 @@ export async function runCli(options: {
   argv: readonly string[]
   env: NodeJS.ProcessEnv
   stdin: AsyncIterable<Uint8Array | string>
-  stdout: (text: string) => void
+  stdout: (text: string) => unknown | Promise<unknown>
   stderr: (text: string) => void
   fetch?: typeof fetch
 }): Promise<number> {
@@ -296,6 +307,23 @@ export async function runCli(options: {
       input,
       fetch: options.fetch,
     })
+    if (args.command === 'export') {
+      await downloadCsv({
+        url,
+        key,
+        path: result.downloadPath,
+        fetch: options.fetch,
+        write: async (chunk) => {
+          if (output) await output.writeFile(chunk)
+          else await options.stdout(chunk)
+        },
+      })
+      if (output) {
+        await output.sync()
+        options.stdout('{"outputWritten":true}\n')
+      }
+      return 0
+    }
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {

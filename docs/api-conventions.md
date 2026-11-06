@@ -1,5 +1,15 @@
 [API conventions](https://hourmere.com/docs/api-conventions).
 
+### CSV booking export
+
+`GET /api/v1/bookings/export.csv` is an additive authenticated download endpoint,
+documented in [CSV booking export](https://hourmere.com/docs/booking-export). It requires
+personal ownership or current team owner/admin authority and API key scope `read`/`full`.
+Unlike the narrower existing team list projection, this explicitly requested export
+includes saved answers and source attribution. The existing list response is unchanged.
+The result is UTF-8 CSV rather than JSON; pre-stream errors retain the ordinary error
+envelope. MCP returns a credential-free pointer and CLI streams the authenticated download.
+
 ### Booking source compatibility
 
 `Booking.source` adds `"import"` to the response values `"web"`, `"embed"`, `"api"`

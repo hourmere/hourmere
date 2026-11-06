@@ -748,6 +748,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download bookings as CSV
+         * @description Personal owners and team owners/admins only. A repeatable-read snapshot streams 100-row keyset pages; one export per organization, five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.
+         */
+        get: operations["exportBookingsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/manage": {
         parameters: {
             query?: never;
@@ -6122,6 +6142,88 @@ export interface operations {
                 };
             };
             /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    exportBookingsCsv: {
+        parameters: {
+            query: {
+                bom?: "true" | "false";
+                /** @description Only bookings ending after (exclusive) */
+                endAfter?: string;
+                /** @description Only bookings ending at or before (inclusive) */
+                endTo?: string;
+                eventTypeId?: string;
+                expectedOrganizationId?: string;
+                /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                from: string;
+                hostUserId?: string;
+                /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
+                order?: "asc" | "desc";
+                status?: "confirmed" | "cancelled";
+                timeZone?: string;
+                /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV download with RFC 4180 quoting and formula protection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Invalid export filters or range */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Only personal owners and team owners/admins may export. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Export already running or organization context changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;

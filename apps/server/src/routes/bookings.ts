@@ -5,6 +5,7 @@ import {
   type BookingNotifier,
   cancelHostBooking,
   cancelManagedBooking,
+  exportBookingsCsv,
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
@@ -681,6 +682,59 @@ export function bookingRoutes({
           cursor: q.cursor,
         })
         return c.json(page, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/export.csv',
+        operationId: 'exportBookingsCsv',
+        summary: 'Download bookings as CSV',
+        description:
+          'Personal owners and team owners/admins only. A repeatable-read snapshot streams 100-row keyset pages; one export per organization, five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
+        security: authenticated,
+        middleware: caller,
+        request: {
+          query: ListBookingsQuery.omit({ limit: true, cursor: true })
+            .extend({
+              from: Instant,
+              to: Instant,
+              timeZone: z.string().optional(),
+              eventTypeId: z.uuid().optional(),
+              hostUserId: z.uuid().optional(),
+              expectedOrganizationId: z.uuid().optional(),
+              bom: z.enum(['true', 'false']).optional(),
+            })
+            .strict(),
+        },
+        responses: {
+          200: {
+            description: 'CSV download with RFC 4180 quoting and formula protection',
+            content: { 'text/csv': { schema: z.string() } },
+          },
+          400: error('Invalid export filters or range'),
+          401: unauthorized,
+          403: error('Only personal owners and team owners/admins may export'),
+          409: error('Export already running or organization context changed'),
+          429: keyRateLimited,
+        },
+      }),
+      async (c) => {
+        const q = c.req.valid('query')
+        const body = await exportBookingsCsv(
+          context(c.var.principal),
+          { ...q, bom: q.bom === 'true' },
+          c.req.raw.signal,
+        )
+        return new Response(body, {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': 'attachment; filename="bookings.csv"',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
       },
     )
 

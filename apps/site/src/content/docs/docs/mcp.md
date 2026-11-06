@@ -91,6 +91,7 @@ notifications and trigger configured integrations.
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
