@@ -24,7 +24,7 @@ import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
-import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
+import { authenticated, ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 
@@ -133,6 +133,10 @@ export const Booking = z
         description: 'Authenticated host reads only: this caller’s ordinary calendar copy.',
       }),
     responses: Responses,
+    questions: z.array(Question).optional().openapi({
+      description:
+        'Authenticated host reads only: the imported booking’s original question definitions, including preserved notes.',
+    }),
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     coHosts: z
       .array(z.object({ name: z.string() }))
@@ -150,8 +154,13 @@ export const Booking = z
     }),
     cancelledAt: Instant.nullable(),
     cancelReason: z.string().nullable(),
-    source: z.enum(['web', 'embed', 'api', 'mcp']).openapi({
-      description: 'How the booking was made; api and mcp are agents',
+    source: z.enum(['web', 'embed', 'api', 'mcp', 'import']).openapi({
+      description:
+        'How the booking was made; import means a read-only busy record managed in the original system',
+    }),
+    managementPolicy: z.literal('local_only_read_only').optional().openapi({
+      description:
+        'Present for imported busy records: managed in the original system, without Hourmere management links, changes, retries, calendar writes or notifications.',
     }),
     createdAt: Instant,
     assignedHost: z

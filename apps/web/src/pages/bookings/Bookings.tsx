@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import { type Booking, loadProfile } from '../../api/resources.ts'
@@ -258,6 +259,7 @@ function BookingList({
                     </td>
                     <td data-label={t('Status')} className="fit">
                       <div className="table-value">
+                        {isReadOnlyBooking(b) && <span className="badge">{t('Imported')}</span>}
                         {b.status === 'cancelled' && b.rescheduledToId ? (
                           <>
                             <span className="badge">{t('Rescheduled')}</span>

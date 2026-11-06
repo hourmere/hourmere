@@ -13,6 +13,17 @@ helper (`@hourmere/notifications`), the `booking_notifications` table, and the b
 services ([`packages/scheduling/src/bookings.ts`](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/bookings.ts)), which queue the jobs in the transaction of
 every booking change, whether it came over REST or MCP (last section).
 
+## Imported local bookings
+
+Cal.com/cal.diy imports use durable `source=import` local-only bookings. Their empty
+notification snapshots do not authorize confirmation delivery. Every enqueue, retry,
+recovery, repair and worker entry checks the persistent policy, including connected
+reschedule chains and stale artifacts from before a restart. No mail, ICS, calendar,
+conference, webhook or scheduled-message delivery is produced for them. Bounded dispatchers
+exclude import-connected records before applying their page limit so ordinary work can
+continue behind stale imported intents. See the
+[repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md).
+
 ## Configure reminders and follow-ups
 
 For host steps in the event-type editor, see

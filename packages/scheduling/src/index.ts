@@ -12,6 +12,8 @@ export {
 export {
   type AvailabilityQuery,
   buildAvailabilityInput,
+  type ExplainEventAvailabilityQuery,
+  explainEventAvailability,
   findSlots,
   getOneTimeBookingPage,
   getPublicEventType,

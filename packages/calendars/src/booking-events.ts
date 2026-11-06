@@ -1,5 +1,6 @@
-import type { Db } from '@hourmere/db'
+import { type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
 import type { EnqueueOptions } from '@hourmere/jobs'
+import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { writeConferenceMirrors } from './conference-mirrors.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
@@ -35,6 +36,8 @@ export async function redispatchBookingCalendar(
   bookingId: string,
 ) {
   return db.transaction().execute(async (trx) => {
+    if (await isImportedBooking(trx, bookingId))
+      throw new DomainError('conflict', 'imported_booking_read_only')
     const root = await rootOf(trx, bookingId)
     if (!root) throw new Error('Booking no longer exists')
     return queue.enqueue(
@@ -125,7 +128,12 @@ export async function recoverBookingCalendarPage(
       .orderBy('b.id')
       .limit(100)
       .execute()
+    const imported = await importedBookingIds(
+      trx,
+      bookings.map((booking) => booking.id),
+    )
     for (const booking of bookings) {
+      if (imported.has(booking.id)) continue
       const root = await rootOf(trx, booking.id)
       if (!root) continue
       const automatic = await trx
@@ -158,6 +166,7 @@ export async function recoverBookingCalendarPage(
 export function calendarBookingNotifier(queue: CalendarBookingQueue) {
   return async (trx: Db, event: BookingEvent) => {
     if (!trx.isTransaction) throw new Error('Calendar jobs require the booking transaction')
+    if (await isImportedBooking(trx, event.bookingId)) return
     const root = await rootOf(trx, event.bookingId)
     if (root) {
       const automatic = await trx
@@ -182,6 +191,7 @@ export async function writeBookingCalendar(
   bookingId: string,
   signal = AbortSignal.timeout(120_000),
 ) {
+  if (await isImportedBooking(deps.db, bookingId)) return
   const root = await rootOf(deps.db, bookingId)
   if (!root) return
   // Automatic roots have exactly one provider-create authority, including unknown imports.
