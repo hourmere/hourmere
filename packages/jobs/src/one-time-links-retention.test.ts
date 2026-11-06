@@ -231,24 +231,24 @@ describe.skipIf(!databaseUrl)('one-time link retention (real Postgres)', () => {
   it.each([
     [
       'expiry grace',
-      "expires_at <= statement_timestamp() - INTERVAL '90 days'",
+      `expires_at <= statement_timestamp() - INTERVAL '\${ONE_TIME_LINK_RETENTION_DAYS} days'`,
       'expires_at <= statement_timestamp()',
     ],
     [
       'revocation grace',
-      "revoked_at <= statement_timestamp() - INTERVAL '90 days'",
+      `revoked_at <= statement_timestamp() - INTERVAL '\${ONE_TIME_LINK_RETENTION_DAYS} days'`,
       'revoked_at <= statement_timestamp()',
     ],
     ['used evidence', "state IN ('active', 'expired')", "state IN ('active', 'expired', 'used')"],
     [
       'nonexpiring links',
-      "AND expires_at <= statement_timestamp() - INTERVAL '90 days'",
-      "AND (expires_at IS NULL OR expires_at <= statement_timestamp() - INTERVAL '90 days')",
+      `AND expires_at <= statement_timestamp() - INTERVAL '\${ONE_TIME_LINK_RETENTION_DAYS} days'`,
+      `AND (expires_at IS NULL OR expires_at <= statement_timestamp() - INTERVAL '\${ONE_TIME_LINK_RETENTION_DAYS} days')`,
     ],
     [
       'revocation clock',
-      "AND revoked_at <= statement_timestamp() - INTERVAL '90 days'",
-      "AND expires_at <= statement_timestamp() - INTERVAL '90 days'",
+      `AND revoked_at <= statement_timestamp() - INTERVAL '\${ONE_TIME_LINK_RETENTION_DAYS} days'`,
+      `AND expires_at <= statement_timestamp() - INTERVAL '\${ONE_TIME_LINK_RETENTION_DAYS} days'`,
     ],
     ['expired deletion', "state IN ('active', 'expired')", "state = 'active' AND false"],
     ['revoked deletion', "WHERE state = 'revoked'", "WHERE state = 'revoked' AND false"],
@@ -262,7 +262,7 @@ describe.skipIf(!databaseUrl)('one-time link retention (real Postgres)', () => {
 
   it('detects source-copy removal of the combined batch cap', async () => {
     const copy = await sourceCopy(
-      'SELECT id FROM ended ORDER BY ended_at, id LIMIT 500',
+      `SELECT id FROM ended ORDER BY ended_at, id LIMIT \${ONE_TIME_LINK_CLEANUP_BATCH}`,
       'SELECT id FROM ended ORDER BY ended_at, id LIMIT 1000',
     )
     await expect(verifyBatch(copy)).rejects.toMatchObject({
@@ -272,7 +272,10 @@ describe.skipIf(!databaseUrl)('one-time link retention (real Postgres)', () => {
   })
 
   it('detects source-copy removal of skip-locked protection', async () => {
-    const copy = await sourceCopy('LIMIT 500 FOR UPDATE SKIP LOCKED', 'LIMIT 500 FOR UPDATE')
+    const copy = await sourceCopy(
+      `LIMIT \${ONE_TIME_LINK_CLEANUP_BATCH} FOR UPDATE SKIP LOCKED`,
+      `LIMIT \${ONE_TIME_LINK_CLEANUP_BATCH} FOR UPDATE`,
+    )
     await expect(verifySkipLocked(copy)).rejects.toMatchObject({
       name: 'AssertionError',
       message: expect.stringContaining('cleanup skips foreground row locks'),

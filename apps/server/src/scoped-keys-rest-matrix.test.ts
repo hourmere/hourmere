@@ -63,6 +63,10 @@ const classes = {
     'POST /api/v1/bookings/manage/reschedule',
     'POST /api/v1/public/{handle}/{slug}/bookings',
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
+    'POST /api/v1/public/{handle}/{slug}/waitlist',
+    'POST /api/v1/public/{handle}/{slug}/waitlist/resend',
+    'POST /api/v1/public/teams/{handle}/{slug}/waitlist',
+    'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
@@ -71,6 +75,8 @@ const classes = {
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
     'GET /api/v1/event-type-hosts',
+    'GET /api/v1/event-types/{id}/waitlist',
+    'GET /api/v1/event-types/{id}/waitlist/entries',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
     'GET /api/v1/schedules/{id}/overrides',
@@ -86,6 +92,8 @@ const classes = {
     'DELETE /api/v1/event-types/{id}',
     'PATCH /api/v1/event-types/{id}',
     'PUT /api/v1/event-types/{id}/notifications',
+    'PUT /api/v1/event-types/{id}/waitlist',
+    'DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}',
     'POST /api/v1/event-types/{id}/round-robin/activate',
     'PUT /api/v1/profile',
     'PATCH /api/v1/profile/name',
@@ -111,6 +119,7 @@ const classes = {
     'POST /api/v1/conference-connections/{id}/refresh',
     'POST /api/v1/conference-connections/zoom/authorize',
     'POST /api/v1/conference-connections/zoom/authorize-meetings',
+    'GET /api/v1/instance/embed',
     'GET /api/v1/mcp-oauth/connections',
     'DELETE /api/v1/mcp-oauth/connections/{id}',
     'POST /api/v1/mcp-oauth/consent',
@@ -265,6 +274,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           googleCalendar: calendar.google,
           socialProviders: {},
           invitationMailLimits: { secret },
+          waitlistSecret: secret,
           webhooks: webhookSettings,
         }),
       })
@@ -300,11 +310,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
             ? 'booking_not_found'
             : template === '/api/v1/readiness/self'
               ? 'readiness_access_denied'
-              : template.startsWith('/api/v1/team') || template.startsWith('/api/v1/teams')
-                ? 'team_management_access_denied'
-                : template.startsWith('/api/v1/conference-connections')
-                  ? 'conference_session_required'
-                  : 'session_required'
+              : template === '/api/v1/instance/embed'
+                ? 'embed_configuration_access_denied'
+                : template.startsWith('/api/v1/team') || template.startsWith('/api/v1/teams')
+                  ? 'team_management_access_denied'
+                  : template.startsWith('/api/v1/conference-connections')
+                    ? 'conference_session_required'
+                    : 'session_required'
         return {
           method,
           path,
@@ -399,12 +411,34 @@ describe.skipIf(!process.env.DATABASE_URL)(
             team ? null : owner.user.id,
             { slug: nonce, hosts: [{ userId: owner.user.id }] },
           )
-          path = path.replace('/intro/bookings', `/${nonce}/bookings`)
+          path = path.replace('/intro/', `/${nonce}/`)
           payload = {
             start,
             invitee: { name: 'Matrix invitee', email: 'matrix@example.test', timeZone: 'UTC' },
           }
           expectedStatus = 201
+          if (template.includes('/waitlist')) {
+            await db
+              .updateTable('event_types')
+              .set({ waitlist_enabled: true })
+              .where('id', '=', cleanupEvent)
+              .execute()
+            // Every matrix caller has a real schedule: choose a future weekend to exercise empty admission.
+            let day = Temporal.Now.plainDateISO('UTC').add({ days: 7 })
+            while (day.dayOfWeek !== 7) day = day.add({ days: 1 })
+            payload = template.endsWith('/resend')
+              ? { email: `${nonce}@example.test` }
+              : {
+                  email: `${nonce}@example.test`,
+                  consent: true,
+                  preferredWindow: {
+                    start: `${day}T00:00:00Z`,
+                    end: `${day.add({ days: 1 })}T00:00:00Z`,
+                    timeZone: 'UTC',
+                  },
+                }
+            expectedStatus = 202
+          }
         }
       } else if (template.startsWith('/api/v1/schedules')) {
         if (template.includes('{id}')) {
@@ -492,7 +526,33 @@ describe.skipIf(!process.env.DATABASE_URL)(
               ],
             },
           }
+        if (operation === 'PUT /api/v1/event-types/{id}/waitlist') payload = { enabled: true }
         if (method === 'DELETE') expectedStatus = 204
+        if (template.includes('/waitlist/entries/{entryId}')) {
+          const createdAt = new Date()
+          const windowEnd = new Date(createdAt.getTime() + 172800000)
+          const entry = await db
+            .insertInto('waitlist_entries')
+            .values({
+              organization_id: teamId,
+              event_type_id: id,
+              recipient_hash: Buffer.alloc(32, 1),
+              email: 'matrix-waitlist@example.test',
+              window_start: new Date(Date.now() + 86400000),
+              window_end: windowEnd,
+              created_at: createdAt,
+              time_zone: 'UTC',
+              locale: 'en',
+              consent_version: 'waitlist-v1',
+              consented_at: new Date(),
+              expires_at: windowEnd,
+              pending_expires_at: new Date(createdAt.getTime() + 86400000),
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          path = path.replace('{entryId}', entry.id)
+          expectedStatus = 200
+        }
       } else if (template.startsWith('/api/v1/webhooks')) {
         id = mainWebhook
         if (method !== 'GET' && template.includes('{id}'))
@@ -550,32 +610,41 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 90-operation contract and all 270 scope combinations', () => {
+    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(90)
-      expect(new Set(ids).size).toBe(90)
+      expect(ids).toHaveLength(99)
+      expect(new Set(ids).size).toBe(99)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(270)
+      expect(cases).toHaveLength(297)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
       const fixture = await prepare(operation, kind)
       const beforeProvider = google.calls.length
       try {
-        const response = await app.request(fixture.path, {
-          method: fixture.method,
-          headers: {
-            authorization: `Bearer ${keys.get(scope)}`,
-            'content-type': 'application/json',
-            ...fixture.headers,
+        const response = await app.request(
+          fixture.path,
+          {
+            method: fixture.method,
+            headers: {
+              authorization: `Bearer ${keys.get(scope)}`,
+              'content-type': 'application/json',
+              ...fixture.headers,
+            },
+            ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
           },
-          ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
-        })
+          { incoming: { socket: { remoteAddress: `192.0.2.${(sequence % 250) + 1}` } } },
+        )
         if (kind === 'session_only') {
           expect(response.status).toBe(fixture.expectedStatus)
-          expect(await response.json()).toMatchObject({ error: fixture.nativeError })
+          const body = await response.json()
+          expect(body).toMatchObject({ error: fixture.nativeError })
+          if (operation === 'GET /api/v1/instance/embed') {
+            expect(body).toEqual({ error: 'embed_configuration_access_denied' })
+            expect(response.headers.get('vary')).toBe('Cookie, Authorization')
+          }
           expect(google.calls.length).toBe(beforeProvider)
         } else if (!allowed[kind].includes(scope)) {
           expect(response.status).toBe(403)
@@ -623,7 +692,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.state).toBe(consumed ? 'used' : revoked ? 'revoked' : 'active')
           expect(link.booking_id !== null).toBe(consumed)
         }
-        expect(response.headers.get('cache-control')).toBe('no-store')
+        expect(response.headers.get('cache-control')).toBe(
+          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+        )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link
         // evidence deliberately prevents deleting that booking on its own.

@@ -392,7 +392,7 @@ describe('published image installation selection', () => {
         ),
     ).toBe(true)
     expect(result.stdout).toContain('docker compose pull')
-    expect(result.stdout).toContain('docker compose up -d --wait')
+    expect(result.stdout).toContain('./scripts/compose-up.sh -d --wait')
     expect(result.stdout).not.toContain('--build')
     expect(result.stdout).toContain('Using image version 1.2.3 from the prompted version.')
   })
@@ -403,7 +403,7 @@ describe('published image installation selection', () => {
     expect(result.status).toBe(0)
     expect(setup.text().includes("COMPOSE_FILE='docker-compose.yml'\n")).toBe(true)
     expect(/^HOURMERE_VERSION=/m.test(setup.text())).toBe(false)
-    expect(result.stdout).toContain('docker compose up -d --build --wait')
+    expect(result.stdout).toContain('./scripts/compose-up.sh -d --build --wait')
   })
 
   it.each([

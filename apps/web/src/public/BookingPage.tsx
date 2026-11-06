@@ -37,6 +37,7 @@ import {
   When,
 } from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
+import { monthOf } from './calendar.ts'
 import { EventDescription } from './EventDescription.tsx'
 import {
   embedParentRedirectAllowed,
@@ -53,9 +54,24 @@ import {
   PublicNotFound,
   PublicStatus,
 } from './PublicLayout.tsx'
-import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
+import {
+  normalizedHandle,
+  normalizedSlug,
+  type RequestState,
+  teamSlug,
+  useRequest,
+} from './paths.ts'
 import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
-import { formatDate, formatTime, formatTimeRange, offsetAt, offsetLabel, zoneName } from './time.ts'
+import { parseSlotLink, type SlotIntent } from './slot-link.ts'
+import {
+  dateKeyIn,
+  formatDate,
+  formatTime,
+  formatTimeRange,
+  offsetAt,
+  offsetLabel,
+  zoneName,
+} from './time.ts'
 import {
   bookingErrors,
   bookingLocale,
@@ -64,12 +80,14 @@ import {
   responsesFor,
 } from './validation.ts'
 import { rememberVisitorTimeZone, visitorTimeZone } from './visitor-time-zone.ts'
+import { WaitlistJoin } from './WaitlistJoin.tsx'
 import {
   loadWaitlistSuggestion,
   parseWaitlistLink,
   type WaitlistLink,
   waitlistPreviewActive,
 } from './waitlist-link.ts'
+import { waitlistOfferEnabled } from './waitlist-window.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
@@ -147,21 +165,32 @@ export function BookingPage({ team = false }: { team?: boolean } = {}) {
     () => parseWaitlistLink(params.waitlistToken, params.suggestedStart, params.previewExpiresAt),
     [params.waitlistToken, params.suggestedStart, params.previewExpiresAt],
   )
+  const directLink = useMemo(
+    () =>
+      !embedded && !params.waitlistToken && window.parent === window
+        ? {
+            identity: `${location.key}/${location.pathname}${location.search}`,
+            intent: parseSlotLink(location.search, window.location.origin + location.pathname),
+          }
+        : undefined,
+    [embedded, params.waitlistToken, location.key, location.pathname, location.search],
+  )
   if (handle === undefined || slug === undefined) return <PublicNotFound what="event" />
   if (handle !== rawHandle || slug !== rawSlug)
     return (
       <Navigate
-        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${handle}/${slug}${waitlist ? `/waitlist/${waitlist.token}/${encodeURIComponent(waitlist.start)}/${waitlist.expiresAt}` : ''}${embedded ? location.search : ''}`}
+        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${handle}/${slug}${params.waitlistToken !== undefined ? `/waitlist/${encodeURIComponent(params.waitlistToken)}/${encodeURIComponent(params.suggestedStart ?? '')}/${encodeURIComponent(params.previewExpiresAt ?? '')}` : ''}${location.search}`}
         replace
       />
     )
   return (
     <BookingPageContent
-      key={`${team}/${handle}/${slug}`}
+      key={`${team}/${handle}/${slug}/${params.waitlistToken !== undefined ? `waitlist/${params.waitlistToken}/${params.suggestedStart}/${params.previewExpiresAt}` : 'ordinary'}`}
       handle={handle}
       slug={slug}
       team={team}
       waitlist={waitlist}
+      directLink={directLink}
     />
   )
 }
@@ -171,19 +200,47 @@ function BookingPageContent({
   slug,
   team,
   waitlist,
+  directLink,
 }: {
   handle: string
   slug: string
   team: boolean
   waitlist?: WaitlistLink | undefined
+  directLink?: DirectLink | undefined
 }) {
   const { t, ui } = useI18n()
 
-  const load = useCallback(
-    (signal: AbortSignal) => getEventType(handle, slug, signal, team),
-    [handle, slug, team],
-  )
-  const [state, reload] = useRequest(load)
+  const requestIdentity = directLink?.identity ?? ''
+  const eventLoaded = useRef(false)
+  const [retry, setRetry] = useState(0)
+  const [initialRead, setInitialRead] = useState<
+    RequestState<PublicEventType> & { identity: string }
+  >({ status: 'loading', identity: requestIdentity })
+  // Once the form exists, it owns refreshes and drafts. Before that point, a new
+  // query must supersede even the very first metadata read (including its errors).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry explicitly repeats an unsuccessful initial read
+  useEffect(() => {
+    if (eventLoaded.current) return
+    const controller = new AbortController()
+    setInitialRead({ status: 'loading', identity: requestIdentity })
+    getEventType(handle, slug, controller.signal, team).then(
+      (data) => {
+        if (controller.signal.aborted) return
+        eventLoaded.current = true
+        setInitialRead({ status: 'ready', data, identity: requestIdentity })
+      },
+      (error) => {
+        if (!controller.signal.aborted)
+          setInitialRead({ status: 'error', error, identity: requestIdentity })
+      },
+    )
+    return () => controller.abort()
+  }, [handle, slug, team, requestIdentity, retry])
+  const state =
+    initialRead.status === 'ready' || initialRead.identity === requestIdentity
+      ? initialRead
+      : { status: 'loading' as const }
+  const reload = () => setRetry((value) => value + 1)
   const embedded = useEmbedded()
   const allowEmbedParent = state.status === 'ready' && state.data.allowEmbedParentRedirect === true
   const loaded = state.status !== 'loading'
@@ -206,7 +263,13 @@ function BookingPageContent({
     return (
       <PublicLayout>
         <div className="card public-card">
-          <p role="alert">{ui(failureMessage(state.error))}</p>
+          <p role={directLink && directLink.intent.status !== 'none' ? 'status' : 'alert'}>
+            {ui(
+              directLink && directLink.intent.status !== 'none'
+                ? 'We could not check this time. Please try again.'
+                : failureMessage(state.error),
+            )}
+          </p>
           <button type="button" className="button" onClick={reload}>
             {t('Try again')}
           </button>
@@ -215,7 +278,14 @@ function BookingPageContent({
     )
   }
   return (
-    <BookingFlow event={state.data} handle={handle} slug={slug} team={team} waitlist={waitlist} />
+    <BookingFlow
+      event={state.data}
+      handle={handle}
+      slug={slug}
+      team={team}
+      waitlist={waitlist}
+      directLink={directLink}
+    />
   )
 }
 
@@ -228,6 +298,10 @@ interface Confirmed extends PublicBookingResult {
 }
 
 type BookingEvent = PublicEventType | OneTimeBookingPageData['eventType']
+interface DirectLink {
+  identity: string
+  intent: SlotIntent
+}
 type BookingAddress =
   | { oneTimeToken: string; handle?: never; slug?: never; team?: never }
   | { oneTimeToken?: never; handle: string; slug: string; team: boolean }
@@ -240,10 +314,12 @@ function BookingFlow({
   oneTimeToken,
   prefill,
   waitlist,
+  directLink,
 }: {
   event: BookingEvent
   prefill?: { name: string | null; email: string | null }
   waitlist?: WaitlistLink | undefined
+  directLink?: DirectLink | undefined
 } & BookingAddress) {
   const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
 
@@ -281,6 +357,25 @@ function BookingFlow({
   // have made instead of booking twice. Language changes preserve that attempt; changing
   // booking details starts a new attempt in the interface language selected at submission.
   const attempt = useRef<{ key: string; details: string; body: CreateBooking } | null>(null)
+  const directController = useRef<AbortController | null>(null)
+  const [directState, setDirectState] = useState<{
+    identity: string
+    status: 'loading' | 'error' | 'selected' | 'done'
+  }>({ identity: '', status: 'done' })
+  const [directRetry, setDirectRetry] = useState(0)
+  const directFlow = directLink !== undefined && directLink.intent.status !== 'none'
+  // Hide the previous form synchronously on query navigation, before effects run.
+  const directPending =
+    !!directLink &&
+    (directState.identity !== directLink.identity
+      ? directLink.intent.status !== 'none' || directState.identity !== ''
+      : directState.status === 'loading')
+  const directError =
+    directState.identity === directLink?.identity && directState.status === 'error'
+  function dismissDirect() {
+    directController.current?.abort()
+    if (directLink) setDirectState({ identity: directLink.identity, status: 'done' })
+  }
   const refreshDurations = useCallback(async () => {
     attempt.current = null
     setSlot(null)
@@ -308,7 +403,7 @@ function BookingFlow({
     }
   }, [handle, slug, team, oneTimeToken])
   const loadSlots = useMemo<SlotLoader>(() => {
-    const duration = hasDurationChoices ? durationMinutes : undefined
+    const duration = hasDurationChoices || directFlow ? durationMinutes : undefined
     const load = oneTimeToken
       ? oneTimeLinkSlots(oneTimeToken, duration)
       : eventSlots(handle, slug, team, duration)
@@ -326,7 +421,11 @@ function BookingFlow({
           codeOf(err) !== 'invalid_duration'
         )
           throw err
-        setNotice(bookingErrors(err, event.questions).form)
+        setNotice(
+          directFlow
+            ? 'This meeting length is no longer offered. Please choose a time again.'
+            : bookingErrors(err, event.questions).form,
+        )
         await refreshDurations()
         return []
       }
@@ -338,9 +437,84 @@ function BookingFlow({
     oneTimeToken,
     durationMinutes,
     hasDurationChoices,
+    directFlow,
     event.questions,
     refreshDurations,
   ])
+
+  // Ordinary address links are read-only suggestions. Each navigation gets a fresh
+  // public metadata/availability read, with an abort guard even if fetch ignores abort.
+  // A manual edit consumes this intent; rerenders and picker refreshes cannot replay it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: zone is presentation only; retry explicitly revalidates the same intent
+  useEffect(() => {
+    if (!directLink) return
+    const { identity, intent } = directLink
+    const controller = new AbortController()
+    directController.current?.abort()
+    directController.current = controller
+    refreshController.current?.abort()
+    setDurationRefresh(null)
+    attempt.current = null
+    setSlot(null)
+    setConfirmed(null)
+    setGone(false)
+    setFormError(null)
+    setNotice(null)
+    const done = (message?: UiText) => {
+      if (message) setNotice(message)
+      setBackToPicker(intent.status !== 'none')
+      setDirectState({ identity, status: 'done' })
+    }
+    if (intent.status === 'none') done()
+    else if (intent.status === 'invalid')
+      done('We could not use the time details in this link. Please choose a time.')
+    else {
+      setDirectState({ identity, status: 'loading' })
+      // The picker independently bounds the restored date to its navigable window.
+      const day = dateKeyIn(Date.parse(intent.start), timeZone)
+      setPickerPosition(
+        Date.parse(intent.start) >= currentTime() ? { month: monthOf(day), day } : null,
+      )
+      void (async () => {
+        try {
+          const updated = await getEventType(handle, slug, controller.signal, team)
+          if (controller.signal.aborted) return
+          setEvent(updated)
+          const allowed = updated.allowedDurationsMinutes ?? [updated.durationMinutes]
+          if (!allowed.includes(intent.durationMinutes)) {
+            setDurationMinutes(updated.durationMinutes)
+            done('This meeting length is no longer offered. Please choose a time again.')
+            return
+          }
+          setDurationMinutes(intent.durationMinutes)
+          const slots = await eventSlots(
+            handle,
+            slug,
+            team,
+            intent.durationMinutes,
+          )(intent.start, intent.end, controller.signal)
+          if (controller.signal.aborted) return
+          const offered = slots.find(
+            (candidate) =>
+              Date.parse(candidate.start) === Date.parse(intent.start) &&
+              Date.parse(candidate.end) === Date.parse(intent.end),
+          )
+          if (offered) {
+            setSlot(offered)
+            setDirectState({ identity, status: 'selected' })
+          } else done('That time is no longer available. Please pick another one.')
+        } catch (error) {
+          if (controller.signal.aborted) return
+          if (codeOf(error) === 'event_type_not_found') setGone(true)
+          else if (codeOf(error) === 'invalid_duration') {
+            done('This meeting length is no longer offered. Please choose a time again.')
+            await refreshDurations()
+          } else setDirectState({ identity, status: 'error' })
+        }
+      })()
+    }
+    return () => controller.abort()
+  }, [directLink, directRetry, handle, slug, team, refreshDurations])
 
   // A suggested time is a preview, never a hold. Read normal availability before
   // opening the ordinary form; the booking transaction checks it again on submit.
@@ -381,10 +555,11 @@ function BookingFlow({
   }, [waitlist, handle, slug, team, initialEvent.durationMinutes])
 
   if (gone) return oneTimeToken ? <OneTimeLinkUnavailable /> : <PublicNotFound what="event" />
-  if (confirmed)
+  if (confirmed && !directPending)
     return <Confirmation event={event} confirmed={confirmed} locale={locale} team={team} />
 
   function pick(chosen: Slot) {
+    dismissDirect()
     // A different time starts a new intent, even if they later return to the old time.
     if (attempt.current && attempt.current.body.start !== chosen.start) attempt.current = null
     setSlot(chosen)
@@ -394,19 +569,20 @@ function BookingFlow({
 
   function changeTime() {
     if (inFlight.current) return
+    dismissDirect()
     setSlot(null)
     setNow(currentTime())
     setBackToPicker(true)
   }
 
   async function submit() {
-    if (!slot || inFlight.current) return
+    if (!slot || inFlight.current || directPending || directError) return
     const guests = guestsFor(values.guests)
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
       ...(waitlist && { waitlistToken: waitlist.token }),
-      ...(hasDurationChoices && { durationMinutes }),
+      ...((hasDurationChoices || directFlow) && { durationMinutes }),
       invitee: {
         name: values.name.trim(),
         email: values.email.trim(),
@@ -451,14 +627,18 @@ function BookingFlow({
         setSlot(null)
         setBackToPicker(true)
         setNotice(
-          code === 'slot_taken'
+          code === 'slot_taken' && !directFlow
             ? 'Someone else just booked that time. Please pick another one.'
             : 'That time is no longer available. Please pick another one.',
         )
         setNow(currentTime())
         setVersion((v) => v + 1)
       } else if (code === 'invalid_duration') {
-        setNotice(bookingErrors(err, event.questions, values.guests).form)
+        setNotice(
+          directFlow
+            ? 'This meeting length is no longer offered. Please choose a time again.'
+            : bookingErrors(err, event.questions, values.guests).form,
+        )
         await refreshDurations()
       } else if (code === 'event_type_not_found' || code === 'one_time_link_not_found') {
         setGone(true)
@@ -534,19 +714,46 @@ function BookingFlow({
             )}
           </ul>
           {event.description && <EventDescription>{event.description}</EventDescription>}
-          {slot && (
+          {slot && !directPending && !directError && (
             <div className="chosen-time">
-              <p>
-                <strong>{formatDate(Date.parse(slot.start), timeZone, locale)}</strong>
-                <br />
-                {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
-                <br />
-                <span className="muted">
-                  {zoneName(timeZone)}
-                  {chosenZoneLabel.slice(0, chosenOffsetAt)}
-                  <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
-                </span>
-              </p>
+              {directFlow ? (
+                <p>
+                  {[slot.start, slot.end].map((instant, index) => (
+                    <span key={instant}>
+                      {index > 0 && (
+                        <>
+                          <br />
+                          <span aria-hidden="true">– </span>
+                        </>
+                      )}
+                      <time dateTime={instant}>
+                        {t('{date}, {time}', {
+                          date: formatDate(Date.parse(instant), timeZone, locale),
+                          time: formatTime(Date.parse(instant), timeZone, locale),
+                        })}
+                      </time>
+                      <span className="muted">
+                        {t(' ({zone}, {offset})', {
+                          zone: zoneName(timeZone),
+                          offset: offsetLabel(timeZone, Date.parse(instant)),
+                        })}
+                      </span>
+                    </span>
+                  ))}
+                </p>
+              ) : (
+                <p>
+                  <strong>{formatDate(Date.parse(slot.start), timeZone, locale)}</strong>
+                  <br />
+                  {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
+                  <br />
+                  <span className="muted">
+                    {zoneName(timeZone)}
+                    {chosenZoneLabel.slice(0, chosenOffsetAt)}
+                    <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
+                  </span>
+                </p>
+              )}
               {hostTimeZone &&
                 isKnownTimeZone(hostTimeZone) &&
                 offsetAt(Date.parse(slot.start), hostTimeZone) !==
@@ -579,7 +786,29 @@ function BookingFlow({
               )}
             </p>
           )}
-          {suggestion === 'loading' ? (
+          {directPending || directError ? (
+            <section className="details-step" aria-label={t('Pick a time')}>
+              <PublicStatus>
+                {t(
+                  directPending
+                    ? 'Checking the suggested time…'
+                    : 'We could not check this time. Please try again.',
+                )}
+              </PublicStatus>
+              {directError && (
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setDirectRetry((value) => value + 1)}
+                >
+                  {t('Try again')}
+                </button>
+              )}
+              <button type="button" className="button" onClick={changeTime} disabled={submitting}>
+                {t('Change time')}
+              </button>
+            </section>
+          ) : suggestion === 'loading' ? (
             <PublicStatus>{t('Loading…')}</PublicStatus>
           ) : durationRefresh ? (
             <section className="details-step" aria-labelledby="duration-refresh-heading">
@@ -603,6 +832,13 @@ function BookingFlow({
               <FocusHeading level={2} id="details-heading" className="step-title">
                 {t('Your details')}
               </FocusHeading>
+              {directState.status === 'selected' && (
+                <p role="status">
+                  {t(
+                    'The suggested time is selected. Review the details and confirm your booking.',
+                  )}
+                </p>
+              )}
               {(prefill?.name || prefill?.email) && (
                 <p className="hint">
                   {t('These details were filled in for convenience. You can change them.')}
@@ -624,6 +860,25 @@ function BookingFlow({
             </section>
           ) : (
             <SlotPicker
+              renderWaitlist={
+                waitlistOfferEnabled(
+                  Boolean(oneTimeToken),
+                  'waitlist' in event ? event.waitlist?.enabled : undefined,
+                  durationMinutes === event.durationMinutes,
+                )
+                  ? (window) => (
+                      <WaitlistJoin
+                        key={`${window.start}/${window.end}/${window.timeZone}`}
+                        handle={handle}
+                        slug={slug}
+                        team={team}
+                        window={window}
+                        locale={locale}
+                        onRefresh={() => void refreshDurations()}
+                      />
+                    )
+                  : undefined
+              }
               load={loadSlots}
               durationMinutes={durationMinutes}
               afterTitle={
@@ -639,7 +894,9 @@ function BookingFlow({
                             value={minutes}
                             checked={durationMinutes === minutes}
                             onChange={() => {
+                              dismissDirect()
                               attempt.current = null
+                              setSlot(null)
                               setDurationMinutes(minutes)
                               setNotice(null)
                               setFormError(null)
@@ -649,6 +906,18 @@ function BookingFlow({
                         </label>
                       ))}
                     </div>
+                    {waitlistOfferEnabled(
+                      Boolean(oneTimeToken),
+                      'waitlist' in event ? event.waitlist?.enabled : undefined,
+                    ) &&
+                      durationMinutes !== event.durationMinutes && (
+                        <p className="hint">
+                          {t(
+                            'To join the waitlist, choose the default meeting length ({duration}).',
+                            { duration: formatDuration(event.durationMinutes, displayLocale) },
+                          )}
+                        </p>
+                      )}
                   </fieldset>
                 ) : undefined
               }
@@ -666,6 +935,7 @@ function BookingFlow({
               version={version}
               focusTitle={backToPicker}
               notice={notice}
+              noticeRole={directFlow ? 'status' : 'alert'}
             />
           )}
         </div>

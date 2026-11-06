@@ -1,5 +1,48 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This location is unavailable. Contact the host to book.':
+    '此地点暂时无法预约。请联系主持人安排预约。',
+  'The host or the team’s owners and admins can see your email, name and requested period.':
+    '主持人或团队所有者和管理员可以查看你的邮箱、姓名和期望时段。',
+  '{count} second': '{count}秒',
+  '{count} seconds': '{count}秒',
+  '{count} minute': '{count}分钟',
+  '{count} minutes': '{count}分钟',
+  '{count} hour': '{count}小时',
+  '{count} hours': '{count}小时',
+
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    '若要加入候补名单，请选择默认时长（{duration}）。',
+  'Join the waitlist': '加入候补名单',
+  'No available times in this period.': '这段时间内没有可约时段。',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    '有空位时，所有符合条件的人都可能收到通知。我们不会预留时段，先成功预约者获得该时段。',
+  'From {start} to {end} ({timeZone})': '从{start}至{end}（{timeZone}）',
+  'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.':
+    '候补截止时间为{date}。未确认的申请会在 24 小时后失效。',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    '我同意接收这段时间的候补邮件，并可通过任一候补邮件中的链接退出。',
+  'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.':
+    '退出后会清除你的联系信息。为防止滥用，我们会保留经哈希处理、无法还原的记录 2 天；为避免重复通知，此类记录最多会保留 64 天。',
+  'Check your email to confirm': '请查收邮件并确认',
+  'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.':
+    '如果申请可受理，我们会发送确认链接。发送限制可能导致邮件无法送达。再次提交加入候补名单的表单不会重发确认邮件。',
+  'Resend confirmation email': '重发确认邮件',
+  'Confirmation email requested. Check your email; sending limits may prevent delivery.':
+    '已请求发送确认邮件。请查收邮件；邮件可能因发送限制而无法送达。',
+  'Agree to receive waitlist emails before joining.': '请先同意接收候补邮件，再加入名单。',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    '这段时间暂时无法加入候补名单。请查看可约时段后重试。',
+  'Joining…': '正在加入……',
+  'Sending…': '正在发送……',
+  'We could not use the time details in this link. Please choose a time.':
+    '无法使用此链接中的时间信息。请选择时间。',
+  'This meeting length is no longer offered. Please choose a time again.':
+    '此会议时长已不再提供。请重新选择时间。',
+  'Checking the suggested time…': '正在检查建议的时间……',
+  'The suggested time is selected. Review the details and confirm your booking.':
+    '已选中建议时间。请核对详情并确认预约。',
+  'We could not check this time. Please try again.': '无法检查此时间。请重试。',
   'These suggestions have expired. Check the currently available times.':
     '这些建议时段已过期，请查看当前可约时间。',
   'If you are still on the waitlist, you can keep waiting until your original deadline. No time is reserved.':
@@ -283,8 +326,8 @@ export const common = {
   'To be confirmed by the host': '待主持人确认',
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     '如需查看、改期或取消预约，请打开确认邮件中的链接，或预约时保存的链接。出于安全考虑，链接打开后会从地址栏移除，因此刷新页面后需重新打开链接。',
-  'Too many requests from your network. Try again in {0} seconds.':
-    '来自你所在网络的请求过多。请在{0}秒后重试。',
+  'Too many requests from your network. Try again in {duration}.':
+    '你的网络请求过多。请在{duration}后重试。',
   'Too many requests from your network. Wait a minute and try again.':
     '来自你所在网络的请求过多。请稍等一分钟后重试。',
   'Too many requests. Wait a minute and try again.': '请求过多。请稍等一分钟后重试。',

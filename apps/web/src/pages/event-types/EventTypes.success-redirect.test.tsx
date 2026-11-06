@@ -192,6 +192,44 @@ describe.each(['en', 'zh-CN'] as const)('after-booking editor in %s', (language)
     )
   })
 
+  it('preserves concurrent waitlist and redirect settings together and adopts both saved baselines', async () => {
+    chooseLanguage(language)
+    const copy = words[language]
+    const api = setup(eventType({ waitlist: { enabled: true }, successRedirect: settings }))
+    const user = userEvent.setup()
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    const title = await screen.findByLabelText(copy.title)
+    api.update({
+      ...api.saved(),
+      waitlist: { enabled: false },
+      successRedirect: { ...settings, url: 'https://other.example/new' },
+    })
+    await user.type(title, ' renamed')
+    await user.click(screen.getByRole('button', { name: copy.save }))
+    await screen.findByText(copy.saved)
+    const firstPatch = api.requests.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+    expect(firstPatch).not.toHaveProperty('waitlist')
+    expect(firstPatch).not.toHaveProperty('successRedirect')
+    expect(api.saved().waitlist).toEqual({ enabled: false })
+    expect(screen.getByLabelText<HTMLInputElement>(copy.url).value).toBe(
+      'https://other.example/new',
+    )
+
+    const waitlistName =
+      language === 'en'
+        ? 'Let invitees join a waitlist when no times are available'
+        : '没有可预约时间时，允许受邀人加入候补名单'
+    const waitlist = screen.getByRole<HTMLInputElement>('checkbox', { name: waitlistName })
+    expect(waitlist.checked).toBe(false)
+    await user.click(waitlist)
+    await user.click(screen.getByRole('button', { name: copy.save }))
+    await screen.findByText(copy.saved)
+    const secondPatch = api.requests.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body
+    expect(secondPatch).toHaveProperty('waitlist', { enabled: true })
+    expect(secondPatch).not.toHaveProperty('successRedirect')
+    expect(api.saved().successRedirect?.url).toBe('https://other.example/new')
+  })
+
   it('surfaces server URL validation inline and links its error summary to the field', async () => {
     chooseLanguage(language)
     const copy = words[language]
@@ -224,6 +262,29 @@ describe.each(['en', 'zh-CN'] as const)('after-booking editor in %s', (language)
 })
 
 describe('redirect draft and preview contracts', () => {
+  it.each([false, true])(
+    'keeps waitlist and redirect changes independent of their saved baselines (waitlist=%s)',
+    (enabled) => {
+      const baseline = draftFromEventType(
+        eventType({ waitlist: { enabled }, successRedirect: settings }),
+      )
+      const waitlistEdit = { ...baseline, waitlistEnabled: !enabled }
+      const onlyWaitlist = toPatchInput(waitlistEdit, baseline)
+      expect(onlyWaitlist.waitlist).toEqual({ enabled: !enabled })
+      expect(onlyWaitlist).not.toHaveProperty('successRedirect')
+      const redirectEdit = { ...baseline, allowEmbedParent: true }
+      const onlyRedirect = toPatchInput(redirectEdit, baseline)
+      expect(onlyRedirect.successRedirect).toEqual({ ...settings, allowEmbedParent: true })
+      expect(onlyRedirect).not.toHaveProperty('waitlist')
+      const both = toPatchInput({ ...waitlistEdit, allowEmbedParent: true }, baseline)
+      expect(both.waitlist).toEqual({ enabled: !enabled })
+      expect(both.successRedirect).toEqual({ ...settings, allowEmbedParent: true })
+      const reverted = toPatchInput({ ...waitlistEdit, waitlistEnabled: enabled }, baseline)
+      expect(reverted).not.toHaveProperty('waitlist')
+      expect(reverted).not.toHaveProperty('successRedirect')
+    },
+  )
+
   it('keeps notification and redirect changes independent of their editor session baselines', () => {
     const baseline = draftFromEventType(eventType({ successRedirect: settings }))
     const onlyRedirect = toPatchInput({ ...baseline, allowEmbedParent: true }, baseline)

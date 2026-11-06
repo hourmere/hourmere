@@ -4,6 +4,11 @@ import { validateEventTypeRules } from '@hourmere/core'
 import { describe, expect, it } from 'vitest'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
+import {
+  compatLocation,
+  locationOptionsFromLegacy,
+  validateLocationOptions,
+} from './location-options.ts'
 
 type Change = readonly [string, string]
 const original = readFileSync(new URL('./event-types.ts', import.meta.url), 'utf8')
@@ -20,6 +25,9 @@ const bindings = {
   validateQuestions: identity,
   parseQuestions: identity,
   jsonb: identity,
+  compatLocation,
+  locationOptionsFromLegacy,
+  validateLocationOptions,
 }
 
 function sourceCopy(start: string, end: string, change?: Change) {
@@ -50,6 +58,7 @@ const fields = {
   isHidden: false,
   allowGuests: false,
   position: 0,
+  locations: null,
 }
 
 describe('booking limit service source-copy mutations', () => {

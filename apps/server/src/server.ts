@@ -74,6 +74,7 @@ import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import type { Tool } from './mcp/tools.ts'
+import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
@@ -122,6 +123,8 @@ export function productRoutes({
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
+  embedAllowedOrigins,
+  slotSnippetsEnabled = false,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
@@ -135,6 +138,8 @@ export function productRoutes({
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
+  embedAllowedOrigins?: readonly string[]
+  slotSnippetsEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -165,7 +170,9 @@ export function productRoutes({
       automaticMeet,
       automaticZoom,
       followUpHostNotesEnabled,
+      slotSnippetsEnabled,
       hostedSignupUrl,
+      embedAllowedOrigins,
       privacyPolicyUrl,
       termsUrl,
     }),
@@ -195,6 +202,7 @@ export function productRoutes({
     publicRoutes({
       db,
       waitlistSecret,
+      publicUrl,
       notify,
       automaticMeet,
       automaticZoom,
@@ -222,6 +230,7 @@ export function productRoutes({
 /** The same tool registry is used by the running server and capability contract tests. */
 export function productTools({
   db,
+  waitlistSecret,
   publicUrl,
   followUpHostNotesEnabled,
   successRedirectPolicy,
@@ -233,7 +242,8 @@ export function productTools({
   zoomConference,
 }: {
   db: Db
-  publicUrl?: string
+  waitlistSecret?: string | undefined
+  publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notify?: BookingNotifier | undefined
@@ -245,7 +255,14 @@ export function productTools({
 }): Tool[] {
   return [
     whoamiTool,
-    ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
+    ...bookingTools({
+      db,
+      waitlistSecret,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      bookingMaxInviteeReschedules,
+    }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
     ...eventTypeTools({
       db,
@@ -259,6 +276,7 @@ export function productTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
     }),
+    ...waitlistTools({ db, secret: waitlistSecret, publicUrl }),
   ]
 }
 
@@ -629,6 +647,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+        embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
+        slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
         successRedirectPolicy,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
@@ -661,6 +681,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           : {}),
         tools: productTools({
           db,
+          waitlistSecret: config.BETTER_AUTH_SECRET,
           publicUrl: config.PUBLIC_URL,
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
           successRedirectPolicy,

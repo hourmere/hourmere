@@ -118,6 +118,7 @@ for configuration and delivery behavior.
 | `SMTP_URL` | Unset | `smtps://user:password@host:465` or `smtp://…:587`; special credential characters must be percent-encoded. Remote SMTP requires TLS/STARTTLS. Without SMTP, emails go to logs. |
 | `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts that can also receive calendar replies; see the requirements below. |
 | `BOOKING_MAX_INVITEE_RESCHEDULES` | `5` | Maximum invitee-initiated reschedules across one booking chain, including through old email links. `0` disables invitee rescheduling. Hosts may still reschedule; cancellation remains available. |
+| `SLOT_SNIPPETS_ENABLED` | `false` | Show the saved-event open-times email picker. Enable only after public direct-slot booking pages are deployed on this same instance. Copying creates no reservation. |
 | `FOLLOW_UP_HOST_NOTES_ENABLED` | `true` | Permit host-written follow-up notes. `false` rejects notification writes containing notes and omits notes from all outgoing follow-ups, including existing booking snapshots. Set identically on web and worker. Hourmere Cloud must set `false` until reviewed host-text abuse controls are implemented. |
 | `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Positive integer. Host emails are exempt. |
 | `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
@@ -229,7 +230,7 @@ from connecting a calendar.
 4. Copy the client ID and secret into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in your
    private `.env`. Keep `PUBLIC_URL` set to the same external origin. Never commit the
    credentials. The default Compose file forwards both variables; recreate affected
-   services with `docker compose up -d --wait`, or restart direct server processes.
+   services with `./scripts/compose-up.sh -d --wait`, or restart direct server processes.
 5. Open your instance's `/sign-in`, choose **Continue with Google** and confirm that Google
    returns you to Hourmere. The instance's registration policy still applies to new users.
 
@@ -324,7 +325,7 @@ before recreating the stack. For plain mode, remove both lines of the proxy veri
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  ./scripts/compose-up.sh -d --build --wait
 )
 ```
 

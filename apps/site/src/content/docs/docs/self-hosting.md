@@ -29,7 +29,7 @@ Run this sequence from a directory where you want the checkout:
 git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 ./scripts/setup.sh --source
-docker compose up -d --build --wait
+./scripts/compose-up.sh -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
 
@@ -64,7 +64,7 @@ existing deployment, edit its `.env` rather than rerunning setup. The developmen
 Setup selects both Compose files using
 `COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml'`, persists
 `COMPOSE_PROJECT_NAME=hourmere`, and sets `SIGNUP=first-user`
-and `AUTO_MIGRATE=true`. `docker compose up` then builds the checked-out application,
+and `AUTO_MIGRATE=true`. `./scripts/compose-up.sh` then builds the checked-out application,
 starts PostgreSQL 18, and applies application and job migrations before serving requests.
 `--wait` waits for the app and database health checks; the curl command also checks the
 public TLS/proxy path. A health response checks the process/database, not SMTP delivery or
@@ -144,8 +144,12 @@ certificates and state persist in `caddy-data` and `caddy-config` volumes. Caddy
 filter replaces the complete request URI with `REDACTED` and deletes request
 headers and response headers (a redirect `Location` can repeat the URI), including on
 upstream errors. This also protects encoded capability paths
-and query strings. Retain this filter when customizing the Caddyfile; configure the
-same URI, request-header and response-header protections on any existing proxy.
+and query strings. Retain this filter when customizing the root `Caddyfile`; the upgrade
+helper reads that same file without rewriting operator customizations. Review upstream
+filter changes alongside your edits before starting a new revision. Use
+`./scripts/compose-up.sh` after edits so the running proxy loads them; a direct
+`docker compose up` does not refresh the content digest. Configure the same URI,
+request-header and response-header protections on any existing proxy.
 
 For your own proxy or CDN, redact capabilities in both access and error logs, including
 upstream failures: the segment after `/waitlist/` on personal and team booking suggestions
@@ -172,7 +176,7 @@ For a private local trial, select `plain`, accept `http://localhost:3000`, leave
 and explicitly acknowledge the private trial prompt. Then use:
 
 ```sh
-docker compose up -d --build --wait
+./scripts/compose-up.sh -d --build --wait
 curl --fail http://127.0.0.1:3000/api/health
 ```
 
@@ -225,7 +229,7 @@ mv "$env_update" .env
 ```
 
 Review the private file locally, then run `docker compose build`, `docker compose pull proxy db`
-and `docker compose up -d --wait`. Verify HTTPS health, sign-in and a booking before
+and `./scripts/compose-up.sh -d --wait`. Verify HTTPS health, sign-in and a booking before
 reopening traffic. Do not recreate or delete the database volume. If the old installation
 used a custom Compose override, carry its settings over deliberately; `.env` entries alone
 do not forward arbitrary server variables. If resizing an already deployed `/29` ingress
@@ -266,7 +270,7 @@ pasting:
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  ./scripts/compose-up.sh -d --build --wait
 )
 ```
 
@@ -330,7 +334,7 @@ Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overla
     { echo "Worker service is still enabled; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  ./scripts/compose-up.sh -d --build --wait
 )
 ```
 
@@ -401,7 +405,7 @@ n8n port. Verify the worker selection and recreate both app and worker:
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  ./scripts/compose-up.sh -d --build --wait
 )
 ```
 
@@ -429,7 +433,8 @@ delivery re-resolves and revalidates every DNS answer on every attempt.
 ## Back up and restore
 
 Back up the full database (`auth`, `public` and `pgboss` schemas), `.env`, the checked-out
-commit, and Caddy's data/configuration. Protect backups as sensitive data. Preserve all
+commit, the host `Caddyfile` (including operator customizations), and Caddy's data/configuration.
+Protect backups as sensitive data. Preserve all
 signing/encryption keys: for example, losing `CALENDAR_ENCRYPTION_KEY` makes saved calendar
 tokens unreadable. The saved `.env` includes `COMPOSE_FILE`, so the backup also records
 whether the tracked worker overlay is enabled. Do not generate replacement secrets during
@@ -452,10 +457,11 @@ volumes. Store the backup outside the checkout:
   docker compose stop app proxy &&
   docker compose exec -T db pg_dump -U hourmere -d hourmere -Fc > "$backup_dir/hourmere.dump" &&
   install -m 600 .env "$backup_dir/.env" &&
+  install -m 600 Caddyfile "$backup_dir/Caddyfile" &&
   git rev-parse HEAD > "$backup_dir/commit" &&
   docker compose cp proxy:/data "$backup_dir/caddy-data" &&
   docker compose cp proxy:/config "$backup_dir/caddy-config" &&
-  docker compose up -d --wait &&
+  ./scripts/compose-up.sh -d --wait &&
   printf '%s\n' "$backup_dir"
 )
 ```
@@ -474,7 +480,7 @@ Inspect the failed command and partial backup, fix the cause, then resume the ex
 deployment from its checkout:
 
 ```sh
-unset COMPOSE_FILE && docker compose up -d --wait
+unset COMPOSE_FILE && ./scripts/compose-up.sh -d --wait
 ```
 
 Treat the partial backup as incomplete and take a new successful backup before continuing.
@@ -494,6 +500,7 @@ that it does not overlap any host, Docker or VPN network before using it:
 git clone https://github.com/hourmere/hourmere.git hourmere-restore
 cd hourmere-restore
 git checkout --detach "$(cat "$backup_dir/commit")"
+install -m 600 "$backup_dir/Caddyfile" Caddyfile
 install -m 600 "$backup_dir/.env" .env
 umask 077
 env_update=$(mktemp .env.update.XXXXXXXX)
@@ -523,6 +530,11 @@ docker compose exec -T db \
 docker compose exec -T db \
   psql -U hourmere -d hourmere -Atc 'SELECT count(*) FROM auth."user";'
 ```
+
+Restore the saved host `Caddyfile` before creating the proxy so operator customizations are
+preserved; the `/config` volume does not contain this bind-mounted source file. For older
+backups without a saved `Caddyfile`, recover the operator's copy separately before continuing.
+Use the checked-out revision's file only if the deployment never customized it.
 
 The separate `APP_IMAGE` tag also prevents restore builds from replacing the original deployment's
 local image tag. Compare the count with your expected account data, and inspect other
@@ -573,8 +585,19 @@ docker compose build
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
 docker compose cp "$backup_dir/caddy-config/." proxy:/config
-docker compose up -d --wait
+compose_services=$(docker compose config --services) &&
+docker compose up -d --wait app db &&
+if printf '%s\n' "$compose_services" | grep -qx worker; then
+  docker compose up -d --wait --no-deps worker
+fi &&
+docker compose up -d --wait --force-recreate --no-deps proxy
 ```
+
+Starting app/database and the selected worker explicitly leaves the proxy untouched
+until the final command, preserving its restored certificate/data volumes and avoiding
+a second restart. The last command briefly restarts only the proxy and binds the restored
+host `Caddyfile`, including when the backed-up revision predates the upgrade helper. For plain mode, omit
+it and remove the preceding `&&`.
 
 Keep the free `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` selected before the
 database restore; overlapping ingress networks cannot coexist. Plain mode omits the proxy
@@ -585,7 +608,7 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 
 Read the intended release's changes and take the backup above first. Record the current
 branch name or tag before upgrading, alongside the backup's saved commit, and preserve
-its `.env` and Caddy state. Use
+its `.env`, host `Caddyfile` customizations and Caddy state. Use
 `git branch --show-current` for a branch, or `git describe --tags --exact-match` for a tag,
 so a checkout-only rollback can return to that named revision without relying on a bare commit.
 For 1.0 and later, check out the intended release tag
@@ -594,6 +617,32 @@ No stable release has been published yet; these are the upgrade steps for future
 Keep tracked Compose files unchanged and preserve the worker selection in `.env` so the
 upgrade rebuilds/recreates any separate worker. If starting from a pre-1.0 checkout, read
 [its migration notes](#upgrading-from-a-pre-10-checkout) before either sequence.
+
+Use `./scripts/compose-up.sh` in the commands below. Each invocation computes a fresh
+SHA-256 of the root `Caddyfile` and supplies it to the proxy's Compose label. If the
+content changed, Compose recreates the proxy and its single-file bind mount points at the
+current file, whether Git replaced it or an operator edited it in place. The proxy has a
+brief restart during that recreation; unchanged content does not restart it. Other
+services follow Compose's usual update behavior. The helper leaves the file untouched;
+retain customizations and the global privacy filter when reconciling upstream changes.
+Direct `docker compose up` does not update the digest.
+
+For operators upgrading from a release without this fix, check that the running proxy
+sees the current host file by comparing the two hashes below (on macOS, use
+`shasum -a 256 Caddyfile` for the host command):
+
+```sh
+sha256sum Caddyfile
+docker compose exec -T proxy sha256sum /etc/caddy/Caddyfile
+```
+
+The hashes must match. If they differ, run the following from the deployment checkout,
+then repeat the comparison. This briefly restarts only the proxy and also works on older
+revisions without the helper:
+
+```sh
+unset COMPOSE_FILE && docker compose up -d --wait --force-recreate --no-deps proxy
+```
 
 Scoped API keys require all key-authenticating processes to use the new code. Stop every
 old web/all/worker and other old process that can authenticate or write keys before
@@ -618,15 +667,16 @@ The app keeps the default `all` role. From the deployment checkout:
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose pull proxy db &&
   docker compose stop app &&
-  docker compose up -d --build --wait &&
+  ./scripts/compose-up.sh -d --build --wait &&
   curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 )
 ```
 
 If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
 return with `git checkout <previous branch or tag>` using the recorded name **only before
-the new-version `docker compose up` command runs**. If the app or worker was already stopped,
-use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+the new-version `docker compose up` command runs**. Complete this rollback with the
+[pre-start recovery block](#checkout-only-recovery-before-startup) below, including its
+proxy recreation, even if the app and worker were never stopped.
 Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
 it fails: a new app or worker may already have applied migrations; old code against the
 new schema is unsafe.
@@ -649,15 +699,16 @@ stopping the old app and worker:
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose pull proxy db &&
   docker compose stop app worker &&
-  docker compose up -d --build --wait &&
+  ./scripts/compose-up.sh -d --build --wait &&
   curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 )
 ```
 
 If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
 return with `git checkout <previous branch or tag>` using the recorded name **only before
-the new-version `docker compose up` command runs**. If the app or worker was already stopped,
-use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+the new-version `docker compose up` command runs**. Complete this rollback with the
+[pre-start recovery block](#checkout-only-recovery-before-startup) below, including its
+proxy recreation, even if the app and worker were never stopped.
 Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
 it fails: a new app or worker may already have applied migrations; old code against the
 new schema is unsafe.
@@ -680,18 +731,30 @@ if any has started, use [Back up and restore](#back-up-and-restore) even before 
 For a pre-start failure, if the app or worker was already stopped (including a partial
 `stop` failure), bring the old version back with the block below after restoring the
 pre-upgrade `COMPOSE_FILE` selection as described above. Replace `PREVIOUS_BRANCH_OR_TAG`
-with the recorded name. If no service was stopped, only the checkout is needed. The block
-uses the existing old application image; do not add `--build` or pull an application image
-during this recovery. The subshell clears an inherited `COMPOSE_FILE` so Compose reads the
+with the recorded name. Run the block even if no service was stopped: checkout can replace
+the host Caddyfile while the running proxy still holds its old inode. The block uses the
+existing old application image; do not add `--build` or pull an application image during
+this recovery. The subshell clears an inherited `COMPOSE_FILE` so Compose reads the
 restored selection from `.env`, and a failed checkout prevents startup.
 
 ```sh
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
   unset COMPOSE_FILE &&
-  docker compose up -d --wait
+  compose_services=$(docker compose config --services) &&
+  docker compose up -d --wait app db &&
+  if printf '%s\n' "$compose_services" | grep -qx worker; then
+    docker compose up -d --wait --no-deps worker
+  fi &&
+  docker compose up -d --wait --force-recreate --no-deps proxy
 )
 ```
+
+Starting app/database and the selected worker explicitly leaves the proxy untouched
+until the final command, avoiding a second HTTPS interruption. Named certificate and
+data volumes are preserved. The explicit final proxy recreation works even if the old
+revision has no upgrade helper, and briefly interrupts HTTPS while binding that revision's actual host `Caddyfile`. For
+plain mode, omit the final command and remove the preceding `&&`.
 
 For plain mode, remove both lines of the proxy verification before pasting either
 sequence, pull only `db`, and use your deployment's health URL.
@@ -743,7 +806,7 @@ this `main`-tracking checkout detached, run `git switch main` before the next up
 first, stop every old `web`, `all` and `worker` process (including any on other hosts), then
 start all roles with the upgraded code: build → stop app (and any separate worker) → up.
 With Compose, run `docker compose build`, `docker compose stop app`,
-`docker compose stop worker` if configured, then `docker compose up -d --wait`.
+`docker compose stop worker` if configured, then `./scripts/compose-up.sh -d --wait`.
 Leave PostgreSQL running. With `AUTO_MIGRATE=true`, the first new process applies
 `0040_notification_mail_limits.sql` on startup. Mixed old/new processes are
 schema-compatible during the switch: old inserts default to `outcome = 'sent'` and NULL

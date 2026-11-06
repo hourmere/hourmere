@@ -22,6 +22,8 @@ interface MonthCalendarProps {
   onMonthChange: (month: YearMonth, focusDay?: DateKey) => void
   /** Days with at least one slot; others cannot be picked. */
   available: ReadonlySet<DateKey>
+  /** A waitlist may accept a future date that currently has no times. */
+  allowEmptyDays?: boolean
   selected: DateKey | null
   onSelect: (day: DateKey) => void
   /** The day keyboard focus rests on (one tab stop for the whole grid). */
@@ -48,6 +50,7 @@ export function MonthCalendar({
   lastMonth,
   onMonthChange,
   available,
+  allowEmptyDays = false,
   selected,
   onSelect,
   focusDay,
@@ -170,6 +173,7 @@ export function MonthCalendar({
                   return <td key={i} aria-hidden="true" />
                 }
                 const isAvailable = available.has(day)
+                const canSelect = !busy && (isAvailable || (allowEmptyDays && day >= today))
                 const isSelected = day === selected
                 const label = t(
                   busy
@@ -190,13 +194,13 @@ export function MonthCalendar({
                       }`}
                       tabIndex={day === focusDay ? 0 : -1}
                       aria-label={label}
-                      aria-disabled={!isAvailable}
+                      aria-disabled={!canSelect}
                       aria-current={day === today ? 'date' : undefined}
                       onFocus={() => day !== focusDay && onFocusDay(day)}
                       onKeyDown={(e) => onKeyDown(e, day)}
                       onClick={() => {
                         onFocusDay(day)
-                        if (isAvailable) onSelect(day)
+                        if (canSelect) onSelect(day)
                       }}
                     >
                       {formatDayNumber(day, locale)}

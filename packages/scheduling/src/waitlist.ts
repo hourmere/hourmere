@@ -70,7 +70,7 @@ export function waitlistRecipientHash(email: string, secret: string): Buffer {
   return createHmac('sha256', key).update(`booking\0${email.trim().toLowerCase()}`).digest()
 }
 
-function admissionHash(value: string, secret: string, purpose: 'email' | 'ip'): Buffer {
+function admissionHash(value: string, secret: string, purpose: 'email' | 'ip' | 'request'): Buffer {
   const key = createHmac('sha256', secret).update('hourmere/waitlist-admission/v1').digest()
   return createHmac('sha256', key).update(`${purpose}\0${value}`).digest()
 }
@@ -349,6 +349,22 @@ async function admissionBudget(
     .executeTakeFirstOrThrow()
   if (Number(counts.ipHour) >= 5 || Number(counts.ipDay) >= 20)
     throw new WaitlistRateLimitError(Number(counts.ipDay) >= 20 ? 86400 : 3600)
+  const requestId = randomUUID()
+  // Debit IP/event admission before any mailbox-state decision, including silent
+  // suppressions. A request-purpose digest cannot debit another mailbox's mail cap;
+  // generation() replaces it with the mailbox digest only when issuing verification.
+  // The legacy generation_id column also identifies requests that issue no generation.
+  await db
+    .insertInto('waitlist_verification_requests')
+    .values({
+      id: requestId,
+      event_type_id: eventId,
+      email_hash: admissionHash(requestId, secret, 'request'),
+      ip_hash: ipHash,
+      generation_id: requestId,
+      requested_at: now,
+    })
+    .execute()
   return {
     allowed:
       Number(counts.emailHour) < 2 &&
@@ -356,7 +372,7 @@ async function admissionBudget(
       Number(counts.eventHour) < 20 &&
       Number(counts.eventDay) < 100,
     emailHash,
-    ipHash,
+    requestId,
   }
 }
 
@@ -419,11 +435,10 @@ async function generation(
     pending_expires_at: Date
     expires_at: Date
   },
-  budget: { emailHash: Buffer; ipHash: Buffer },
-  eventId: string,
+  budget: { emailHash: Buffer; requestId: string },
   now: Date,
 ) {
-  const id = randomUUID(),
+  const id = budget.requestId,
     token = tokenValue(entry.id)
   const expiresAt = new Date(
     Math.min(
@@ -456,14 +471,9 @@ async function generation(
     })
     .execute()
   await db
-    .insertInto('waitlist_verification_requests')
-    .values({
-      event_type_id: eventId,
-      email_hash: budget.emailHash,
-      ip_hash: budget.ipHash,
-      generation_id: id,
-      requested_at: now,
-    })
+    .updateTable('waitlist_verification_requests')
+    .set({ email_hash: budget.emailHash })
+    .where('id', '=', id)
     .execute()
 }
 
@@ -501,23 +511,19 @@ export async function joinWaitlist(
     checkWindow(parsed.start, parsed.end, now)
     await expireEventEntries(db, et.id, now)
     const budget = await admissionBudget(db, et.id, parsed.email, ctx.trustedIp, ctx.secret, now)
-    if (!budget.allowed) return accepted()
     const recipientHash = waitlistRecipientHash(parsed.email, ctx.secret)
-    const duplicate = await db
-      .selectFrom('waitlist_entries')
-      .select('id')
-      .where('event_type_id', '=', et.id)
-      .where('recipient_hash', '=', recipientHash)
-      .where('status', 'in', LIVE)
-      .executeTakeFirst()
-    if (duplicate) return accepted()
+    // New and existing recipients perform the same admission write and aggregate
+    // lookup, in the same order, before deciding whether to issue verification.
     const count = await db
       .selectFrom('waitlist_entries')
-      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .select((eb) => [
+        eb.fn.countAll<string>().as('n'),
+        eb.fn.countAll<string>().filterWhere('recipient_hash', '=', recipientHash).as('duplicate'),
+      ])
       .where('event_type_id', '=', et.id)
       .where('status', 'in', LIVE)
       .executeTakeFirstOrThrow()
-    if (Number(count.n) >= 100) return accepted()
+    if (!budget.allowed || Number(count.duplicate) > 0 || Number(count.n) >= 100) return accepted()
     const expiresAt = new Date(Math.min(now.getTime() + 30 * DAY, parsed.end.getTime()))
     const entry = await db
       .insertInto('waitlist_entries')
@@ -539,7 +545,7 @@ export async function joinWaitlist(
       })
       .returningAll()
       .executeTakeFirstOrThrow()
-    await generation(db, ctx, entry, budget, et.id, now)
+    await generation(db, ctx, entry, budget, now)
     return accepted()
   })
 }
@@ -560,7 +566,6 @@ export async function resendWaitlistVerification(
     const now = await waitlistNow(db, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
     await expireEventEntries(db, et.id, now)
     const budget = await admissionBudget(db, et.id, email, ctx.trustedIp, ctx.secret, now)
-    if (!budget.allowed) return accepted()
     const entry = await db
       .selectFrom('waitlist_entries')
       .selectAll()
@@ -569,14 +574,20 @@ export async function resendWaitlistVerification(
       .where('status', '=', 'pending_verification')
       .forUpdate()
       .executeTakeFirst()
-    if (!entry) return accepted()
+    // Keep the same lookup order for pending and absent recipients. The nil UUID
+    // makes the latter perform the same indexed outbox query without matching work.
     const previous = await db
       .selectFrom('waitlist_verification_outbox')
       .select('created_at')
-      .where('entry_id', '=', entry.id)
+      .where('entry_id', '=', entry?.id ?? '00000000-0000-0000-0000-000000000000')
       .orderBy('generation', 'desc')
       .executeTakeFirst()
-    if (previous && now.getTime() - previous.created_at.getTime() < 15 * 60_000) return accepted()
+    if (
+      !budget.allowed ||
+      !entry ||
+      (previous && now.getTime() - previous.created_at.getTime() < 15 * 60_000)
+    )
+      return accepted()
     await db
       .updateTable('waitlist_capabilities')
       .set({ revoked_at: now })
@@ -596,7 +607,7 @@ export async function resendWaitlistVerification(
       .set({ verification_generation: next.verification_generation })
       .where('id', '=', entry.id)
       .execute()
-    await generation(db, ctx, next, budget, et.id, now)
+    await generation(db, ctx, next, budget, now)
     return accepted()
   })
 }
@@ -991,11 +1002,19 @@ export async function cleanupWaitlist(ctx: WaitlistContext, options: { limit?: n
           candidates.map((row) => row.id),
         )
         .execute()
+    // Keep one minimal accepted receipt so managers retain lastNotifiedAt for this entry.
+    // Existing entry cleanup still cascades it at terminal + seven elapsed days.
+    const keepNewestReceipt = sql<boolean>`accepted_at IS NULL OR id <> (
+      SELECT receipt.id FROM waitlist_candidates receipt
+      WHERE receipt.entry_id = waitlist_candidates.entry_id AND receipt.accepted_at IS NOT NULL
+      ORDER BY receipt.accepted_at DESC, receipt.id DESC LIMIT 1
+    )`
     const oldCandidates = await db
       .selectFrom('waitlist_candidates')
       .select('id')
       .where('state', 'not in', ['pending', 'processing'])
       .where('expires_at', '<=', new Date(now.getTime() - 7 * DAY))
+      .where(keepNewestReceipt)
       .limit(limit)
       .execute()
     if (oldCandidates.length)

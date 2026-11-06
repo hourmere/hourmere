@@ -1,0 +1,224 @@
+[
+  {
+    "input": {
+      "publicUrl": "https://hourmere.example.com",
+      "address": {
+        "kind": "personal",
+        "handle": "ada",
+        "slug": "intro-call"
+      },
+      "title": "Planning & review",
+      "durationMinutes": 60,
+      "starts": ["2027-06-15T14:30:00.000Z", "2027-03-14T06:30:00.000Z"],
+      "locale": "en",
+      "displayTimeZone": "America/New_York"
+    },
+    "expected": {
+      "bookingUrl": "https://hourmere.example.com/ada/intro-call",
+      "durationMinutes": 60,
+      "locale": "en",
+      "displayTimeZone": "America/New_York",
+      "slots": [
+        {
+          "start": "2027-03-14T06:30:00.000Z",
+          "end": "2027-03-14T07:30:00.000Z",
+          "label": "Sun, March 14, 2027, 1:30 AM (UTC-05:00) – 3:30 AM (UTC-04:00) [America/New_York]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60"
+        },
+        {
+          "start": "2027-06-15T14:30:00.000Z",
+          "end": "2027-06-15T15:30:00.000Z",
+          "label": "Tue, June 15, 2027, 10:30 AM – 11:30 AM [America/New_York, UTC-04:00]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60"
+        }
+      ],
+      "text": "Available times for Planning & review (60 minutes)\n\nSun, March 14, 2027, 1:30 AM (UTC-05:00) – 3:30 AM (UTC-04:00) [America/New_York]\nhttps://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60\n\nTue, June 15, 2027, 10:30 AM – 11:30 AM [America/New_York, UTC-04:00]\nhttps://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60\n\nThese times are not reserved and may no longer be available. Each link opens the booking page with that time selected. Confirm your booking there if the time is still available.",
+      "html": "<div lang=\"en\"><p>Available times for Planning &amp; review (60 minutes)</p><ul><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">Sun, March 14, 2027, 1:30 AM (UTC-05:00) – 3:30 AM (UTC-04:00) [America/New_York]</a></li><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">Tue, June 15, 2027, 10:30 AM – 11:30 AM [America/New_York, UTC-04:00]</a></li></ul><p>These times are not reserved and may no longer be available. Each link opens the booking page with that time selected. Confirm your booking there if the time is still available.</p></div>"
+    }
+  },
+  {
+    "input": {
+      "publicUrl": "https://hourmere.example.com",
+      "address": {
+        "kind": "personal",
+        "handle": "ada",
+        "slug": "intro-call"
+      },
+      "title": "Planning & review",
+      "durationMinutes": 60,
+      "starts": ["2027-06-15T14:30:00.000Z", "2027-03-14T06:30:00.000Z"],
+      "locale": "zh-CN",
+      "displayTimeZone": "America/New_York"
+    },
+    "expected": {
+      "bookingUrl": "https://hourmere.example.com/ada/intro-call",
+      "durationMinutes": 60,
+      "locale": "zh-CN",
+      "displayTimeZone": "America/New_York",
+      "slots": [
+        {
+          "start": "2027-03-14T06:30:00.000Z",
+          "end": "2027-03-14T07:30:00.000Z",
+          "label": "2027年3月14日周日，1:30（UTC-05:00）至3:30（UTC-04:00）［America/New_York］",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60"
+        },
+        {
+          "start": "2027-06-15T14:30:00.000Z",
+          "end": "2027-06-15T15:30:00.000Z",
+          "label": "2027年6月15日周二，10:30至11:30［America/New_York，UTC-04:00］",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60"
+        }
+      ],
+      "text": "「Planning & review」的可预约时间（60分钟）\n\n2027年3月14日周日，1:30（UTC-05:00）至3:30（UTC-04:00）［America/New_York］\nhttps://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60\n\n2027年6月15日周二，10:30至11:30［America/New_York，UTC-04:00］\nhttps://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60\n\n这些时间不会被预留，打开链接时可能已不可约。每个链接都会打开预约页面，并预选对应的时间。若该时间仍可约，请在页面上确认预约。",
+      "html": "<div lang=\"zh-CN\"><p>「Planning &amp; review」的可预约时间（60分钟）</p><ul><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">2027年3月14日周日，1:30（UTC-05:00）至3:30（UTC-04:00）［America/New_York］</a></li><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">2027年6月15日周二，10:30至11:30［America/New_York，UTC-04:00］</a></li></ul><p>这些时间不会被预留，打开链接时可能已不可约。每个链接都会打开预约页面，并预选对应的时间。若该时间仍可约，请在页面上确认预约。</p></div>"
+    }
+  },
+  {
+    "input": {
+      "publicUrl": "https://hourmere.example.com",
+      "address": {
+        "kind": "personal",
+        "handle": "ada",
+        "slug": "intro-call"
+      },
+      "title": "Planning & review",
+      "durationMinutes": 60,
+      "starts": ["2027-06-15T14:30:00.000Z", "2027-03-14T06:30:00.000Z"],
+      "locale": "de",
+      "displayTimeZone": "America/New_York"
+    },
+    "expected": {
+      "bookingUrl": "https://hourmere.example.com/ada/intro-call",
+      "durationMinutes": 60,
+      "locale": "de",
+      "displayTimeZone": "America/New_York",
+      "slots": [
+        {
+          "start": "2027-03-14T06:30:00.000Z",
+          "end": "2027-03-14T07:30:00.000Z",
+          "label": "So., 14. März 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60"
+        },
+        {
+          "start": "2027-06-15T14:30:00.000Z",
+          "end": "2027-06-15T15:30:00.000Z",
+          "label": "Di., 15. Juni 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60"
+        }
+      ],
+      "text": "Verfügbare Termine für Planning & review (60 Minuten)\n\nSo., 14. März 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]\nhttps://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60\n\nDi., 15. Juni 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]\nhttps://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60\n\nDiese Termine sind nicht reserviert und möglicherweise nicht mehr verfügbar. Jeder Link führt zur Buchungsseite, auf der der entsprechende Termin vorausgewählt ist. Bestätigen Sie Ihre Buchung dort, wenn der Termin noch verfügbar ist.",
+      "html": "<div lang=\"de\"><p>Verfügbare Termine für Planning &amp; review (60 Minuten)</p><ul><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">So., 14. März 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]</a></li><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">Di., 15. Juni 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]</a></li></ul><p>Diese Termine sind nicht reserviert und möglicherweise nicht mehr verfügbar. Jeder Link führt zur Buchungsseite, auf der der entsprechende Termin vorausgewählt ist. Bestätigen Sie Ihre Buchung dort, wenn der Termin noch verfügbar ist.</p></div>"
+    }
+  },
+  {
+    "input": {
+      "publicUrl": "https://hourmere.example.com",
+      "address": {
+        "kind": "personal",
+        "handle": "ada",
+        "slug": "intro-call"
+      },
+      "title": "Planning & review",
+      "durationMinutes": 60,
+      "starts": ["2027-06-15T14:30:00.000Z", "2027-03-14T06:30:00.000Z"],
+      "locale": "fr",
+      "displayTimeZone": "America/New_York"
+    },
+    "expected": {
+      "bookingUrl": "https://hourmere.example.com/ada/intro-call",
+      "durationMinutes": 60,
+      "locale": "fr",
+      "displayTimeZone": "America/New_York",
+      "slots": [
+        {
+          "start": "2027-03-14T06:30:00.000Z",
+          "end": "2027-03-14T07:30:00.000Z",
+          "label": "dim. 14 mars 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60"
+        },
+        {
+          "start": "2027-06-15T14:30:00.000Z",
+          "end": "2027-06-15T15:30:00.000Z",
+          "label": "mar. 15 juin 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60"
+        }
+      ],
+      "text": "Créneaux disponibles pour Planning & review (60 minutes)\n\ndim. 14 mars 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]\nhttps://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60\n\nmar. 15 juin 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]\nhttps://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60\n\nCes créneaux ne sont pas réservés et peuvent ne plus être disponibles. Chaque lien ouvre la page de réservation avec le créneau correspondant présélectionné. Confirmez votre réservation sur cette page si le créneau est toujours disponible.",
+      "html": "<div lang=\"fr\"><p>Créneaux disponibles pour Planning &amp; review (60 minutes)</p><ul><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">dim. 14 mars 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]</a></li><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">mar. 15 juin 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]</a></li></ul><p>Ces créneaux ne sont pas réservés et peuvent ne plus être disponibles. Chaque lien ouvre la page de réservation avec le créneau correspondant présélectionné. Confirmez votre réservation sur cette page si le créneau est toujours disponible.</p></div>"
+    }
+  },
+  {
+    "input": {
+      "publicUrl": "https://hourmere.example.com",
+      "address": {
+        "kind": "personal",
+        "handle": "ada",
+        "slug": "intro-call"
+      },
+      "title": "Planning & review",
+      "durationMinutes": 60,
+      "starts": ["2027-06-15T14:30:00.000Z", "2027-03-14T06:30:00.000Z"],
+      "locale": "es",
+      "displayTimeZone": "America/New_York"
+    },
+    "expected": {
+      "bookingUrl": "https://hourmere.example.com/ada/intro-call",
+      "durationMinutes": 60,
+      "locale": "es",
+      "displayTimeZone": "America/New_York",
+      "slots": [
+        {
+          "start": "2027-03-14T06:30:00.000Z",
+          "end": "2027-03-14T07:30:00.000Z",
+          "label": "dom, 14 de marzo de 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60"
+        },
+        {
+          "start": "2027-06-15T14:30:00.000Z",
+          "end": "2027-06-15T15:30:00.000Z",
+          "label": "mar, 15 de junio de 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60"
+        }
+      ],
+      "text": "Horarios disponibles para Planning & review (60 minutos)\n\ndom, 14 de marzo de 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]\nhttps://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60\n\nmar, 15 de junio de 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]\nhttps://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60\n\nEstos horarios no están reservados y es posible que ya no estén disponibles. Cada enlace abre la página de reservas con el horario correspondiente preseleccionado. Confirme su reserva en esa página si el horario sigue disponible.",
+      "html": "<div lang=\"es\"><p>Horarios disponibles para Planning &amp; review (60 minutos)</p><ul><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">dom, 14 de marzo de 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]</a></li><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">mar, 15 de junio de 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]</a></li></ul><p>Estos horarios no están reservados y es posible que ya no estén disponibles. Cada enlace abre la página de reservas con el horario correspondiente preseleccionado. Confirme su reserva en esa página si el horario sigue disponible.</p></div>"
+    }
+  },
+  {
+    "input": {
+      "publicUrl": "https://hourmere.example.com",
+      "address": {
+        "kind": "personal",
+        "handle": "ada",
+        "slug": "intro-call"
+      },
+      "title": "Planning & review",
+      "durationMinutes": 60,
+      "starts": ["2027-06-15T14:30:00.000Z", "2027-03-14T06:30:00.000Z"],
+      "locale": "pt-BR",
+      "displayTimeZone": "America/New_York"
+    },
+    "expected": {
+      "bookingUrl": "https://hourmere.example.com/ada/intro-call",
+      "durationMinutes": 60,
+      "locale": "pt-BR",
+      "displayTimeZone": "America/New_York",
+      "slots": [
+        {
+          "start": "2027-03-14T06:30:00.000Z",
+          "end": "2027-03-14T07:30:00.000Z",
+          "label": "dom., 14 de março de 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60"
+        },
+        {
+          "start": "2027-06-15T14:30:00.000Z",
+          "end": "2027-06-15T15:30:00.000Z",
+          "label": "ter., 15 de junho de 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]",
+          "url": "https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60"
+        }
+      ],
+      "text": "Horários disponíveis para Planning & review (60 minutos)\n\ndom., 14 de março de 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]\nhttps://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&durationMinutes=60\n\nter., 15 de junho de 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]\nhttps://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&durationMinutes=60\n\nEstes horários não estão reservados e podem não estar mais disponíveis. Cada link abre a página de agendamento com o horário correspondente já selecionado. Confirme seu agendamento nessa página se o horário ainda estiver disponível.",
+      "html": "<div lang=\"pt-BR\"><p>Horários disponíveis para Planning &amp; review (60 minutos)</p><ul><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-03-14T06%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">dom., 14 de março de 2027, 1:30 (UTC-05:00) – 3:30 (UTC-04:00) [America/New_York]</a></li><li><a href=\"https://hourmere.example.com/ada/intro-call?start=2027-06-15T14%3A30%3A00.000Z&amp;durationMinutes=60\" rel=\"noopener noreferrer\">ter., 15 de junho de 2027, 10:30 – 11:30 [America/New_York, UTC-04:00]</a></li></ul><p>Estes horários não estão reservados e podem não estar mais disponíveis. Cada link abre a página de agendamento com o horário correspondente já selecionado. Confirme seu agendamento nessa página se o horário ainda estiver disponível.</p></div>"
+    }
+  }
+]

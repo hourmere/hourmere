@@ -53,6 +53,7 @@ function productSourceCopy(change?: Change): Factory {
     bookingTools: () => [],
     catalogTools: () => [],
     integrationTools: () => [],
+    waitlistTools: () => [],
     oneTimeLinkTools: () => [],
   }
   return new Function(

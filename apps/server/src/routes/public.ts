@@ -7,11 +7,14 @@ import {
   getPublicEventType,
   getPublicHost,
   getPublicTeamEventType,
+  joinWaitlist,
   listPublicSlots,
   listPublicTeamSlots,
   MAX_GUESTS,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  resendWaitlistVerification,
+  WaitlistRateLimitError,
 } from '@hourmere/scheduling'
 import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
@@ -65,6 +68,13 @@ export const PublicEventType = z
       description:
         'Whether saved event-type settings permit user-activated continuation in the embedding parent. Omitted means false. No redirect URL or parameters are exposed.',
     }),
+    waitlist: z
+      .object({ enabled: z.literal(true) })
+      .optional()
+      .openapi({
+        description:
+          'Present only when a supported event offers a waitlist. Join only after a successful empty availability query.',
+      }),
     questions: z
       .array(Question)
       .openapi({ description: 'Booking-form fields beyond name and email' }),
@@ -149,6 +159,25 @@ export const CreateBooking = z
   })
   .openapi('CreateBooking')
 
+export const WaitlistJoinBody = z
+  .strictObject({
+    email,
+    name: z.string().max(200).optional(),
+    preferredWindow: z.strictObject({
+      start: Instant,
+      end: Instant,
+      timeZone: z.string().min(1).max(64),
+    }),
+    locale: z.string().max(35).optional().openapi({ description: localeDescription }),
+    consent: z.literal(true),
+  })
+  .openapi('JoinWaitlist', {
+    description:
+      'Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. The personal event owner or authorized team owners/admins can see the submitted email, optional name and requested period. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention.',
+  })
+export const WaitlistResendBody = z.strictObject({ email }).openapi('ResendWaitlistVerification')
+const WaitlistAccepted = z.object({ accepted: z.literal(true) }).openapi('WaitlistAccepted')
+
 export const HostParams = z.object({ handle: z.string().openapi({ example: 'ada' }) })
 
 export const PageParams = z.object({
@@ -172,6 +201,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 export interface PublicRoutesDeps {
   db: Db
   waitlistSecret?: string | undefined
+  publicUrl?: string | undefined
   successRedirectPolicy?: PublicContext['successRedirectPolicy']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -194,6 +224,7 @@ export function publicRoutes({
   automaticZoom,
   successRedirectPolicy,
   waitlistSecret,
+  publicUrl = 'http://localhost:3000',
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
   const ctx: PublicContext = {
@@ -321,6 +352,60 @@ export function publicRoutes({
           return c.json({ data: slots }, 200)
         },
       )
+
+      for (const resend of [false, true]) {
+        app.openapi(
+          createRoute({
+            method: 'post',
+            path: `${target.prefix}/{handle}/{slug}/waitlist${resend ? '/resend' : ''}`,
+            operationId: `${resend ? 'resend' : 'join'}${target.team ? 'Team' : 'Personal'}Waitlist`,
+            summary: resend
+              ? 'Explicitly request another verification email'
+              : 'Request to join a booking waitlist',
+            description:
+              'Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.',
+            middleware: bookLimit,
+            request: {
+              params: PageParams,
+              body: {
+                content: json(resend ? WaitlistResendBody : WaitlistJoinBody),
+                required: true,
+              },
+            },
+            responses: {
+              202: {
+                description:
+                  'Accepted; check email to confirm. Does not reveal membership or mail delivery.',
+                content: json(WaitlistAccepted),
+              },
+              400: error(
+                'invalid_request, invalid_waitlist_input, waitlist_unsupported, invalid_range, range_too_long',
+              ),
+              404: eventTypeNotFound,
+              409: error(
+                'waitlist_unavailable or availability_changed: refresh availability before trying again',
+              ),
+              429: rateLimited,
+            },
+          }),
+          async (c) => {
+            if (!waitlistSecret) return c.json({ error: 'waitlist_unavailable' }, 409)
+            const context = { ...ctx, secret: waitlistSecret, publicUrl, trustedIp: c.var.clientIp }
+            const reference = { ...c.req.valid('param'), team: target.team }
+            const body = c.req.valid('json')
+            try {
+              const result = resend
+                ? await resendWaitlistVerification(context, { ...reference, email: body.email })
+                : await joinWaitlist(context, { ...reference, ...WaitlistJoinBody.parse(body) })
+              return c.json(result, 202)
+            } catch (error) {
+              if (!(error instanceof WaitlistRateLimitError)) throw error
+              c.header('Retry-After', String(error.retryAfterSeconds))
+              return c.json({ error: 'rate_limited' }, 429)
+            }
+          },
+        )
+      }
 
       app.openapi(
         createRoute({

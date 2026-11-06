@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { slot } from '../test/public-fixtures.ts'
 import type { Slot, SlotLoader } from './api.ts'
 import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
+import type { WaitlistWindow } from './waitlist-window.ts'
 
 const styles = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
 const tokens = readFileSync('apps/web/src/styles.css', 'utf8')
@@ -551,6 +552,53 @@ describe('slot picker browsing position', () => {
     const load = answerWith('2026-12-05T15:00:00Z')
     render(<SlotPicker {...positionProps({ load })} />)
     await screen.findByRole('button', { name: /December 5, available/ })
+    expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
+  it('advances a waitlist-enabled month with no remaining times to the next free month', async () => {
+    const renderWaitlist = vi.fn(() => <p>waitlist offer fixture</p>)
+    const load = answerWith('2026-12-05T15:00:00Z')
+    render(
+      <SlotPicker
+        {...positionProps({ load, now: Date.parse('2026-11-30T12:00:00Z'), renderWaitlist })}
+      />,
+    )
+    await screen.findByRole('button', { name: /December 5, available/ })
+    expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(renderWaitlist).not.toHaveBeenCalled()
+    expect(screen.queryByText('waitlist offer fixture')).toBeNull()
+  })
+
+  it('offers only the final empty visible range after the bounded automatic advance', async () => {
+    const renderWaitlist = vi.fn((_window: WaitlistWindow) => <p>waitlist offer fixture</p>)
+    const load = answerWith()
+    render(
+      <SlotPicker
+        {...positionProps({ load, now: Date.parse('2026-11-30T12:00:00Z'), renderWaitlist })}
+      />,
+    )
+    await screen.findByText('waitlist offer fixture')
+    expect(screen.getByRole('heading', { name: 'January 2027' })).toBeDefined()
+    expect(load).toHaveBeenCalledTimes(3)
+    expect(renderWaitlist).toHaveBeenCalled()
+    for (const [window] of renderWaitlist.mock.calls) {
+      expect(window.start).toBe('2027-01-01T00:00:00.000Z')
+      expect(window.end).toBe('2027-01-31T12:00:00.000Z')
+    }
+  })
+
+  it('keeps a chosen empty day and a browsed empty month eligible for the waitlist', async () => {
+    const user = userEvent.setup()
+    const renderWaitlist = vi.fn((window: { start: string }) => <p>{window.start}</p>)
+    const load = answerWith('2026-11-02T14:00:00Z')
+    render(<SlotPicker {...positionProps({ load, renderWaitlist })} />)
+    await screen.findByRole('button', { name: /November 2, available/ })
+    await user.click(screen.getByRole('button', { name: /November 3, no times available/ }))
+    expect(screen.getByText('2026-11-03T00:00:00.000Z')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await screen.findByText('2026-12-01T00:00:00.000Z')
     expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
     expect(load).toHaveBeenCalledTimes(2)
   })

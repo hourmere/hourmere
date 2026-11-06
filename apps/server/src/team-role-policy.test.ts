@@ -171,6 +171,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       operation: 'member_role_changed',
       actor_user_id: f.actor.id,
       booking_id: null,
+      group_slot_id: null,
       target_user_id: f.target.id,
       previous_role: previousRole,
       new_role: newRole,

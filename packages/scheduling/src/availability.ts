@@ -100,6 +100,7 @@ export interface PublicEventTypeRecord {
   hostUserIds: string[]
   eligibleHostUserIds: string[]
   successRedirect: SuccessRedirect | null
+  waitlistEnabled: boolean
   zoomConnectionId?: string | null
   conferenceOrganizerUserId: string | null
   schedulingType: 'individual' | 'collective' | 'round_robin'
@@ -179,6 +180,7 @@ async function findPersonalEventType(
       'et.questions',
       'et.allow_guests',
       'et.success_redirect',
+      'et.waitlist_enabled',
       'p.user_id',
       'p.handle',
       'p.time_zone',
@@ -227,6 +229,7 @@ async function findPersonalEventType(
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
+    waitlistEnabled: row.waitlist_enabled,
     hostName: row.name.trim() || row.handle,
     ...(image && { hostImage: image }),
     hostTimeZone: row.time_zone,
@@ -362,6 +365,7 @@ async function findTeamEventType(
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
+    waitlistEnabled: row.waitlist_enabled,
     hostName:
       row.scheduling_type === 'round_robin' ? row.team_name : views.map((h) => h.name).join(', '),
     hostTimeZone: views[0]?.timeZone ?? 'UTC',
@@ -404,7 +408,7 @@ export async function getOneTimeBookingPage(
   const link = await resolveOneTimeBookingLink(ctx, token)
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
-  const page = publicEventType(eventType)
+  const page = publicEventType({ ...eventType, waitlistEnabled: false })
   // Keep this projection explicit: additions to the reusable public page must not
   // silently expose an address or navigation capability to one-time recipients.
   return {
@@ -443,6 +447,7 @@ export interface PublicEventType {
   location: { kind: LocationKind } | null
   questions: Question[]
   allowGuests: boolean
+  waitlist?: { enabled: true }
   /** Only the saved parent-navigation opt-in; never the redirect target or parameters. */
   allowEmbedParentRedirect?: boolean
   host: { name: string; timeZone?: string; image?: string }
@@ -480,6 +485,10 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     allowGuests: et.allowGuests,
+    ...(et.waitlistEnabled &&
+      et.schedulingType === 'individual' &&
+      et.hostUserIds.length === 1 &&
+      et.eligibleHostUserIds.length === 1 && { waitlist: { enabled: true as const } }),
     ...(et.successRedirect?.allowEmbedParent === true && { allowEmbedParentRedirect: true }),
     host: {
       name: et.hostName,

@@ -1143,6 +1143,28 @@ if it did not exist (agents' MCP tools too), so nobody keeps a page at a path th
 uses. Its owner keeps the profile, and must pick a new handle the next time they save it.
 Existing bookings stay reachable through their manage links, which do not involve the handle.
 
+
+### Legacy event location updates
+
+Protected event-type `location` remains a read/write compatibility projection of the
+effective default. Echoing the current value preserves every option and its identity.
+A different value can edit a single unlabelled option: the ID survives settings edits,
+while changing the kind or recreating a cleared option allocates a new ID. A changed
+value (including null) for multiple or labelled options returns HTTP 409
+`location_options_conflict`, with guidance to use `locations`. MCP `update_event_type`
+returns the same domain code. Full option-list writes are internal in this slice; clients
+that receive this conflict should omit an unchanged `location` or wait for the choice
+configuration interfaces rather than discard options.
+
+The additive phone compatibility value `{kind:"phone",askInvitee:true}` can be read and
+written back unchanged through REST/MCP. New phone configuration requires the host’s
+`number`: creating or changing to `askInvitee` returns `400 invalid_location` until the
+public booking flow can collect the invitee’s phone number. It cannot be combined with
+`number`. `EventType.location` keeps its published discriminated `oneOf` shape, extending the existing phone branch.
+The current editor omits unchanged locations. Existing booking flows cannot collect this
+number yet and reject an effective invitee-phone default with `400 invalid_invitee_phone`
+before writing a booking. A future booking flow must collect and resolve a real number.
+
 ## Retries
 
 `POST /api/v1/public/{handle}/{slug}/bookings` accepts an `Idempotency-Key` header (1–255

@@ -119,7 +119,7 @@ export function FocusHeading({
   className,
 }: {
   children: ReactNode
-  level?: 1 | 2
+  level?: 1 | 2 | 3
   id?: string
   className?: string
 }) {
@@ -127,7 +127,7 @@ export function FocusHeading({
   useEffect(() => {
     ref.current?.focus()
   }, [])
-  const Tag = level === 1 ? 'h1' : 'h2'
+  const Tag = level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3'
   return (
     <Tag ref={ref} id={id} tabIndex={-1} className={className}>
       {children}
