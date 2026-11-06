@@ -1,0 +1,27 @@
+{
+  "format": "hourmere.make.manual-recipe.v1",
+  "id": "find-slots-create-booking",
+  "title": "Find available slots and create a booking",
+  "webhookEvents": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/public/{handle}/{slug}/slots"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/public/{handle}/{slug}/bookings"
+    }
+  ],
+  "connections": [
+    {
+      "kind": "make-keychain",
+      "purpose": "Bookings-scope Hourmere key in HTTP v4 Credentials."
+    }
+  ],
+  "settings": {
+    "documentation": "find-slots-create-booking.md",
+    "apiKeyScope": "bookings",
+    "signatureVerification": "Not applicable: outbound REST requests."
+  }
+}

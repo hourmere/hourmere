@@ -1,0 +1,27 @@
+{
+  "format": "hourmere.make.manual-recipe.v1",
+  "id": "booking-created-sheets",
+  "title": "New Hourmere booking → Google Sheets row",
+  "webhookEvents": ["booking.created"],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/webhooks/{id}"
+    }
+  ],
+  "connections": [
+    {
+      "kind": "make-keychain",
+      "purpose": "Full-scope Hourmere key for webhook registration only; destination app connection for delivery."
+    }
+  ],
+  "settings": {
+    "documentation": "booking-created-sheets.md",
+    "apiKeyScope": "full (registration only); no runtime Hourmere key",
+    "signatureVerification": "Verify the exact raw body before any destination action; see the documented receiver options."
+  }
+}
