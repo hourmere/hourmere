@@ -55,7 +55,7 @@ export function waitlistTools({
     now: now ?? (() => Temporal.Now.instant()),
   })
   const publicContext = (call: ToolCall): WaitlistContext => {
-    if (!secret) throw new DomainError('not_found', 'event_type_not_found')
+    if (!secret) throw new DomainError('conflict', 'waitlist_unavailable')
     return { db, secret, publicUrl, trustedIp: call.trustedIp, now }
   }
   return [

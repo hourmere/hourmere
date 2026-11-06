@@ -30,12 +30,20 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
+- [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
+  receive notification when a matching time opens; manage entries in the editor, REST,
+  MCP or CLI. Available in full to self-hosters.
+
 ## Known limitations
+
+- [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
+  single-host types at the default meeting length. Nothing is reserved; the first
+  successful ordinary booking wins, and email delivery is not guaranteed.
 
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
-  in process memory.
+  in process memory, except the additional durable booking-waitlist admission limits.
 - [Microsoft Calendar](/docs/microsoft-calendar) lists calendars only, without busy-time
   synchronization or event writes. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft)
   and calendar connections have not had real-account acceptance.
@@ -58,7 +66,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   [Bundled Caddy](/docs/self-hosting#prepare-the-host) additionally requires ports 80/443,
   an HTTPS host name without a port, and an IPv4-only ingress network.
 - [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
-  uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
+  uses in-process memory at the transport layer; multiple web replicas multiply the limits.
+  Waitlists additionally enforce durable mailbox, event and trusted-IP admission budgets. Run a single web process;
   a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
 - [Public booking pages and emails](/docs/interface-languages) support English,
   Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces support English and

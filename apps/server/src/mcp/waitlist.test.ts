@@ -104,7 +104,66 @@ function error(result: Awaited<ReturnType<typeof runTool>>) {
 const call = (tool: Tool, input: unknown, caller: McpCaller = principal) =>
   runTool(tool, input, { caller, trustedIp: '192.0.2.45', rateLimit: () => {} }, () => {})
 
+async function assertMissingSecretParity(factory: Factory, name: string, team: boolean) {
+  const db = {} as Db
+  const app = createApp({
+    publicUrl,
+    checkDb: async () => {},
+    authHandler: async () => new Response(null, { status: 404 }),
+    resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+    routes: [publicSchemas.publicRoutes({ db })],
+  })
+  const resend = name === 'resend_waitlist_verification'
+  const { handle, slug, ...join } = args
+  const body = resend ? { email: args.email } : join
+  const response = await app.request(
+    `/api/v1/public/${team ? 'teams/' : ''}${handle}/${slug}/waitlist${resend ? '/resend' : ''}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  expect(response.status).toBe(409)
+  const rest = await response.json()
+  expect(rest).toEqual({ error: 'waitlist_unavailable' })
+  const tool = find(factory({ db }), name)
+  const mcp = error(
+    await call(tool, { ...body, slug, ...(team ? { teamSlug: handle } : { handle }) }),
+  )
+  expect(mcp.error).toBe('waitlist_unavailable')
+  await expect(
+    tool.run(
+      { ...body, slug, ...(team ? { teamSlug: handle } : { handle }) },
+      {
+        caller: principal,
+        trustedIp: '192.0.2.45',
+        rateLimit: () => {},
+      },
+    ),
+  ).rejects.toMatchObject({ kind: 'conflict', code: 'waitlist_unavailable' })
+}
+
 describe('MCP waitlist adapter protections', () => {
+  it.each(['join_waitlist', 'resend_waitlist_verification'])(
+    'matches REST missing-secret errors for %s on personal and team pages',
+    async (name) => {
+      for (const team of [false, true]) await assertMissingSecretParity(waitlistTools, name, team)
+    },
+  )
+  it.each(['join_waitlist', 'resend_waitlist_verification'])(
+    'kills source-copy missing-secret divergence for %s',
+    async (name) => {
+      const factory = sourceCopy([
+        "if (!secret) throw new DomainError('conflict', 'waitlist_unavailable')",
+        "if (!secret) throw new DomainError('not_found', 'event_type_not_found')",
+      ])
+      await expect(assertMissingSecretParity(factory, name, false)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
+
   const admissionTools = ['join_waitlist', 'resend_waitlist_verification'] as const
   function toolMutation(name: string, before: string, after: string): Change {
     const source = readFileSync('apps/server/src/mcp/waitlist.ts', 'utf8')

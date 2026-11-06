@@ -23,6 +23,7 @@ import {
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { cleanText } from './text.ts'
+import { WAITLIST_ABUSE_RETENTION_DAYS, WAITLIST_WINDOW_MAX_DAYS } from './waitlist-policy.ts'
 
 export interface WaitlistContext extends Omit<PublicContext, 'now'> {
   secret: string
@@ -281,8 +282,8 @@ function checkWindow(start: Date, end: Date, now: Date) {
   if (
     start.getTime() < now.getTime() ||
     end <= start ||
-    end.getTime() > now.getTime() + 62 * DAY ||
-    end.getTime() - start.getTime() > 62 * DAY
+    end.getTime() > now.getTime() + WAITLIST_WINDOW_MAX_DAYS * DAY ||
+    end.getTime() - start.getTime() > WAITLIST_WINDOW_MAX_DAYS * DAY
   )
     throw new DomainError('invalid', 'invalid_waitlist_window')
 }
@@ -956,7 +957,7 @@ export async function cleanupWaitlist(ctx: WaitlistContext, options: { limit?: n
     const requests = await db
       .selectFrom('waitlist_verification_requests')
       .select('id')
-      .where('requested_at', '<=', new Date(now.getTime() - 2 * DAY))
+      .where('requested_at', '<=', new Date(now.getTime() - WAITLIST_ABUSE_RETENTION_DAYS * DAY))
       .limit(limit)
       .execute()
     if (requests.length)

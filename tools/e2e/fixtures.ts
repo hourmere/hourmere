@@ -1,3 +1,5 @@
+// Initialize schema extensions before service fixtures construct shared Zod schemas.
+import '@hono/zod-openapi'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import { createServer as createTcpServer } from 'node:net'
@@ -23,6 +25,7 @@ import {
 import { deliverWaitlistEmail } from '../../packages/notifications/src/waitlist.ts'
 import { validateSuccessRedirect } from '../../packages/scheduling/src/success-redirect.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
+import { scanWaitlists } from '../../packages/scheduling/src/waitlist-discovery.ts'
 import {
   AUDIT_BOOKING_END,
   AUDIT_BOOKING_START,
@@ -48,7 +51,11 @@ export interface FixtureApp {
   personalPath: string
   configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
-  configureWaitlist: (kind: 'personal' | 'team') => Promise<string>
+  configureWaitlist: (kind: 'personal' | 'team', enabled?: boolean) => Promise<string>
+  waitlistIds: () => Promise<{ eventId: string; bookingId: string }>
+  deliverWaitlistNotifications: () => Promise<void>
+  openWaitlistMailLink: (page: Page, kind: 'booking' | 'remove') => Promise<void>
+  waitlistContacts: () => Promise<{ status: string; cleared: boolean }[]>
   openWaitlistVerification: (page: Page) => Promise<void>
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
@@ -506,7 +513,7 @@ export const test = base.extend<{
             .where('slug', '=', 'call')
             .execute()
         },
-        configureWaitlist: async (kind) => {
+        configureWaitlist: async (kind, enabled = true) => {
           const organizationId = kind === 'team' ? team : host.organizationId
           const event = await db
             .selectFrom('event_types')
@@ -543,7 +550,7 @@ export const test = base.extend<{
           })
           await db
             .updateTable('event_types')
-            .set({ waitlist_enabled: true })
+            .set({ waitlist_enabled: enabled })
             .where('id', '=', event.id)
             .execute()
           return day.toString()
@@ -587,6 +594,110 @@ export const test = base.extend<{
             { path: '/booking/waitlist/verify', fragment: link.hash },
           )
           await page.goto(`${url}/booking/waitlist/verify`)
+        },
+        waitlistIds: async () => {
+          if (!waitlistEventId) throw new Error('Waitlist fixture is not configured')
+          const booking = await db
+            .selectFrom('bookings')
+            .select('id')
+            .where('event_type_id', '=', waitlistEventId)
+            .executeTakeFirstOrThrow()
+          return { eventId: waitlistEventId, bookingId: booking.id }
+        },
+        deliverWaitlistNotifications: async () => {
+          if (!waitlistEventId) throw new Error('Waitlist fixture is not configured')
+          const deps = { db, secret: authSecret, publicUrl: url }
+          await scanWaitlists(deps)
+          const outboxes = await db
+            .selectFrom('waitlist_verification_outbox as o')
+            .innerJoin('waitlist_entries as e', 'e.id', 'o.entry_id')
+            .select('o.id')
+            .where('e.event_type_id', '=', waitlistEventId)
+            .execute()
+          for (const outbox of outboxes)
+            await deliverWaitlistEmail(
+              {
+                ...deps,
+                smtpConfigured: true,
+                mailer: {
+                  send: async (message) => {
+                    sent.push(message)
+                  },
+                },
+              },
+              { kind: 'verification', id: outbox.id },
+            )
+          const candidates = await db
+            .selectFrom('waitlist_candidates')
+            .select('id')
+            .where('event_type_id', '=', waitlistEventId)
+            .execute()
+          for (const candidate of candidates)
+            await deliverWaitlistEmail(
+              {
+                ...deps,
+                smtpConfigured: true,
+                mailer: {
+                  send: async (message) => {
+                    sent.push(message)
+                  },
+                },
+              },
+              { kind: 'notification', id: candidate.id },
+            )
+        },
+        openWaitlistMailLink: async (page, kind) => {
+          const line = sent
+            .flatMap((message) => message.text.split('\n'))
+            .find((value) =>
+              kind === 'remove'
+                ? value.startsWith(`${url}/booking/waitlist/remove#`)
+                : value.startsWith(`${url}/fixture-host/call/waitlist/`),
+            )
+          if (!line) throw new Error('Expected waitlist link missing from fixture mail sink')
+          const link = new URL(line)
+          if (kind === 'remove') {
+            await page.addInitScript(
+              ({ path, fragment }) => {
+                if (location.pathname === path) history.replaceState(null, '', path + fragment)
+              },
+              { path: link.pathname, fragment: link.hash },
+            )
+            await page.goto(url + link.pathname)
+          } else {
+            try {
+              await page.goto(line)
+            } catch {
+              throw new Error('Could not open the synthetic waitlist booking link')
+            }
+          }
+        },
+        waitlistContacts: async () => {
+          if (!waitlistEventId) throw new Error('Waitlist fixture is not configured')
+          const entries = await db
+            .selectFrom('waitlist_entries')
+            .select([
+              'status',
+              'email',
+              'name',
+              'window_start',
+              'window_end',
+              'time_zone',
+              'locale',
+            ])
+            .where('event_type_id', '=', waitlistEventId)
+            .orderBy('created_at')
+            .execute()
+          return entries.map((entry) => ({
+            status: entry.status,
+            cleared:
+              entry.email === null &&
+              entry.name === null &&
+              entry.window_start === null &&
+              entry.window_end === null &&
+              entry.time_zone === null &&
+              entry.locale === null,
+          }))
         },
         waitlistState: async () => {
           if (!waitlistEventId) throw new Error('Waitlist fixture is not configured')
