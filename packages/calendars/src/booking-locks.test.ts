@@ -407,7 +407,10 @@ describe.skipIf(!url)('calendar connection and booking lock compatibility', () =
         {
           db,
           now: () => Temporal.Instant.fromEpochMilliseconds(now),
-          notify: calendarBookingNotifier({ enqueue: async () => null }),
+          notify: async (trx, event) => {
+            if (!('requestId' in event))
+              await calendarBookingNotifier({ enqueue: async () => null })(trx, event)
+          },
         },
         {
           handle,

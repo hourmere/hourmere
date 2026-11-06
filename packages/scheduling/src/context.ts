@@ -12,6 +12,8 @@ export type BookingEvent =
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string }
+  | { type: 'reschedule_requested'; bookingId: string; requestId: string }
+  | { type: 'reschedule_request_expired'; bookingId: string; requestId: string }
 
 /**
  * Called by the booking services inside the transaction that makes the change, with that

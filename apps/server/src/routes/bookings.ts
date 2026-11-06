@@ -14,7 +14,9 @@ import {
   MAX_PAGE_SIZE,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  RescheduleRequestNoteSchema,
   ResponsesSchema,
+  requestReschedule,
   rescheduleHostBooking,
   rescheduleManagedBooking,
   resolveBookingOrganization,
@@ -100,6 +102,21 @@ export const Booking = z
     id: z.uuid(),
     eventTypeId: z.uuid().nullable(),
     status: z.enum(['confirmed', 'cancelled']),
+    isGroupSeat: z.boolean().optional().openapi({
+      description:
+        'True for a group-seat booking, which does not support host reschedule requests.',
+    }),
+    pendingReschedule: z
+      .object({
+        id: z.uuid(),
+        expiresAt: Instant,
+        note: z.string().nullable(),
+      })
+      .optional()
+      .openapi({
+        description:
+          'An outstanding host request to choose another time. The original booking stays confirmed and blocks its slot; expiry keeps the original time.',
+      }),
     start: Instant,
     end: Instant,
     title: z.string(),
@@ -208,6 +225,32 @@ export const CancelBody = z
 export const RescheduleBody = z
   .strictObject({ start: Instant, durationMinutes: SelectedDurationMinutes.optional() })
   .openapi('Reschedule')
+
+export const RescheduleRequestId = z.uuid().optional().openapi({
+  description:
+    'The pendingReschedule.id being answered. Fences replaced requests and makes a matching pick or cancellation safe to replay.',
+})
+export const ManagedCancelBody = z.strictObject({
+  ...CancelBody.shape,
+  rescheduleRequestId: RescheduleRequestId,
+})
+export const ManagedRescheduleBody = z.strictObject({
+  ...RescheduleBody.shape,
+  rescheduleRequestId: RescheduleRequestId,
+})
+
+export const RequestRescheduleBody = z
+  .strictObject({
+    idempotencyKey: z.uuid().openapi({
+      description:
+        'Retain this random UUID for retries. A new key replaces the current request; changed input with an existing key is refused.',
+    }),
+    note: RescheduleRequestNoteSchema.optional().openapi({
+      description:
+        'Optional plain text, at most 2000 UTF-16 code units, normalized like follow-up host notes. Included only in the email body.',
+    }),
+  })
+  .openapi('RequestReschedule')
 
 export const BookingPage = z
   .object({
@@ -342,6 +385,48 @@ export function bookingRoutes({
       automaticZoom,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
+
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/bookings/{id}/request-reschedule',
+        operationId: 'requestReschedule',
+        summary: 'Ask the invitee to choose another time',
+        description:
+          'For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused.',
+        security: authenticated,
+        middleware: hostManage,
+        tags: ['Bookings'],
+        request: {
+          params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+          body: { required: true, content: json(RequestRescheduleBody) },
+        },
+        responses: {
+          200: {
+            description: 'Booking with its outstanding request, or the current booking on replay',
+            content: json(Booking),
+          },
+          400: error('Invalid input or note (`invalid_request`)'),
+          401: unauthorized,
+          403: crossOrigin,
+          404: hostNotFound,
+          409: error(
+            'Booking cancelled, already started, imported read-only, group-seat unsupported, idempotency key reused or organization context changed',
+          ),
+          429: hostRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await requestReschedule(
+            context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({
@@ -499,7 +584,7 @@ export function bookingRoutes({
         middleware: manageLimit,
         request: {
           headers: ManageToken,
-          body: { content: json(CancelBody), required: false },
+          body: { content: json(ManagedCancelBody), required: false },
         },
         responses: {
           200: { description: 'The cancelled booking', content: json(Booking) },
@@ -512,11 +597,12 @@ export function bookingRoutes({
         },
       }),
       async (c) => {
-        const { reason } = (c.req.valid('json') as z.infer<typeof CancelBody> | undefined) ?? {}
+        const { reason, rescheduleRequestId } =
+          (c.req.valid('json') as z.infer<typeof ManagedCancelBody> | undefined) ?? {}
         const booking = await cancelManagedBooking(
           publicContext,
           c.req.valid('header')['x-manage-token'],
-          { reason },
+          { reason, rescheduleRequestId },
         )
         return c.json(booking, 200)
       },
@@ -534,7 +620,7 @@ export function bookingRoutes({
         request: {
           headers: ManageToken,
           body: {
-            content: json(RescheduleBody),
+            content: json(ManagedRescheduleBody),
             required: true,
           },
         },
@@ -557,6 +643,7 @@ export function bookingRoutes({
           {
             start: Temporal.Instant.from(c.req.valid('json').start),
             durationMinutes: c.req.valid('json').durationMinutes,
+            rescheduleRequestId: c.req.valid('json').rescheduleRequestId,
           },
         )
         return c.json(result, 200)
