@@ -4303,7 +4303,7 @@ export interface components {
                 /** @description IANA time zone */
                 timeZone: string;
             };
-            /** @description Required for an askInvitee phone option, in E.164 format, for example +14155550123. */
+            /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
             inviteePhone?: string;
             /** @description An id from the public event locations. Omission selects the default or first option. */
             locationOptionId?: string;
@@ -5941,7 +5941,7 @@ export interface operations {
                         /** @description IANA time zone */
                         timeZone: string;
                     };
-                    /** @description Required for an askInvitee phone option, in E.164 format, for example +14155550123. */
+                    /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
                     inviteePhone?: string;
                     /** @description An id from the public event locations. Omission selects the default or first option. */
                     locationOptionId?: string;

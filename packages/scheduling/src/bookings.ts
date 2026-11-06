@@ -19,6 +19,7 @@ import {
   type Location,
   type PublicEventTypeRecord,
   parseLocation,
+  selectBookableLocationOption,
   selectDurationMinutes,
   toInstant,
   toIso,
@@ -39,7 +40,8 @@ import {
 } from './conferences.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
-import { bookingHostIds, lockOrganization } from './hosts.ts'
+import { admitGroupSlot, lockGroupBooking } from './group-seat-admission.ts'
+import { bookingHostIds, lockOrganization, resolvedBookingHosts } from './hosts.ts'
 import { resolveLocationChoice, selectLocationOption } from './location-options.ts'
 import {
   createNotificationSnapshot,
@@ -362,6 +364,7 @@ const RESCHEDULE_COLUMNS = [
   'hosts_use_default_schedule',
   'manage_token_hash',
   'notification_snapshot',
+  'group_slot_id',
 ] as const
 
 /**
@@ -559,7 +562,11 @@ async function toBookings(
     const replacements = await db
       .selectFrom('bookings as successor')
       .innerJoin('bookings as predecessor', 'predecessor.id', 'successor.rescheduled_from_id')
-      .innerJoin('booking_hosts as successor_host', 'successor_host.booking_id', 'successor.id')
+      .innerJoin(
+        resolvedBookingHosts(db).as('successor_host'),
+        'successor_host.booking_id',
+        'successor.id',
+      )
       .select(['predecessor.id as predecessor_id', 'successor.id'])
       .where(
         'predecessor.id',
@@ -835,6 +842,8 @@ async function requireOfferedSlot(
 }
 
 interface NewBooking {
+  groupSlotId?: string | undefined
+  locationOption?: Json | null | undefined
   successRedirect?: BookingSuccessRedirect | undefined
   organizationId: string
   eventTypeId: string | null
@@ -842,7 +851,6 @@ interface NewBooking {
   end: Temporal.Instant
   title: string
   location: Location | null
-  locationOption: Json | null
   responses: Responses
   source: BookingSource
   apiKeyId: string | null
@@ -869,13 +877,19 @@ async function insertBooking(
     .insertInto('bookings')
     .values({
       organization_id: b.organizationId,
+      group_slot_id: b.groupSlotId ?? null,
+      group_booker_key: b.groupSlotId
+        ? sql<string>`normalize_group_booker_key(${b.attendees[0]?.email ?? ''})`
+        : null,
+      ...(b.locationOption !== undefined
+        ? { location_option: b.locationOption === null ? null : JSON.stringify(b.locationOption) }
+        : {}),
       event_type_id: b.eventTypeId,
       success_redirect: b.successRedirect ? JSON.stringify(b.successRedirect) : null,
       start_at: b.start.toString(),
       end_at: b.end.toString(),
       title: b.title,
       location: b.location && JSON.stringify(unresolvedLocation(b.location as Json)),
-      location_option: b.locationOption === null ? null : JSON.stringify(b.locationOption),
       responses: JSON.stringify(b.responses),
       manage_token_hash: hash,
       source: b.source,
@@ -890,7 +904,7 @@ async function insertBooking(
     })
     .returning('id')
     .executeTakeFirstOrThrow()
-  if (b.hostUserIds.length) {
+  if (b.hostUserIds.length && !b.groupSlotId) {
     try {
       await db
         .insertInto('booking_hosts')
@@ -965,6 +979,12 @@ async function cancelLocked(
   actorUserId: string | null,
 ): Promise<Booking> {
   await assertBookingLocallyManaged(db, row.id)
+  const seat = await db
+    .selectFrom('bookings')
+    .select('group_slot_id')
+    .where('id', '=', row.id)
+    .executeTakeFirst()
+  if (seat?.group_slot_id && row.status === 'cancelled') return loadBooking(db, row.id)
   assertChangeable(row, now)
   await db
     .updateTable('bookings')
@@ -1025,6 +1045,8 @@ export interface CreateBookingInput {
   inviteePhone?: string | undefined
   handle: string
   slug: string
+  /** Internal service generation fence; transports introduce it separately. */
+  expectedGroupSlotId?: string | undefined
   start: Temporal.Instant
   /** One of the event type's allowed durations; omitted uses its default. */
   durationMinutes?: number | undefined
@@ -1074,6 +1096,8 @@ export async function createPublicBooking(
   input: CreateBookingInput,
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<CreateBookingResult> {
+  const replay = await groupCreationReplay(ctx, input, origin, false)
+  if (replay) return replay
   return publicBooking(ctx, input, origin, (db, options) =>
     findPublicEventType(db, input.handle, input.slug, options),
   )
@@ -1085,9 +1109,44 @@ export async function createPublicTeamBooking(
   input: CreateBookingInput,
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<CreateBookingResult> {
+  const replay = await groupCreationReplay(ctx, input, origin, true)
+  if (replay) return replay
   return publicBooking(ctx, input, origin, (db, options) =>
     findPublicTeamEventType(db, input.handle, input.slug, options),
   )
+}
+
+/** An exact group replay survives later disabling/deletion of the event configuration. */
+async function groupCreationReplay(
+  ctx: PublicContext,
+  input: CreateBookingInput,
+  origin: BookingOrigin,
+  team: boolean,
+): Promise<CreateBookingResult | undefined> {
+  if (input.idempotencyKey === undefined) return undefined
+  const query = ctx.db
+    .selectFrom('event_types as e')
+    .select(['e.id', 'e.organization_id'])
+    .where('e.slug', '=', input.slug.toLowerCase())
+    .where('e.booking_mode', '=', 'group')
+  const event = team
+    ? await query
+        .innerJoin('auth.organization as o', 'o.id', 'e.organization_id')
+        .where('o.slug', '=', input.handle.toLowerCase())
+        .where('e.owner_user_id', 'is', null)
+        .executeTakeFirst()
+    : await query
+        .innerJoin('profiles as p', 'p.user_id', 'e.owner_user_id')
+        .where('p.handle', '=', input.handle.toLowerCase())
+        .executeTakeFirst()
+  if (!event) return undefined
+  const scope = bookingIdempotency(
+    { id: event.id, organizationId: event.organization_id },
+    input,
+    origin,
+  )
+  const replay = scope && (await findReplay(ctx.db, scope))
+  return replay ? { ...replay, replayed: true } : undefined
 }
 
 export interface CreateOneTimeBookingInput extends Omit<CreateBookingInput, 'handle' | 'slug'> {
@@ -1191,6 +1250,9 @@ function bookingIdempotency(
         durationMinutes: input.durationMinutes,
         locationOptionId: input.locationOptionId,
         inviteePhone: input.inviteePhone,
+        ...(input.expectedGroupSlotId !== undefined
+          ? { expectedGroupSlotId: input.expectedGroupSlotId }
+          : {}),
         invitee: input.invitee,
         guests: input.guests ?? [],
         responses: input.responses ?? {},
@@ -1266,7 +1328,16 @@ async function publicBooking(
       const responses = validateResponses(current.questions, input.responses ?? {})
       const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
       const end = input.start.add({ minutes: durationMinutes })
-      const chosenOption = selectLocationOption(current.locations, input.locationOptionId)
+      const chosenOption = selectBookableLocationOption(current, input.locationOptionId)
+      const groupSlot = await admitGroupSlot(trx, {
+        event: current,
+        bookerEmail: invitee.email,
+        start: input.start,
+        end,
+        now,
+        snapshot,
+        expectedSlotId: input.expectedGroupSlotId,
+      })
       let selectedHostIds = current.hostUserIds
       if (current.schedulingType === 'round_robin') {
         await lockRoundRobinState(trx, current.id)
@@ -1301,7 +1372,7 @@ async function publicBooking(
             'The host calendars are temporarily unavailable. Try again shortly.',
           )
         selectedHostIds = [await assignRoundRobinHost(trx, current.id, available)]
-      } else {
+      } else if (!groupSlot) {
         for (const hostUserId of current.hostUserIds)
           await requireOfferedSlot(trx, {
             eventTypeId: current.id,
@@ -1341,13 +1412,14 @@ async function publicBooking(
       })
       const { id, manageToken } = await insertBooking(trx, {
         successRedirect,
+        groupSlotId: groupSlot?.id,
         organizationId: current.organizationId,
         eventTypeId: current.id,
         start: input.start,
         end,
         title: `${current.title} with ${invitee.name}`,
-        location: choice.location,
-        locationOption: choice.locationOption,
+        location: groupSlot ? groupSlot.location : choice.location,
+        locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
         responses,
         source: origin.source,
         apiKeyId: origin.apiKeyId,
@@ -1396,6 +1468,8 @@ async function publicBooking(
       const replay = await findReplay(ctx.db, scope)
       if (replay) return { ...replay, replayed: true }
     }
+    if (code === '23505' && constraint === 'bookings_group_active_mailbox')
+      throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
     throw err
   }
 }
@@ -1435,8 +1509,9 @@ export async function cancelManagedBooking(
         .select('organization_id')
         .where('id', '=', target.id)
         .executeTakeFirst())
-    if (!parent) throw bookingNotFound()
+    if (!parent || !target) throw bookingNotFound()
     await lockCancellationOrganization(trx, parent.organization_id)
+    await lockGroupBooking(trx, target.id)
     const row = await lockManagedBooking(trx, hash)
     if (!row) throw bookingNotFound()
     return cancelLocked(
@@ -1462,12 +1537,29 @@ export async function cancelManagedBooking(
 export async function rescheduleManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
-  { start, durationMinutes }: { start: Temporal.Instant; durationMinutes?: number | undefined },
+  {
+    start,
+    durationMinutes,
+    idempotencyKey,
+    expectedGroupSlotId,
+  }: {
+    start: Temporal.Instant
+    durationMinutes?: number | undefined
+    idempotencyKey?: string | undefined
+    expectedGroupSlotId?: string | undefined
+  },
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<BookingWithToken> {
   const hash = manageTokenHash(token)
   if (!hash) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    const receiptReplay = await groupCapabilityMoveReplay(
+      trx,
+      hash,
+      { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
+      origin,
+    )
+    if (receiptReplay) return receiptReplay
     const target = await resolveManagedTarget(trx, hash)
     const parent =
       target &&
@@ -1476,11 +1568,23 @@ export async function rescheduleManagedBooking(
         .select('organization_id')
         .where('id', '=', target.id)
         .executeTakeFirst())
-    if (!parent) throw bookingNotFound()
+    if (!parent || !target) throw bookingNotFound()
     await lockOrganization(trx, parent.organization_id)
+    await lockGroupBooking(trx, target.id, start, durationMinutes)
     const old = await lockManagedBooking(trx, hash)
     if (!old) throw bookingNotFound()
-    return rescheduleLocked(ctx, trx, old, start, origin, false, durationMinutes)
+    return replayableGroupMove(
+      ctx,
+      trx,
+      old,
+      { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
+      origin,
+      false,
+      {
+        kind: 'capability',
+        hash: groupMoveCapabilityAuthority(hash, origin),
+      },
+    )
   })
 }
 
@@ -1493,10 +1597,22 @@ async function rescheduleLocked(
   origin: BookingOrigin,
   carryManageToken = false,
   selectedDuration?: number | undefined,
+  expectedGroupSlotId?: string | undefined,
 ): Promise<BookingWithToken> {
   await assertBookingLocallyManaged(trx, old.id)
   // The status cannot change while the row is locked; the time check waits for the locks.
   if (old.status === 'cancelled') throw bookingCancelled()
+  if (old.group_slot_id)
+    return rescheduleGroupLocked(
+      ctx,
+      trx,
+      old,
+      start,
+      origin,
+      carryManageToken,
+      selectedDuration,
+      expectedGroupSlotId,
+    )
   if (!carryManageToken) await assertInviteeRescheduleAllowed({ ...ctx, db: trx }, old.id)
 
   const [hosts, attendees] = await Promise.all([
@@ -1608,6 +1724,282 @@ async function rescheduleLocked(
   return { booking: await loadBooking(trx, id), manageToken }
 }
 
+function groupMoveCapabilityAuthority(hash: Buffer, origin: BookingOrigin): Buffer {
+  return sha256(
+    canonicalJson({
+      purpose: 'group-move',
+      tokenHash: hash.toString('hex'),
+      apiKeyId: origin.apiKeyId,
+      oauthConsentId: origin.oauthConsentId ?? null,
+    }),
+  )
+}
+
+/** A retained capability is reauthorized before receipt lookup, without following its chain. */
+async function groupCapabilityMoveReplay(
+  db: Db,
+  hash: Buffer,
+  input: {
+    start: Temporal.Instant
+    durationMinutes?: number | undefined
+    idempotencyKey?: string | undefined
+    expectedGroupSlotId?: string | undefined
+  },
+  origin: BookingOrigin,
+): Promise<BookingWithToken | undefined> {
+  if (input.idempotencyKey === undefined) return undefined
+  const receipt = await db
+    .selectFrom('group_booking_move_receipts as r')
+    .select(['r.fingerprint', 'r.result_booking_id'])
+    .where('r.authority_kind', '=', 'capability')
+    .where('r.authority_hash', '=', groupMoveCapabilityAuthority(hash, origin))
+    .where('r.request_key', '=', input.idempotencyKey)
+    .where((eb) =>
+      eb.or([
+        eb.exists(
+          eb
+            .selectFrom('bookings as b')
+            .select('b.id')
+            .whereRef('b.organization_id', '=', 'r.organization_id')
+            .where('b.manage_token_hash', '=', hash),
+        ),
+        eb.exists(
+          eb
+            .selectFrom('booking_notifications as n')
+            .innerJoin('bookings as b', 'b.id', 'n.booking_id')
+            .select('b.id')
+            .whereRef('b.organization_id', '=', 'r.organization_id')
+            .where('n.manage_token_hash', '=', hash)
+            .where('n.outcome', '=', 'sent'),
+        ),
+      ]),
+    )
+    .executeTakeFirst()
+  if (!receipt) return undefined
+  const fingerprint = sha256(
+    canonicalJson({
+      start: input.start.toString(),
+      durationMinutes: input.durationMinutes,
+      expectedGroupSlotId: input.expectedGroupSlotId,
+    }),
+  )
+  if (!receipt.fingerprint.equals(fingerprint))
+    throw new DomainError(
+      'conflict',
+      'idempotency_key_reused',
+      'This Idempotency-Key was already used for a different request',
+    )
+  return { booking: await loadBooking(db, receipt.result_booking_id), manageToken: null }
+}
+
+/** Receipt lookup precedes lifecycle/fullness checks and never recovers a raw capability. */
+async function replayableGroupMove(
+  ctx: PublicContext,
+  trx: Db,
+  old: NonNullable<Awaited<ReturnType<typeof lockManagedBooking>>>,
+  input: {
+    start: Temporal.Instant
+    durationMinutes?: number | undefined
+    idempotencyKey?: string | undefined
+    expectedGroupSlotId?: string | undefined
+  },
+  origin: BookingOrigin,
+  carry: boolean,
+  authority: { kind: string; hash: Buffer; sourceId?: string },
+): Promise<BookingWithToken> {
+  if (old.group_slot_id && input.idempotencyKey === undefined)
+    throw new DomainError(
+      'invalid',
+      'invalid_idempotency_key',
+      'Group rescheduling requires an Idempotency-Key',
+    )
+  if (!old.group_slot_id || input.idempotencyKey === undefined)
+    return rescheduleLocked(
+      ctx,
+      trx,
+      old,
+      input.start,
+      origin,
+      carry,
+      input.durationMinutes,
+      input.expectedGroupSlotId,
+    )
+  if (!IDEMPOTENCY_KEY.test(input.idempotencyKey))
+    throw new DomainError(
+      'invalid',
+      'invalid_idempotency_key',
+      'Idempotency-Key must be 1 to 255 printable ASCII characters',
+    )
+  const fingerprint = sha256(
+    canonicalJson({
+      sourceId: authority.sourceId,
+      start: input.start.toString(),
+      durationMinutes: input.durationMinutes,
+      expectedGroupSlotId: input.expectedGroupSlotId,
+    }),
+  )
+  const receipt = await trx
+    .selectFrom('group_booking_move_receipts')
+    .selectAll()
+    .where('organization_id', '=', old.organization_id)
+    .where('authority_kind', '=', authority.kind)
+    .where('authority_hash', '=', authority.hash)
+    .where('request_key', '=', input.idempotencyKey)
+    .executeTakeFirst()
+  if (receipt) {
+    if (!receipt.fingerprint.equals(fingerprint))
+      throw new DomainError(
+        'conflict',
+        'idempotency_key_reused',
+        'This Idempotency-Key was already used for a different request',
+      )
+    return { booking: await loadBooking(trx, receipt.result_booking_id), manageToken: null }
+  }
+  const result = await rescheduleLocked(
+    ctx,
+    trx,
+    old,
+    input.start,
+    origin,
+    carry,
+    input.durationMinutes,
+    input.expectedGroupSlotId,
+  )
+  const successor = await trx
+    .selectFrom('bookings')
+    .select('group_slot_id')
+    .where('id', '=', result.booking.id)
+    .executeTakeFirstOrThrow()
+  if (!successor.group_slot_id) throw new Error('Group move lost its slot binding')
+  await trx
+    .insertInto('group_booking_move_receipts')
+    .values({
+      organization_id: old.organization_id,
+      authority_kind: authority.kind,
+      authority_hash: authority.hash,
+      request_key: input.idempotencyKey,
+      fingerprint,
+      source_booking_id: old.id,
+      result_booking_id: result.booking.id,
+      source_group_slot_id: old.group_slot_id,
+      result_group_slot_id: successor.group_slot_id,
+      is_noop: old.id === result.booking.id,
+    })
+    .execute()
+  return result
+}
+
+/** A group move retires only the moving seat, then admits its successor atomically. */
+async function rescheduleGroupLocked(
+  ctx: PublicContext,
+  trx: Db,
+  old: NonNullable<Awaited<ReturnType<typeof lockManagedBooking>>>,
+  start: Temporal.Instant,
+  origin: BookingOrigin,
+  carry: boolean,
+  selectedDuration?: number,
+  expectedGroupSlotId?: string | undefined,
+): Promise<BookingWithToken> {
+  await bookingHostIds(trx, old.id, old.organization_id, old.required_host_user_ids, true)
+  const event =
+    old.event_type_id && (await findOneTimeEventType(trx, old.event_type_id, { lock: true }))
+  if (!event || event.hostUserIds.join() !== old.required_host_user_ids.join())
+    throw new DomainError(
+      'conflict',
+      'event_type_unavailable',
+      'This event type no longer takes bookings',
+    )
+  const duration =
+    selectedDuration === undefined
+      ? toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })
+      : selectDurationMinutes(event, selectedDuration)
+  const end = start.add({ minutes: duration })
+  const now = ctx.now()
+  assertChangeable(old, now)
+  if (
+    expectedGroupSlotId !== undefined &&
+    start.equals(toInstant(old.start_at)) &&
+    end.equals(toInstant(old.end_at)) &&
+    expectedGroupSlotId !== old.group_slot_id
+  )
+    throw new DomainError(
+      'conflict',
+      'group_slot_changed',
+      'This slot changed; choose a time again',
+    )
+  if (start.equals(toInstant(old.start_at)) && end.equals(toInstant(old.end_at)))
+    return { booking: await loadBooking(trx, old.id), manageToken: null }
+  if (!carry) await assertInviteeRescheduleAllowed({ ...ctx, db: trx }, old.id)
+  const attendees = await trx
+    .selectFrom('booking_attendees')
+    .selectAll()
+    .where('booking_id', '=', old.id)
+    .execute()
+  // A survivor keeps source occupancy. Final-seat retirement releases it before the
+  // exact target check; any target failure rolls this entire transaction back.
+  await trx
+    .updateTable('bookings')
+    .set({
+      status: 'cancelled',
+      cancelled_at: now.toString(),
+      cancelled_source: origin.source,
+      cancelled_api_key_id: origin.apiKeyId,
+      cancelled_oauth_consent_id: origin.oauthConsentId ?? null,
+      ...(carry ? { manage_token_hash: null } : {}),
+    })
+    .where('id', '=', old.id)
+    .execute()
+  const snapshot = notificationSnapshot(old.notification_snapshot)
+  const slot = await admitGroupSlot(trx, {
+    event,
+    start,
+    end,
+    now,
+    snapshot,
+    bookerEmail: attendees[0]?.email ?? '',
+    preserveDurationBookingId: selectedDuration === undefined ? old.id : undefined,
+    sourceSlotId: old.group_slot_id ?? undefined,
+    expectedSlotId: expectedGroupSlotId,
+  })
+  if (!slot)
+    throw new DomainError(
+      'conflict',
+      'event_type_unavailable',
+      'This event type no longer takes group bookings',
+    )
+  const result = await insertBooking(trx, {
+    organizationId: old.organization_id,
+    eventTypeId: event.id,
+    groupSlotId: slot.id,
+    locationOption: slot.locationOption,
+    start,
+    end,
+    title: old.title,
+    location: slot.location,
+    responses: old.responses as Responses,
+    source: origin.source,
+    apiKeyId: origin.apiKeyId,
+    oauthConsentId: origin.oauthConsentId,
+    rescheduledFromId: old.id,
+    manageTokenHash: carry ? old.manage_token_hash : undefined,
+    hostUserIds: event.hostUserIds,
+    hostsUseDefaultSchedule: false,
+    notificationSnapshot: snapshot,
+    attendees: attendees.map((a) => ({
+      name: a.name,
+      email: a.email,
+      timeZone: a.time_zone,
+      locale: a.locale,
+      isBooker: a.is_booker,
+    })),
+  })
+  await skipScheduledMessages(trx, old.id, 'booking_replaced')
+  await cancelBookingConference(trx, old.id, now)
+  await prepareBookingConference(ctx, trx, result.id)
+  await ctx.notify?.(trx, { type: 'rescheduled', bookingId: result.id, start }, now)
+  return { booking: await loadBooking(trx, result.id), manageToken: result.manageToken }
+}
+
 // --- Host side ----------------------------------------------------------------------------
 
 export { DEFAULT_PAGE_SIZE, type ListBookingsInput, MAX_PAGE_SIZE } from './booking-page.ts'
@@ -1628,7 +2020,7 @@ export async function listHostBookings(
 ): Promise<BookingPage> {
   const { query, limit } = bookingPageQuery(ctx.db, input)
   const rows = await query
-    .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+    .innerJoin(resolvedBookingHosts(ctx.db).as('bh'), 'bh.booking_id', 'b.id')
     .leftJoin('event_types as et', (join) =>
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
@@ -1651,7 +2043,7 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
   if (!UUID.test(id)) throw bookingNotFound()
   const row = await ctx.db
     .selectFrom('bookings as b')
-    .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+    .innerJoin(resolvedBookingHosts(ctx.db).as('bh'), 'bh.booking_id', 'b.id')
     .leftJoin('event_types as et', (join) =>
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
@@ -1676,13 +2068,24 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
 export async function rescheduleHostBooking(
   ctx: ServiceContext,
   id: string,
-  { start, durationMinutes }: { start: Temporal.Instant; durationMinutes?: number | undefined },
+  {
+    start,
+    durationMinutes,
+    idempotencyKey,
+    expectedGroupSlotId,
+  }: {
+    start: Temporal.Instant
+    durationMinutes?: number | undefined
+    idempotencyKey?: string | undefined
+    expectedGroupSlotId?: string | undefined
+  },
   origin?: BookingOrigin,
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
+    await lockGroupBooking(trx, id, start, durationMinutes)
     const old = await trx
       .selectFrom('bookings')
       .select(RESCHEDULE_COLUMNS)
@@ -1691,20 +2094,20 @@ export async function rescheduleHostBooking(
       .where((eb) =>
         eb.exists(
           eb
-            .selectFrom('booking_hosts')
+            .selectFrom(resolvedBookingHosts(trx).as('booking_host'))
             .select('booking_id')
-            .whereRef('booking_hosts.booking_id', '=', 'bookings.id')
-            .where('booking_hosts.user_id', '=', ctx.principal.user.id),
+            .whereRef('booking_host.booking_id', '=', 'bookings.id')
+            .where('booking_host.user_id', '=', ctx.principal.user.id),
         ),
       )
       .forUpdate()
       .executeTakeFirst()
     if (!old) throw bookingNotFound()
-    return rescheduleLocked(
+    return replayableGroupMove(
       ctx,
       trx,
       old,
-      start,
+      { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
       origin ?? {
         source:
           ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
@@ -1712,7 +2115,23 @@ export async function rescheduleHostBooking(
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
       true,
-      durationMinutes,
+      {
+        kind: ctx.principal.kind,
+        hash: sha256(
+          canonicalJson({
+            purpose: 'group-move',
+            userId: ctx.principal.user.id,
+            organizationId: ctx.principal.organization.id,
+            credential:
+              ctx.principal.kind === 'api_key'
+                ? ctx.principal.apiKeyId
+                : ctx.principal.kind === 'oauth'
+                  ? ctx.principal.oauthConsentId
+                  : ctx.principal.user.id,
+          }),
+        ),
+        sourceId: id,
+      },
     )
   })
 }
@@ -1729,9 +2148,10 @@ export async function cancelHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
+    await lockGroupBooking(trx, id)
     const row = await trx
       .selectFrom('bookings as b')
-      .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+      .innerJoin(resolvedBookingHosts(trx).as('bh'), 'bh.booking_id', 'b.id')
       .select(['b.id', 'b.organization_id', 'b.status', 'b.start_at'])
       .where('b.id', '=', id)
       .where('bh.user_id', '=', ctx.principal.user.id)
@@ -1772,6 +2192,7 @@ export async function cancelTeamBookingInTransaction(
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
+  await lockGroupBooking(trx, id)
   const row = await trx
     .selectFrom('bookings')
     .select(['id', 'organization_id', 'status', 'start_at'])

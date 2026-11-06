@@ -56,6 +56,7 @@ export interface GoogleEventWrite {
   sequence: number
   status: 'confirmed' | 'cancelled'
   transparency: 'opaque'
+  visibility?: 'private'
   location?: string
   description?: string
   conferenceData?: {

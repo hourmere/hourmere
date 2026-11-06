@@ -114,5 +114,7 @@ ready-link invitations; other options create no conference.
 - Automatic Zoom supports only individual events with one authorized host. Collective and
   round-robin Zoom remain unsupported. Meet uses the required collective organizer or the
   actual assigned round-robin host; it never borrows another host’s connection.
-- Group-seat events are not yet enabled for users. Future enablement must enforce one
-  shared location and conference per slot; these seat constraints are not implemented yet.
+- Group-seat events have internal service support but are not enabled in public pages,
+  event editors or REST/MCP/CLI configuration. Internal seats use the shared slot’s
+  default location and conference; per-invitee location selection and phone collection
+  are unavailable for group seats.

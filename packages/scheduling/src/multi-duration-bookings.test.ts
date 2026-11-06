@@ -23,6 +23,7 @@ import * as conferences from './conferences.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
+import * as groupSeatAdmission from './group-seat-admission.ts'
 import * as hosts from './hosts.ts'
 import * as locationOptions from './location-options.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
@@ -103,6 +104,7 @@ function sourceCopy(change?: Change): Api {
     ...bookingPage,
     ...conferences,
     ...locationOptions,
+    ...groupSeatAdmission,
     DomainError,
     ...hosts,
     ...notificationSettings,
@@ -546,14 +548,17 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'invitee reschedule duration forwarding',
       [
-        'return rescheduleLocked(ctx, trx, old, start, origin, false, durationMinutes)',
-        'return rescheduleLocked(ctx, trx, old, start, origin, false)',
+        '{ start, durationMinutes, idempotencyKey, expectedGroupSlotId },\n      origin,\n      false,',
+        '{ start, idempotencyKey, expectedGroupSlotId },\n      origin,\n      false,',
       ],
       verifyRescheduleSelection,
     ],
     [
       'host reschedule duration forwarding',
-      ['true,\n      durationMinutes,', 'true,'],
+      [
+        '{ start, durationMinutes, idempotencyKey, expectedGroupSlotId },\n      origin ?? {',
+        '{ start, idempotencyKey, expectedGroupSlotId },\n      origin ?? {',
+      ],
       verifyRescheduleSelection,
     ],
     [

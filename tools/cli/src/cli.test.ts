@@ -269,10 +269,12 @@ describe('CLI transport and arguments', () => {
     await verifySlotLocation()
     await verifySlotLocation(sourceCopy())
     await expect(
-      verifySlotLocation(sourceCopy([
-        'const input = await readInput(args.input, options.stdin)',
-        'const input = await readInput(args.input, options.stdin); delete input.locationOptionId',
-      ])),
+      verifySlotLocation(
+        sourceCopy([
+          'const input = await readInput(args.input, options.stdin)',
+          'const input = await readInput(args.input, options.stdin); delete input.locationOptionId',
+        ]),
+      ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 

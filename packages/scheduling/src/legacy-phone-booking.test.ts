@@ -3,9 +3,10 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { selectBookableLocationOption } from './availability.ts'
 import { createOneTimeBooking, createPublicBooking, createPublicTeamBooking } from './bookings.ts'
 import { DomainError } from './errors.ts'
-import { resolveLocationChoice } from './location-options.ts'
+import { resolveLocationChoice, selectLocationOption } from './location-options.ts'
 import { createOneTimeBookingLink } from './one-time-links.ts'
 import { createFixtures } from './testing.ts'
 
@@ -133,6 +134,8 @@ function copiedBooking(change?: readonly [string, string]) {
   const bindings = {
     DomainError,
     resolveLocationChoice,
+    selectLocationOption,
+    selectBookableLocationOption,
     automaticMeet: () => false,
     automaticZoom: () => false,
     eventTypeNotFound: () => new DomainError('not_found', 'event_type_not_found'),
@@ -149,6 +152,7 @@ function copiedBooking(change?: readonly [string, string]) {
     toIso: (value: Temporal.Instant) => value.toString(),
     insertBooking: async () => ({ id: 'synthetic-booking', manageToken: null }),
     prepareBookingConference: noop,
+    admitGroupSlot: noop,
     loadBooking: async () => ({}),
     pgError: () => ({}),
   }
