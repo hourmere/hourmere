@@ -85,6 +85,10 @@ export interface EventType {
   bookingWindowDays: number | null
   /** null = no limit. */
   maxBookingsPerDay: number | null
+  /** null = no limit; periods use each host's schedule time zone. */
+  maxBookingsPerWeek: number | null
+  /** null = no limit; calendar months in each host's schedule time zone. */
+  maxBookingsPerMonth: number | null
   schedulingType: SchedulingType
   /** Round-robin booking requires a separate explicit activation action. */
   roundRobinActive: boolean
@@ -129,6 +133,8 @@ export interface EventTypeInput {
   minimumNoticeMinutes?: number | undefined
   bookingWindowDays?: number | null | undefined
   maxBookingsPerDay?: number | null | undefined
+  maxBookingsPerWeek?: number | null | undefined
+  maxBookingsPerMonth?: number | null | undefined
   location?: LocationSettings | null | undefined
   /** Replaces the ordered list. Cannot be combined with a legacy location write. */
   locations?: LocationOption[] | null | undefined
@@ -180,6 +186,8 @@ interface Fields {
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   maxBookingsPerDay: number | null
+  maxBookingsPerWeek: number | null
+  maxBookingsPerMonth: number | null
   location: LocationSettings | null
   locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
@@ -204,6 +212,8 @@ const FIELD_NAMES = [
   'minimumNoticeMinutes',
   'bookingWindowDays',
   'maxBookingsPerDay',
+  'maxBookingsPerWeek',
+  'maxBookingsPerMonth',
   'location',
   'locations',
   'successRedirect',
@@ -222,6 +232,8 @@ const DEFAULTS = {
   minimumNoticeMinutes: 0,
   bookingWindowDays: null,
   maxBookingsPerDay: null,
+  maxBookingsPerWeek: null,
+  maxBookingsPerMonth: null,
   location: null,
   locations: null,
   successRedirect: null,
@@ -1015,6 +1027,8 @@ function validFields(
         minimumNoticeMinutes: c.minimumNoticeMinutes,
         bookingWindowDays: c.bookingWindowDays ?? undefined,
         maxBookingsPerDay: c.maxBookingsPerDay ?? undefined,
+        maxBookingsPerWeek: c.maxBookingsPerWeek ?? undefined,
+        maxBookingsPerMonth: c.maxBookingsPerMonth ?? undefined,
       },
       '',
     ),
@@ -1042,6 +1056,8 @@ function validFields(
     minimumNoticeMinutes: c.minimumNoticeMinutes as number,
     bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
+    maxBookingsPerWeek: (c.maxBookingsPerWeek ?? null) as number | null,
+    maxBookingsPerMonth: (c.maxBookingsPerMonth ?? null) as number | null,
     location: compatLocation(locations),
     locations,
     // A policy change must not block unrelated edits. Only an explicitly supplied
@@ -1190,6 +1206,8 @@ function fieldsOf(row: {
   minimum_notice_minutes: number
   booking_window_days: number | null
   max_bookings_per_day: number | null
+  max_bookings_per_week: number | null
+  max_bookings_per_month: number | null
   location: Json | null
   locations: Json | null
   success_redirect: Json | null
@@ -1214,6 +1232,8 @@ function fieldsOf(row: {
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     maxBookingsPerDay: row.max_bookings_per_day,
+    maxBookingsPerWeek: row.max_bookings_per_week,
+    maxBookingsPerMonth: row.max_bookings_per_month,
     location: compatLocation(locations),
     locations,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -1238,6 +1258,8 @@ function columns(fields: Fields) {
     minimum_notice_minutes: fields.minimumNoticeMinutes,
     booking_window_days: fields.bookingWindowDays,
     max_bookings_per_day: fields.maxBookingsPerDay,
+    max_bookings_per_week: fields.maxBookingsPerWeek,
+    max_bookings_per_month: fields.maxBookingsPerMonth,
     location: fields.location === null ? null : jsonb(fields.location),
     locations: fields.locations === null ? null : jsonb(fields.locations),
     success_redirect: fields.successRedirect === null ? null : jsonb(fields.successRedirect),

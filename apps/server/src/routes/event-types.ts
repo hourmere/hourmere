@@ -54,8 +54,14 @@ import {
 
 const L = EVENT_TYPE_LIMITS
 
-// Location options remain service-only until their REST/MCP/CLI contracts are introduced.
-const eventTypeResponse = ({ locations: _locations, ...eventType }: ServiceEventType) => eventType
+// Location options and weekly/monthly limits remain service-only until their REST/MCP/CLI
+// contracts are introduced.
+const eventTypeResponse = ({
+  locations: _locations,
+  maxBookingsPerWeek: _maxBookingsPerWeek,
+  maxBookingsPerMonth: _maxBookingsPerMonth,
+  ...eventType
+}: ServiceEventType) => eventType
 
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },

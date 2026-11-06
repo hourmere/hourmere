@@ -19,7 +19,8 @@ const MINUTES_PER_DAY = 24 * 60
  * - now + minimumNotice <= start <= now + bookingWindowDays (calendar days in the
  *   host's zone);
  * - rangeStart <= start and end <= rangeEnd;
- * - its host-local day has fewer than maxBookingsPerDay bookings.
+ * - its host-local day, Monday–Sunday week and calendar month each have fewer
+ *   bookings than their configured limit.
  *
  * Daylight saving time. Wall-clock times are read in the host's zone, separately
  * for each local date:
@@ -58,7 +59,7 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
   if (Temporal.Instant.compare(earliest, latest) > 0) return []
 
   const blocked = blockedIntervals(q.busy, q.bookings)
-  const bookingsPerDay = countByLocalDate(q.bookings, timeZone)
+  const bookingCounts = countByLocalPeriods(q.bookings, timeZone)
   const slots: Slot[] = []
 
   // A slot starts on the local date whose wall-clock time it was generated from.
@@ -71,8 +72,18 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
   let date = earliest.toZonedDateTimeISO(timeZone).toPlainDate().subtract({ days: 1 })
   for (; Temporal.PlainDate.compare(date, lastDate) <= 0; date = date.add({ days: 1 })) {
     const key = date.toString()
-    const bookedThatDay = bookingsPerDay.get(key) ?? 0
+    const bookedThatDay = bookingCounts.day.get(key) ?? 0
     if (q.maxBookingsPerDay !== undefined && bookedThatDay >= q.maxBookingsPerDay) continue
+    if (
+      q.maxBookingsPerWeek !== undefined &&
+      (bookingCounts.week.get(weekKey(date)) ?? 0) >= q.maxBookingsPerWeek
+    )
+      continue
+    if (
+      q.maxBookingsPerMonth !== undefined &&
+      (bookingCounts.month.get(monthKey(date)) ?? 0) >= q.maxBookingsPerMonth
+    )
+      continue
 
     const intervals = q.dateOverrides.get(key) ?? q.weeklyHours.get(date.dayOfWeek) ?? []
     for (const interval of intervals) {
@@ -189,12 +200,31 @@ function overlapsAny(
   return candidate !== undefined && candidate.start < windowEnd
 }
 
-/** Counts intervals by the host-local date of their (real, unbuffered) start. */
-function countByLocalDate(intervals: readonly InstantInterval[], timeZone: string) {
-  const counts = new Map<string, number>()
+/** ISO week-year keeps weeks together when their dates cross a calendar-year boundary. */
+function weekKey(date: Temporal.PlainDate): string {
+  return `${date.yearOfWeek}-${date.weekOfYear}`
+}
+
+function monthKey(date: Temporal.PlainDate): string {
+  return `${date.year}-${date.month}`
+}
+
+/** Counts periods of the host-local, real start; buffers never change the counted period. */
+function countByLocalPeriods(intervals: readonly InstantInterval[], timeZone: string) {
+  const counts = {
+    day: new Map<string, number>(),
+    week: new Map<string, number>(),
+    month: new Map<string, number>(),
+  }
   for (const { start } of intervals) {
-    const key = start.toZonedDateTimeISO(timeZone).toPlainDate().toString()
-    counts.set(key, (counts.get(key) ?? 0) + 1)
+    const date = start.toZonedDateTimeISO(timeZone).toPlainDate()
+    for (const [period, key] of [
+      ['day', date.toString()],
+      ['week', weekKey(date)],
+      ['month', monthKey(date)],
+    ] as const) {
+      counts[period].set(key, (counts[period].get(key) ?? 0) + 1)
+    }
   }
   return counts
 }
