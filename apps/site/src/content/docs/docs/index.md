@@ -36,6 +36,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
   conflict merge; use the combined API for atomic edits with version checks.
+- Group seats currently have internal storage and service support only. Public booking
+  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
+  this limitation applies equally to self-hosted installations.
 
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per

@@ -1,6 +1,7 @@
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 
 /** Resolve only browser-visible bookings; this read never changes the session's space. */
@@ -25,7 +26,7 @@ export async function resolveBookingOrganization(
       eb
         .exists(
           eb
-            .selectFrom('booking_hosts as host')
+            .selectFrom(resolvedBookingHosts(db).as('host'))
             .select('host.user_id')
             .whereRef('host.booking_id', '=', 'booking.id')
             .whereRef('host.user_id', '=', 'user.id'),
