@@ -82,6 +82,11 @@ matches Stripe's minimum Checkout Session expiration window (30 minutes to 24 ho
 UTC instants, so DST does not lengthen or shorten it. See the
 [`expires_at` parameter](https://docs.stripe.com/api/checkout/sessions/create#create_checkout_session-expires_at).
 
+Paid admission requires the full hold window before the scheduled start, even when an
+event permits shorter notice for free bookings. The stored deadline cannot exceed the
+meeting start, so payment confirmation cannot create a meeting that has already begun.
+Future paid availability must apply this same minimum lead time before offering a slot.
+
 The database deadline begins when the reservation is admitted, not when the browser opens
 Checkout. Creating the Stripe Session later means its minimum expiration may extend slightly
 past that deadline. Therefore the database remains authoritative: do not extend the hold

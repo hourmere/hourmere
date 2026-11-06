@@ -16,7 +16,8 @@ It is a rollout safeguard available to every self-hosted instance, with no subsc
 or license requirement. Disabling creation does not discard existing reservations:
 local expiry continues to release them safely.
 
-An unpaid reservation holds capacity for 30 elapsed minutes. It can become confirmed only
+An unpaid reservation holds capacity for 30 elapsed minutes and requires at least that
+much time before the meeting starts. It can become confirmed only
 before its database deadline; expiry or cancellation releases it. The deadline is unaffected
 by daylight-saving changes. The design chooses a full refund for any payment observed after
 expiry or cancellation, even if the slot is still free. Actual payment processing and refunds

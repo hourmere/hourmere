@@ -7,7 +7,7 @@ ALTER TABLE bookings ADD COLUMN payment_hold_expires_at timestamptz,
   ADD COLUMN payment_refund_required boolean NOT NULL DEFAULT false;
 ALTER TABLE bookings ADD CONSTRAINT bookings_payment_hold_shape CHECK (
   (status NOT IN ('pending_payment','expired') OR payment_hold_expires_at IS NOT NULL)
-  AND (payment_hold_expires_at IS NULL OR (isfinite(payment_hold_expires_at) AND group_slot_id IS NULL AND source <> 'import'))
+  AND (payment_hold_expires_at IS NULL OR (isfinite(payment_hold_expires_at) AND payment_hold_expires_at <= start_at AND group_slot_id IS NULL AND source <> 'import'))
   AND (payment_reference IS NULL OR payment_hold_expires_at IS NOT NULL)
   AND (status <> 'confirmed' OR payment_hold_expires_at IS NULL OR payment_reference IS NOT NULL)
   AND (NOT payment_refund_required OR (payment_reference IS NOT NULL AND status IN ('expired','cancelled'))));

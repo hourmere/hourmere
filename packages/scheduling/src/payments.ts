@@ -101,6 +101,10 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
     const end = input.start.add({ minutes: duration })
     const { rows } = await sql<{ now: Date }>`SELECT clock_timestamp() AS now`.execute(trx)
     const now = Temporal.Instant.from((rows[0] as { now: Date }).now.toISOString())
+    const hasFullPaymentWindow =
+      Temporal.Instant.compare(input.start, now.add({ minutes: PAYMENT_HOLD_MINUTES })) >= 0
+    if (!hasFullPaymentWindow)
+      throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
     await requireOfferedSlot(trx, {
       eventTypeId: current.id,
       hostUserId: current.hostUserId,

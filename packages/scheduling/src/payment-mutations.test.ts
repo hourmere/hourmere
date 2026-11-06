@@ -10,7 +10,7 @@ import { canonicalJson, insertBooking, lockHosts, requireOfferedSlot } from './b
 import { admitGroupSlot } from './group-seat-admission.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { confirmPaymentHold, createPaymentHold } from './payments.ts'
-import { createFixtures } from './testing.ts'
+import { createFixtures, weekdays } from './testing.ts'
 
 async function copy(
   file: string,
@@ -296,6 +296,55 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     )
     await expect(
       lockedReplay(mutant.createPaymentHold as typeof createPaymentHold),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function fullHoldWindow(api = createPaymentHold) {
+    const f = createFixtures(db)
+    const host = await f.host({ timeZone: 'UTC' })
+    const hours = [{ start: '00:00', end: '24:00' }]
+    await f.schedule(host.userId, {
+      timeZone: 'UTC',
+      weeklyHours: { ...weekdays(...hours), saturday: hours, sunday: hours },
+    })
+    const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+      slug: 'soon',
+      durationMinutes: 1,
+      slotStepMinutes: 1,
+      minimumNoticeMinutes: 0,
+    })
+    const now = Temporal.Now.instant()
+    const start = now.round({ smallestUnit: 'minute', roundingMode: 'ceil' }).add({ minutes: 5 })
+    const ctx = { db, now: () => now, paidBookingsEnabled: true }
+    // Prove that ordinary availability would admit this slot; only the payment window rejects it.
+    expect(
+      await findSlots(db, {
+        eventTypeId,
+        hostUserId: host.userId,
+        rangeStart: start,
+        rangeEnd: start.add({ minutes: 1 }),
+        now,
+      }),
+    ).toHaveLength(1)
+    await expect(
+      api(ctx, {
+        handle: host.handle,
+        slug: 'soon',
+        start,
+        idempotencyKey: 'full-window',
+        invitee: { name: 'Synthetic', email: 'soon@example.com', timeZone: 'UTC' },
+      }),
+    ).rejects.toMatchObject({ code: 'slot_unavailable' })
+  }
+  it('requires the complete payment hold window before the meeting starts', async () => {
+    await fullHoldWindow()
+    const mutant = await copy(
+      './payments.ts',
+      'createPaymentHold',
+      'if (!hasFullPaymentWindow)',
+      'if (false)',
+    )
+    await expect(
+      fullHoldWindow(mutant.createPaymentHold as typeof createPaymentHold),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects disabled flag removal in an isolated source copy', async () => {

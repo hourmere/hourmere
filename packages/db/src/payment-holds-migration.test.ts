@@ -158,6 +158,30 @@ interface Guard {
 
 const guards: Guard[] = [
   {
+    name: 'hold deadline cannot exceed meeting start',
+    mutate: (source) => source.replace('payment_hold_expires_at <= start_at AND ', ''),
+    check: async ({ pool, booking }) => {
+      await expect(
+        pool.query(
+          `INSERT INTO bookings
+        (organization_id,event_type_id,start_at,end_at,title,source,status,payment_hold_expires_at)
+        SELECT organization_id,event_type_id,start_at,end_at,title,source,'pending_payment',start_at+interval '1 microsecond'
+        FROM bookings WHERE id=$1`,
+          [booking],
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'bookings_payment_hold_shape' })
+      await expect(
+        pool.query(
+          `INSERT INTO bookings
+        (organization_id,event_type_id,start_at,end_at,title,source,status,payment_hold_expires_at)
+        SELECT organization_id,event_type_id,start_at,end_at,title,source,'pending_payment',start_at
+        FROM bookings WHERE id=$1`,
+          [booking],
+        ),
+      ).resolves.toMatchObject({ rowCount: 1 })
+    },
+  },
+  {
     name: 'paid confirmed insert requires payment reference',
     mutate: (source) =>
       source.replace(
