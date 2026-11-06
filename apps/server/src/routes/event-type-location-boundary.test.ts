@@ -485,10 +485,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     verifyBoundary())
   it('detects removal of the REST location projection', async () => {
     await verifyBoundary(await sourceCopy())
-    const mutant = await sourceCopy([
-      'const eventTypeResponse = ({ locations: _locations, ...eventType }: ServiceEventType) => eventType',
-      'const eventTypeResponse = (eventType: ServiceEventType) => eventType',
-    ])
+    const mutant = await sourceCopy(['  locations: _locations,\n', ''])
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())
   })

@@ -54,6 +54,146 @@ describe.skipIf(!serverUrl)('event type service', () => {
       .where('event_type_id', '=', eventTypeId)
       .execute()
 
+  describe('booking limits', () => {
+    it('persists all limits on create, read and list, preserves omitted fields and clears nulls', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const limits = { maxBookingsPerDay: 2, maxBookingsPerWeek: 5, maxBookingsPerMonth: 10 }
+      const created = await createEventType(ctx, input(limits))
+      expect(created).toMatchObject(limits)
+      expect(await getEventType(ctx, created.id)).toMatchObject(limits)
+      expect(await listEventTypes(ctx)).toEqual([created])
+      expect(await updateEventType(ctx, created.id, { title: 'Renamed' })).toMatchObject(limits)
+      expect(await updateEventType(ctx, created.id, { maxBookingsPerWeek: 6 })).toMatchObject({
+        ...limits,
+        maxBookingsPerWeek: 6,
+      })
+      const cleared = await updateEventType(ctx, created.id, {
+        maxBookingsPerDay: null,
+        maxBookingsPerWeek: null,
+        maxBookingsPerMonth: null,
+      })
+      expect(cleared).toMatchObject({
+        maxBookingsPerDay: null,
+        maxBookingsPerWeek: null,
+        maxBookingsPerMonth: null,
+      })
+      expect(
+        await db
+          .selectFrom('event_types')
+          .select(['max_bookings_per_day', 'max_bookings_per_week', 'max_bookings_per_month'])
+          .where('id', '=', created.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        max_bookings_per_day: null,
+        max_bookings_per_week: null,
+        max_bookings_per_month: null,
+      })
+    })
+
+    it.each([
+      { maxBookingsPerDay: 3, maxBookingsPerWeek: 2 },
+      { maxBookingsPerWeek: 3, maxBookingsPerMonth: 2 },
+      { maxBookingsPerDay: 3, maxBookingsPerMonth: 2 },
+    ])('rejects descending limits on create and partial update: %j', async (limits) => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      await expect(createEventType(ctx, input(limits))).rejects.toMatchObject({
+        code: 'invalid_event_type',
+      })
+      expect(await listEventTypes(ctx)).toEqual([])
+      const created = await createEventType(
+        ctx,
+        input({
+          maxBookingsPerDay: 2,
+          maxBookingsPerWeek: 2,
+          maxBookingsPerMonth: 3,
+        }),
+      )
+      await expect(updateEventType(ctx, created.id, limits)).rejects.toMatchObject({
+        code: 'invalid_event_type',
+      })
+      expect(await getEventType(ctx, created.id)).toEqual(created)
+    })
+
+    it('validates the merged saved limits and permits changing them together', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const created = await createEventType(
+        ctx,
+        input({ maxBookingsPerWeek: 2, maxBookingsPerMonth: 3 }),
+      )
+      await expect(
+        updateEventType(ctx, created.id, { maxBookingsPerDay: 3 }),
+      ).rejects.toMatchObject({ code: 'invalid_event_type' })
+      await expect(
+        updateEventType(ctx, created.id, { maxBookingsPerWeek: 4 }),
+      ).rejects.toMatchObject({ code: 'invalid_event_type' })
+      await expect(
+        updateEventType(ctx, created.id, {
+          maxBookingsPerDay: 4,
+          maxBookingsPerWeek: 4,
+          maxBookingsPerMonth: 4,
+        }),
+      ).resolves.toMatchObject({
+        maxBookingsPerDay: 4,
+        maxBookingsPerWeek: 4,
+        maxBookingsPerMonth: 4,
+      })
+    })
+
+    it('keeps day/month ordering when the weekly limit is cleared', async () => {
+      const user = await createTestUser(db)
+      const ctx = personal(user)
+      const created = await createEventType(
+        ctx,
+        input({ maxBookingsPerDay: 2, maxBookingsPerWeek: 3, maxBookingsPerMonth: 4 }),
+      )
+      await expect(
+        updateEventType(ctx, created.id, { maxBookingsPerWeek: null, maxBookingsPerMonth: 1 }),
+      ).rejects.toMatchObject({ code: 'invalid_event_type' })
+      expect(await getEventType(ctx, created.id)).toEqual(created)
+      const cleared = await updateEventType(ctx, created.id, { maxBookingsPerWeek: null })
+      expect(cleared).toMatchObject({
+        maxBookingsPerDay: 2,
+        maxBookingsPerWeek: null,
+        maxBookingsPerMonth: 4,
+      })
+      for (const changes of [{ maxBookingsPerDay: 5 }, { maxBookingsPerMonth: 1 }]) {
+        await expect(updateEventType(ctx, created.id, changes)).rejects.toMatchObject({
+          code: 'invalid_event_type',
+        })
+        expect(await getEventType(ctx, created.id)).toEqual(cleared)
+      }
+      await expect(
+        updateEventType(ctx, created.id, { maxBookingsPerDay: null, maxBookingsPerMonth: 1 }),
+      ).resolves.toMatchObject({
+        maxBookingsPerDay: null,
+        maxBookingsPerWeek: null,
+        maxBookingsPerMonth: 1,
+      })
+    })
+
+    it.each(['maxBookingsPerWeek', 'maxBookingsPerMonth'] as const)(
+      'rejects invalid %s types before storage',
+      async (field) => {
+        const user = await createTestUser(db)
+        const ctx = personal(user)
+        const created = await createEventType(ctx, input())
+        for (const value of ['2', true, Number.NaN, Number.POSITIVE_INFINITY]) {
+          const bad = { [field]: value } as unknown as EventTypeInput
+          await expect(createEventType(ctx, input(bad))).rejects.toMatchObject({
+            code: 'invalid_event_type',
+          })
+          await expect(updateEventType(ctx, created.id, bad)).rejects.toMatchObject({
+            code: 'invalid_event_type',
+          })
+        }
+        expect(await getEventType(ctx, created.id)).toEqual(created)
+      },
+    )
+  })
+
   describe('duration options', () => {
     it('stores supplied lengths in ascending order without mutating caller input', async () => {
       const user = await createTestUser(db)
@@ -186,6 +326,8 @@ describe.skipIf(!serverUrl)('event type service', () => {
         minimumNoticeMinutes: 0,
         bookingWindowDays: null,
         maxBookingsPerDay: null,
+        maxBookingsPerWeek: null,
+        maxBookingsPerMonth: null,
         schedulingType: 'individual',
         roundRobinActive: false,
         conferenceOrganizer: null,
@@ -705,6 +847,8 @@ describe.skipIf(!serverUrl)('event type service', () => {
             minimumNoticeMinutes: stored.minimumNoticeMinutes,
             bookingWindowDays: stored.bookingWindowDays ?? undefined,
             maxBookingsPerDay: stored.maxBookingsPerDay ?? undefined,
+            maxBookingsPerWeek: stored.maxBookingsPerWeek ?? undefined,
+            maxBookingsPerMonth: stored.maxBookingsPerMonth ?? undefined,
           },
           rangeStart: now,
           rangeEnd: now.add({ hours: 24 * 30 }),

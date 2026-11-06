@@ -675,7 +675,7 @@ function requireCollectedPhone(location: Location | null): void {
 /**
  * Serializes booking writes per host for the rest of the transaction. The exclusion
  * constraint alone stops overlapping meetings, but not two concurrent bookings that only
- * collide through buffers or the daily limit; with the lock, the second one recomputes
+ * collide through buffers or day/week/month limits; with the lock, the second recomputes
  * availability after the first has committed. Sorted, so multi-host bookings cannot deadlock.
  */
 async function lockHosts(db: Db, userIds: readonly string[]): Promise<void> {
