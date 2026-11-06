@@ -97,7 +97,7 @@ export function BookingExport({
     }
   }
   return (
-    <details className="panel">
+    <details className="panel booking-export">
       <summary>{t('Export bookings as CSV')}</summary>
       <div className="stack">
         <p className="hint">

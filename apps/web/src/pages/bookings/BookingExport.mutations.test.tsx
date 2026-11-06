@@ -5,6 +5,7 @@ import * as react from 'react'
 import { expect, it, vi } from 'vitest'
 import { Field } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
+import styles from '../../styles.css?raw'
 import { ME } from '../../test/fake-api.tsx'
 import type { BookingExport } from './BookingExport.tsx'
 
@@ -67,3 +68,29 @@ it.each([
     await verify(component(), failure)
   },
 )
+
+it('keeps the actual checkbox at least 24px and detects removal of its size rule', () => {
+  function verifySize(css: string) {
+    cleanup()
+    const Component = component()
+    const style = document.createElement('style')
+    style.textContent = css
+    document.head.append(style)
+    try {
+      render(<Component filters={{}} timeZone="UTC" expectedOrganizationId={ME.organization.id} />)
+      const control = screen.getByLabelText('Include UTF-8 BOM for Excel')
+      const computed = getComputedStyle(control)
+      expect(Number.parseFloat(computed.minWidth)).toBeGreaterThanOrEqual(24)
+      expect(Number.parseFloat(computed.minHeight)).toBeGreaterThanOrEqual(24)
+    } finally {
+      style.remove()
+    }
+  }
+  const rule = /\.booking-export input\[type="checkbox"\] \{[^}]+\}/
+  expect(styles.match(rule)).not.toBeNull()
+  verifySize(styles)
+  expect(() => verifySize(styles.replace(rule, ''))).toThrowError(
+    expect.objectContaining({ name: 'AssertionError' }),
+  )
+  verifySize(styles)
+})
