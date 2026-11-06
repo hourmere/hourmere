@@ -1121,6 +1121,18 @@ export const admin = {
   Created: 'Created',
   'Created “{0}”.': 'Created “{0}”.',
   'Creating…': 'Creating…',
+  'Weekly limit': 'Weekly limit',
+  'Monthly limit': 'Monthly limit',
+  'Bookings per week, {0}–{1}. Empty: no limit.': 'Bookings per week, {0}–{1}. Empty: no limit.',
+  'Bookings per month, {0}–{1}. Empty: no limit.': 'Bookings per month, {0}–{1}. Empty: no limit.',
+  'Weekly limit must be at least the daily limit.':
+    'Weekly limit must be at least the daily limit.',
+  'Monthly limit must be at least the weekly limit.':
+    'Monthly limit must be at least the weekly limit.',
+  'Monthly limit must be at least the daily limit.':
+    'Monthly limit must be at least the daily limit.',
+  'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.':
+    'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
   'Daily limit': 'Daily limit',
   Date: 'Date',
   'Date overrides': 'Date overrides',

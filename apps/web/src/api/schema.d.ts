@@ -4513,6 +4513,10 @@ export interface components {
             } | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek: number | null;
             /** @description How far ahead a meeting must be booked */
             minimumNoticeMinutes: number;
             notifications: components["schemas"]["EventTypeNotifications"];
@@ -4633,6 +4637,10 @@ export interface components {
             } | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth?: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek?: number | null;
             /**
              * @description How far ahead a meeting must be booked
              * @default 0
@@ -4805,6 +4813,10 @@ export interface components {
             } | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth?: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek?: number | null;
             /** @description How far ahead a meeting must be booked */
             minimumNoticeMinutes?: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
