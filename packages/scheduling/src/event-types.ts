@@ -94,6 +94,7 @@ export interface EventType {
   successRedirect: SuccessRedirect | null
   questions: Question[]
   notifications: NotificationSettings
+  waitlist: WaitlistSettings
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
   isHidden: boolean
@@ -127,6 +128,7 @@ export interface EventTypeInput {
   successRedirect?: SuccessRedirectInput | null | undefined
   questions?: QuestionInput[] | undefined
   notifications?: NotificationSettings | undefined
+  waitlist?: WaitlistSettings | undefined
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
   allowGuests?: boolean | undefined
@@ -290,7 +292,7 @@ async function waitlistManager(db: Db, ctx: ServiceContext, row: { owner_user_id
   } else if (!current.canManageTeam) throw insufficientRole()
 }
 
-/** Internal only: the same role boundary protects settings and contact-free summaries. */
+/** Only personal owners and team owners/admins can manage waitlist settings. */
 export async function getEventTypeWaitlist(
   ctx: ServiceContext,
   id: string,
@@ -315,38 +317,158 @@ export async function setEventTypeWaitlist(
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await waitlistManager(trx, ctx, row)
-    if (settings.enabled) {
-      const hosts = await trx
-        .selectFrom('event_type_hosts')
-        .select('user_id')
-        .where('event_type_id', '=', row.id)
-        .execute()
-      if (
-        row.scheduling_type !== 'individual' ||
-        hosts.length !== 1 ||
-        (row.owner_user_id !== null && hosts[0]?.user_id !== row.owner_user_id)
-      ) {
-        throw new DomainError('invalid', 'waitlist_unsupported')
-      }
-      try {
-        await assertHosts(
-          trx,
-          row.organization_id,
-          hosts.map((host) => host.user_id),
-          true,
-        )
-      } catch (error) {
-        if (error instanceof DomainError) throw new DomainError('invalid', 'waitlist_unsupported')
-        throw error
-      }
-    }
-    if (row.waitlist_enabled !== settings.enabled)
-      await trx
-        .updateTable('event_types')
-        .set({ waitlist_enabled: settings.enabled })
-        .where('id', '=', row.id)
-        .execute()
+    await writeWaitlistSettings(trx, row, settings)
     return settings
+  })
+}
+
+/** Used after host writes so one save validates and commits its complete configuration. */
+async function writeWaitlistSettings(
+  db: Db,
+  row: Pick<
+    EventTypeRow,
+    'id' | 'scheduling_type' | 'organization_id' | 'owner_user_id' | 'waitlist_enabled'
+  >,
+  settings: WaitlistSettings,
+) {
+  if (settings.enabled) {
+    const hosts = await db
+      .selectFrom('event_type_hosts')
+      .select('user_id')
+      .where('event_type_id', '=', row.id)
+      .execute()
+    if (
+      row.scheduling_type !== 'individual' ||
+      hosts.length !== 1 ||
+      (row.owner_user_id !== null && hosts[0]?.user_id !== row.owner_user_id)
+    )
+      throw new DomainError('invalid', 'waitlist_unsupported')
+    try {
+      await assertHosts(
+        db,
+        row.organization_id,
+        hosts.map((host) => host.user_id),
+        true,
+      )
+    } catch (error) {
+      if (error instanceof DomainError) throw new DomainError('invalid', 'waitlist_unsupported')
+      throw error
+    }
+  }
+  if (row.waitlist_enabled !== settings.enabled)
+    await db
+      .updateTable('event_types')
+      .set({ waitlist_enabled: settings.enabled })
+      .where('id', '=', row.id)
+      .execute()
+}
+
+export type WaitlistEntryState =
+  | 'pending_verification'
+  | 'active'
+  | 'notified'
+  | 'booked'
+  | 'removed'
+  | 'expired'
+export interface ManagedWaitlistEntry {
+  id: string
+  state: WaitlistEntryState
+  email: string | null
+  name: string | null
+  preferredWindow: { start: string; end: string; timeZone: string } | null
+  createdAt: string
+  lastNotifiedAt: string | null
+}
+
+/** Contacts are restricted separately from the team-readable event configuration. */
+export async function listEventTypeWaitlistEntries(
+  ctx: ServiceContext,
+  id: string,
+  input: CatalogPageInput = {},
+): Promise<CatalogPage<ManagedWaitlistEntry>> {
+  const { limit, after } = checkedCatalogPage(input)
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id)
+    await waitlistManager(trx, ctx, row)
+    let query = trx
+      .selectFrom('waitlist_entries as e')
+      .select([
+        'e.id',
+        'e.email',
+        'e.name',
+        'e.window_start',
+        'e.window_end',
+        'e.time_zone',
+        'e.created_at',
+        sql<WaitlistEntryState>`CASE WHEN e.status IN ('pending_verification','active','notified')
+        AND (e.expires_at <= clock_timestamp() OR (e.status='pending_verification' AND e.pending_expires_at <= clock_timestamp()))
+        THEN 'expired' ELSE e.status END`.as('state'),
+        sql<Date | null>`(SELECT max(c.accepted_at) FROM waitlist_candidates c WHERE c.entry_id=e.id)`.as(
+          'last_notified_at',
+        ),
+      ])
+      .where('e.event_type_id', '=', row.id)
+      .where('e.organization_id', '=', row.organization_id)
+    if (after !== undefined) query = query.where('e.id', '>', after)
+    const entries = await query
+      .orderBy('e.id')
+      .limit(limit + 1)
+      .execute()
+    return catalogPage(
+      entries.map((entry) => ({
+        id: entry.id,
+        state: entry.state,
+        email: entry.email,
+        name: entry.name,
+        preferredWindow:
+          entry.window_start && entry.window_end && entry.time_zone
+            ? {
+                start: timestamp(entry.window_start),
+                end: timestamp(entry.window_end),
+                timeZone: entry.time_zone,
+              }
+            : null,
+        createdAt: timestamp(entry.created_at),
+        lastNotifiedAt: entry.last_notified_at ? timestamp(entry.last_notified_at) : null,
+      })),
+      limit,
+    )
+  })
+}
+
+/** Removal sends no email; the database erases contacts and revokes all pending work. */
+export async function removeEventTypeWaitlistEntry(
+  ctx: ServiceContext,
+  id: string,
+  entryId: string,
+) {
+  if (!isUuid(entryId)) throw new DomainError('not_found', 'waitlist_entry_not_found')
+  return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id, { lock: true })
+    await waitlistManager(trx, ctx, row)
+    const entry = await trx
+      .selectFrom('waitlist_entries')
+      .select(['id', 'status'])
+      .where('id', '=', entryId)
+      .where('event_type_id', '=', row.id)
+      .where('organization_id', '=', row.organization_id)
+      .forUpdate()
+      .executeTakeFirst()
+    if (!entry) throw new DomainError('not_found', 'waitlist_entry_not_found')
+    if (['pending_verification', 'active', 'notified'].includes(entry.status))
+      await trx
+        .updateTable('waitlist_entries')
+        .set({
+          status: 'removed',
+          terminal_reason: 'host_removed',
+          terminal_at: sql<Date>`clock_timestamp()`,
+        })
+        .where('id', '=', entry.id)
+        .execute()
+    return { removed: true as const }
   })
 }
 
@@ -457,6 +579,8 @@ export async function createEventType(
   const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
   const notifications =
     input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
+  const waitlist =
+    input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
@@ -512,6 +636,7 @@ export async function createEventType(
           })),
         )
         .execute()
+      if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)
       return toEventType(await loadEventType(trx, id))
     }),
   )
@@ -526,6 +651,8 @@ export async function updateEventType(
   const changes = defined(input)
   const notifications =
     input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
+  const waitlist =
+    input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
@@ -678,6 +805,7 @@ export async function updateEventType(
           .where('event_type_id', '=', row.id)
           .execute()
       }
+      if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)
       return toEventType(await loadEventType(trx, row.id))
     }),
   )
@@ -1087,6 +1215,7 @@ function toEventType(row: EventTypeRow): EventType {
     ownerUserId: row.owner_user_id,
     ...fieldsOf(row),
     notifications: parseNotifications(row.notifications),
+    waitlist: { enabled: row.waitlist_enabled },
     schedulingType: row.scheduling_type as SchedulingType,
     roundRobinActive: row.scheduling_type === 'round_robin' && row.round_robin_active,
     hosts: row.hosts,

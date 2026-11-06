@@ -110,6 +110,7 @@ function runner(change?: Change) {
       z,
       ...auth,
       DomainError: scheduling.DomainError,
+      WaitlistRateLimitError: scheduling.WaitlistRateLimitError,
       hasUnsafeJsonText,
       inspect,
       redactOneTimeLogDetails,

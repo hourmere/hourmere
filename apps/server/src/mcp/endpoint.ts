@@ -91,12 +91,12 @@ function logLine(level: 'ERROR' | 'WARN', what: string, detail: unknown): void {
  * handler (it never reads credentials itself), so the key's secret is not passed on: the
  * SDK only needs `token` for OAuth helpers that are not used here.
  */
-function toAuthInfo(caller: McpCaller): AuthInfo {
+function toAuthInfo(caller: McpCaller, trustedIp: string | undefined): AuthInfo {
   return {
     token: '',
     clientId: caller.kind === 'api_key' ? caller.apiKeyId : caller.clientId,
     scopes: caller.kind === 'oauth' ? [...caller.scopes] : [],
-    extra: { caller },
+    extra: { caller, trustedIp },
   }
 }
 
@@ -256,8 +256,12 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
         capabilities: { tools: { listChanged: false } },
         instructions: instructionsFor(caller),
       })
-      registerTools(server, prepared, caller, (what, detail) =>
-        logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
+      registerTools(
+        server,
+        prepared,
+        caller,
+        (what, detail) => logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
+        typeof authInfo?.extra?.trustedIp === 'string' ? authInfo.extra.trustedIp : undefined,
       )
       return server
     },
@@ -312,7 +316,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
           }
         }),
         requireApiKey(resolveCaller, oauth, publicUrl),
-        (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller) }),
+        (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller, c.var.clientIp) }),
       )
     }
 

@@ -332,6 +332,13 @@ operation table and the required stop-before-upgrade procedure.
 For terminal scripts, the dependency-free [CLI](https://hourmere.com/docs/cli) supports configuration discovery,
 slots, booking, host history, rescheduling and cancellation with the same API key.
 
+Personal and single-host team event types can enable a booking waitlist in the event editor.
+Invitees join for an unavailable date or period and confirm their email before receiving
+availability notifications. Eligible invitees are notified together, subject to mail limits;
+nothing is reserved and the first successful ordinary booking wins. Waitlists use the default
+meeting length. Hosts can view and remove their event's entries; team contacts are restricted
+to owners/admins. REST, MCP and CLI provide the same settings, list and removal operations.
+
 Configure event-type reminders and follow-ups through REST, MCP
 `set_event_type_notifications` or CLI `set-event-notifications` with `full` scope.
 Follow-up rules may carry bounded plain-text host notes. These are sent from the instance's

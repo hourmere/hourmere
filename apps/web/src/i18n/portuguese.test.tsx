@@ -163,7 +163,10 @@ describe('Brazilian Portuguese public booking language', () => {
     ).toBeDefined()
   })
 
-  it.each([1, 2])('keeps the retry delay grammatical for %i seconds', async (seconds) => {
+  it.each([
+    [1, 'segundo'],
+    [2, 'segundos'],
+  ] as const)('keeps the retry delay grammatical for %i seconds', async (seconds, unit) => {
     chooseLanguage('pt-BR')
     fakeApi({
       'GET /api/v1/public/ada/intro': () =>
@@ -174,7 +177,9 @@ describe('Brazilian Portuguese public booking language', () => {
     })
     renderApp('/ada/intro')
     expect(
-      await screen.findByText(`Muitas solicitações da sua rede. Tente novamente em ${seconds} s.`),
+      await screen.findByText(
+        `Muitas solicitações da sua rede. Tente novamente em ${seconds} ${unit}.`,
+      ),
     ).toBeDefined()
   })
 

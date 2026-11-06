@@ -31,6 +31,7 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     hosts: [{ userId: ME.user.id }],
     location: null,
     questions: [],
+    waitlist: { enabled: false },
     notifications: {
       reminders: [
         {

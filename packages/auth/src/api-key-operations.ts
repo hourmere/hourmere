@@ -115,6 +115,10 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('DELETE', '/api/v1/event-types/{id}', 'other_write', 'key'),
   rest('PATCH', '/api/v1/event-types/{id}', 'other_write', 'key'),
   rest('PUT', '/api/v1/event-types/{id}/notifications', 'other_write', 'key'),
+  rest('GET', '/api/v1/event-types/{id}/waitlist', 'other_read', 'key'),
+  rest('PUT', '/api/v1/event-types/{id}/waitlist', 'other_write', 'key'),
+  rest('GET', '/api/v1/event-types/{id}/waitlist/entries', 'other_read', 'key'),
+  rest('DELETE', '/api/v1/event-types/{id}/waitlist/entries/{entryId}', 'other_write', 'key'),
   rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links', 'other_read', 'key'),
   rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_write', 'key'),
   rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'other_read', 'key'),
@@ -138,6 +142,15 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/public/teams/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/teams/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/public/teams/{handle}/{slug}/slots', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/public/{handle}/{slug}/waitlist', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/{handle}/{slug}/waitlist/resend', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/teams/{handle}/{slug}/waitlist', 'booking_write', 'optional_key'),
+  rest(
+    'POST',
+    '/api/v1/public/teams/{handle}/{slug}/waitlist/resend',
+    'booking_write',
+    'optional_key',
+  ),
   rest('GET', '/api/v1/readiness/self', 'session_only', 'session_only'),
   rest('GET', '/api/v1/schedules', 'other_read', 'key'),
   rest('POST', '/api/v1/schedules', 'other_write', 'key'),
@@ -273,6 +286,22 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   ]),
   mcp('list_calendar_connections', 'other_read', ['GET /api/v1/calendar-connections']),
   mcp('list_conference_connections', 'other_read', ['GET /api/v1/conference-connections']),
+  mcp('get_event_type_waitlist', 'other_read', ['GET /api/v1/event-types/{id}/waitlist']),
+  mcp('set_event_type_waitlist', 'other_write', ['PUT /api/v1/event-types/{id}/waitlist']),
+  mcp('list_waitlist_entries', 'other_read', ['GET /api/v1/event-types/{id}/waitlist/entries']),
+  mcp('remove_waitlist_entry', 'other_write', [
+    'DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}',
+  ]),
+  ...['join_waitlist', 'resend_waitlist_verification'].flatMap((tool) => {
+    const suffix = tool === 'join_waitlist' ? '' : '/resend'
+    const personal = `POST /api/v1/public/{handle}/{slug}/waitlist${suffix}`
+    const team = `POST /api/v1/public/teams/{handle}/{slug}/waitlist${suffix}`
+    return [
+      mcp(tool, 'booking_write', [personal, team]),
+      mcp(tool, 'booking_write', [personal], 'personal'),
+      mcp(tool, 'booking_write', [team], 'team'),
+    ]
+  }),
 ])
 
 function cli(command: string, tool: string): ApiKeyCliOperation {
@@ -306,6 +335,12 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('cancel', 'cancel_booking'),
   cli('retry-meeting', 'retry_conference'),
   cli('retry-calendar-copy', 'retry_calendar_copy'),
+  cli('event-waitlist', 'get_event_type_waitlist'),
+  cli('set-event-waitlist', 'set_event_type_waitlist'),
+  cli('waitlist-entries', 'list_waitlist_entries'),
+  cli('remove-waitlist-entry', 'remove_waitlist_entry'),
+  cli('join-waitlist', 'join_waitlist'),
+  cli('resend-waitlist-verification', 'resend_waitlist_verification'),
   cli('one-time-links create', 'create_one_time_link'),
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),

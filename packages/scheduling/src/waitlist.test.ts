@@ -347,7 +347,7 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
       preferredWindow: { ...base.preferredWindow, end: '2026-12-01T00:00:00Z' },
     })
     expect(await entry()).toEqual(before)
-    expect(await countRequests()).toBe(1)
+    expect(await countRequests()).toBe(2)
     expect(await db.selectFrom('waitlist_verification_outbox').select('id').execute()).toHaveLength(
       1,
     )
@@ -397,12 +397,12 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
       before = await entry()
     clock = NOW.add({ minutes: 14, seconds: 59 })
     await resendWaitlistVerification(ctx, base)
-    expect(await countRequests()).toBe(1)
+    expect(await countRequests()).toBe(2)
     clock = NOW.add({ minutes: 15 })
     await resendWaitlistVerification(ctx, base)
     const second = await verification()
     expect(second === first).toBe(false)
-    expect(await countRequests()).toBe(2)
+    expect(await countRequests()).toBe(3)
     expect((await entry()).verification_generation).toBe(2)
     expect((await entry()).expires_at).toEqual(before.expires_at)
     await expect(verifyWaitlist(ctx, { token: first })).rejects.toMatchObject({
@@ -410,7 +410,7 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
     })
     await expect(verifyWaitlist(ctx, { token: second })).resolves.toEqual({ verified: true })
     await resendWaitlistVerification(ctx, base)
-    expect(await countRequests()).toBe(2)
+    expect(await countRequests()).toBe(4)
   })
 
   it('generation fencing rejects an old token even if its revocation was lost', async () => {
@@ -443,7 +443,7 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
       joinWaitlist({ ...ctx, trustedIp: '192.0.2.2' }, input(b)),
       joinWaitlist({ ...ctx, trustedIp: '192.0.2.3' }, input(c)),
     ])
-    expect(await countRequests()).toBe(2)
+    expect(await countRequests()).toBe(3)
     expect(await db.selectFrom('waitlist_entries').select('id').execute()).toHaveLength(2)
   })
 
@@ -462,10 +462,10 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
     expect(await joinWaitlist({ ...ctx, trustedIp: '192.0.2.9' }, input(b))).toEqual({
       accepted: true,
     })
-    expect(await countRequests()).toBe(5)
+    expect(await countRequests()).toBe(6)
     clock = NOW.add({ hours: 22 })
     await joinWaitlist({ ...ctx, trustedIp: '192.0.2.9' }, input(b))
-    expect(await countRequests()).toBe(6)
+    expect(await countRequests()).toBe(7)
   })
 
   it('IP hourly cap is shared across event/email and IPv6 /64 aliases; final allowance is atomic', async () => {
@@ -517,7 +517,10 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
       joinWaitlist({ ...ctx, trustedIp: '192.0.2.3' }, input(et, 'three@example.test')),
     ])
     expect(results).toEqual([{ accepted: true }, { accepted: true }])
-    expect(await countRequests()).toBe(20)
+    expect(await countRequests()).toBe(21)
+    expect(await db.selectFrom('waitlist_verification_outbox').select('id').execute()).toHaveLength(
+      2,
+    )
   })
 
   it('event daily cap is enforced independently of its hourly cap', async () => {
@@ -535,7 +538,10 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
     expect(
       await joinWaitlist({ ...ctx, trustedIp: '192.0.2.9' }, input(et, 'next@example.test')),
     ).toEqual({ accepted: true })
-    expect(await countRequests()).toBe(100)
+    expect(await countRequests()).toBe(101)
+    expect(await db.selectFrom('waitlist_verification_outbox').select('id').execute()).toHaveLength(
+      1,
+    )
   })
 
   it('event storage cap is atomic and delayed expiry cannot block replacement', async () => {

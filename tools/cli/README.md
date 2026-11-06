@@ -79,6 +79,28 @@ the winning booking. Its prefilled invitee details are editable and do not prove
 Use the returned `manageToken` for later moves or cancellation; neither reopens the link.
 The CLI accepts this capability only through JSON input and redacts it from output.
 
+Use `event-waitlist` with `{ "id": "<event-type-id>" }` to read waitlist settings and
+`set-event-waitlist` with the same id and `enabled: true` or `false` to change them.
+`waitlist-entries` takes `id`, optional `limit` (1–100) and `after` for pagination;
+`remove-waitlist-entry` takes `id` and `entryId`. Confirm removal before submitting.
+Settings and removal require a full key. Reading settings or entries allows full/read
+keys, and every host operation requires the personal owner or a team owner/admin.
+Entry output may contain personal contact information; keep it private.
+
+`join-waitlist` takes JSON `handle` or `teamSlug`, `slug`, `email`, optional `name` and
+`locale`, `preferredWindow: {start, end, timeZone}`, and explicit `consent: true`.
+Use UTC instants for the window and an IANA time zone. Join only after the invitee agrees
+and no times are available in that range. `resend-waitlist-verification` takes the same
+page reference and `email` after the invitee explicitly requests another email. Both
+require a full/bookings key, return only `{ "accepted": true }` and never retry.
+Check email to confirm; acceptance reveals neither an existing entry nor mail delivery.
+Nothing is reserved, and the first successful ordinary booking wins. All public admission
+limits apply. Optional `waitlistToken` in private booking JSON associates a successful
+ordinary booking without priority; the CLI redacts it from all output.
+MCP join and resend also share a 10-call-per-minute budget per user across all their keys.
+Duplicate and suppressed acceptances, and requests rejected by the service, consume calls.
+Neither tool promises idempotent retries; submit again only after an explicit invitee request.
+
 For an event with several lengths, choose from `allowedDurationsMinutes` using JSON
 `durationMinutes` or `--duration-minutes 60` on `slots`, `book` and `reschedule`. Keep the
 same length when finding and booking a slot. The flag accepts 1–1440 whole minutes;

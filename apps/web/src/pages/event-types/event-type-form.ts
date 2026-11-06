@@ -99,6 +99,7 @@ export interface EventTypeDraft {
   isActive: boolean
   isHidden: boolean
   allowGuests: boolean
+  waitlistEnabled: boolean
   successRedirectUrl: string
   successRedirectParameters: SuccessRedirectParameter[]
   includeInviteePersonalData: boolean
@@ -150,6 +151,7 @@ export function emptyDraft(): EventTypeDraft {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    waitlistEnabled: false,
     successRedirectUrl: '',
     successRedirectParameters: [],
     includeInviteePersonalData: false,
@@ -197,6 +199,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     isActive: e.isActive,
     isHidden: e.isHidden,
     allowGuests: e.allowGuests,
+    waitlistEnabled: e.waitlist?.enabled ?? false,
     successRedirectUrl: e.successRedirect?.url ?? '',
     successRedirectParameters: [...(e.successRedirect?.parameters ?? [])],
     includeInviteePersonalData: e.successRedirect?.includeInviteePersonalData ?? false,
@@ -286,6 +289,13 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (
+    draft.waitlistEnabled &&
+    draft.waitlistEnabled !== baseline?.waitlistEnabled &&
+    (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
+  )
+    errors.waitlist =
+      'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).'
   // Untouched stored notes may predate tighter write rules; omission preserves them.
   if (
     comparableNotifications(draft.notifications) !==
@@ -489,6 +499,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     isActive: draft.isActive,
     isHidden: draft.isHidden,
     allowGuests: draft.allowGuests,
+    ...(draft.waitlistEnabled && { waitlist: { enabled: true } }),
     ...(draft.successRedirectUrl !== '' && { successRedirect: redirectInput(draft) }),
     ...(comparableNotifications(draft.notifications) !==
       comparableNotifications(defaultNotificationsDraft()) && {
@@ -500,6 +511,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // A metadata save must preserve waitlist changes made outside this editor session.
+  if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
+  else body.waitlist = { enabled: draft.waitlistEnabled }
   // Saved targets can stop meeting instance policy. Do not re-submit an untouched target,
   // or overwrite another client's redirect edit with this editor session's older copy.
   if (JSON.stringify(redirectInput(draft)) === JSON.stringify(redirectInput(baseline)))
@@ -566,6 +580,7 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     maxBookingsPerDay: 'Daily limit',
     bookingWindowDays: 'Booking window',
     position: 'Position',
+    waitlist: 'Booking waitlist',
     successRedirect: 'After booking',
     'successRedirect.url': 'Continue to URL',
     'successRedirect.parameters': 'URL parameters',
@@ -637,6 +652,11 @@ export function serverErrors(
     if (message) return field(err.field, message)
   }
   switch (err.code) {
+    case 'waitlist_unsupported':
+      return field(
+        'waitlist',
+        'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).',
+      )
     case 'automatic_zoom_disabled':
       return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
     case 'automatic_zoom_unavailable':

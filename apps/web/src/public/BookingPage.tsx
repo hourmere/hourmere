@@ -80,12 +80,14 @@ import {
   responsesFor,
 } from './validation.ts'
 import { rememberVisitorTimeZone, visitorTimeZone } from './visitor-time-zone.ts'
+import { WaitlistJoin } from './WaitlistJoin.tsx'
 import {
   loadWaitlistSuggestion,
   parseWaitlistLink,
   type WaitlistLink,
   waitlistPreviewActive,
 } from './waitlist-link.ts'
+import { waitlistOfferEnabled } from './waitlist-window.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
@@ -858,6 +860,25 @@ function BookingFlow({
             </section>
           ) : (
             <SlotPicker
+              renderWaitlist={
+                waitlistOfferEnabled(
+                  Boolean(oneTimeToken),
+                  'waitlist' in event ? event.waitlist?.enabled : undefined,
+                  durationMinutes === event.durationMinutes,
+                )
+                  ? (window) => (
+                      <WaitlistJoin
+                        key={`${window.start}/${window.end}/${window.timeZone}`}
+                        handle={handle}
+                        slug={slug}
+                        team={team}
+                        window={window}
+                        locale={locale}
+                        onRefresh={() => void refreshDurations()}
+                      />
+                    )
+                  : undefined
+              }
               load={loadSlots}
               durationMinutes={durationMinutes}
               afterTitle={
@@ -885,6 +906,18 @@ function BookingFlow({
                         </label>
                       ))}
                     </div>
+                    {waitlistOfferEnabled(
+                      Boolean(oneTimeToken),
+                      'waitlist' in event ? event.waitlist?.enabled : undefined,
+                    ) &&
+                      durationMinutes !== event.durationMinutes && (
+                        <p className="hint">
+                          {t(
+                            'To join the waitlist, choose the default meeting length ({duration}).',
+                            { duration: formatDuration(event.durationMinutes, displayLocale) },
+                          )}
+                        </p>
+                      )}
                   </fieldset>
                 ) : undefined
               }
