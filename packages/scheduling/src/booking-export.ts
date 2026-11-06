@@ -2,6 +2,7 @@ import { sql } from 'kysely'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid, validTimeZone } from './internal.ts'
 
 export const MAX_EXPORT_DAYS = 366
@@ -179,7 +180,7 @@ export async function exportBookingsCsv(
               q.where((eb) =>
                 eb.exists(
                   eb
-                    .selectFrom('booking_hosts')
+                    .selectFrom(resolvedBookingHosts(trx).as('export_host'))
                     .select('booking_id')
                     .whereRef('booking_id', '=', 'b.id')
                     .where('user_id', '=', options.hostUserId as string),
@@ -217,7 +218,7 @@ export async function exportBookingsCsv(
             .execute()
           if (stopped) return
           const hosts = await trx
-            .selectFrom('booking_hosts as h')
+            .selectFrom(resolvedBookingHosts(trx).as('h'))
             .innerJoin('auth.user as u', 'u.id', 'h.user_id')
             .select(['h.booking_id', 'u.id', 'u.name', 'u.email'])
             .where('h.booking_id', 'in', ids)

@@ -74,8 +74,8 @@ Headers are stable machine-readable names, independent of the admin interface la
 | `status` | Stored booking status, including cancelled predecessors after a reschedule. |
 | `invitee_name`, `invitee_email` | The booking's primary invitee. |
 | `guests_count` | Number of additional attendees. |
-| `hosts` | JSON containing the saved booking hosts. |
-| `location_option` | JSON describing the chosen location option, without resolved private links. |
+| `hosts` | JSON containing saved booking host IDs and their current names/email addresses. |
+| `location_option` | JSON containing the option's ID, kind and label when present, without resolved private links. |
 | `answers` | JSON keyed by question ID, preserving the saved responses. |
 | `source` | Creation source, including `import` for imported local bookings. |
 | `created_at`, `cancelled_at` | UTC creation/cancellation timestamps; empty cancellation value when absent. |
@@ -132,6 +132,9 @@ npm run --silent cli -- export --input export-request.json
   notifications. Imported bookings retain `source=import` and remain managed in their
   original system. A reschedule leaves its cancelled predecessor and a new booking;
   each appears when it matches the selected range and status.
+- For stored group seats, each booking is a separate row with that seat's invitee and
+  answers. Hosts come from the shared slot, including cancelled-seat history; answers
+  and contacts from other seats are never folded into the row.
 - There is no scheduled export, email delivery, saved report or resumable download.
   A failed or interrupted transfer may leave an incomplete local file; discard it and
   request a new export, using a smaller range if needed.

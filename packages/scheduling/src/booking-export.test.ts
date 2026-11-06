@@ -2,6 +2,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
 import {
   BOOKING_EXPORT_COLUMNS,
   csvCell,
@@ -284,6 +285,104 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       const retry = await exportBookingsCsv(ctx, range)
       await retry.cancel()
     })
+  })
+  it('exports group seats with resolved hosts and isolated per-seat attendee fields', async () => {
+    const f = await groupFixture(owned.pool)
+    const { bookings } = await occupiedSlot(f, 2)
+    const first = bookings[0] as string,
+      second = bookings[1] as string
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: f.organization,
+        userId: f.host,
+        role: 'admin',
+        createdAt: new Date(),
+      })
+      .execute()
+    const host = await db
+      .selectFrom('auth.user')
+      .select(['id', 'name', 'email'])
+      .where('id', '=', f.host)
+      .executeTakeFirstOrThrow()
+    const ctx = testContext(db, {
+      kind: 'api_key',
+      apiKeyId: 'synthetic-key',
+      apiKeyScope: 'read',
+      user: host,
+      organization: { id: f.organization, name: 'Group team', slug: 'group', personal: false },
+    })
+    await db
+      .updateTable('booking_attendees')
+      .set({ name: 'First seat' })
+      .where('booking_id', '=', first)
+      .execute()
+    await db
+      .updateTable('booking_attendees')
+      .set({ name: 'Private sibling' })
+      .where('booking_id', '=', second)
+      .execute()
+    await db
+      .updateTable('bookings')
+      .set({
+        responses: JSON.stringify({ q: 'first-answer' }),
+        status: 'cancelled',
+        cancelled_at: new Date(),
+      })
+      .where('id', '=', first)
+      .execute()
+    await db
+      .updateTable('bookings')
+      .set({ responses: JSON.stringify({ q: 'private-sibling-answer' }) })
+      .where('id', '=', second)
+      .execute()
+    const filters = {
+      from: '2032-01-01T00:00:00Z',
+      to: '2032-01-03T00:00:00Z',
+      eventTypeId: f.event,
+    }
+    const all = await read(await exportBookingsCsv(ctx, filters))
+    expect(
+      all
+        .slice(1)
+        .map((row) => row[0])
+        .sort(),
+    ).toEqual([...bookings].sort())
+    for (const row of all.slice(1)) {
+      expect(JSON.parse(row[12] ?? '')).toEqual([host])
+      expect(row[11]).toBe('0')
+      if (row[0] === first) {
+        expect(row[8]).toBe('cancelled')
+        expect(row[9]).toBe('First seat')
+        expect(row[10]).toContain('@example.test')
+        expect(row.join(',')).not.toContain('Private sibling')
+        expect(row.join(',')).not.toContain('private-sibling-answer')
+        expect(JSON.parse(row[14] ?? '')).toEqual({ q: 'first-answer' })
+      } else {
+        expect(row[8]).toBe('confirmed')
+        expect(row[9]).toBe('Private sibling')
+        expect(row.join(',')).not.toContain('first-answer')
+      }
+    }
+    expect(await read(await exportBookingsCsv(ctx, { ...filters, hostUserId: f.host }))).toEqual(
+      all,
+    )
+    expect(
+      await read(await exportBookingsCsv(ctx, { ...filters, hostUserId: f.otherHost })),
+    ).toHaveLength(1)
+    const cancelled = await read(
+      await exportBookingsCsv(ctx, { ...filters, hostUserId: f.host, status: 'cancelled' }),
+    )
+    expect(cancelled.slice(1).map((row) => row[0])).toEqual([first])
+    const outsider = await createTestUser(db)
+    expect(
+      await read(
+        await exportBookingsCsv(testContext(db, outsider.principal), {
+          ...filters,
+          hostUserId: f.host,
+        }),
+      ),
+    ).toHaveLength(1)
   })
   it('holds a cross-connection lease, releases on cancel and timeout, and isolates organizations', async () => {
     const user = await createTestUser(db),

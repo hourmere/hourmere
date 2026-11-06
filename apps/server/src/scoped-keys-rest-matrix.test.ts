@@ -69,6 +69,7 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
@@ -298,6 +299,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
         path = path
           .replaceAll('{id}', randomUUID())
@@ -610,14 +612,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
+    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(99)
-      expect(new Set(ids).size).toBe(99)
+      expect(ids).toHaveLength(100)
+      expect(new Set(ids).size).toBe(100)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(297)
+      expect(cases).toHaveLength(300)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -652,7 +654,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
-          if (response.status !== 204) {
+          if (operation === 'GET /api/v1/bookings/export.csv') {
+            expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+            expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
             if (operation === 'PUT /api/v1/event-types/{id}/notifications')
