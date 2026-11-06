@@ -307,7 +307,7 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('detects source-copy removal of the cross-worker budget fence', async () => {
     // Without the fence, both workers must read the remaining budget before either charges
     // it. A barrier after the read makes that interleaving certain instead of timing-
-    // dependent; the 5 s fallback only prevents a hang if one worker never reaches it.
+    // dependent; the 1.5 s fallback only prevents a hang if one worker never reaches it.
     const barrier = globalThis as { __waitlistBudgetBarrier?: () => Promise<void> }
     let arrived = 0
     let release = () => {}
@@ -317,7 +317,9 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     barrier.__waitlistBudgetBarrier = async () => {
       arrived += 1
       if (arrived >= 2) release()
-      await Promise.race([both, new Promise((resolve) => setTimeout(resolve, 5_000))])
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([both, new Promise((resolve) => (timer = setTimeout(resolve, 1_500)))])
+      clearTimeout(timer)
     }
     try {
       await expect(
