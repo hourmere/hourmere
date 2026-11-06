@@ -76,6 +76,8 @@ notifications and trigger configured integrations.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |

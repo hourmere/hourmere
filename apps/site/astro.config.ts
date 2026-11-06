@@ -90,6 +90,7 @@ export default defineConfig({
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },
+            { label: 'Booking page branding', link: '/docs/branding' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },
             { label: 'Interface languages', link: '/docs/interface-languages' },

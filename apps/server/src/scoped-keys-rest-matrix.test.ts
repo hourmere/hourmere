@@ -69,6 +69,8 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
@@ -84,6 +86,8 @@ const classes = {
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -595,6 +599,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         expectedStatus = 204
       }
+      if (operation === 'PATCH /api/v1/branding') payload = { brandPrimaryColor: '#123456' }
+      if (
+        operation === 'POST /api/v1/branding/logo' ||
+        operation === 'GET /api/v1/branding/logo/{hash}'
+      ) {
+        const { default: sharp } = await import('sharp')
+        const image = await sharp({
+          create: { width: 2, height: 2, channels: 4, background: '#123456' },
+        })
+          .png()
+          .toBuffer()
+        if (method === 'POST') {
+          payload = image
+          headers['content-type'] = 'image/png'
+        } else {
+          const { uploadBrandLogo } = await import('@hourmere/scheduling')
+          const branding = await uploadBrandLogo(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            image,
+            'image/png',
+          )
+          path = path.replace('{hash}', branding.brandLogo as string)
+        }
+      }
       path = path.replace('{id}', id).replace('{date}', date)
       return {
         method,
@@ -610,14 +638,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
+    it('covers the exact 103-operation contract and all 309 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(99)
-      expect(new Set(ids).size).toBe(99)
+      expect(ids).toHaveLength(103)
+      expect(new Set(ids).size).toBe(103)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(297)
+      expect(cases).toHaveLength(309)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -633,7 +661,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
               'content-type': 'application/json',
               ...fixture.headers,
             },
-            ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
+            ...(fixture.payload === undefined
+              ? {}
+              : {
+                  body: Buffer.isBuffer(fixture.payload)
+                    ? new Uint8Array(fixture.payload)
+                    : JSON.stringify(fixture.payload),
+                }),
           },
           { incoming: { socket: { remoteAddress: `192.0.2.${(sequence % 250) + 1}` } } },
         )
@@ -652,7 +686,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
-          if (response.status !== 204) {
+          if (operation === 'GET /api/v1/branding/logo/{hash}') {
+            expect(response.headers.get('content-type')).toBe('image/png')
+          } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
             if (operation === 'PUT /api/v1/event-types/{id}/notifications')
@@ -693,7 +729,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe(
-          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+          operation === 'GET /api/v1/instance/embed' ||
+            (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
+            ? 'private, no-store'
+            : 'no-store',
         )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link

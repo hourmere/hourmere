@@ -55,6 +55,52 @@ function check(name: string, verify: (checker: Checker) => void) {
   cases.push({ name, verify })
 }
 
+check(
+  'requires exact binary upload routing and a registered reference tool',
+  ({ interfaceParityErrors }) => {
+    const inventory: InterfaceInventory = {
+      rest: [{ path: '/api/v1/branding/logo', method: 'post', operationId: 'uploadBrandLogo' }],
+      mcp: ['set_branding'],
+      cli: {},
+      restCli: { 'branding upload': 'POST /api/v1/branding/logo' },
+    }
+    const entry = {
+      mcpReference: 'set_branding',
+      cliUpload: 'branding upload',
+      reason: 'Binary REST upload with an MCP reference.',
+    }
+    expect(interfaceParityErrors(inventory, { uploadBrandLogo: entry })).toEqual([])
+    for (const invalid of [
+      { ...inventory, mcp: [] },
+      { ...inventory, restCli: {} },
+      {
+        ...inventory,
+        rest: [{ path: '/api/v1/other', method: 'post' as const, operationId: 'uploadBrandLogo' }],
+      },
+    ])
+      expect(interfaceParityErrors(invalid, { uploadBrandLogo: entry }).length).toBeGreaterThan(0)
+    for (const invalid of [
+      { ...entry, extra: true },
+      { ...entry, mcpReference: 'other' },
+      { ...entry, cliUpload: 'other' },
+      { ...entry, reason: '' },
+    ]) {
+      expect(interfaceParityErrors(inventory, { uploadBrandLogo: invalid }).length).toBeGreaterThan(
+        0,
+      )
+    }
+    expect(
+      interfaceParityErrors(
+        {
+          ...inventory,
+          rest: [{ path: '/api/v1/branding/logo', method: 'post', operationId: 'otherUpload' }],
+        },
+        { otherUpload: entry },
+      ).length,
+    ).toBeGreaterThan(0)
+  },
+)
+
 check('accepts real MCP/CLI equivalents and a reasoned exemption', ({ interfaceParityErrors }) => {
   expect(interfaceParityErrors(baseline, mapping)).toEqual([])
   expect(
@@ -658,6 +704,22 @@ describe('source-copy parity guard mutation checks', () => {
     ['REST prefix', "path !== '/api/v1' && !path.startsWith('/api/v1/')", 'false'],
     ['OpenAPI document shape', '!isRecord(document) || !isRecord(document.paths)', 'false'],
     ['OpenAPI path shape', '!isRecord(item)', 'false'],
+    ['binary mapping shape', 'Object.keys(entry).length !== 3', 'false'],
+    ['binary operation identity', "operationId !== 'uploadBrandLogo'", 'false'],
+    [
+      'binary REST route',
+      "writes.get(operationId)?.route !== 'POST /api/v1/branding/logo'",
+      'false',
+    ],
+    ['binary reference identity', "entry.mcpReference !== 'set_branding'", 'false'],
+    ['binary reference registration', "!tools.has('set_branding')", 'false'],
+    ['binary upload identity', "entry.cliUpload !== 'branding upload'", 'false'],
+    [
+      'binary actual CLI route',
+      "inventory.restCli?.['branding upload'] !== 'POST /api/v1/branding/logo'",
+      'false',
+    ],
+    ['binary mapping reason', '!oneLineReason(entry.reason)', 'false'],
     ['operation IDs', '!identifier(operation.operationId)', 'false'],
     ['identifier first character', '/^[A-Za-z_]/.test(value)', 'true'],
     ['identifier character set', '!/[^A-Za-z0-9_.-]/.test(value)', 'true'],
