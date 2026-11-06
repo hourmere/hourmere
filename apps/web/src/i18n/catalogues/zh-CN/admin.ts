@@ -12,8 +12,8 @@ export const admin = {
   'Booking created': '预约已创建',
   'Booking cancelled': '预约已取消',
   'Booking rescheduled': '预约已改期',
-  'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.':
-    '将预约编号、时间和状态发送到 Slack。通知不包含姓名、邮箱地址、自定义问题回答或会议链接。',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    '向 Slack 发送活动标题、预约编号、时间、状态和后台链接。个人接收地址还包含受邀人姓名，不包含邮箱、自定义答案或会议链接。',
   'Loading Slack notifications…': '正在加载 Slack 通知……',
   'Could not load Slack notifications. Only organization owners and admins can manage them.':
     '无法加载 Slack 通知。只有组织所有者和管理员可以管理通知。',
@@ -39,6 +39,26 @@ export const admin = {
   'Events to post': '要发送的事件',
   'Enable Slack notifications': '启用 Slack 通知',
   'Save Slack destination': '保存 Slack 接收地址',
+  'Group-seat bookings do not support reschedule requests.': '团体席位预约不支持请求改期。',
+  'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
+    '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
+
+  'Waiting for the invitee to choose a new time.': '正在等待受邀人选择新时间。',
+  'Ask the invitee to choose a new time': '请受邀人选择新时间',
+  'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.':
+    '原时间仍会保留。受邀人可以选择其他时间或取消预约。如果在 48 小时内或会议开始前没有回应，原预约保持不变。',
+  'The request is saved. The invitee will receive an email, subject to delivery limits.':
+    '请求已保存。受邀人将收到邮件，实际发送受邮件限额约束。',
+  'Request reschedule': '请求改期',
+  'A new request replaces any previous request for this booking.':
+    '新请求会替换此预约之前的改期请求。',
+  'Note to the invitee': '给受邀人的留言',
+  'Plain text, up to 2000 characters. Included only in the email body.':
+    '最多 2000 个字符，仅限纯文本。留言只会出现在邮件正文中。',
+  'Use at most 2000 characters for your note.': '留言最多可输入 2000 个字符。',
+  'Could not request a new time. {0}': '无法发送改期请求。{0}',
+  'Retry the same request': '重试此请求',
+  'Send request': '发送请求',
 
   Imported: '已导入',
   'the original scheduling system': '原预约系统',

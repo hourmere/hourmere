@@ -143,6 +143,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/reschedule` | Session or API key | `full, bookings` |
+| `POST /api/v1/bookings/{id}/request-reschedule` | Session or API key | `full, bookings` |
 | `GET /api/v1/bookings/{id}/slots` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/manage` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/bookings/manage/cancel` | Public or manage token; check a supplied key | `full, bookings` |
@@ -255,6 +256,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |

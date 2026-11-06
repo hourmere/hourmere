@@ -12,8 +12,8 @@ export const admin = {
   'Booking created': 'Booking created',
   'Booking cancelled': 'Booking cancelled',
   'Booking rescheduled': 'Booking rescheduled',
-  'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.':
-    'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.',
   'Loading Slack notifications…': 'Loading Slack notifications…',
   'Could not load Slack notifications. Only organization owners and admins can manage them.':
     'Could not load Slack notifications. Only organization owners and admins can manage them.',
@@ -40,6 +40,27 @@ export const admin = {
   'Events to post': 'Events to post',
   'Enable Slack notifications': 'Enable Slack notifications',
   'Save Slack destination': 'Save Slack destination',
+  'Group-seat bookings do not support reschedule requests.':
+    'Group-seat bookings do not support reschedule requests.',
+  'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
+    'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.',
+
+  'Waiting for the invitee to choose a new time.': 'Waiting for the invitee to choose a new time.',
+  'Ask the invitee to choose a new time': 'Ask the invitee to choose a new time',
+  'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.':
+    'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.',
+  'The request is saved. The invitee will receive an email, subject to delivery limits.':
+    'The request is saved. The invitee will receive an email, subject to delivery limits.',
+  'Request reschedule': 'Request reschedule',
+  'A new request replaces any previous request for this booking.':
+    'A new request replaces any previous request for this booking.',
+  'Note to the invitee': 'Note to the invitee',
+  'Plain text, up to 2000 characters. Included only in the email body.':
+    'Plain text, up to 2000 characters. Included only in the email body.',
+  'Use at most 2000 characters for your note.': 'Use at most 2000 characters for your note.',
+  'Could not request a new time. {0}': 'Could not request a new time. {0}',
+  'Retry the same request': 'Retry the same request',
+  'Send request': 'Send request',
 
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',

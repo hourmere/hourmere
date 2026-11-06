@@ -45,6 +45,7 @@ import {
   notificationEmailCleanupJob,
   queuedSignInEmail,
   repairScheduledBookingEmails,
+  rescheduleRequestExpiryJob,
   reserveInvitationEmailBudget,
   type ScheduledEmailQueue,
   scheduledBookingEmailJob,
@@ -532,6 +533,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
       bookingNotificationJob(notificationDeps),
+      rescheduleRequestExpiryJob({
+        db,
+        notify: async (trx, event, now) => {
+          await bookingNotifier(jobs)(trx, event, now)
+          await webhookBookingNotifier(jobs, webhookSettings)(trx, event, now)
+        },
+      }),
       groupHostMailJob(notificationDeps),
       scheduledBookingEmailJob(notificationDeps),
       scheduledBookingEmailRepairJob(notificationDeps, scheduledQueue),
@@ -626,9 +634,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     const conferenceNotifier = conferenceBookingNotifier(jobs)
     const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
     const notify: BookingNotifier = async (trx, event, now) => {
-      await conferenceNotifier(trx, event)
+      if (!('requestId' in event)) await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
-      if (googleCalendar) await calendarNotifier(trx, event)
+      if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
       await webhookNotifier(trx, event, now)
     }
     const auth = createAuth({

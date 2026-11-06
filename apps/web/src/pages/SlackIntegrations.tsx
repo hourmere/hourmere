@@ -109,7 +109,7 @@ function SlackSettings({
     <div className="stack">
       <p>
         {t(
-          'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.',
+          'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.',
         )}
       </p>
       {destinations.status === 'loading' && (

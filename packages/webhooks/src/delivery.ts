@@ -48,12 +48,17 @@ export function webhookBookingNotifier(
       ])
       .where('id', '=', event.bookingId)
       .executeTakeFirstOrThrow()
+    const requestId = 'requestId' in event ? event.requestId : null
     const eventType: WebhookEventType =
       event.type === 'created'
         ? 'booking.created'
         : event.type === 'rescheduled'
           ? 'booking.rescheduled'
-          : 'booking.cancelled'
+          : event.type === 'reschedule_requested'
+            ? 'booking.reschedule_requested'
+            : event.type === 'reschedule_request_expired'
+              ? 'booking.reschedule_request_expired'
+              : 'booking.cancelled'
     // Share locks serialize opt-out/deletion with capture, and are always taken by ID.
     const endpoints = await trx
       .selectFrom('webhooks')
@@ -114,6 +119,7 @@ export function webhookBookingNotifier(
       type: eventType,
       occurredAt: now.toString(),
       data: {
+        ...(requestId ? { requestId } : {}),
         bookingId: booking.id,
         organizationId: booking.organization_id,
         eventTypeId: booking.event_type_id,
@@ -133,6 +139,7 @@ export function webhookBookingNotifier(
           booking_id: booking.id,
           event_id: eventId,
           event_type: eventType,
+          request_id: requestId,
           payload:
             endpoint.destination_kind === 'slack'
               ? slackPayload({
@@ -149,7 +156,9 @@ export function webhookBookingNotifier(
               : payload,
           created_at: new Date(now.epochMilliseconds),
         })
-        .onConflict((oc) => oc.columns(['webhook_id', 'booking_id', 'event_type']).doNothing())
+        .onConflict((oc) =>
+          oc.columns(['webhook_id', 'booking_id', 'event_type', 'request_id']).doNothing(),
+        )
         .returning('id')
         .executeTakeFirst()
       if (delivery)

@@ -253,13 +253,16 @@ export async function testSlackDestination(
         'A Slack test message is already pending for this destination',
       )
     const eventType = row.events[0] as string
+    const eventId = randomUUID()
     const delivery = await trx
       .insertInto('webhook_deliveries')
       .values({
         webhook_id: row.id,
         organization_id: row.organization_id,
         booking_id: null,
-        event_id: randomUUID(),
+        event_id: eventId,
+        // Samples have no booking; distinguish successive completed tests in deduplication.
+        request_id: eventId,
         event_type: eventType,
         payload: slackPayload({ type: eventType }),
         created_at: new Date(ctx.now().epochMilliseconds),

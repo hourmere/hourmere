@@ -74,7 +74,33 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack configuration protections', ()
     }
     expect(transport).toHaveBeenCalledTimes(13)
     expect(enqueue).toHaveBeenCalledTimes(1)
-    await testSlackDestination(ctx, settings, destination.id, { enqueue })
+    await expect(testSlackDestination(ctx, settings, destination.id, { enqueue })).resolves.toEqual(
+      { deliveryId: expect.any(String) },
+    )
+    expect(enqueue).toHaveBeenCalledTimes(2)
+  })
+  it('allows another sample after successful delivery without colliding with retained history', async () => {
+    const { ctx, destination } = await fixture()
+    const enqueue = vi.fn(async () => null)
+    const first = await testSlackDestination(ctx, settings, destination.id, { enqueue })
+    const transport = vi.fn(async () => 200)
+    await deliverWebhook(
+      { db, ...settings, transport, now: () => now },
+      first.deliveryId,
+      new AbortController().signal,
+    )
+    await expect(testSlackDestination(ctx, settings, destination.id, { enqueue })).resolves.toEqual(
+      { deliveryId: expect.any(String) },
+    )
+    const rows = await db
+      .selectFrom('webhook_deliveries')
+      .select(['id', 'status', 'request_id'])
+      .where('webhook_id', '=', destination.id)
+      .execute()
+    expect(rows).toHaveLength(2)
+    expect(rows.find((row) => row.id === first.deliveryId)?.status).toBe('delivered')
+    expect(new Set(rows.map((row) => row.request_id)).size).toBe(2)
+    expect(rows.every((row) => row.request_id !== null)).toBe(true)
     expect(enqueue).toHaveBeenCalledTimes(2)
   })
   it('refuses sample enqueue when outbound webhooks are disabled', async () => {
