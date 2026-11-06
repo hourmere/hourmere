@@ -1,5 +1,11 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Meeting location': '会议地点',
+  'Your phone number': '您的电话号码',
+  'Choose one of the available locations.': '请选择一个可用的会议地点。',
+  'Enter a phone number with + and country code, followed by 7–15 digits.':
+    '请输入以 + 和国家代码开头、共含 7–15 位数字的电话号码。',
+
   'This location is unavailable. Contact the host to book.':
     '此地点暂时无法预约。请联系主持人安排预约。',
   'The host or the team’s owners and admins can see your email, name and requested period.':

@@ -1,5 +1,11 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'Meeting location': 'Meeting location',
+  'Your phone number': 'Your phone number',
+  'Choose one of the available locations.': 'Choose one of the available locations.',
+  'Enter a phone number with + and country code, followed by 7–15 digits.':
+    'Enter a phone number with + and country code, followed by 7–15 digits.',
+
   'This location is unavailable. Contact the host to book.':
     'This location is unavailable. Contact the host to book.',
   'The host or the team’s owners and admins can see your email, name and requested period.':

@@ -36,7 +36,7 @@ import {
   locationText,
   When,
 } from './BookingDetails.tsx'
-import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
+import { BookingForm, type BookingFormValues, selectedLocation } from './BookingForm.tsx'
 import { monthOf } from './calendar.ts'
 import { EventDescription } from './EventDescription.tsx'
 import {
@@ -391,6 +391,12 @@ function BookingFlow({
       if (controller.signal.aborted) return
       // Keep the invitee's draft in this flow while replacing stale choices and slots.
       setEvent(updated)
+      setValues((current) =>
+        current.locationOptionId !== undefined &&
+        !updated.locations?.some((option) => option.id === current.locationOptionId)
+          ? { ...current, locationOptionId: undefined, inviteePhone: undefined }
+          : current,
+      )
       setDurationMinutes(updated.durationMinutes)
       setNow(currentTime())
       setVersion((v) => v + 1)
@@ -575,12 +581,18 @@ function BookingFlow({
     setBackToPicker(true)
   }
 
+  const chosenLocation = selectedLocation(event.locations ?? [], values.locationOptionId)
+
   async function submit() {
     if (!slot || inFlight.current || directPending || directError) return
     const guests = guestsFor(values.guests)
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
+      ...(chosenLocation && { locationOptionId: chosenLocation.id }),
+      ...(chosenLocation?.askInvitee && {
+        inviteePhone: values.inviteePhone?.trim(),
+      }),
       ...(waitlist && { waitlistToken: waitlist.token }),
       ...((hasDurationChoices || directFlow) && { durationMinutes }),
       invitee: {
@@ -633,6 +645,9 @@ function BookingFlow({
         )
         setNow(currentTime())
         setVersion((v) => v + 1)
+      } else if (code === 'invalid_location_choice') {
+        setNotice('Choose one of the available locations.')
+        await refreshDurations()
       } else if (code === 'invalid_duration') {
         setNotice(
           directFlow
@@ -702,7 +717,11 @@ function BookingFlow({
           )}
           <ul className="event-facts">
             <li>{formatDuration(durationMinutes, displayLocale)}</li>
-            {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
+            {chosenLocation ? (
+              <li>{chosenLocation.label ?? ui(locationLabel(chosenLocation.kind))}</li>
+            ) : event.location ? (
+              <li>{ui(locationLabel(event.location.kind))}</li>
+            ) : null}
             {hostTimeZone && (
               <li className="user-content">
                 <TimeZoneName
@@ -845,6 +864,7 @@ function BookingFlow({
                 </p>
               )}
               <BookingForm
+                locations={event.locations}
                 allowGuests={event.allowGuests}
                 questions={event.questions}
                 values={values}

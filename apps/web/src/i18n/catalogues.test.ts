@@ -46,6 +46,21 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  it('translates location choice and phone collection in every public locale', () => {
+    const keys = [
+      'Meeting location',
+      'Your phone number',
+      'Choose one of the available locations.',
+      'Enter a phone number with + and country code, followed by 7–15 digits.',
+    ]
+    for (const { code } of registeredLocales) {
+      const catalogue = groups.common[`./catalogues/${code}/common.ts`]
+      for (const key of keys) {
+        expect(catalogue?.[key], `${code}: ${key}`).toBeTruthy()
+        if (code !== 'en') expect(catalogue?.[key]).not.toBe(key)
+      }
+    }
+  })
   it('translates suggested-time statuses in every public locale', () => {
     const keys = [
       'We could not use the time details in this link. Please choose a time.',

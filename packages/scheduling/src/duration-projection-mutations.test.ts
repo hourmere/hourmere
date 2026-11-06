@@ -13,6 +13,7 @@ import { engineValidation } from './internal.ts'
 import {
   compatLocation,
   locationOptionsFromLegacy,
+  publicLocationOptions,
   validateLocationOptions,
 } from './location-options.ts'
 import type { getManagedBookingDetails } from './manage.ts'
@@ -99,9 +100,11 @@ function publicProjection(change?: Change) {
     '/** One event type as the host',
     change,
   )
-  return new Function('eventTypeNotFound', `${copy}; return publicEventType`)(
-    eventTypeNotFound,
-  ) as (event: PublicEventTypeRecord) => PublicEventType
+  return new Function(
+    'eventTypeNotFound',
+    'publicLocationOptions',
+    `${copy}; return publicEventType`,
+  )(eventTypeNotFound, publicLocationOptions) as (event: PublicEventTypeRecord) => PublicEventType
 }
 
 function managedProjection(change?: Change): typeof getManagedBookingDetails {

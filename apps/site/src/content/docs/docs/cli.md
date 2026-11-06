@@ -302,3 +302,11 @@ with no validated ID remains ambiguous: retry does not issue another POST or ado
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
 requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` when booking. An invitee-phone option additionally requires
+`inviteePhone` in E.164 format. CLI commands accept these fields in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.

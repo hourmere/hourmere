@@ -136,6 +136,7 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
           'durationMinutes',
           'host',
           'location',
+          'locations',
           'questions',
           ...(team ? ['team'] : []),
           'title',

@@ -8,6 +8,7 @@ import {
   EVENT_TYPE_LIMITS,
   getEventType,
   getEventTypeWaitlist,
+  type LocationOption,
   type LocationSettings,
   listEventTypeHosts,
   listEventTypes,
@@ -54,10 +55,8 @@ import {
 
 const L = EVENT_TYPE_LIMITS
 
-// Location options and weekly/monthly limits remain service-only until their REST/MCP/CLI
-// contracts are introduced.
+// Weekly/monthly limits remain service-only until their transport contracts are introduced.
 const eventTypeResponse = ({
-  locations: _locations,
   maxBookingsPerWeek: _maxBookingsPerWeek,
   maxBookingsPerMonth: _maxBookingsPerMonth,
   ...eventType
@@ -89,7 +88,7 @@ const locationKinds = {
 }
 const locationDoc = {
   description:
-    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
+    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
 }
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
@@ -127,6 +126,59 @@ const LocationInput = z
   ])
   .nullable()
   .openapi(locationDoc)
+
+const optionMetadata = {
+  id: z.string().openapi({
+    description:
+      'Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved.',
+  }),
+  label: z.string().optional(),
+  isDefault: z.literal(true).optional(),
+}
+const locationOptionVariants = [
+  { ...locationKinds.googleMeet, ...optionMetadata },
+  { ...locationKinds.zoom, ...optionMetadata },
+  {
+    ...locationKinds.phone,
+    number: locationKinds.phone.number.optional(),
+    askInvitee: z.literal(true).optional(),
+    ...optionMetadata,
+  },
+  { ...locationKinds.inPerson, ...optionMetadata },
+  { ...locationKinds.link, ...optionMetadata },
+] as const
+const locationsDescription =
+  'Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking.'
+const LocationsInput = z
+  .array(
+    z.discriminatedUnion('kind', [
+      z.strictObject(locationOptionVariants[0]),
+      z.strictObject(locationOptionVariants[1]),
+      z
+        .strictObject(locationOptionVariants[2])
+        .refine(
+          (phone): phone is Extract<LocationOption, { kind: 'phone' }> =>
+            (phone.number !== undefined) !== (phone.askInvitee === true),
+          { message: 'Phone requires exactly one of number or askInvitee: true' },
+        ),
+      z.strictObject(locationOptionVariants[3]),
+      z.strictObject(locationOptionVariants[4]),
+    ]),
+  )
+  .nullable()
+  .openapi({ description: locationsDescription })
+export const Locations = z
+  .array(
+    z.discriminatedUnion('kind', [
+      z.object(locationOptionVariants[0]),
+      z.object(locationOptionVariants[1]),
+      z.object(locationOptionVariants[2]),
+      z.object(locationOptionVariants[3]),
+      z.object(locationOptionVariants[4]),
+    ]),
+  )
+  .nullable()
+  .openapi({ description: locationsDescription })
 
 // Questions: responses show the shared Question component (openapi.ts). Writes are checked
 // for shape here and as a whole by validateQuestions in the service (400 invalid_questions),
@@ -320,6 +372,7 @@ const fields = {
     "Bookings per host's day; null = no limit",
   ).nullable(),
   location: Location,
+  locations: Locations,
   allowGuests: z.boolean().openapi({
     description:
       'Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved',
@@ -381,6 +434,7 @@ export const EventTypeInput = z
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     location: LocationInput.optional(),
+    locations: LocationsInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
@@ -414,6 +468,7 @@ export const EventTypeUpdate = z
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     location: LocationInput.optional(),
+    locations: LocationsInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),

@@ -258,3 +258,82 @@ describe('public booking form polish', () => {
     expect(screen.getByRole('link').textContent).toBe('邮箱：请输入邮箱地址。')
   })
 })
+
+const locationChoices = [
+  { id: 'office', kind: 'in_person', label: 'Our office' },
+  { id: 'phone', kind: 'phone', askInvitee: true as const, isDefault: true as const },
+]
+
+function LocationForm({ single = false, onSubmit = vi.fn() }) {
+  const [values, setValues] = useState(valid)
+  return (
+    <BookingForm
+      allowGuests={false}
+      questions={[]}
+      values={values}
+      onChange={setValues}
+      locations={single ? locationChoices.slice(1) : locationChoices}
+      serverErrors={{}}
+      formError={null}
+      submitting={false}
+      onSubmit={onSubmit}
+    />
+  )
+}
+
+describe('invitee location choice', () => {
+  it('uses native radios, selects the default, and supports keyboard changes', async () => {
+    const user = userEvent.setup()
+    render(<LocationForm />)
+    const group = screen.getByRole('group', { name: 'Meeting location' })
+    const phone = within(group).getByRole('radio', { name: 'Phone call' })
+    const office = within(group).getByRole('radio', { name: 'Our office' })
+    expect((phone as HTMLInputElement).checked).toBe(true)
+    phone.focus()
+    await user.keyboard('{ArrowLeft}')
+    expect((office as HTMLInputElement).checked).toBe(true)
+    expect(screen.queryByLabelText('Your phone number')).toBeNull()
+    await user.keyboard('{ArrowRight}')
+    expect((phone as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByLabelText('Your phone number').getAttribute('type')).toBe('tel')
+  })
+
+  it('collects a valid phone for a single option without showing a selector', async () => {
+    const user = userEvent.setup()
+    const submit = vi.fn()
+    render(<LocationForm single onSubmit={submit} />)
+    expect(screen.queryByRole('radio')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(submit).not.toHaveBeenCalled()
+    const phone = screen.getByLabelText('Your phone number')
+    expect(phone.getAttribute('aria-invalid')).toBe('true')
+    await user.type(phone, '+123')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(submit).not.toHaveBeenCalled()
+    await user.clear(phone)
+    await user.type(phone, '+14155550123')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(submit).toHaveBeenCalledOnce()
+  })
+
+  it('rejects removed choices and requires phone only for the chosen phone option', () => {
+    expect(
+      validateBookingForm([], { ...valid, locationOptionId: 'gone' }, locationChoices),
+    ).toHaveProperty('locationOptionId')
+    expect(validateBookingForm([], valid, locationChoices)).toHaveProperty('inviteePhone')
+    expect(
+      validateBookingForm([], { ...valid, locationOptionId: 'office' }, locationChoices),
+    ).toEqual({})
+    for (const inviteePhone of [
+      '+01234567',
+      '+123456',
+      '+1234567890123456',
+      '4155550123',
+      '+1 4155550123',
+    ]) {
+      expect(validateBookingForm([], { ...valid, inviteePhone }, locationChoices)).toHaveProperty(
+        'inviteePhone',
+      )
+    }
+  })
+})

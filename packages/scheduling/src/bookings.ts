@@ -27,11 +27,14 @@ import {
   cancelBookingConference,
   eligibleMeetHosts,
   prepareBookingConference,
+  requireMeetDestination,
+  requireZoomConnection,
   unresolvedLocation,
 } from './conferences.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, lockOrganization } from './hosts.ts'
+import { resolveLocationChoice } from './location-options.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -342,6 +345,7 @@ const RESCHEDULE_COLUMNS = [
   'end_at',
   'title',
   'location',
+  'location_option',
   'responses',
   'required_host_user_ids',
   'hosts_use_default_schedule',
@@ -661,7 +665,93 @@ async function loadBooking(db: Db, id: string): Promise<Booking> {
 
 // --- Writing bookings -------------------------------------------------------------------
 
-/** The existing booking form cannot collect an invitee's phone number yet. */
+/** Resolve only against the locked configuration and the actual assigned hosts. */
+async function resolveBookingLocation(
+  ctx: PublicContext,
+  db: Db,
+  event: PublicEventTypeRecord,
+  hosts: string[],
+  input: Pick<CreateBookingInput, 'locationOptionId' | 'inviteePhone'>,
+) {
+  const options = event.locations
+  const chosen =
+    input.locationOptionId === undefined
+      ? (options?.find((option) => option.isDefault === true) ?? options?.[0])
+      : options?.find((option) => option.id === input.locationOptionId)
+  const organizer =
+    event.schedulingType === 'collective' ? event.conferenceOrganizerUserId : hosts[0]
+  const meetReady: string[] = []
+  const zoomReady: string[] = []
+  try {
+    if (organizer && automaticMeet(chosen)) {
+      await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
+      meetReady.push(organizer)
+    }
+    if (organizer && automaticZoom(chosen)) {
+      await requireZoomConnection(db, organizer, event.zoomConnectionId, ctx.automaticZoom, true)
+      zoomReady.push(organizer)
+    }
+  } catch (error) {
+    if (!(error instanceof DomainError)) throw error
+    if (options?.length === 1 && chosen?.id === 'legacy' && input.locationOptionId === undefined)
+      throw error
+    throw new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
+  }
+  // Migration 0056 deliberately preserved historical settings (including phone formatting).
+  // Do not turn a previously bookable legacy singleton into a configuration rewrite.
+  if (
+    options?.length === 1 &&
+    chosen?.id === 'legacy' &&
+    !automaticMeet(chosen) &&
+    !automaticZoom(chosen) &&
+    !(chosen.kind === 'phone' && 'askInvitee' in chosen)
+  ) {
+    const { id: _id, label: _label, isDefault: _default, ...location } = chosen
+    return { locationOption: structuredClone(chosen), location }
+  }
+  return resolveLocationChoice(
+    options,
+    {
+      ...(input.locationOptionId !== undefined && { optionId: input.locationOptionId }),
+      ...(input.inviteePhone !== undefined && { inviteePhone: input.inviteePhone }),
+    },
+    {
+      schedulingType: event.schedulingType,
+      hostUserIds: hosts,
+      ...(hosts[0] && { assignedHostUserId: hosts[0] }),
+      conferenceOrganizerUserId: event.conferenceOrganizerUserId,
+      meetReadyHostUserIds: meetReady,
+      zoomReadyHostUserIds: zoomReady,
+    },
+  )
+}
+
+/** Keep a readiness race during conference intent creation inside the choice error contract. */
+async function prepareChosenBookingConference(
+  ctx: PublicContext,
+  db: Db,
+  bookingId: string,
+  preserveLegacyErrors: boolean,
+): Promise<void> {
+  try {
+    await prepareBookingConference(ctx, db, bookingId)
+  } catch (error) {
+    if (
+      !preserveLegacyErrors &&
+      error instanceof DomainError &&
+      (error.code.startsWith('automatic_meet_') || error.code.startsWith('automatic_zoom_'))
+    ) {
+      throw new DomainError(
+        'conflict',
+        'location_unavailable',
+        'The chosen location is unavailable.',
+      )
+    }
+    throw error
+  }
+}
+
+/** Final invariant: a persisted phone location must contain a collected number. */
 function requireCollectedPhone(location: Location | null): void {
   if (location?.kind === 'phone' && location.askInvitee === true) {
     throw new DomainError(
@@ -732,6 +822,7 @@ interface NewBooking {
   end: Temporal.Instant
   title: string
   location: Location | null
+  locationOption: Json | null
   responses: Responses
   source: BookingSource
   apiKeyId: string | null
@@ -764,6 +855,7 @@ async function insertBooking(
       end_at: b.end.toString(),
       title: b.title,
       location: b.location && JSON.stringify(unresolvedLocation(b.location as Json)),
+      location_option: b.locationOption === null ? null : JSON.stringify(b.locationOption),
       responses: JSON.stringify(b.responses),
       manage_token_hash: hash,
       source: b.source,
@@ -898,6 +990,8 @@ async function skipScheduledMessages(
 // --- Public booking -----------------------------------------------------------------------
 
 export interface CreateBookingInput {
+  locationOptionId?: string | undefined
+  inviteePhone?: string | undefined
   handle: string
   slug: string
   start: Temporal.Instant
@@ -1064,6 +1158,8 @@ function bookingIdempotency(
         ...(oneTimeLinkId !== undefined && { oneTimeLinkId }),
         start: input.start.toString(),
         durationMinutes: input.durationMinutes,
+        locationOptionId: input.locationOptionId,
+        inviteePhone: input.inviteePhone,
         invitee: input.invitee,
         guests: input.guests ?? [],
         responses: input.responses ?? {},
@@ -1120,7 +1216,6 @@ async function publicBooking(
           throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
         throw unavailable()
       }
-      requireCollectedPhone(current.location)
       if (guests.length > 0 && !current.allowGuests) {
         throw new DomainError(
           'invalid',
@@ -1145,9 +1240,15 @@ async function publicBooking(
         await lockRoundRobinState(trx, current.id)
         const available: string[] = []
         let stale = false
-        const candidates = automaticMeet(current.location)
-          ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
-          : current.eligibleHostUserIds
+        const candidates =
+          (current.locations?.length ?? 0) <= 1 && automaticMeet(current.location)
+            ? await eligibleMeetHosts(
+                trx,
+                current.eligibleHostUserIds,
+                current.id,
+                ctx.automaticMeet,
+              )
+            : current.eligibleHostUserIds
         for (const hostUserId of candidates) {
           try {
             const slots = await findSlots(trx, {
@@ -1186,6 +1287,8 @@ async function publicBooking(
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
+      const choice = await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)
+      requireCollectedPhone(choice.location)
       let settings: SuccessRedirect | null = null
       if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
         try {
@@ -1217,7 +1320,8 @@ async function publicBooking(
         start: input.start,
         end,
         title: `${current.title} with ${invitee.name}`,
-        location: current.location,
+        location: choice.location,
+        locationOption: choice.locationOption,
         responses,
         source: origin.source,
         apiKeyId: origin.apiKeyId,
@@ -1243,7 +1347,14 @@ async function publicBooking(
           now: ctx.now,
         })
       }
-      await prepareBookingConference(ctx, trx, id)
+      await prepareChosenBookingConference(
+        ctx,
+        trx,
+        id,
+        current.locations?.length === 1 &&
+          current.locations[0]?.id === 'legacy' &&
+          input.locationOptionId === undefined,
+      )
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return {
         booking: await loadBooking(trx, id),
@@ -1444,6 +1555,7 @@ async function rescheduleLocked(
     end,
     title: old.title,
     location: parseLocation(old.location),
+    locationOption: old.location_option,
     responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
     source: origin.source,
     apiKeyId: origin.apiKeyId,

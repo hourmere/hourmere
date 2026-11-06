@@ -2,6 +2,7 @@ import { type FormEvent, useId, useRef, useState } from 'react'
 import { ErrorSummary } from '../components/forms.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
+import { locationLabel } from './BookingDetails.tsx'
 import {
   type Answer,
   answerError,
@@ -14,7 +15,23 @@ import {
   type Question,
 } from './validation.ts'
 
+export interface BookingLocationOption {
+  id: string
+  kind: string
+  label?: string
+  isDefault?: true
+  askInvitee?: true
+}
+
+export function selectedLocation(locations: readonly BookingLocationOption[], id?: string) {
+  return id === undefined
+    ? (locations.find((option) => option.isDefault) ?? locations[0])
+    : locations.find((option) => option.id === id)
+}
+
 export interface BookingFormValues {
+  locationOptionId?: string
+  inviteePhone?: string
   name: string
   email: string
   guests: { name: string; email: string }[]
@@ -22,6 +39,7 @@ export interface BookingFormValues {
 }
 
 interface BookingFormProps {
+  locations?: readonly BookingLocationOption[] | null
   allowGuests: boolean
   questions: readonly Question[]
   values: BookingFormValues
@@ -37,8 +55,14 @@ interface BookingFormProps {
 export function validateBookingForm(
   questions: readonly Question[],
   values: BookingFormValues,
+  locations: readonly BookingLocationOption[] = [],
 ): FieldErrors {
   const errors: FieldErrors = {}
+  const chosen = selectedLocation(locations, values.locationOptionId)
+  if (locations.length && !chosen)
+    errors.locationOptionId = 'Choose one of the available locations.'
+  if (chosen?.askInvitee && !/^\+[1-9][0-9]{6,14}$/.test(values.inviteePhone?.trim() ?? ''))
+    errors.inviteePhone = 'Enter a phone number with + and country code, followed by 7–15 digits.'
   const name = nameError(values.name)
   if (name) errors.name = name
   const email = emailError(values.email)
@@ -65,6 +89,7 @@ export function validateBookingForm(
  */
 export function BookingForm({
   allowGuests,
+  locations: locationOptions,
   questions,
   values,
   onChange,
@@ -75,6 +100,8 @@ export function BookingForm({
 }: BookingFormProps) {
   const { t, ui, locale } = useI18n()
 
+  const locations = locationOptions ?? []
+  const chosen = selectedLocation(locations, values.locationOptionId)
   const prefix = useId()
   const form = useRef<HTMLFormElement>(null)
   const [clientErrors, setClientErrors] = useState<FieldErrors>({})
@@ -87,7 +114,7 @@ export function BookingForm({
     const next = { ...values, ...change }
     onChange(next)
     // Once people have tried to submit, errors follow their corrections.
-    if (submitted) setClientErrors(validateBookingForm(questions, next))
+    if (submitted) setClientErrors(validateBookingForm(questions, next, locations))
   }
 
   function setAnswer(id: string, answer: Answer | undefined) {
@@ -98,13 +125,15 @@ export function BookingForm({
     event.preventDefault()
     setSubmitted(true)
     setAttempt((current) => current + 1)
-    const found = validateBookingForm(questions, values)
+    const found = validateBookingForm(questions, values, locations)
     setClientErrors(found)
     if (Object.keys(found).length > 0) return
     onSubmit()
   }
 
   const labels: Record<string, UiText> = {
+    locationOptionId: 'Meeting location',
+    inviteePhone: 'Your phone number',
     name: 'Your name',
     email: 'Email',
     ...Object.fromEntries(questions.map((q) => [`q-${q.id}`, literal(q.label)])),
@@ -180,6 +209,37 @@ export function BookingForm({
   return (
     <form ref={form} className="stack booking-form" noValidate onSubmit={submit}>
       <ErrorSummary errors={summaryErrors} message={formError} attempt={attempt} />
+      {locations.length > 1 && (
+        <fieldset
+          className="field choices"
+          id={fieldId('locationOptionId')}
+          tabIndex={-1}
+          aria-describedby={describedBy('locationOptionId')}
+        >
+          <legend>{t('Meeting location')}</legend>
+          {locations.map((option) => (
+            <label className="choice" key={option.id}>
+              <input
+                type="radio"
+                name={`${prefix}location`}
+                value={option.id}
+                checked={chosen?.id === option.id}
+                onChange={() => update({ locationOptionId: option.id, inviteePhone: '' })}
+              />
+              <span>{option.label ?? ui(locationLabel(option.kind))}</span>
+            </label>
+          ))}
+          {errorText('locationOptionId')}
+        </fieldset>
+      )}
+      {chosen?.askInvitee &&
+        textInput(
+          'inviteePhone',
+          'Your phone number',
+          values.inviteePhone ?? '',
+          (inviteePhone) => update({ inviteePhone }),
+          { type: 'tel', autoComplete: 'tel' },
+        )}
       {textInput('name', 'Your name', values.name, (name) => update({ name }), {
         autoComplete: 'name',
       })}

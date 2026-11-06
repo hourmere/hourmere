@@ -137,7 +137,8 @@ export function oneTimeBookingRoutes({
           400: invalid,
           404: unavailable,
           409: {
-            description: 'Slot unavailable or idempotency key reused',
+            description:
+              'Slot unavailable, chosen location unavailable (location_unavailable), or idempotency key reused',
             content: json(ErrorBody),
           },
           429: rateLimited,
@@ -149,6 +150,8 @@ export function oneTimeBookingRoutes({
           token: c.req.valid('param').token,
           start: Temporal.Instant.from(body.start),
           durationMinutes: body.durationMinutes,
+          locationOptionId: body.locationOptionId,
+          inviteePhone: body.inviteePhone,
           invitee: body.invitee,
           guests: body.guests,
           responses: body.responses,

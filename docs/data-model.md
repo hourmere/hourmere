@@ -460,7 +460,7 @@ for host steps, invitee selection and the shared-rule limitations.
 
 ## Event location options contract
 
-`event_types.locations` / internal service `locations` is an ordered list of 1–5
+`event_types.locations` / REST, MCP and service `locations` is an ordered list of 1–5
 location options, or SQL/service null for no location. An empty list is invalid.
 Each option has a stable `id` (1–64 ASCII letters, digits, `_` or `-`, excluding
 `__proto__`, as for question and reminder rule IDs), a `kind`,
@@ -485,7 +485,7 @@ constraints also enforce the list envelope, identities, kinds and default count.
 Option IDs survive settings edits within the same kind and reordering. A kind change
 replaces the option identity. Removing and recreating an option must allocate a new ID
 so a stale page cannot accidentally select a different option under the old ID.
-Internal complete-list writers are responsible for these identity rules.
+Complete-list writers are responsible for these identity rules.
 
 `event_types.location` and service `location` remain compatibility fields derived
 from the explicit default, or first/only option, with `id`, `label` and `isDefault`
@@ -499,7 +499,7 @@ initially uses `legacy`, as does historical backfill.
 A different value, including null, for several options or an option with a label returns
 conflict `location_options_conflict` (REST 409; MCP tool error), instructing the client to
 use `locations`. Rejecting the ambiguous edit avoids guessing a target or dropping data.
-Internal writes supply `locations` as a complete replacement; specifying both fields in
+Configuration writes supply `locations` as a complete replacement; specifying both fields in
 one service write is invalid. Unrelated edits preserve the list and its order. Migration 0056 wraps every existing non-null
 event location in `{ id: "legacy", ...location }` without normalizing its settings
 or changing timestamps; existing nulls stay null. A compatibility trigger also
@@ -509,31 +509,21 @@ lists take precedence in SQL. Later data migrations that echo `location` are har
 ones that intentionally change a multi-option or labelled configuration must update
 `locations` explicitly instead.
 
-The additive transport contract for later work is `locations` beside the existing
-`location`; configuration REST, MCP and CLI must introduce writes together. Future
-booking requests use `locationOptionId` and, only for `askInvitee`, `inviteePhone`.
-Omitting the option chooses the effective default; an unknown/removed ID returns
-`invalid_location_choice`, never silently falls back. Invalid or missing collected
-phone data returns `invalid_invitee_phone`. The pure `resolveLocationChoice` helper
-performs this resolution without database or provider I/O. This migration/model
-slice does not expose `locations` through REST/OpenAPI, MCP or CLI, add booking
-request fields, or enable public choice or per-choice conference creation.
-The existing protected event-type response's `location` schema additionally accepts
-`{ kind: "phone", askInvitee: true }` so reads of internal configuration remain
-well-typed. Legacy service, REST, MCP and CLI writes accept this phone value only as
-an unchanged echo of an existing saved location. Creating or changing to it returns
-`invalid_location` until public booking can collect the invitee’s phone number. New phone
-configuration requires the host’s number; a host number and `askInvitee` together remain
-invalid. The published `EventType.location` retains its discriminated `oneOf` shape, with optional
-`number`/`askInvitee` fields on its single phone branch. The current editor preserves this
-configuration and omits an unchanged location when saving unrelated settings.
-Until the booking follow-up adds phone collection, existing personal, team and one-time
-booking paths reject an effective default `askInvitee` location with
-`invalid_invitee_phone` before persistence, rechecking under the booking locks. They
-cannot create a phone booking without a number from this configuration; exact replays
-of existing bookings retain their previous result.
+REST, MCP and CLI expose `locations` beside the existing `location`. Configuration
+writes use the same validation and conflict rules in every transport. Booking creation
+accepts `locationOptionId` and, only for `askInvitee`, `inviteePhone`. Omitting the option
+chooses the effective default; an unknown or removed ID returns `invalid_location_choice`,
+never silently falls back. Invalid or missing collected phone data returns
+`invalid_invitee_phone`. Public personal, team, embedded and one-time booking forms
+collect the number when required. The pure `resolveLocationChoice` helper performs
+selection without provider I/O; booking-time readiness is rechecked under the locks.
+Legacy `location` writes still reject new `askInvitee` configuration with
+`invalid_location`; use the complete `locations` list to configure collection. An unchanged
+legacy echo remains accepted. The editor preserves that configuration on unrelated edits.
+See [meeting location choices](https://hourmere.com/docs/location-choices) for configuration,
+public discovery and booking examples.
 
-A new booking will store its chosen configuration snapshot in
+A new booking stores its chosen configuration snapshot in
 `bookings.location_option`, including its ID, kind, label/default marker and settings.
 `bookings.location` remains the resolved values used by current protected booking
 reads, notifications and calendars: host or collected invitee phone, saved address
@@ -547,23 +537,21 @@ Migration 0056 backfills each existing non-null resolved booking location as
 `{ id: "legacy", ...location }`, including any historical ready URL; null remains
 null. These historical snapshots cannot recover the original option settings or
 labels. Compatibility inserts that omit a snapshot similarly capture their resolved
-location; the next booking task will explicitly persist the resolver's snapshot.
+location; booking creation explicitly persists the resolver's snapshot.
 Historical resolved booking payloads with custom kinds remain intact in snapshots;
 this storage compatibility does not admit those kinds into new event options.
 
 Rescheduling keeps the original option snapshot and resolved phone/address/link,
 even if the host removes or edits that option. Automatic conferences retain existing
 same-conference reschedule behavior and pinned organizer/destination identities.
-Changing the location on reschedule is outside this contract. The booking follow-up
-must copy `location_option` to successors, including a legacy snapshot, and include
-explicit choice and collected phone in the existing idempotency fingerprint; exact
+Changing the location on reschedule is outside this contract. Successors copy `location_option`, including a legacy snapshot. Explicit choice and
+collected phone participate in the existing idempotency fingerprint; exact
 replays must return the original snapshot and resolved result without reevaluation.
 
 Public option discovery is a whitelist of `id`, `kind`, optional public `label` and
 default marker, plus `askInvitee: true` when a phone must be collected. It never
 exposes host numbers, addresses, saved link URLs, connection IDs, organizer account
-details, credentials or generated URLs. Existing public catalog projections remain
-kind-only in this slice. Hosts must treat option labels as public text. Protected
+details, credentials or generated URLs. Public discovery adds this whitelist beside the existing kind-only compatibility field. Hosts must treat option labels as public text. Protected
 booking results reveal resolved location details under today's access rules; raw
 configuration snapshots are not added to public responses.
 

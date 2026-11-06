@@ -233,3 +233,19 @@ describe('server errors on the form', () => {
     expect(translateMessage('de', 'Meeting length')).toBe('Termindauer')
   })
 })
+
+it('maps location errors to localized fields and keeps readiness wording neutral', () => {
+  expect(bookingErrors(new RequestError(422, 'invalid_invitee_phone', 'private'), [])).toEqual({
+    fields: {
+      inviteePhone: 'Enter a phone number with + and country code, followed by 7–15 digits.',
+    },
+    form: null,
+  })
+  expect(
+    bookingErrors(new RequestError(422, 'invalid_location_choice', 'private'), []).fields,
+  ).toEqual({ locationOptionId: 'Choose one of the available locations.' })
+  expect(
+    bookingErrors(new RequestError(409, 'location_unavailable', 'private account details'), [])
+      .form,
+  ).toBe('This location is unavailable. Contact the host to book.')
+})

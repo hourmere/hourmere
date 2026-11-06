@@ -663,3 +663,11 @@ a known meeting ID without selecting another account or creating a replacement. 
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
 ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` when booking. An invitee-phone option additionally requires
+`inviteePhone` in E.164 format. CLI commands accept these fields in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.

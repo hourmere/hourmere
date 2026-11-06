@@ -1,4 +1,10 @@
 export const common = {
+  'Meeting location': 'Besprechungsort',
+  'Your phone number': 'Ihre Telefonnummer',
+  'Choose one of the available locations.': 'Wählen Sie einen der verfügbaren Orte.',
+  'Enter a phone number with + and country code, followed by 7–15 digits.':
+    'Geben Sie eine Telefonnummer mit + und Ländervorwahl sowie insgesamt 7–15 Ziffern ein.',
+
   'This location is unavailable. Contact the host to book.':
     'Dieser Treffpunkt ist nicht verfügbar. Wenden Sie sich für die Buchung an die gastgebende Person.',
   'The host or the team’s owners and admins can see your email, name and requested period.':

@@ -29,6 +29,11 @@ import {
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
+import {
+  type LocationOption,
+  type PublicLocationOption,
+  publicLocationOptions,
+} from './location-options.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
@@ -117,6 +122,7 @@ export interface PublicEventTypeRecord {
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   location: Location | null
+  locations: LocationOption[] | null
   questions: Question[]
   allowGuests: boolean
   hostName: string
@@ -176,6 +182,7 @@ async function findPersonalEventType(
       'et.minimum_notice_minutes',
       'et.booking_window_days',
       'et.location',
+      'et.locations',
       'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
@@ -226,6 +233,7 @@ async function findPersonalEventType(
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
+    locations: row.locations as LocationOption[] | null,
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -362,6 +370,7 @@ async function findTeamEventType(
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
+    locations: row.locations as LocationOption[] | null,
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -420,6 +429,7 @@ export async function getOneTimeBookingPage(
         allowedDurationsMinutes: page.allowedDurationsMinutes,
       }),
       location: page.location,
+      locations: page.locations,
       questions: page.questions,
       allowGuests: page.allowGuests,
       host: page.host,
@@ -445,6 +455,7 @@ export interface PublicEventType {
   /** Omitted for a single offered length to retain the original public response. */
   allowedDurationsMinutes?: number[]
   location: { kind: LocationKind } | null
+  locations: PublicLocationOption[] | null
   questions: Question[]
   allowGuests: boolean
   waitlist?: { enabled: true }
@@ -483,6 +494,7 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
       allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b),
     }),
     location: et.location && { kind: et.location.kind },
+    locations: publicLocationOptions(et.locations),
     questions: et.questions,
     allowGuests: et.allowGuests,
     ...(et.waitlistEnabled &&
@@ -703,12 +715,12 @@ async function eventSlots(
 ): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
-  if (automaticZoom(et.location)) {
+  if ((et.locations?.length ?? 0) <= 1 && automaticZoom(et.location)) {
     if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
       throw new DomainError('conflict', 'automatic_zoom_host_policy')
     await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
   }
-  if (automaticMeet(et.location)) {
+  if ((et.locations?.length ?? 0) <= 1 && automaticMeet(et.location)) {
     if (et.schedulingType === 'round_robin')
       et.eligibleHostUserIds = await eligibleMeetHosts(
         ctx.db,

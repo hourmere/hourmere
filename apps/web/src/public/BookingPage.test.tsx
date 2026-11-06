@@ -1828,3 +1828,144 @@ it.each([false, true])(
     expect(screen.queryByText('Team pool')).toBeNull()
   },
 )
+
+describe('booking a chosen location', () => {
+  it('sends the chosen option and phone, preserves the draft and retries the same request', async () => {
+    const user = userEvent.setup()
+    const requests: { body: unknown; key: string | null }[] = []
+    fakeApi({
+      ...eventRoutes(
+        {
+          ...EVENT,
+          locations: [
+            { id: 'office', kind: 'in_person', label: 'Our office' },
+            { id: 'phone', kind: 'phone', askInvitee: true },
+          ],
+        },
+        DST_SLOTS,
+      ),
+      'POST /api/v1/public/ada/intro/bookings': (call) => {
+        requests.push({ body: call.body, key: call.headers.get('Idempotency-Key') })
+        if (requests.length === 1) return Promise.reject(new TypeError('offline'))
+        return json(201, {
+          booking: booking({ location: { kind: 'phone', number: '+14155550123' } }),
+          manageToken: TOKEN,
+        })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.click(screen.getByRole('radio', { name: 'Phone call' }))
+    await user.type(screen.getByLabelText('Your phone number'), '+14155550123')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Change time' }))
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expect((screen.getByRole('radio', { name: 'Phone call' }) as HTMLInputElement).checked).toBe(
+      true,
+    )
+    expect((screen.getByLabelText('Your phone number') as HTMLInputElement).value).toBe(
+      '+14155550123',
+    )
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByText(/Your booking is not confirmed yet/)
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(requests[0]?.body).toMatchObject({
+      locationOptionId: 'phone',
+      inviteePhone: '+14155550123',
+    })
+    expect(requests[1]).toEqual(requests[0])
+    expect(screen.getByRole('link', { name: '+14155550123' }).getAttribute('href')).toBe(
+      'tel:+14155550123',
+    )
+  })
+})
+
+it.each([false, true])(
+  'sends the visible default location identity (single: %s) and recovers removed choices',
+  async (single) => {
+    const user = userEvent.setup()
+    let loaded = 0
+    const requests: unknown[] = []
+    const options = [
+      { id: 'office', kind: 'in_person' as const, label: 'Our office' },
+      { id: 'video', kind: 'google_meet' as const, isDefault: true as const },
+    ]
+    fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'GET /api/v1/public/ada/intro': () =>
+        json(200, {
+          ...EVENT,
+          locations: ++loaded === 1 ? (single ? options.slice(1) : options) : [options[0]],
+        }),
+      'POST /api/v1/public/ada/intro/bookings': (call) => {
+        requests.push(call.body)
+        if (requests.length === 1) return json(422, { error: 'invalid_location_choice' })
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('Grace Hopper')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(requests[0]).toMatchObject({ locationOptionId: 'video' })
+    expect(requests[1]).toMatchObject({ locationOptionId: 'office' })
+  },
+)
+
+it.each([false, true])(
+  'reconciles explicit location choices during duration refresh (removed: %s)',
+  async (removed) => {
+    const user = userEvent.setup()
+    let loaded = 0
+    const requests: unknown[] = []
+    const options = [
+      { id: 'office', kind: 'in_person' as const, label: 'Our office' },
+      { id: 'phone', kind: 'phone' as const, askInvitee: true as const },
+    ]
+    fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'GET /api/v1/public/ada/intro': () =>
+        json(200, {
+          ...EVENT,
+          locations: ++loaded === 1 || !removed ? options : [options[0]],
+        }),
+      'POST /api/v1/public/ada/intro/bookings': (call) => {
+        requests.push(call.body)
+        if (requests.length === 1) return json(422, { error: 'invalid_duration' })
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.click(screen.getByRole('radio', { name: 'Phone call' }))
+    await user.type(screen.getByLabelText('Your phone number'), '+14155550123')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('Grace Hopper')
+    if (removed) {
+      expect(screen.queryByRole('radio')).toBeNull()
+      expect(screen.queryByLabelText('Your phone number')).toBeNull()
+    } else {
+      expect((screen.getByRole('radio', { name: 'Phone call' }) as HTMLInputElement).checked).toBe(
+        true,
+      )
+      expect((screen.getByLabelText('Your phone number') as HTMLInputElement).value).toBe(
+        '+14155550123',
+      )
+    }
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(requests[1]).toMatchObject({ locationOptionId: removed ? 'office' : 'phone' })
+    if (removed) expect(requests[1]).not.toHaveProperty('inviteePhone')
+    else expect(requests[1]).toHaveProperty('inviteePhone', '+14155550123')
+  },
+)

@@ -231,3 +231,11 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` when booking. An invitee-phone option additionally requires
+`inviteePhone` in E.164 format. CLI commands accept these fields in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.

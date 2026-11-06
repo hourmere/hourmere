@@ -181,6 +181,11 @@ export function bookingErrors(
         if (path === 'invitee.name') fields.name = 'Enter your name, at most 200 characters.'
         else if (path === 'invitee.email') fields.email = EMAIL_HINT
         else if (path === 'invitee.timeZone') fields.timeZone = 'Choose a time zone from the list.'
+        else if (path === 'inviteePhone')
+          fields.inviteePhone =
+            'Enter a phone number with + and country code, followed by 7–15 digits.'
+        else if (path === 'locationOptionId')
+          fields.locationOptionId = 'Choose one of the available locations.'
         else if (path === 'guests')
           fields.guests = msg('Add at most {0} guests.', { '0': LIMITS.guests })
         else if (guest) {
@@ -200,6 +205,14 @@ export function bookingErrors(
         form: unplaced || !Object.keys(fields).length ? 'Check the form and try again.' : null,
       }
     }
+    case 'location_unavailable':
+      return { fields, form: 'This location is unavailable. Contact the host to book.' }
+    case 'invalid_location_choice':
+      fields.locationOptionId = 'Choose one of the available locations.'
+      return { fields, form: null }
+    case 'invalid_invitee_phone':
+      fields.inviteePhone = 'Enter a phone number with + and country code, followed by 7–15 digits.'
+      return { fields, form: null }
     case 'invalid_invitee':
       if (/name/i.test(message))
         fields.name = 'Enter your name on one line, at most 200 characters.'

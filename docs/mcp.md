@@ -148,3 +148,11 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 `[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` when booking. An invitee-phone option additionally requires
+`inviteePhone` in E.164 format. CLI commands accept these fields in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.

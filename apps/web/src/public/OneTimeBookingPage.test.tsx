@@ -25,6 +25,7 @@ const ONE_TIME_EVENT: OneTimeBookingPage['eventType'] = {
   title: EVENT.title,
   description: EVENT.description,
   durationMinutes: EVENT.durationMinutes,
+  locations: EVENT.locations,
   location: EVENT.location,
   allowGuests: EVENT.allowGuests,
   host: EVENT.host,

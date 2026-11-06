@@ -91,6 +91,7 @@ describe('event type routes in the OpenAPI document', () => {
       expect(closedObjects(doc, schema)).toEqual([
         '$',
         ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
+        ...[0, 1, 2, 3, 4].map((i) => `$.locations[]|oneOf${i}`),
         '$.conferenceOrganizer',
         '$.questions[]',
         '$.notifications',
@@ -392,6 +393,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       conferenceOrganizer: null,
       hosts: [{ userId: user.id }],
       location: { kind: 'phone', number: '+14155550123' },
+      locations: [{ id: 'legacy', kind: 'phone', number: '+14155550123' }],
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       notifications: DEFAULT_NOTIFICATIONS,
       waitlist: { enabled: false },
