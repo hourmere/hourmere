@@ -1,6 +1,6 @@
 import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
 import {
@@ -24,6 +24,17 @@ import {
   schedule,
 } from '../../test/fixtures.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
+
+// Warm the exercised lazy modules before UI assertions: this suite tests editor behavior,
+// not cold module transformation time on a shared test runner.
+beforeAll(async () => {
+  await Promise.all([
+    import('./EventTypeEditor.tsx'),
+    import('./EventTypes.tsx'),
+    import('../bookings/Bookings.tsx'),
+    import('../Settings.tsx'),
+  ])
+})
 
 const location = () => screen.getByTestId('location').textContent
 const field = (name: string | RegExp) => screen.getByLabelText<HTMLInputElement>(name)
