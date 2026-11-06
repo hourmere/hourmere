@@ -1,5 +1,32 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'SCIM provisioning tokens': 'SCIM provisioning tokens',
+  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
+    'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
+  'Tokens only authorize SCIM for this organization. Keep them private.':
+    'Tokens only authorize SCIM for this organization. Keep them private.',
+  'Could not update provisioning tokens. Check the token list before trying again.':
+    'Could not update provisioning tokens. Check the token list before trying again.',
+  'New provisioning token': 'New provisioning token',
+  'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
+    'Copy this token now. It will not be shown again after you dismiss it or leave this view.',
+  'Copy token': 'Copy token',
+  'Dismiss token': 'Dismiss token',
+  'Provisioning token name': 'Provisioning token name',
+  'Create provisioning token': 'Create provisioning token',
+  'Loading provisioning tokens…': 'Loading provisioning tokens…',
+  'Could not load provisioning tokens.': 'Could not load provisioning tokens.',
+  'No provisioning tokens.': 'No provisioning tokens.',
+  'Previous token valid until: {date}': 'Previous token valid until: {date}',
+  'Last used: {date}': 'Last used: {date}',
+  'Rotate token': 'Rotate token',
+  'Revoke token': 'Revoke token',
+  'Confirm token change': 'Confirm token change',
+  'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
+    'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.',
+  'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
+    'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.',
+
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 

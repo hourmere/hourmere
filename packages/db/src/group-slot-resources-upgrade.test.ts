@@ -49,7 +49,10 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const slots = (
         await old.pool.query('SELECT to_jsonb(s)::text AS row FROM group_slots s ORDER BY id')
       ).rows
-      expect(await runMigrations(old.pool)).toEqual(['0061_group_slot_resources.sql'])
+      expect(await runMigrations(old.pool)).toEqual([
+        '0061_group_slot_resources.sql',
+        '0066_scim_provisioning_tokens.sql',
+      ])
       expect(
         (
           await old.pool.query(

@@ -38,6 +38,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [SCIM](/docs/scim) provides disabled-by-default provisioning-token administration only.
+  Users, Groups, discovery and IdP synchronization are not available yet.
+
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

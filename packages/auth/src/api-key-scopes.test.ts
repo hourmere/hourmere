@@ -70,6 +70,10 @@ const restContract = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',

@@ -110,6 +110,10 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
@@ -271,6 +275,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          scimProvisioningEnabled: true,
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -308,6 +313,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
+          .replaceAll('{organizationId}', teamId)
         const error =
           template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
@@ -615,14 +621,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
+    it('covers the exact 104-operation contract and all 312 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(100)
-      expect(new Set(ids).size).toBe(100)
+      expect(ids).toHaveLength(104)
+      expect(new Set(ids).size).toBe(104)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(300)
+      expect(cases).toHaveLength(312)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -698,7 +704,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe(
-          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+          operation === 'GET /api/v1/instance/embed' || operation.includes('/provisioning-tokens')
+            ? 'private, no-store'
+            : 'no-store',
         )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link
