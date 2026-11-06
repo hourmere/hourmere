@@ -3,7 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { getPublicEventType } from './availability.ts'
+import { getPublicEventType, listPublicSlots } from './availability.ts'
 import * as Bookings from './bookings.ts'
 import { DomainError } from './errors.ts'
 import { createFixtures } from './testing.ts'
@@ -200,6 +200,106 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
     })
     await verifySnapshot(Bookings, move)
   })
+  /** An event whose only location was set after creation: the trigger allocates a new id. */
+  async function single(location: Record<string, unknown>) {
+    const f = createFixtures(db)
+    const host = await f.host()
+    await f.schedule(host.userId)
+    const event = await f.eventType(host.organizationId, host.userId, { slug: 'single' })
+    await db
+      .updateTable('event_types')
+      .set({ location: JSON.stringify(location) })
+      .where('id', '=', event)
+      .execute()
+    const { locations } = await db
+      .selectFrom('event_types')
+      .select('locations')
+      .where('id', '=', event)
+      .executeTakeFirstOrThrow()
+    const [option] = locations as [{ id: string }]
+    expect(locations).toEqual([{ ...location, id: option.id }])
+    expect(option.id).not.toBe('legacy')
+    return {
+      event,
+      id: option.id,
+      ctx: { db, now, automaticMeet: true, automaticZoom: true },
+      slots: {
+        handle: host.handle,
+        slug: 'single',
+        start: Temporal.Instant.from('2026-11-02T08:00Z'),
+        end: Temporal.Instant.from('2026-11-02T12:00Z'),
+      },
+      input: {
+        handle: host.handle,
+        slug: 'single',
+        start: Temporal.Instant.from('2026-11-02T09:00Z'),
+        invitee: { name: 'Guest', email: 'guest@example.test', timeZone: 'Europe/Berlin' },
+        idempotencyKey: crypto.randomUUID(),
+      },
+    }
+  }
+  async function verifySingleConference(module: typeof Bookings, kind: 'google_meet' | 'zoom') {
+    const s = await single({ kind, autoCreate: true })
+    const provider = kind === 'zoom' ? 'automatic_zoom_unavailable' : 'automatic_meet_unavailable'
+    // Without a choice the provider readiness code is the one an event without choices returns.
+    await expect(listPublicSlots(s.ctx, s.slots)).rejects.toMatchObject({ code: provider })
+    await expect(module.createPublicBooking(s.ctx, s.input)).rejects.toMatchObject({
+      code: provider,
+    })
+    // Choosing that option explicitly uses the location-choice contract.
+    await expect(
+      listPublicSlots(s.ctx, { ...s.slots, locationOptionId: s.id }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    await expect(
+      module.createPublicBooking(s.ctx, { ...s.input, locationOptionId: s.id }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect(
+      await db.selectFrom('bookings').select('id').where('event_type_id', '=', s.event).execute(),
+    ).toEqual([])
+  }
+  it.each(['google_meet', 'zoom'] as const)(
+    'keeps provider readiness codes for a single %s option added after creation',
+    async (kind) => {
+      await verifySingleConference(Bookings, kind)
+      const copy = await sourceCopy(
+        '    if (isPreservedSingleton(options, input.locationOptionId)) throw error\n',
+        "    if (options?.length === 1 && chosen?.id === 'legacy' && input.locationOptionId === undefined) throw error\n",
+      )
+      await expect(verifySingleConference(copy, kind)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+      await verifySingleConference(Bookings, kind)
+    },
+  )
+  async function verifySingleSettings(module: typeof Bookings, explicit: boolean) {
+    // A compatibility write may keep settings that the option-list contract would normalize.
+    const stored = { kind: 'link', url: 'https://meet.example.test' }
+    const s = await single(stored)
+    expect((await listPublicSlots(s.ctx, s.slots)).length).toBeGreaterThan(0)
+    const result = await module.createPublicBooking(s.ctx, {
+      ...s.input,
+      ...(explicit && { locationOptionId: s.id }),
+    })
+    expect(result.booking.location).toEqual(stored)
+    expect(await snapshot(result.booking.id)).toEqual({
+      location: stored,
+      location_option: { ...stored, id: s.id },
+    })
+  }
+  it.each([false, true])(
+    'stores a single non-legacy option as configured (explicit choice: %s)',
+    async (explicit) => {
+      await verifySingleSettings(Bookings, explicit)
+      const copy = await sourceCopy(
+        '    options?.length === 1 &&\n    !automaticMeet(chosen) &&',
+        "    options?.length === 1 &&\n    chosen?.id === 'legacy' &&\n    !automaticMeet(chosen) &&",
+      )
+      await expect(verifySingleSettings(copy, explicit)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+      await verifySingleSettings(Bookings, explicit)
+    },
+  )
   it.each(['google_meet', 'zoom'])(
     'fails a selected unavailable %s without creating a booking',
     async (kind) => {

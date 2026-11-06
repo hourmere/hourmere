@@ -92,6 +92,10 @@ Omitting the choice uses the default. A removed or unknown ID returns
 `invalid_location_choice`; an absent or invalid required phone returns
 `invalid_invitee_phone`. A chosen automatic location that cannot be provided for the
 assigned host returns `location_unavailable`, without silently switching hosts or locations.
+An event with exactly one location keeps its earlier behavior when the choice is omitted,
+whatever that option's ID: slot lookup and booking return the existing automatic-meeting
+readiness codes (such as `automatic_meet_unavailable`), and the booking stores that location's
+settings as configured. Choosing that option explicitly uses `location_unavailable`.
 Retain the same idempotency key and input for retries; changing the choice or phone with
 the same key is a different request.
 

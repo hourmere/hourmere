@@ -1700,9 +1700,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     ])
     await entry(s)
     const unavailable = { ...s.ctx, automaticZoom: true, automaticMeet: true }
-    // Changing a null location creates a new option, so both readers use the public
-    // location error instead of the preserved implicit legacy singleton provider code.
-    const expected = { code: 'location_unavailable' }
+    const expected = {
+      code: kind === 'zoom' ? 'automatic_zoom_unavailable' : 'automatic_meet_unavailable',
+    }
     await expect(
       availability.listPublicSlots(
         { ...s.publicCtx, automaticZoom: true, automaticMeet: true },

@@ -6,7 +6,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { selectBookableLocationOption } from './availability.ts'
 import { createOneTimeBooking, createPublicBooking, createPublicTeamBooking } from './bookings.ts'
 import { DomainError } from './errors.ts'
-import { resolveLocationChoice, selectLocationOption } from './location-options.ts'
+import {
+  isPreservedSingleton,
+  resolveLocationChoice,
+  selectLocationOption,
+} from './location-options.ts'
 import { createOneTimeBookingLink } from './one-time-links.ts'
 import { createFixtures } from './testing.ts'
 
@@ -133,6 +137,7 @@ function copiedBooking(change?: readonly [string, string]) {
   const noop = async () => {}
   const bindings = {
     DomainError,
+    isPreservedSingleton,
     resolveLocationChoice,
     selectLocationOption,
     selectBookableLocationOption,

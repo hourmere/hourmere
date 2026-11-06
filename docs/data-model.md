@@ -599,7 +599,11 @@ collective and round-robin Zoom are rejected even as non-default choices. The pu
 resolver consumes a trusted readiness snapshot rather than querying accounts. If the
 chosen automatic option cannot be honored for the actual assigned host/organizer,
 return conflict `location_unavailable`, without provider or private account details;
-do not substitute a location or a different host after assignment. Existing service
+do not substitute a location or a different host after assignment. An event type with
+exactly one option, queried or booked without an explicit choice, keeps the
+single-location contract whatever the option ID (adding a location or changing its kind
+allocates a new one): provider readiness codes such as `automatic_meet_unavailable`
+remain, and the booking snapshot stores that option's settings without normalization. Existing service
 configuration errors and conference readiness rules remain in force. No readiness
 failure is presented as proof that the host has not configured an account.
 

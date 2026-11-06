@@ -232,6 +232,18 @@ function unavailable(): never {
   )
 }
 
+/**
+ * One configured location and no explicit invitee choice keeps the single-location contract:
+ * provider readiness codes and the stored settings are those of an event without choices.
+ * The option id is irrelevant; adding a location or changing its kind allocates a new one.
+ */
+export function isPreservedSingleton(
+  options: readonly unknown[] | null | undefined,
+  optionId: string | undefined,
+): boolean {
+  return options?.length === 1 && optionId === undefined
+}
+
 /** Select configuration before host eligibility or assignment; never fall back for unknown IDs. */
 export function selectLocationOption(
   options: readonly LocationOption[] | null,

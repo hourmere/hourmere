@@ -43,7 +43,11 @@ import type { BookingNotifier, PublicContext, ServiceContext } from './context.t
 import { DomainError } from './errors.ts'
 import { admitGroupSlot, lockGroupBooking } from './group-seat-admission.ts'
 import { bookingHostIds, lockOrganization, resolvedBookingHosts } from './hosts.ts'
-import { resolveLocationChoice, selectLocationOption } from './location-options.ts'
+import {
+  isPreservedSingleton,
+  resolveLocationChoice,
+  selectLocationOption,
+} from './location-options.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -723,15 +727,15 @@ async function resolveBookingLocation(
     }
   } catch (error) {
     if (!(error instanceof DomainError)) throw error
-    if (options?.length === 1 && chosen?.id === 'legacy' && input.locationOptionId === undefined)
-      throw error
+    if (isPreservedSingleton(options, input.locationOptionId)) throw error
     throw new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
   }
-  // Migration 0056 deliberately preserved historical settings (including phone formatting).
-  // Do not turn a previously bookable legacy singleton into a configuration rewrite.
+  // Migration 0056 and older compatibility writes keep a single location's settings as stored
+  // (including historical phone formatting), whatever its option id. Booking one must not
+  // turn into a configuration rewrite; choosing it explicitly stores the same snapshot.
   if (
+    chosen &&
     options?.length === 1 &&
-    chosen?.id === 'legacy' &&
     !automaticMeet(chosen) &&
     !automaticZoom(chosen) &&
     !(chosen.kind === 'phone' && 'askInvitee' in chosen)
@@ -1470,9 +1474,7 @@ async function publicBooking(
         ctx,
         trx,
         id,
-        current.locations?.length === 1 &&
-          current.locations[0]?.id === 'legacy' &&
-          input.locationOptionId === undefined,
+        isPreservedSingleton(current.locations, input.locationOptionId),
       )
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return {
