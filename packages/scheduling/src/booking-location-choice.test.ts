@@ -46,6 +46,7 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
       .execute()
     return {
       event,
+      host,
       ctx: { db, now },
       input: {
         handle: host.handle,
@@ -114,6 +115,36 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
     expect(await snapshot(moved.booking.id)).toEqual(await snapshot(replay.booking.id))
     await Bookings.cancelManagedBooking(ctx, moved.manageToken as string)
     expect(await snapshot(moved.booking.id)).toEqual(await snapshot(replay.booking.id))
+  })
+  it('keeps the chosen phone when the invitee answers a host reschedule request', async () => {
+    const { ctx, input, host } = await setup()
+    const booked = await Bookings.createPublicBooking(ctx, input)
+    const requested = await Bookings.requestReschedule(
+      {
+        ...ctx,
+        principal: {
+          kind: 'session',
+          sessionId: 'synthetic-session',
+          user: { id: host.userId, name: 'Host', email: 'host@example.test' },
+          organization: { id: host.organizationId, name: 'Org', slug: 'org', personal: true },
+        },
+      },
+      booked.booking.id,
+      { idempotencyKey: crypto.randomUUID() },
+    )
+    const answer = {
+      start: Temporal.Instant.from('2026-11-03T09:00Z'),
+      rescheduleRequestId: requested.pendingReschedule?.id,
+    }
+    const moved = await Bookings.rescheduleManagedBooking(ctx, booked.manageToken as string, answer)
+    expect(moved.booking.location).toEqual({ kind: 'phone', number: input.inviteePhone })
+    expect(await snapshot(moved.booking.id)).toEqual(await snapshot(booked.booking.id))
+    const replay = await Bookings.rescheduleManagedBooking(
+      ctx,
+      booked.manageToken as string,
+      answer,
+    )
+    expect(replay.booking.id).toBe(moved.booking.id)
   })
   it('retains the selected office when rescheduling across a daylight-saving transition', async () => {
     const { ctx, input } = await setup()
