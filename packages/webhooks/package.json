@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./outbound-guard": "./src/transport.ts",
+    "./private-targets": "./src/private-targets.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
