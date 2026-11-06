@@ -36,9 +36,6 @@ const proposed = [
 type ProposedLabel = (typeof proposed)[number][0]
 const design = (label: ProposedLabel) => proposed.find(([name]) => name === label)?.[1] as number
 
-// Weekly is the densest supported pattern, so members are at least this far apart.
-const MINIMUM_MEMBER_GAP_MINUTES = 7 * 24 * 60
-
 function largestHostCount(mode: string) {
   let largest = 0
   for (let count = 1; count <= 64; count++)
@@ -151,36 +148,60 @@ function verifyExisting(source: string, code: CodeFacts) {
   ).toEqual(existing.map(([label, key]) => [label, code[key]]))
 }
 
+interface UrgentRules {
+  /** An urgent copy needs room for one cancellation per series the cap allows. */
+  roomCheck: boolean
+  /** A series sends at most one urgent update per rolling hour. */
+  onePerSeries: boolean
+  /** Failure reports skip the spacing too (the rejected rule). */
+  failureUrgent: boolean
+}
+
+const RULES: UrgentRules = { roomCheck: true, onePerSeries: true, failureUrgent: false }
+
 /**
  * Worst rolling hour for one invitee recipient when `seriesCount` series (at most the
- * admission cap) each send a confirmation, one urgent link update and a whole-series cancel,
- * over every interleaving. An urgent update goes out only while the count leaves room for
- * one cancellation per series the cap allows (`roomCheck`); otherwise it waits and is later
+ * admission cap) each send a regular series mail (the confirmation), a failure report for
+ * the imminent member, two repaired-link attempts and a whole-series cancel, over every
+ * interleaving. Within one hour a failure report is sent only if failures are urgent; a
+ * repaired link goes out only under the urgent rules, otherwise it waits and is later
  * skipped by the cancellation.
  */
-function simulateHour(code: CodeFacts, seriesCount: number, roomCheck = true) {
+function simulateHour(code: CodeFacts, seriesCount: number, rules: UrgentRules = RULES) {
   const cap = design('Series admissions per rolling hour per actor and event')
-  const threshold = roomCheck ? code.recipientHour - 1 - cap : Number.POSITIVE_INFINITY
-  const steps = ['confirmation', 'urgent', 'cancel'] as const
+  const threshold = rules.roomCheck ? code.recipientHour - 1 - cap : Number.POSITIVE_INFINITY
+  const steps = ['regular', 'failure', 'repaired', 'repaired', 'cancel'] as const
   let worst = 0
   let suppressed = false
-  const walk = (positions: readonly number[], count: number) => {
+  const walk = (positions: readonly number[], urgentSent: readonly boolean[], count: number) => {
     let finished = true
     positions.forEach((position, index) => {
       const step = steps[position]
       if (step === undefined) return
       finished = false
       const next = positions.map((value, other) => (other === index ? value + 1 : value))
-      if (step === 'urgent') walk(next, count <= threshold ? count + 1 : count)
-      else {
+      if (step === 'regular' || step === 'cancel') {
         if (count >= code.recipientHour) suppressed = true
-        walk(next, count + 1)
+        walk(next, urgentSent, count + 1)
+        return
       }
+      if (step === 'failure' && !rules.failureUrgent) {
+        walk(next, urgentSent, count)
+        return
+      }
+      const allowed = count <= threshold && !(rules.onePerSeries && urgentSent[index] === true)
+      if (allowed && count >= code.recipientHour) suppressed = true
+      walk(
+        next,
+        allowed ? urgentSent.map((sent, other) => sent || other === index) : urgentSent,
+        allowed ? count + 1 : count,
+      )
     })
     if (finished) worst = Math.max(worst, count)
   }
   walk(
     Array.from({ length: seriesCount }, () => 0),
+    Array.from({ length: seriesCount }, () => false),
     0,
   )
   return { worst, suppressed }
@@ -199,15 +220,13 @@ function mailProof(
   // Regular series mail (confirmation and regular link updates) shares one slot per rolling
   // hour only when spaced by at least the ledger window.
   const regularPerHour = Math.ceil(window / Math.min(spacing, window))
-  // Members are at least a week apart, so one series has at most one urgent member per hour.
-  const urgentPerHour = Math.ceil(
-    (design('Urgent link-update window before a start in minutes') + window) /
-      MINIMUM_MEMBER_GAP_MINUTES,
-  )
+  // The rules allow at most one urgent update per series in any rolling hour.
+  const urgentPerHour = 1
   const oneSeries = regularPerHour + urgentPerHour + 1
-  // The simulation models one regular mail and one urgent update per series.
+  // The simulation models one regular mail per series and hour, so it holds for that case.
   const simulated = simulateHour(code, cap)
-  const capHour = regularPerHour === 1 && urgentPerHour === 1 ? simulated.worst : Number.NaN
+  const single = simulateHour(code, 1)
+  const capHour = regularPerHour === 1 ? simulated.worst : Number.NaN
   const ruleMaxDay = 1 + digests + 1
   const accepted = [
     ['Create', 1, 1, perMail, perMail],
@@ -231,6 +250,13 @@ function mailProof(
       oneSeries,
       3,
       oneSeries * perMail,
+      3 * perMail,
+    ],
+    [
+      'First start inside the lead, its link failing and then repaired before the start, then whole-series cancel',
+      regularPerHour === 1 ? single.worst : Number.NaN,
+      3,
+      (regularPerHour === 1 ? single.worst : Number.NaN) * perMail,
       3 * perMail,
     ],
     [
@@ -269,6 +295,7 @@ function mailProof(
     regularPerHour,
     capHour,
     simulated,
+    single,
     accepted,
     rejected,
     suppressed: occurrences - code.recipientHour,
@@ -277,7 +304,8 @@ function mailProof(
 
 function verifyMailProof(source: string, code: CodeFacts, spacing?: number) {
   const proof = mailProof(code, spacing)
-  expect(proof.simulated.suppressed, 'the urgent room check prevents suppression').toBe(false)
+  expect(proof.simulated.suppressed, 'the urgent rules prevent suppression').toBe(false)
+  expect(proof.single.suppressed, 'one series is never suppressed').toBe(false)
   expect(
     numericRows(section(source, 'Mail budget proof'), 4),
     'mail budget rows match the code limits',
@@ -298,6 +326,8 @@ function verifyMailProof(source: string, code: CodeFacts, spacing?: number) {
     `(${1 + code.guests} invitee recipients) and ${code.hosts} collective hosts`,
     `the confirmation and regular link updates) costs at most ${proof.regularPerHour} per recipient in any rolling hour`,
     `two series at the admission cap at most ${proof.capHour}, the hourly limit itself`,
+    `One series therefore costs at most ${proof.single.worst} per invitee recipient in an hour`,
+    'two repaired-link attempts and a cancellation, and finds none that suppresses mail',
     `at most the recipient hourly limit minus 1 minus the admission cap (${code.recipientHour - 1 - cap} with defaults)`,
     `${occurrences}-occurrence/${code.guests}-guest/${code.hosts}-host`,
     `Keep ${occurrences} occurrences and ${code.guests} guests`,
@@ -329,8 +359,10 @@ function verifyRuleProse(source: string) {
     `lead (${design('Series confirmation lead before the first start in minutes')} minutes)`,
     `less than ${design('Series confirmation lead before the first start in minutes')} minutes away`,
     `imminent-start wait (${design('Imminent-start confirmation wait in minutes')} minutes)`,
-    `starting within the next ${design('Urgent link-update window before a start in minutes')} minutes is urgent`,
-    `no earlier than ${design('Minimum minutes between series link-update mails')} minutes after the previous series mail`,
+    `newly ready link for a member starting within the next ${design('Urgent link-update window before a start in minutes')} minutes`,
+    `no earlier than ${design('Minimum minutes between series link-update mails')} minutes after the series' previous confirmation or link-update mail`,
+    'A series sends at most one urgent update in any rolling hour',
+    'Failure reports are never urgent for any recipient',
     `at most ${design('Maximum series link-update mails per rolling day')} per series in any`,
     `${design('Maximum occurrence-host evaluations')} evaluations, at most ${design('Maximum batch database read statements')} reads/${design('Maximum batch fact rows')} rows, abort at ${design('Batch deadline in milliseconds')} ms`,
   ])
@@ -422,10 +454,19 @@ describe('recurring booking design bounds', () => {
     verifyMailProof(document, facts)
   })
 
-  it('needs the urgent room check to avoid suppression with two imminent series', () => {
+  it('needs each urgent rule to avoid suppression with two imminent series', () => {
     const cap = design('Series admissions per rolling hour per actor and event')
-    expect(simulateHour(facts, cap).suppressed).toBe(false)
-    expect(simulateHour(facts, cap, false).suppressed).toBe(true)
+    expect(simulateHour(facts, cap)).toEqual({ worst: facts.recipientHour, suppressed: false })
+    expect(simulateHour(facts, 1)).toEqual({ worst: 3, suppressed: false })
+    expect(simulateHour(facts, cap, { ...RULES, roomCheck: false }).suppressed).toBe(true)
+    // The round-4 counterexample: a failure report and a repaired link both sent at once.
+    expect(
+      simulateHour(facts, cap, { ...RULES, onePerSeries: false, failureUrgent: true }).suppressed,
+    ).toBe(true)
+    // One series alone would reach 4 in an hour without the per-series limit.
+    expect(
+      simulateHour(facts, 1, { ...RULES, onePerSeries: false, failureUrgent: true }).worst,
+    ).toBe(4)
   })
 
   it('detects a changed derived mail figure in an isolated document copy', () => {
