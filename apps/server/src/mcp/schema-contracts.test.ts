@@ -51,7 +51,7 @@ function withoutRedirect(value: unknown): unknown {
 
 function assertExistingDiscovery(adapt?: Adapt) {
   // No handlers run, so no connection pools or real provider dependencies are created.
-  for (const prepared of prepareTools(productTools({ db: {} as Db }))) {
+  for (const prepared of prepareTools(productTools({ db: {} as Db, slotSnippetsEnabled: true }))) {
     for (const io of ['input', 'output'] as const) {
       for (const target of ['draft-7', 'draft-2020-12'] as const) {
         const schema = prepared.tool[io]
@@ -107,7 +107,7 @@ function assertInternationalRedirects({
   const ajv = new Ajv({ strict: false, validateFormats: true })
   addFormats.default(ajv)
   const uri = ajv.compile({ type: 'string', format: 'uri' })
-  for (const prepared of prepareTools(productTools({ db: {} as Db }))) {
+  for (const prepared of prepareTools(productTools({ db: {} as Db, slotSnippetsEnabled: true }))) {
     if (!['create_event_type', 'update_event_type'].includes(prepared.tool.name)) continue
     const tool = {
       ...prepared.tool,
