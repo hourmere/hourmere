@@ -678,3 +678,8 @@ a known meeting ID without selecting another account or creating a replacement. 
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
 ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.
+
+CSV export through API keys is limited to the owner's personal organization (`read` or
+`full`). Team-wide CSV exports retain the existing browser-session-only team-admin access
+and field rules; a team key, even an owner's `full` key, receives
+`team_management_access_denied`. See [CSV booking export](https://hourmere.com/docs/booking-export).

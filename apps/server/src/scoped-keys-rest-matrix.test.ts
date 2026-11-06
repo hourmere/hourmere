@@ -186,6 +186,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let date: string
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
+    const personalKeys = new Map<ApiKeyScope, string>()
 
     beforeAll(async () => {
       database = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -228,6 +229,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           (
             await auth.api.createApiKey({
               body: { userId: owner.user.id, metadata: { scope, organizationId: teamId } },
+            })
+          ).key,
+        )
+      // Exports permit scoped keys only for the owner's personal organization.
+      for (const scope of scopes)
+        personalKeys.set(
+          scope,
+          (
+            await auth.api.createApiKey({
+              body: {
+                userId: owner.user.id,
+                metadata: { scope, organizationId: owner.organization.id },
+              },
             })
           ).key,
         )
@@ -616,14 +630,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
+    it('covers the exact 101-operation contract and all 303 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(100)
-      expect(new Set(ids).size).toBe(100)
+      expect(ids).toHaveLength(101)
+      expect(new Set(ids).size).toBe(101)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(300)
+      expect(cases).toHaveLength(303)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -635,7 +649,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           {
             method: fixture.method,
             headers: {
-              authorization: `Bearer ${keys.get(scope)}`,
+              authorization: `Bearer ${(operation === 'GET /api/v1/bookings/export.csv' ? personalKeys : keys).get(scope)}`,
               'content-type': 'application/json',
               ...fixture.headers,
             },

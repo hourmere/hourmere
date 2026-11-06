@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
@@ -6,6 +8,7 @@ import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts
 import {
   BOOKING_EXPORT_COLUMNS,
   csvCell,
+  EXPORT_STALL_TIMEOUT_MS,
   EXPORT_TIMEOUT_MS,
   exportBookingsCsv,
   prepareBookingExport,
@@ -56,6 +59,29 @@ describe('CSV cells', () => {
   ])('escapes %j', (value) => {
     expect(parseCsv(`${csvCell(value)}\r\n`)).toEqual([[`'${value}`]])
   })
+  it.each(['x;=HYPERLINK("https://evil.invalid")', 'x,  +SUM(1)', 'x;\t@formula', 'x;=1, -2'])(
+    'neutralizes formula triggers after locale separators: %j',
+    (value) => {
+      const encoded = csvCell(value)
+      const cell = parseCsv(`${encoded}\r\n`)[0]?.[0] ?? ''
+      expect(cell).toBe(`'${value.replace(/;(\s*[=+\-@\t\r])/gu, ";'$1")}`)
+      expect(encoded.startsWith('"')).toBe(true)
+    },
+  )
+  it('neutralizes semicolon formulas even when a wrong-delimiter parser splits the full CSV row', () => {
+    const row = ['id', 'ordinary', 'x;=HYPERLINK("https://evil.invalid")', 'z;  +CMD']
+      .map(csvCell)
+      .join(',')
+    for (const field of row.split(';')) expect(field).not.toMatch(/^\s*[=+\-@\t\r]/u)
+    expect(row).toContain(";'=HYPERLINK")
+    expect(row).toContain(";'  +CMD")
+  })
+  it('preserves nested JSON after removing the spreadsheet protection prefix', () => {
+    const value = JSON.stringify({ q: [1, -2], text: 'ordinary' })
+    const cell = parseCsv(`${csvCell(value)}\r\n`)[0]?.[0] ?? ''
+    expect(cell[0]).toBe("'")
+    expect(JSON.parse(cell.slice(1))).toEqual({ q: [1, -2], text: 'ordinary' })
+  })
   it('quotes commas, doubled quotes and line breaks without changing ordinary text', () => {
     for (const value of ['ordinary', 'comma,here', 'a"quote', 'line\nnext', ''])
       expect(parseCsv(`${csvCell(value)}\r\n`)).toEqual([[value]])
@@ -73,6 +99,25 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
   afterAll(async () => {
     await owned?.drop()
   })
+  async function session(principal: Principal): Promise<Principal> {
+    const row = await db
+      .insertInto('auth.session')
+      .values({
+        userId: principal.user.id,
+        token: randomUUID(),
+        activeOrganizationId: principal.organization.id,
+        expiresAt: new Date(Date.now() + 3_600_000),
+        updatedAt: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return {
+      user: principal.user,
+      organization: principal.organization,
+      kind: 'session',
+      sessionId: row.id,
+    }
+  }
   it('rejects invalid limits, zones, IDs and stale organization contexts', async () => {
     const user = await createTestUser(db)
     const ctx = testContext(db, user.principal)
@@ -114,10 +159,14 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     )
     for (const user of [owner, admin])
       expect(
-        (await read(await exportBookingsCsv(testContext(db, team.as(user)), range)))[1]?.[0],
+        (
+          await read(await exportBookingsCsv(testContext(db, await session(team.as(user))), range))
+        )[1]?.[0],
       ).toBe(id)
-    await expect(exportBookingsCsv(testContext(db, team.as(member)), range)).rejects.toMatchObject({
-      code: 'insufficient_role',
+    await expect(
+      exportBookingsCsv(testContext(db, await session(team.as(member))), range),
+    ).rejects.toMatchObject({
+      code: 'team_management_access_denied',
     })
     await db
       .updateTable('auth.member')
@@ -125,8 +174,10 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       .where('organizationId', '=', team.id)
       .where('userId', '=', admin.id)
       .execute()
-    await expect(exportBookingsCsv(testContext(db, team.as(admin)), range)).rejects.toMatchObject({
-      code: 'insufficient_role',
+    await expect(
+      exportBookingsCsv(testContext(db, await session(team.as(admin))), range),
+    ).rejects.toMatchObject({
+      code: 'team_management_access_denied',
     })
     const forged = { ...member.principal, organization: owner.principal.organization }
     await expect(exportBookingsCsv(testContext(db, forged), range)).rejects.toMatchObject({
@@ -135,6 +186,103 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     expect(
       await read(await exportBookingsCsv(testContext(db, owner.principal), range)),
     ).toHaveLength(1)
+  })
+  it('keeps team browser exports within the team-admin whitelist and personal exports full on every principal kind', async () => {
+    const owner = await createTestUser(db),
+      former = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const { id } = await db
+      .insertInto('bookings')
+      .values({
+        organization_id: team.id,
+        start_at: '2026-05-01T00:00:00Z',
+        end_at: '2026-05-01T01:00:00Z',
+        source: 'api',
+        manage_token_hash: Buffer.alloc(32, 2),
+        title: 'PRIVATE_TITLE',
+        responses: JSON.stringify({ q: 'PRIVATE_ANSWER' }),
+        cancel_reason: 'PRIVATE_REASON',
+        location_option: JSON.stringify({
+          id: 'private-option',
+          kind: 'link',
+          label: 'PRIVATE_LOCATION',
+          url: 'https://private.invalid',
+        }),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db.insertInto('booking_hosts').values({ booking_id: id, user_id: former.id }).execute()
+    const teamSession = await session(team.as(owner))
+    const rows = await read(await exportBookingsCsv(testContext(db, teamSession), range))
+    expect(rows[0]).toEqual([
+      'id',
+      'event_type_id',
+      'event_type',
+      'start',
+      'end',
+      'start_utc',
+      'end_utc',
+      'status',
+      'invitee_name',
+      'invitee_email',
+      'guests_count',
+      'hosts',
+      'cancelled_at',
+      'time_zone',
+    ])
+    expect(JSON.stringify(rows)).not.toMatch(/PRIVATE_|answers|location_option|source|created_at/)
+    expect(JSON.stringify(rows)).not.toContain(former.email)
+    expect(JSON.parse(rows[1]?.[11] ?? '')).toEqual([{ id: former.id, name: former.name }])
+    const oauth: Principal = {
+      ...team.as(owner),
+      kind: 'oauth',
+      oauthConsentId: randomUUID(),
+      clientId: 'test',
+      scopes: ['mcp:tools'],
+    }
+    for (const principal of [
+      team.as(owner),
+      {
+        ...team.as(owner),
+        kind: 'api_key' as const,
+        apiKeyScope: 'read' as const,
+        apiKeyId: randomUUID(),
+      },
+      oauth,
+    ])
+      await expect(prepareBookingExport(testContext(db, principal), range)).rejects.toMatchObject({
+        code: 'team_management_access_denied',
+      })
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(0) })
+      .where('id', '=', teamSession.kind === 'session' ? teamSession.sessionId : '')
+      .execute()
+    await expect(prepareBookingExport(testContext(db, teamSession), range)).rejects.toMatchObject({
+      code: 'team_management_access_denied',
+    })
+    const personalId = await createFixtures(db).booking(
+      owner.principal.organization.id,
+      [owner.id],
+      '2026-05-01T00:00:00Z',
+      '2026-05-01T01:00:00Z',
+    )
+    await db
+      .updateTable('bookings')
+      .set({ title: 'PERSONAL_TITLE', responses: JSON.stringify({ q: 'PERSONAL_ANSWER' }) })
+      .where('id', '=', personalId)
+      .execute()
+    for (const principal of [
+      owner.principal,
+      await session(owner.principal),
+      { ...oauth, organization: owner.principal.organization },
+    ]) {
+      const personal = await read(await exportBookingsCsv(testContext(db, principal), range))
+      expect(personal[0]).toEqual([...BOOKING_EXPORT_COLUMNS])
+      expect(JSON.stringify(personal)).toContain('PERSONAL_TITLE')
+      expect(JSON.stringify(personal)).toContain('PERSONAL_ANSWER')
+      expect(JSON.stringify(personal)).toContain(owner.email)
+    }
   })
   it('exports projected fields safely, including JSON answers, imported/cancelled rows and DST', async () => {
     const user = await createTestUser(db, '  =HOST("x")')
@@ -152,7 +300,12 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
         cancelled_at: new Date(),
         manage_token_hash: Buffer.alloc(32, 1),
         title: '  @TITLE,"quoted"\nnext',
-        responses: JSON.stringify({ q: '=ANSWER', other: ['+multi', '\rline'] }),
+        responses: JSON.stringify({
+          q: '=ANSWER',
+          other: ['+multi', '\rline'],
+          nested: [1, -2],
+          separator: 'x;=formula',
+        }),
         location_option: JSON.stringify({
           id: 'option',
           kind: 'link',
@@ -188,13 +341,19 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     expect(row[3]).toBe('\'  @TITLE,"quoted"\nnext')
     expect(row[9]).toBe("'\t=NAME")
     expect(row[10]).toBe("'+EMAIL@example.com")
-    expect(row[4]).toContain('01:30:00+01:00')
-    expect(row[5]).toContain('03:30:00+02:00')
+    expect(row[4]).toBe('2026-03-29T01:30:00+01:00')
+    expect(row.at(-1)).toBe('Europe/Berlin')
+    expect(row[5]).toBe('2026-03-29T03:30:00+02:00')
     expect(row[8]).toBe('cancelled')
     expect(row[15]).toBe('api')
     expect(row[17]).not.toBe('')
     expect(JSON.parse(row[12] ?? '')[0].name).toBe('  =HOST("x")')
-    expect(JSON.parse(row[14] ?? '')).toEqual({ q: '=ANSWER', other: ['+multi', '\rline'] })
+    expect(JSON.parse((row[14] ?? '').replace(/^'/u, ''))).toEqual({
+      q: '=ANSWER',
+      other: ['+multi', '\rline'],
+      nested: [1, -2],
+      separator: 'x;=formula',
+    })
     expect(row[13]).toBe('{"id":"option","kind":"link","label":"=LABEL"}')
     expect(text).not.toMatch(/PRIVATE_REASON|private.invalid|manage_token|hash|credential/)
     await createFixtures(db).booking(
@@ -266,6 +425,59 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     )
     expect(bounded.slice(1).map((row) => row[0])).toEqual([next])
   })
+  it('caps exports across organizations before connection acquisition and keeps queries responsive', async () => {
+    vi.stubEnv('BOOKING_EXPORT_MAX_CONCURRENT', '2')
+    const users = await Promise.all(Array.from({ length: 3 }, () => createTestUser(db)))
+    const streams: ReadableStream<Uint8Array>[] = []
+    try {
+      for (const user of users.slice(0, 2))
+        streams.push(await exportBookingsCsv(testContext(db, user.principal), range))
+      const third = users[2]
+      if (!third) throw new Error('missing fixture')
+      const connect = vi.spyOn(owned.pool, 'connect')
+      try {
+        await expect(
+          exportBookingsCsv(testContext(db, third.principal), range).then((stream) => {
+            streams.push(stream)
+            return stream
+          }),
+        ).rejects.toMatchObject({ code: 'export_busy' })
+        expect(connect).not.toHaveBeenCalled()
+      } finally {
+        connect.mockRestore()
+      }
+      const response = await Promise.race([
+        sql`SELECT 1 AS answer`.execute(db),
+        new Promise<never>((_, reject) => {
+          const timeout = setTimeout(() => reject(new Error('unrelated query blocked')), 1000)
+          timeout.unref()
+        }),
+      ])
+      expect(response.rows).toEqual([{ answer: 1 }])
+      expect(owned.pool.waitingCount).toBe(0)
+    } finally {
+      await Promise.all(streams.map((stream) => stream.cancel()))
+      vi.unstubAllEnvs()
+    }
+  })
+  it('cuts off stalled readers and returns their database connection', async () => {
+    const user = await createTestUser(db)
+    const ctx = testContext(db, user.principal)
+    const idleBefore = owned.pool.totalCount - owned.pool.idleCount
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const stream = await exportBookingsCsv(ctx, range)
+      const reader = stream.getReader()
+      await reader.read()
+      expect(owned.pool.totalCount - owned.pool.idleCount).toBe(idleBefore + 1)
+      await vi.advanceTimersByTimeAsync(EXPORT_STALL_TIMEOUT_MS)
+      await expect(reader.read()).rejects.toThrow('reader timed out')
+    } finally {
+      vi.useRealTimers()
+    }
+    await vi.waitFor(() => expect(owned.pool.totalCount - owned.pool.idleCount).toBe(idleBefore))
+    await (await exportBookingsCsv(ctx, range)).cancel()
+  })
   it('releases a disconnected locked reader and an already-aborted request', async () => {
     const user = await createTestUser(db)
     const ctx = testContext(db, user.principal)
@@ -305,13 +517,16 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       .select(['id', 'name', 'email'])
       .where('id', '=', f.host)
       .executeTakeFirstOrThrow()
-    const ctx = testContext(db, {
-      kind: 'api_key',
-      apiKeyId: 'synthetic-key',
-      apiKeyScope: 'read',
-      user: host,
-      organization: { id: f.organization, name: 'Group team', slug: 'group', personal: false },
-    })
+    const ctx = testContext(
+      db,
+      await session({
+        kind: 'api_key',
+        apiKeyId: 'synthetic-key',
+        apiKeyScope: 'read',
+        user: host,
+        organization: { id: f.organization, name: 'Group team', slug: 'group', personal: false },
+      }),
+    )
     await db
       .updateTable('booking_attendees')
       .set({ name: 'First seat' })
@@ -349,18 +564,20 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
         .sort(),
     ).toEqual([...bookings].sort())
     for (const row of all.slice(1)) {
-      expect(JSON.parse(row[12] ?? '')).toEqual([host])
-      expect(row[11]).toBe('0')
+      const data = Object.fromEntries((all[0] ?? []).map((column, index) => [column, row[index]]))
+      expect(JSON.parse(data.hosts ?? '')).toEqual([{ id: host.id, name: host.name }])
+      expect(data.guests_count).toBe('0')
       if (row[0] === first) {
-        expect(row[8]).toBe('cancelled')
-        expect(row[9]).toBe('First seat')
-        expect(row[10]).toContain('@example.test')
+        expect(data.status).toBe('cancelled')
+        expect(data.invitee_name).toBe('First seat')
+        expect(data.invitee_email).toContain('@example.test')
         expect(row.join(',')).not.toContain('Private sibling')
         expect(row.join(',')).not.toContain('private-sibling-answer')
-        expect(JSON.parse(row[14] ?? '')).toEqual({ q: 'first-answer' })
+        expect(data).not.toHaveProperty('answers')
+        expect(row.join(',')).not.toContain('first-answer')
       } else {
-        expect(row[8]).toBe('confirmed')
-        expect(row[9]).toBe('Private sibling')
+        expect(data.status).toBe('confirmed')
+        expect(data.invitee_name).toBe('Private sibling')
         expect(row.join(',')).not.toContain('first-answer')
       }
     }

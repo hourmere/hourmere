@@ -297,3 +297,8 @@ These routes keep their own authentication; API key scopes do not authorize them
 | `POST /api/conference/zoom/events` | Provider signature |
 
 <!-- api-key-scope-table:end -->
+
+CSV export through API keys is limited to the owner's personal organization (`read` or
+`full`). Team-wide CSV exports retain the existing browser-session-only team-admin access
+and field rules; a team key, even an owner's `full` key, receives
+`team_management_access_denied`. See [CSV booking export](https://hourmere.com/docs/booking-export).

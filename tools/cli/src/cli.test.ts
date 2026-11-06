@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { constants, readFileSync } from 'node:fs'
-import { mkdtemp, open, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -75,7 +75,7 @@ function sourceCopy(change?: readonly [string, string]): typeof runCli {
     /\bexport /g,
     '',
   )
-  const bindings = { constants, open, ...client }
+  const bindings = { constants, open, unlink, ...client }
   return new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),
   ) as typeof runCli

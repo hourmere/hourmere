@@ -272,8 +272,11 @@ export async function downloadCsv(options: {
       headers: { authorization: `Bearer ${options.key}`, accept: 'text/csv' },
     })
     if (!response.ok) {
-      await response.body?.cancel()
-      throw new CliError('http_error', response.status)
+      const reply = await readResponse(response).catch(() => undefined)
+      throw new CliError(
+        safeCode(isObject(reply) ? reply.error : undefined, 'http_error'),
+        response.status,
+      )
     }
     if (response.headers.get('content-type')?.split(';')[0]?.trim() !== 'text/csv') {
       await response.body?.cancel()

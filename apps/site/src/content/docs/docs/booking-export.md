@@ -12,16 +12,18 @@ included in self-hosted Hourmere without a separate service or paid feature flag
 ## Permissions and personal data
 
 Personal exports contain only the owner's bookings in their personal organization.
-Team exports require current team owner/admin membership, including when the caller hosts
-one of the bookings. An ordinary member cannot export team data. REST and CLI API keys
-require `read` or `full`; `bookings` scope cannot export. A scope never replaces the
-ownership or role check. The organization associated with the credential determines the
-export's organization.
+Team exports require a current verified browser session and current team owner/admin
+membership, including when the caller hosts one of the bookings. An ordinary member
+cannot export team data. Team API keys and MCP OAuth grants receive
+`403 team_management_access_denied`, matching team-wide booking reads.
+Personal REST and CLI API keys require `read` or `full`; `bookings` scope cannot export.
+A scope never replaces ownership checks. The credential's organization determines scope;
+there is no API-key exception for team owners/admins.
 
-**The file contains personal data**, including invitee names, email addresses and answers.
+**The file contains personal data**, including invitee names and email addresses; personal files also contain custom answers.
 Store it privately, share it only with authorized recipients and delete copies when no
 longer needed. Deleting data in Hourmere cannot recall a downloaded file. Exports omit
-manage tokens, token hashes, credential data and internal request fingerprints. Location
+manage tokens, token hashes, credential data and internal request fingerprints. Personal location
 exports describe the chosen option; they do not provide private meeting links.
 
 ## REST
@@ -44,7 +46,7 @@ booking list. The response is not cached.
 | `bom` | `true` adds a UTF-8 byte-order mark for Excel. Default `false` keeps machine-oriented CSV free of a BOM. |
 | `expectedOrganizationId` | Optional organization binding for a browser download. A changed current organization refuses the request instead of exporting a different space. |
 
-Supply your key privately as described in the [REST quickstart](/docs/rest):
+For a personal export, supply your key privately as described in the [REST quickstart](/docs/rest):
 
 ```sh
 curl --fail-with-body --get "$HOURMERE_URL/api/v1/bookings/export.csv" \
@@ -59,11 +61,20 @@ curl --fail-with-body --get "$HOURMERE_URL/api/v1/bookings/export.csv" \
 For a range defined by local calendar dates, convert each boundary separately in that
 time zone. A daylight-saving transition can make a local day 23 or 25 hours; adding
 24 elapsed hours is not always the next local midnight. Local start/end values include
-their UTC offsets so repeated autumn hours remain distinguishable.
+their UTC offsets so repeated autumn hours remain distinguishable. For example,
+`2026-03-29T01:30:00+01:00` has no bracketed zone suffix; the IANA zone is in
+`time_zone`. Spreadsheet date parsing still depends on the chosen import settings.
 
 ## Columns
 
 Headers are stable machine-readable names, independent of the admin interface language.
+The table below describes the **personal** column set. Team exports use only `id`,
+`event_type_id`, `event_type`, `start`, `end`, `start_utc`, `end_utc`, `status`,
+`invitee_name`, `invitee_email`, `guests_count`, `hosts`, `cancelled_at` and `time_zone`.
+Team `hosts` contains IDs and names only, including for former members; no host email
+addresses are exported. Team files exclude booking titles, cancellation reasons, custom
+answers, location metadata/links, source attribution and creation timestamps, following
+the existing team-admin booking-read data boundary. A deleted event type has an empty title.
 
 | Column | Contents |
 |---|---|
@@ -73,6 +84,7 @@ Headers are stable machine-readable names, independent of the admin interface la
 | `title` | Booking title. |
 | `start` | Start in the requested zone, with UTC offset. |
 | `end` | End in the requested zone, with UTC offset. |
+| `time_zone` | Requested IANA zone, such as `Europe/Berlin`. |
 | `start_utc` | Start instant in UTC. |
 | `end_utc` | End instant in UTC. |
 | `status` | Stored booking status, including cancelled predecessors after a reschedule. |
@@ -91,21 +103,31 @@ span event types with different questions and historical edits. Stable question 
 the header unchanged and preserve arrays and other answer types without a separate
 discovery pass over all bookings. JSON values are then quoted as ordinary CSV cells.
 
-Cells use RFC 4180 quoting: commas, quotes and line breaks are preserved, double quotes
+Cells use RFC 4180 quoting: commas, semicolons, quotes and line breaks are preserved, double quotes
 are doubled, and record boundaries use CRLF. A cell that begins with `=`, `+`, `-`, `@`,
 tab or carriage return, including after leading whitespace, receives an apostrophe
-prefix. This treats spreadsheet formulas as text. JSON strings are contained within a
-JSON object/array rather than becoming independent spreadsheet cells. Do not strip the
-protection before opening untrusted data in a spreadsheet.
+prefix. A trigger after a comma, including intervening whitespace, also prefixes the
+entire cell. A trigger after a semicolon receives an apostrophe immediately after that
+semicolon, protecting against common locale list-separator splitting even in a complete
+comma-delimited row. Cells containing semicolons are quoted as well.
+JSON serialization escapes semicolons as `\u003b` before CSV protection, so parsing the
+JSON preserves the original values. Programmatic JSON consumers must remove the single
+leading protection apostrophe, when present, before parsing the JSON.
+For reliable interpretation use **Data → From Text/CSV** and explicitly choose the comma
+delimiter and text column types for untrusted fields. This is defense in depth, not a
+universal guarantee across spreadsheet applications: alternate delimiter/quote handling,
+full-width formula characters and re-saving or stripping apostrophes can bypass protections.
+Do not remove protection before opening untrusted data in a spreadsheet.
 
 ## MCP and CLI
 
-MCP `export_bookings` takes the same filters with a boolean `bom`. It validates the
+For personal organizations, MCP `export_bookings` takes the same filters with a boolean `bom`. It validates the
 range and authorization and returns a small download pointer, not CSV rows. This keeps
 large files out of the agent's context. The pointer contains no credentials and grants
 no access on its own; downloading requires authentication and checks permissions again.
 The REST download accepts a `read`/`full` API key or a browser session, not an MCP OAuth
-token. OAuth-connected agents can provide the pointer for an authorized user to download.
+token. OAuth-connected personal agents can provide the pointer for an authorized user
+to download. Team exports are browser-only: neither MCP nor CLI can obtain a team pointer.
 
 The CLI `export` command streams that download to stdout or to `--output FILE`, using
 the same key. Put the query in a private JSON input file:
@@ -130,20 +152,28 @@ npm run --silent cli -- export --input export-request.json
 - Rows are read with keyset pagination in batches of 100, rather than loading the full
   result in memory. Only one export per organization can run at a time, enforced in
   PostgreSQL across web processes. Another active download receives
-  `409 export_in_progress`; wait for it to finish before retrying. Each export has a
-  five-minute deadline and holds one database connection while streaming. Its
+  `409 export_in_progress`; wait for it to finish before retrying. There is also a
+  process-wide cap configured by `BOOKING_EXPORT_MAX_CONCURRENT` (default 2, valid 1–8;
+  invalid settings use 2). A full process cap returns `409 export_busy` before acquiring
+  a database connection. Each stream is cut off after 30 seconds without a reader pull,
+  as well as after a five-minute overall deadline, returning its connection. Its
   repeatable-read snapshot reflects the data at export start, so changes committed
-  later appear only in a new export. A disconnect or deadline releases the export slot.
+  later appear only in a new export. A disconnect, stalled reader or deadline releases
+  the export slot.
 - Exports are read-only. Repeating a download neither creates bookings nor sends
-  notifications. Imported bookings retain `source=import` and remain managed in their
+  notifications. Personal imported bookings retain `source=import`; imported bookings remain managed in their
   original system. A reschedule leaves its cancelled predecessor and a new booking;
   each appears when it matches the selected range and status.
 - For stored group seats, each booking is a separate row with that seat's invitee and
-  answers. Hosts come from the shared slot, including cancelled-seat history; answers
+  answers for personal exports (team exports omit answers). Hosts come from the shared
+  slot, including cancelled-seat history; answers
   and contacts from other seats are never folded into the row.
 - There is no scheduled export, email delivery, saved report or resumable download.
-  A failed or interrupted transfer may leave an incomplete local file; discard it and
-  request a new export, using a smaller range if needed.
+  The browser prepares the download in memory and shows failed-request errors in the panel;
+  narrow team ranges for large downloads. For large personal exports, prefer CLI streaming.
+  The CLI removes an output file it created if the download fails, and reports API error
+  codes such as `export_busy` or `organization_context_changed`. Stdout and other HTTP
+  clients can retain partial bytes: discard them and request a new export.
 - There is no attendance/no-show column because attendance tracking is not available
   in this version. A past confirmed booking does not prove that anyone attended.
 - CSV is a reporting format, not a database backup or a booking import format.

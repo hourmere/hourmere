@@ -692,7 +692,7 @@ export function bookingRoutes({
         operationId: 'exportBookingsCsv',
         summary: 'Download bookings as CSV',
         description:
-          'Personal owners and team owners/admins only. A repeatable-read snapshot streams 100-row keyset pages; one export per organization, five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
+          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
         security: authenticated,
         middleware: caller,
         request: {
@@ -715,8 +715,12 @@ export function bookingRoutes({
           },
           400: error('Invalid export filters or range'),
           401: unauthorized,
-          403: error('Only personal owners and team owners/admins may export'),
-          409: error('Export already running or organization context changed'),
+          403: error(
+            'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
+          ),
+          409: error(
+            'export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
+          ),
           429: keyRateLimited,
         },
       }),

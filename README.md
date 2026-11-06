@@ -246,6 +246,13 @@ disconnected: 20 s to send a request's headers and 60 s for the whole request
 the app, or the proxy may reuse a connection the app has just closed and answer 502. The
 default is above the usual ones: nginx's upstream keepalive and AWS ALB 60 s, Traefik 90 s,
 Caddy 120 s.
+CSV exports reserve at most two database connections per server process by default.
+`BOOKING_EXPORT_MAX_CONCURRENT` accepts 1–8 (invalid values use 2); keep this below
+the database pool capacity, with headroom for ordinary traffic. Excess requests fail
+before acquiring a connection with HTTP 409 `export_busy`. Each stream closes after
+30 seconds without reader progress, or after five minutes overall. These limits apply
+in addition to the one-export-per-organization database lease.
+
 
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Accounts are only created for email addresses the provider

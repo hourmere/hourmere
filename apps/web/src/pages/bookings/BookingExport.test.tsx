@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
 import * as session from '../../session.tsx'
@@ -36,20 +36,37 @@ async function range(from = '2030-03-01T00:00', to = '2030-04-01T00:00') {
   // The native details element is deliberately opened before inspecting its controls.
   fireEvent.click(screen.getByText('Export bookings as CSV'))
   screen.getByText('Export bookings as CSV').closest('details')?.setAttribute('open', '')
-  fireEvent.change(screen.getByLabelText('Export starts at or after (UTC)'), {
+  fireEvent.change(screen.getByLabelText('Bookings starting at or after (UTC)'), {
     target: { value: from },
   })
-  fireEvent.change(screen.getByLabelText('Export starts before (UTC)'), { target: { value: to } })
+  fireEvent.change(screen.getByLabelText('Bookings starting before (UTC)'), {
+    target: { value: to },
+  })
 }
-function download() {
-  const link = screen.getByRole('link', { name: 'Download CSV' })
-  return new URL(link.getAttribute('href') ?? '', 'http://localhost')
+async function download() {
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response('header\r\n', { headers: { 'content-type': 'text/csv' } }))
+  vi.stubGlobal(
+    'URL',
+    class extends URL {
+      static override createObjectURL = vi.fn(() => 'blob:test')
+      static override revokeObjectURL = vi.fn()
+    },
+  )
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  const button = screen.getByRole('button', { name: 'Download CSV' })
+  fireEvent.click(button)
+  await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false))
+  expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled()
+  expect(screen.queryByRole('alert')).toBeNull()
+  return new URL(String(fetcher.mock.calls.at(-1)?.[0]), 'http://localhost')
 }
 describe('CSV export action', () => {
-  it('keeps the tab boundary, zone and pinned organisation in a native download', async () => {
+  it('keeps the tab boundary, zone and pinned organisation in the download request', async () => {
     setup()
     await range()
-    expect(Object.fromEntries(download().searchParams)).toMatchObject({
+    expect(Object.fromEntries((await download()).searchParams)).toMatchObject({
       from: '2030-03-01T00:00:00.000Z',
       to: '2030-04-01T00:00:00.000Z',
       timeZone: 'Europe/Berlin',
@@ -57,18 +74,55 @@ describe('CSV export action', () => {
       bom: 'true',
       order: 'asc',
     })
-    expect(download().searchParams.has('endAfter')).toBe(true)
-    expect(download().searchParams.has('limit')).toBe(false)
-    expect(screen.getByRole('link', { name: 'Download CSV' }).getAttribute('target')).toBe('_blank')
+    expect((await download()).searchParams.has('endAfter')).toBe(true)
+    expect((await download()).searchParams.has('limit')).toBe(false)
+    expect(screen.getByLabelText('Include UTF-8 BOM for Excel').closest('label')?.className).toBe(
+      'checkbox',
+    )
     fireEvent.click(screen.getByLabelText('Include UTF-8 BOM for Excel'))
-    expect(download().searchParams.get('bom')).toBe('false')
+    expect((await download()).searchParams.get('bom')).toBe('false')
+  })
+  it.each([400, 409, 429])(
+    'shows an in-app error and saves no file for HTTP %s',
+    async (status) => {
+      setup()
+      await range()
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json({ error: 'export_busy' }, { status }),
+      )
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+      fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('Could not download CSV')
+      expect(click).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: 'Download CSV' }).hasAttribute('disabled')).toBe(
+        false,
+      )
+    },
+  )
+  it('reports a truncated download without saving a partial CSV', async () => {
+    setup()
+    await range()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new Error('connection lost'))
+          },
+        }),
+        { headers: { 'content-type': 'text/csv' } },
+      ),
+    )
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not download CSV')
+    expect(click).not.toHaveBeenCalled()
   })
   it('retains descending order and end boundary on the personal past tab', async () => {
     setup(false, 'owner', '/app/bookings?tab=past')
     await range()
-    expect(download().searchParams.get('order')).toBe('desc')
-    expect(download().searchParams.has('endTo')).toBe(true)
-    expect(download().searchParams.has('endAfter')).toBe(false)
+    expect((await download()).searchParams.get('order')).toBe('desc')
+    expect((await download()).searchParams.has('endTo')).toBe(true)
+    expect((await download()).searchParams.has('endAfter')).toBe(false)
   })
   it.each([
     ['', '2030-04-01T00:00'],
@@ -87,14 +141,14 @@ describe('CSV export action', () => {
       '/app/team/bookings?tab=all&from=2030-03-02T12:00:00Z&to=2030-03-20T12:00:00Z&status=cancelled&endTo=2030-03-22T00:00:00Z&order=desc',
     )
     await range()
-    expect(Object.fromEntries(download().searchParams)).toMatchObject({
+    expect(Object.fromEntries((await download()).searchParams)).toMatchObject({
       from: '2030-03-02T12:00:00.000Z',
       to: '2030-03-20T12:00:00.000Z',
       status: 'cancelled',
       endTo: '2030-03-22T00:00:00.000Z',
       order: 'desc',
     })
-    expect(download().searchParams.has('limit')).toBe(false)
+    expect((await download()).searchParams.has('limit')).toBe(false)
   })
   it('does not offer team export to members', async () => {
     setup(true, 'member', '/app/team/bookings')
@@ -111,7 +165,7 @@ describe('CSV export action', () => {
     setup()
     await screen.findByText('将预约导出为 CSV')
     expect(screen.getByText('此文件包含个人数据。请妥善保存并谨慎分享。')).toBeDefined()
-    expect(screen.getByLabelText('导出开始时间不早于（UTC）')).toBeDefined()
+    expect(screen.getByLabelText('预约开始时间不早于（UTC）')).toBeDefined()
     expect(screen.getByLabelText('包含 UTF-8 BOM，便于 Excel 读取')).toBeDefined()
   })
 })

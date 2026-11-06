@@ -98,6 +98,70 @@ describe.skipIf(!process.env.DATABASE_URL)('booking export REST', () => {
       await retry.body?.cancel()
     })
   })
+  it('permits only verified browser team administrators and preserves the team field boundary', async () => {
+    const owner = await createTestUser(db),
+      admin = await createTestUser(db),
+      member = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: admin, role: 'admin' },
+      { user: member, role: 'member' },
+    ])
+    const id = await createFixtures(db).booking(
+      team.id,
+      [member.id],
+      '2026-05-01T00:00:00Z',
+      '2026-05-01T01:00:00Z',
+    )
+    await db
+      .updateTable('bookings')
+      .set({ title: 'PRIVATE_TITLE', responses: JSON.stringify({ q: 'PRIVATE_ANSWER' }) })
+      .where('id', '=', id)
+      .execute()
+    for (const [label, user] of [
+      ['owner', owner],
+      ['admin', admin],
+      ['member', member],
+    ] as const) {
+      const row = await db
+        .insertInto('auth.session')
+        .values({
+          userId: user.id,
+          token: randomUUID(),
+          activeOrganizationId: team.id,
+          expiresAt: new Date(Date.now() + 3_600_000),
+          updatedAt: new Date(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      principals.set(`team-${label}`, { ...team.as(user), kind: 'session', sessionId: row.id })
+      const response = await app.request(path + query, {
+        headers: { cookie: syntheticSessionCookie(`team-${label}`) },
+      })
+      expect(response.status).toBe(label === 'member' ? 403 : 200)
+      const body = await response.text()
+      if (label !== 'member') {
+        expect(body).toContain(id)
+        expect(body).not.toMatch(/PRIVATE_|answers|location_option|source|created_at/)
+        expect(body).not.toContain(member.email)
+      } else expect(JSON.parse(body).error).toBe('team_management_access_denied')
+      for (const scope of ['read', 'full'] as const) {
+        principals.set(`team-${label}-${scope}`, {
+          ...team.as(user),
+          kind: 'api_key',
+          apiKeyId: randomUUID(),
+          apiKeyScope: scope,
+        })
+        const denied = await get(`team-${label}-${scope}`)
+        expect(denied.status).toBe(403)
+        expect(await denied.json()).toMatchObject({ error: 'team_management_access_denied' })
+      }
+    }
+    principals.set('uuid-owner', owner.principal)
+    const invalid = await get('uuid-owner', `${query}&hostUserId=bad`)
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ error: 'invalid_request' })
+  })
   it('rejects team members, stale spaces and invalid filters before sending CSV', async () => {
     const user = await createTestUser(db)
     principals.set('user', user.principal)

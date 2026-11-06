@@ -7,7 +7,9 @@ The standalone CLI supports Node.js 22 or later; repository development still us
 It calls the existing stateless MCP tools at `/mcp` for API-key users, using Node's built-in
 HTTP client with no additional dependencies. The `export` command obtains a bounded MCP
 download pointer and streams the CSV from REST to a file or stdout; CSV rows are never
-returned in the MCP tool result. See [CSV booking export](/docs/booking-export).
+returned in the MCP tool result. This is for personal bookings; team exports require the
+verified owner/admin browser session. Failed downloads report the API error code and remove
+an output file created by this invocation. See [CSV booking export](/docs/booking-export).
 This preserves the key's organization, permissions, idempotency scope and `mcp` audit source,
 including host rescheduling, without introducing another booking API.
 

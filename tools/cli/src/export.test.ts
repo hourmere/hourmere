@@ -1,10 +1,11 @@
-import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { constants, readFileSync } from 'node:fs'
+import { mkdtemp, open, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { runCli } from './cli.ts'
+import * as client from './client.ts'
 import { downloadCsv, version } from './client.ts'
 
 const origin = new URL('https://hourmere.example/mcp')
@@ -12,6 +13,18 @@ const path = '/api/v1/bookings/export.csv?from=2026-01-01T00%3A00%3A00Z'
 const csv = '\ufeffname,answer\r\n中文,"line\nnext"\r\n'
 const csvResponse = () =>
   new Response(csv, { headers: { 'content-type': 'text/csv; charset=utf-8' } })
+
+function sourceRunner(change: [string, string]): typeof runCli {
+  let source = readFileSync('tools/cli/src/cli.ts', 'utf8')
+  expect(source.includes(change[0])).toBe(true)
+  source = stripTypeScriptTypes(
+    source.replace(...change).replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
+  ).replace(/\bexport /g, '')
+  const bindings = { constants, open, unlink, ...client }
+  return new Function(...Object.keys(bindings), `${source}; return runCli`)(
+    ...Object.values(bindings),
+  )
+}
 
 describe('CSV CLI', () => {
   it('streams CSV bytes to stdout or a new private file, preserving BOM and Unicode', async () => {
@@ -46,6 +59,74 @@ describe('CSV CLI', () => {
     } finally {
       await rm(directory, { recursive: true })
     }
+  })
+
+  it.each(['export_in_progress', 'organization_context_changed'])(
+    'reports the API conflict code %s',
+    async (code) => {
+      await expect(
+        downloadCsv({
+          url: origin,
+          key: 'hm_test',
+          path,
+          fetch: async () => Response.json({ error: code }, { status: 409 }),
+          write: async () => {},
+        }),
+      ).rejects.toMatchObject({ code, status: 409 })
+    },
+  )
+  async function failedFile(existing: boolean, runner = runCli) {
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-export-failure-'))
+    const output = join(directory, 'bookings.csv')
+    try {
+      if (existing) await writeFile(output, 'existing contents')
+      let reads = 0
+      const code = await runner({
+        argv: ['export', '--output', output],
+        env: { HOURMERE_URL: origin.origin, HOURMERE_API_KEY: 'hm_test' },
+        stdin: (async function* () {})(),
+        stdout: () => {},
+        stderr: () => {},
+        fetch: async (_url, options) =>
+          options?.method === 'POST'
+            ? Response.json({
+                jsonrpc: '2.0',
+                id: 1,
+                result: { structuredContent: { downloadPath: path } },
+              })
+            : new Response(
+                new ReadableStream(
+                  {
+                    pull(controller) {
+                      if (reads++ === 0) controller.enqueue(new TextEncoder().encode('partial'))
+                      else controller.error(new Error('connection lost'))
+                    },
+                  },
+                  { highWaterMark: 0 },
+                ),
+                { headers: { 'content-type': 'text/csv' } },
+              ),
+      })
+      expect(code).not.toBe(0)
+      if (existing) expect(await readFile(output, 'utf8')).toBe('existing contents')
+      else await expect(stat(output)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(directory, { recursive: true })
+    }
+  }
+  it.each([false, true])(
+    'removes its failed export file and preserves existing files (%s)',
+    async (existing) => failedFile(existing),
+  )
+  it('kills removal of failed-file cleanup in a source copy', async () => {
+    await failedFile(false)
+    await expect(
+      failedFile(
+        false,
+        sourceRunner(['await unlink(exportOutputPath).catch(() => {})', 'void exportOutputPath']),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await failedFile(false)
   })
 
   async function security(download = downloadCsv) {
@@ -113,6 +194,24 @@ describe('CSV CLI', () => {
       version,
     ) as typeof downloadCsv
     await security(baseline)
+    const conflict = async (download: typeof downloadCsv) => {
+      await expect(
+        download({
+          url: origin,
+          key: 'hm_test',
+          path,
+          fetch: async () => Response.json({ error: 'export_in_progress' }, { status: 409 }),
+          write: async () => {},
+        }),
+      ).rejects.toMatchObject({ code: 'export_in_progress', status: 409 })
+    }
+    await conflict(baseline)
+    const conflictMutant = new Function(
+      'version',
+      `${source.replace("safeCode(isObject(reply) ? reply.error : undefined, 'http_error')", "'http_error'").replace("safeCode(isObject(reply) ? reply.error : undefined, 'http_error')", "'http_error'")}; return downloadCsv`,
+    )(version) as typeof downloadCsv
+    await expect(conflict(conflictMutant)).rejects.toMatchObject({ name: 'AssertionError' })
+
     const mutant = new Function(
       'version',
       `${source.replaceAll("redirect: 'error'", "redirect: 'follow'")}; return downloadCsv`,

@@ -149,8 +149,9 @@ The personal and `/api/v1/public/teams/{handle}/{slug}` endpoints share this con
 
 For reporting, [export bookings as CSV](/docs/booking-export) using
 `GET /api/v1/bookings/export.csv`. A `read` or `full` key and a bounded date range are
-required. Personal owners can export their own bookings; team owners/admins can export
-their team's bookings. Ordinary team membership does not grant export access.
+required for personal exports. Team exports require a verified browser session and current
+owner/admin membership, and use the limited team-admin field set. Team API keys and OAuth
+credentials cannot export team data.
 
 Bookings send email to the host/invitee when workers are enabled. Additional guests require
 the host to enable `allowGuests` on the event type (off by default, at most ten). Otherwise

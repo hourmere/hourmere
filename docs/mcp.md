@@ -176,7 +176,8 @@ request; use a suitable API key or the signed-in bookings page to download.
 Required inputs are RFC 3339 `from` (inclusive) and `to` (exclusive), at most 366 days
 apart. Optional inputs are `timeZone` (UTC by default), `bom` (false by default),
 `status`, `eventTypeId`, `hostUserId`, `endAfter`, `endTo` and `order`. Personal owners
-export their own bookings; team owners/admins export the team. The pointer pins the
+export their own bookings. Team exports require a browser session and are unavailable
+to MCP API keys or OAuth grants (`team_management_access_denied`). The pointer pins the
 organization to prevent a browser workspace switch from downloading another workspace.
 Use `hourmere export --input export.json --output bookings.csv` for a streamed private
 file. Keeping rows out of MCP responses prevents large personal-data dumps in model

@@ -487,15 +487,15 @@ export function bookingTools({
     name: 'export_bookings',
     title: 'Export bookings as CSV',
     description:
-      'Returns a small authenticated download pointer, never CSV rows. Personal owners export their own bookings; team owners/admins export team bookings. Requires read/full API key scope. Download with the same instance and an authorized API key (OAuth MCP grants cannot authenticate REST). Maximum 366 days, from inclusive and to exclusive. Files contain personal data. Use the CLI export command to stream to a private file or stdout.',
+      'Returns a small authenticated download pointer, never CSV rows. Personal owners export their own bookings. Team exports are browser-session only and unavailable to MCP/CLI credentials. Requires read/full API key scope. Download with the same instance and an authorized API key (OAuth MCP grants cannot authenticate REST). Maximum 366 days, from inclusive and to exclusive. Files contain personal data. Use the CLI export command to stream to a private file or stdout.',
     input: z.strictObject({
       from: Instant,
       to: Instant,
-      timeZone: z.string().max(100).optional(),
+      timeZone: z.string().optional(),
       bom: z.boolean().optional(),
       status: z.enum(['confirmed', 'cancelled']).optional(),
       eventTypeId: z.uuid().optional(),
-      hostUserId: z.string().max(255).optional(),
+      hostUserId: z.uuid().optional(),
       endAfter: Instant.optional(),
       endTo: Instant.optional(),
       order: z.enum(['asc', 'desc']).optional(),

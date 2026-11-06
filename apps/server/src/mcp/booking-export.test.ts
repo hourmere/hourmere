@@ -49,6 +49,15 @@ describe('MCP export pointer', () => {
     ])
     expect(JSON.stringify(result).length).toBeLessThan(2000)
   })
+  it('validates host UUIDs with the REST invalid_request code before querying', async () => {
+    prepare.mockClear()
+    const result = await runTool(tool, { ...args, hostUserId: 'bad' }, call(), () => {})
+    expect(result.isError).toBe(true)
+    expect(JSON.parse((result.content[0] as { text: string }).text)).toMatchObject({
+      error: 'invalid_request',
+    })
+    expect(prepare).not.toHaveBeenCalled()
+  })
   it('rejects booking-only keys before authorization and preserves resource denials', async () => {
     prepare.mockClear()
     const denied = await runTool(tool, args, call({ ...caller, apiKeyScope: 'bookings' }), () => {})
@@ -99,4 +108,20 @@ it.each([
   }
   await verify(copy())
   await expect(verify(copy([before, after]))).rejects.toThrow()
+})
+
+it('kills missing MCP host UUID validation in a source copy', async () => {
+  const verify = async (candidate: Tool) => {
+    prepare.mockReset().mockResolvedValue({})
+    const result = await runTool(candidate, { ...args, hostUserId: 'bad' }, call(), () => {})
+    expect(result.isError).toBe(true)
+    expect(JSON.parse((result.content[0] as { text: string }).text)).toMatchObject({
+      error: 'invalid_request',
+    })
+    expect(prepare).not.toHaveBeenCalled()
+  }
+  await verify(copy())
+  await expect(
+    verify(copy(['hostUserId: z.uuid().optional()', 'hostUserId: z.string().optional()'])),
+  ).rejects.toThrow()
 })

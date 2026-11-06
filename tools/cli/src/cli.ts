@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { open } from 'node:fs/promises'
+import { open, unlink } from 'node:fs/promises'
 import {
   CliError,
   callTool,
@@ -240,6 +240,7 @@ export async function runCli(options: {
     return 0
   }
   let output: Awaited<ReturnType<typeof open>> | undefined
+  let exportOutputPath: string | undefined
   let called = false
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
@@ -304,6 +305,7 @@ export async function runCli(options: {
     )
       throw new CliError('idempotency_key_required')
     // Reserve the private output before making a booking: a path error must not lose its token.
+    if (args.command === 'export') exportOutputPath = args.output
     if (args.output) output = await open(args.output, 'wx', 0o600)
     called = true
     const result = await callTool({
@@ -342,6 +344,10 @@ export async function runCli(options: {
     }
     return 0
   } catch (error) {
+    if (output && exportOutputPath) {
+      await output.close().catch(() => {})
+      await unlink(exportOutputPath).catch(() => {})
+    }
     const code = error instanceof CliError ? error.code : called ? 'output_failed' : 'file_error'
     options.stderr(
       printable(
