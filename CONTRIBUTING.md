@@ -203,8 +203,9 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing `check`,
-`cli-compatibility`, `docker` and `e2e` jobs. The separate
+The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing `check`,
+`cli-compatibility`, `docker` and `e2e` jobs unchanged, alongside the standalone
+`n8n-compatibility` job. The separate
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
 and manual dispatches. Layout shards fail on every layout finding, scan error, browser
 failure or missing report; axe fails on serious/critical violations and scan/execution
