@@ -48,6 +48,7 @@ import {
   oneTimeBookingReplayTarget,
   resolveOneTimeBookingLink,
 } from './one-time-links.ts'
+import { expirePaymentHolds } from './payment-expiry.ts'
 import { parseQuestions, type Question, type Responses, validateResponses } from './questions.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
@@ -174,7 +175,7 @@ function person(input: PersonInput, code: 'invalid_invitee' | 'invalid_guests', 
   return { name, email }
 }
 
-function validateInvitee(input: InviteeInput): Attendee {
+export function validateInvitee(input: InviteeInput): Attendee {
   const { name, email } = person(input, 'invalid_invitee', 'The invitee')
   const timeZone = validTimeZone(input.timeZone)
   if (!timeZone) {
@@ -273,7 +274,7 @@ interface ManagedTarget {
  */
 async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget | undefined> {
   const { rows } = await sql<{ id: string; from_email: boolean }>`
-    SELECT id, false AS from_email FROM bookings WHERE manage_token_hash = ${hash}
+    SELECT id, false AS from_email FROM bookings WHERE manage_token_hash = ${hash} AND (payment_hold_expires_at IS NULL OR status='confirmed')
     UNION ALL
     SELECT booking_id, true FROM booking_notifications
      WHERE manage_token_hash = ${hash} AND outcome = 'sent'`.execute(db)
@@ -420,6 +421,7 @@ async function findReplay(
   let query = db
     .selectFrom('bookings')
     .select(['id', 'idempotency_fingerprint', 'success_redirect'])
+    .where('payment_hold_expires_at', 'is', null)
     .where('organization_id', '=', scope.organizationId)
     .where('api_key_id', scope.apiKeyId === null ? 'is' : '=', scope.apiKeyId)
     .where(
@@ -701,7 +703,7 @@ function requireCollectedPhone(location: Location | null): void {
  * collide through buffers or day/week/month limits; with the lock, the second recomputes
  * availability after the first has committed. Sorted, so multi-host bookings cannot deadlock.
  */
-async function lockHosts(db: Db, userIds: readonly string[]): Promise<void> {
+export async function lockHosts(db: Db, userIds: readonly string[]): Promise<void> {
   for (const id of [...new Set(userIds)].sort()) {
     await db
       .selectNoFrom((eb) =>
@@ -719,7 +721,7 @@ async function lockHosts(db: Db, userIds: readonly string[]): Promise<void> {
  * Throws `slot_unavailable` unless the engine offers exactly [start, end) for this host now.
  * Comparing the end too catches an event type whose duration changed after the caller read it.
  */
-async function requireOfferedSlot(
+export async function requireOfferedSlot(
   db: Db,
   q: {
     eventTypeId: string
@@ -732,6 +734,7 @@ async function requireOfferedSlot(
     useDefaultSchedule?: boolean
   },
 ): Promise<void> {
+  await expirePaymentHolds({ db, hostUserId: q.hostUserId })
   const slots = await findSlots(db, {
     eventTypeId: q.eventTypeId,
     hostUserId: q.hostUserId,
@@ -748,6 +751,7 @@ async function requireOfferedSlot(
 }
 
 interface NewBooking {
+  paymentHoldExpiresAt?: string | undefined
   successRedirect?: BookingSuccessRedirect | undefined
   organizationId: string
   eventTypeId: string | null
@@ -771,7 +775,7 @@ interface NewBooking {
 }
 
 /** Inserts a booking with its hosts and attendees; call inside a transaction. */
-async function insertBooking(
+export async function insertBooking(
   db: Db,
   b: NewBooking,
 ): Promise<{ id: string; manageToken: string | null }> {
@@ -780,6 +784,8 @@ async function insertBooking(
   const { id } = await db
     .insertInto('bookings')
     .values({
+      status: b.paymentHoldExpiresAt ? 'pending_payment' : 'confirmed',
+      payment_hold_expires_at: b.paymentHoldExpiresAt ?? null,
       organization_id: b.organizationId,
       event_type_id: b.eventTypeId,
       success_redirect: b.successRedirect ? JSON.stringify(b.successRedirect) : null,
@@ -835,6 +841,17 @@ async function insertBooking(
 }
 
 export async function assertBookingLocallyManaged(db: Db, id: string): Promise<void> {
+  const paid = await db
+    .selectFrom('bookings')
+    .select('payment_hold_expires_at')
+    .where('id', '=', id)
+    .executeTakeFirst()
+  if (paid?.payment_hold_expires_at)
+    throw new DomainError(
+      'conflict',
+      'paid_booking_management_unavailable',
+      'Paid booking management is not available yet',
+    )
   if (await isImportedBooking(db, id)) {
     throw new DomainError(
       'conflict',
@@ -1554,6 +1571,10 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
     .select(BOOKING_COLUMNS)
     .select('et.title as event_type_title')
     .where('b.id', '=', id)
+    .where('b.status', 'in', ['confirmed', 'cancelled'])
+    .where((eb) =>
+      eb.or([eb('b.payment_hold_expires_at', 'is', null), eb('b.status', '=', 'confirmed')]),
+    )
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
     .executeTakeFirst()

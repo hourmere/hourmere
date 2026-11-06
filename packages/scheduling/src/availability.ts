@@ -1024,6 +1024,12 @@ async function buildAvailabilityInputForMode(
     ])
     .where('bh.user_id', '=', hostUserId)
     .where('bh.active', '=', true)
+    .where((eb) =>
+      eb.or([
+        eb('b.status', '!=', 'pending_payment'),
+        eb('b.payment_hold_expires_at', '>', sql<Date>`clock_timestamp()`),
+      ]),
+    )
     .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
 
   const [overrides, busy, bookings] = await Promise.all([

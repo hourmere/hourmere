@@ -31,6 +31,10 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
+The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
+occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
+available in this foundation release.
+
 ## Principles
 
 - **Two schemas.** `auth` belongs to [Better Auth](https://www.better-auth.com) and keeps
@@ -149,8 +153,9 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   are allowed (ranges are half-open). `period` and `active` are never trusted from the
   application: a `BEFORE INSERT OR UPDATE` trigger derives them from the booking (locking
   it `FOR SHARE` against a concurrent reschedule), and a trigger on `bookings` re-derives
-  them when the time or status changes. Every status except `cancelled` occupies the
-  host. A multi-host booking is inserted in one transaction, so one taken host rolls back
+  them when the time or status changes. `confirmed` and `pending_payment` occupy the
+  host; `cancelled` and `expired` do not. The slot engine ignores holds past their deadline,
+  and booking admission releases due holds before checking the exclusion constraint. A multi-host booking is inserted in one transaction, so one taken host rolls back
   the whole booking. Buffers are enforced by the availability engine, not the constraint.
 - **Rescheduling** cancels the booking and inserts a new one with `rescheduled_from_id`,
   in one transaction (cancel first, so the new time may overlap the old one).
@@ -1456,3 +1461,17 @@ always read the reschedule-chain root's fields. A new root atomically pins its c
 sending mailbox before its first SMTP invitation; later versions reuse that identity.
 See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
 legacy compatibility, recipient policy and reply limitations.
+
+## Pending-payment foundation
+
+Migration `0062_payment_holds.sql` adds `pending_payment` and `expired` booking states,
+nullable `payment_hold_expires_at` and `payment_reference`, and a default-false
+`payment_refund_required` marker. Existing bookings retain their state and data. The
+PaymentIntent reference is unique when present; credentials and card data are never stored.
+An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy atomically;
+confirmation after the deadline records refund intent without reviving the booking.
+The transition guard prevents changing retained deadlines/references or resurrecting terminal
+holds. Group seats and imported bookings cannot carry payment holds. See the
+[paid-booking design](payments.md) for the internal-only rollout boundary, future refund
+ledger/retention and operator responsibilities. Stop old app and worker processes before
+migration and restart all roles together.

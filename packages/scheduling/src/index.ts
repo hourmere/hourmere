@@ -164,6 +164,15 @@ export {
   revokeManagedOneTimeBookingLink,
   revokeOneTimeBookingLink,
 } from './one-time-links.ts'
+export { expirePaymentHolds } from './payment-expiry.ts'
+export { FakePaymentProvider, type PaymentProvider } from './payment-provider.ts'
+export {
+  cancelPaymentHold,
+  confirmPaymentHold,
+  createPaymentHold,
+  PAYMENT_HOLD_MINUTES,
+  type PaymentContext,
+} from './payments.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

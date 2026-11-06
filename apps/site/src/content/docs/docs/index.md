@@ -32,6 +32,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
+  processing, payment settings and automatic refunds are not available.
+
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
