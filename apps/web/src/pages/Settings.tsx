@@ -116,6 +116,7 @@ export function SettingsPage() {
       {!personal && me.principal.kind === 'session' && (
         <ProvisioningTokens
           organizationId={organizationId}
+          timeZone={profile.status === 'ready' ? profile.data?.timeZone : undefined}
           role={role.status === 'ready' ? role.data : null}
         />
       )}

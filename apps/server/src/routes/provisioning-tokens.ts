@@ -18,6 +18,9 @@ const Token = z
     organizationId: z.uuid(),
     name: z.string(),
     createdAt: z.string(),
+    createdByUserId: z.string().nullable(),
+    rotatedByUserId: z.string().nullable(),
+    rotatedAt: z.string().nullable(),
     lastUsedAt: z.string().nullable(),
     expiresAt: z.string().nullable(),
     revokedAt: z.string().nullable(),
@@ -41,7 +44,8 @@ export function provisioningTokenRoutes({
     const boundary = createMiddleware(async (c, next) => {
       c.header('Cache-Control', 'private, no-store')
       c.header('Referrer-Policy', 'no-referrer')
-      if (!enabled) return c.json({ error: 'scim_provisioning_disabled' }, 404)
+      if (!enabled && c.req.method === 'POST')
+        return c.json({ error: 'scim_provisioning_disabled' }, 404)
       if (c.req.raw.headers.has('authorization')) return c.json({ error: 'session_required' }, 403)
       await next()
     })
@@ -74,14 +78,17 @@ export function provisioningTokenRoutes({
       security: [{ session: [] }],
       middleware,
       description:
-        'Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.',
+        'Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.',
     }
     const errors = errorResponses({
-      400: 'invalid_request',
-      403: 'session_required or scim_token_access_denied',
+      400: 'invalid_request or scim_token_invalid_input',
+      403: 'session_required or scim_token_access_denied or scim_token_forbidden or forbidden',
       404: 'scim_provisioning_disabled or scim_token_not_found',
-      409: 'organization_context_changed or scim_token_conflict',
+      409: 'organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap)',
     })
+    if (errors[401]) errors[401].description = 'unauthorized: a valid browser session is required'
+    if (errors[429])
+      errors[429].description = 'rate_limited: request budget exhausted; retry after Retry-After'
     const actor = (principal: CallerEnv['Variables']['principal'], organizationId: string) => {
       if (principal.kind !== 'session') throw new ScimTokenError('forbidden', 403)
       return { organizationId, userId: principal.user.id, sessionId: principal.sessionId }
@@ -93,23 +100,27 @@ export function provisioningTokenRoutes({
         path: '/api/v1/organizations/{organizationId}/provisioning-tokens',
         operationId: 'listScimProvisioningTokens',
         summary: 'List provisioning token metadata',
-        request: { params },
+        request: {
+          params,
+          query: z.object({
+            limit: z.coerce.number().int().min(1).max(100).default(20),
+            after: z.uuid().optional(),
+          }),
+        },
         responses: {
           200: {
             description: 'Metadata only; never secrets or hashes',
-            content: json(z.object({ tokens: z.array(Token) })),
+            content: json(z.object({ tokens: z.array(Token), nextCursor: z.uuid().nullable() })),
           },
           ...errors,
         },
       }),
       async (c) =>
         c.json(
-          {
-            tokens: await listScimTokens(
-              db,
-              actor(c.var.principal, c.req.valid('param').organizationId),
-            ),
-          },
+          await listScimTokens(db, {
+            ...actor(c.var.principal, c.req.valid('param').organizationId),
+            ...c.req.valid('query'),
+          }),
           200,
         ),
     )

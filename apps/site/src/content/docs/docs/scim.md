@@ -14,23 +14,32 @@ lifecycle; it is separate from SSO sign-in.
 ## Enable token administration
 
 `SCIM_PROVISIONING_ENABLED` defaults to `false`. An operator may set it to `true` and
-recreate the application to expose token administration. See
+recreate the application to enable token creation and rotation. Listing and revocation
+remain available while the switch is off. See
 [configuration](/docs/configuration) for environment and Compose behavior.
 
 Sign in as an owner or administrator of a team organization and open **Settings** (`/app/settings`), then **SCIM provisioning tokens**.
 Personal spaces and ordinary members cannot administer provisioning tokens. The page
 states that provisioning itself is unavailable; do not connect a production IdP yet.
 
+Only owners can create or rotate tokens; owners and administrators can list and revoke
+them, including while the switch is off.
+
 Create a token with a recognizable name and copy its complete value into a private
 secret store immediately. The complete value is shown only after creation or rotation.
 Closing that view, navigating away or switching organizations clears it. The list
-contains safe metadata, not a way to recover the secret. If you lose the value, rotate
+contains paginated safe metadata, not a way to recover the secret. The management API
+also records the creating and most recent rotating user IDs and timestamps. If you lose the value, rotate
 or replace it. Never include it in a URL, support ticket, screenshot or command history.
 
 A provisioning token is bound to one organization and to the SCIM protocol. It cannot
 call REST `/api/v1`, MCP or the CLI, and an ordinary API key cannot authenticate SCIM.
 Token management itself requires your signed-in browser session, just like
 [API-key administration](/docs/api-keys); it has no MCP tool or CLI command.
+
+An organization can have at most 10 active tokens. This leaves room for staged IdP
+transitions and recovery while bounding live credentials. Revoke unused tokens before
+creating more.
 
 ## Rotate and revoke
 
@@ -43,7 +52,9 @@ rotation is refused while the previous overlap is active.
 Revocation immediately disables the credential, including any overlapping old secret.
 It cannot be undone. Last-used records credential authentication, not successful
 synchronization; it is not evidence that Users or Groups are working in this release.
-Turning off the feature flag hides/disables the foundation but does not revoke tokens.
+Turning off the feature flag disables creation, rotation and SCIM authentication but does
+not revoke tokens. Owners and administrators can still inspect and revoke them before
+re-enabling the flag; unrevoked tokens otherwise become usable again when enabled.
 
 Keep the instance behind HTTPS and prevent your proxy, monitoring and request logs from
 recording Authorization headers. An optional IP restriction can be applied at your

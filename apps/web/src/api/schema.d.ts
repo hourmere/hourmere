@@ -2216,13 +2216,13 @@ export interface paths {
         };
         /**
          * List provisioning token metadata
-         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
          */
         get: operations["listScimProvisioningTokens"];
         put?: never;
         /**
          * Create a provisioning token
-         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
          */
         post: operations["createScimProvisioningToken"];
         delete?: never;
@@ -2243,7 +2243,7 @@ export interface paths {
         post?: never;
         /**
          * Permanently revoke both token generations
-         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
          */
         delete: operations["revokeScimProvisioningToken"];
         options?: never;
@@ -2262,7 +2262,7 @@ export interface paths {
         put?: never;
         /**
          * Rotate a provisioning token with bounded overlap
-         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
          */
         post: operations["rotateScimProvisioningToken"];
         delete?: never;
@@ -5447,6 +5447,7 @@ export interface components {
         };
         ScimProvisioningToken: {
             createdAt: string;
+            createdByUserId: string | null;
             expiresAt: string | null;
             /** Format: uuid */
             id: string;
@@ -5456,6 +5457,8 @@ export interface components {
             organizationId: string;
             previousValidUntil: string | null;
             revokedAt: string | null;
+            rotatedAt: string | null;
+            rotatedByUserId: string | null;
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         SelfReadinessPage: {
@@ -8641,7 +8644,10 @@ export interface operations {
     };
     listScimProvisioningTokens: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string;
+                limit?: number;
+            };
             header?: never;
             path: {
                 organizationId: string;
@@ -8657,11 +8663,13 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** Format: uuid */
+                        nextCursor: string | null;
                         tokens: components["schemas"]["ScimProvisioningToken"][];
                     };
                 };
             };
-            /** @description invalid_request */
+            /** @description invalid_request or scim_token_invalid_input */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8670,7 +8678,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No valid session or API key */
+            /** @description unauthorized: a valid browser session is required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -8679,7 +8687,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or scim_token_access_denied */
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8697,7 +8705,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed or scim_token_conflict */
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8706,7 +8714,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The API key's rate limit is used up */
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8745,7 +8753,7 @@ export interface operations {
                     "application/json": components["schemas"]["IssuedScimProvisioningToken"];
                 };
             };
-            /** @description invalid_request */
+            /** @description invalid_request or scim_token_invalid_input */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8754,7 +8762,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No valid session or API key */
+            /** @description unauthorized: a valid browser session is required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -8763,7 +8771,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or scim_token_access_denied */
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8781,7 +8789,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed or scim_token_conflict */
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8790,7 +8798,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The API key's rate limit is used up */
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8826,7 +8834,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description invalid_request */
+            /** @description invalid_request or scim_token_invalid_input */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8835,7 +8843,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No valid session or API key */
+            /** @description unauthorized: a valid browser session is required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -8844,7 +8852,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or scim_token_access_denied */
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8862,7 +8870,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed or scim_token_conflict */
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8871,7 +8879,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The API key's rate limit is used up */
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8912,7 +8920,7 @@ export interface operations {
                     "application/json": components["schemas"]["IssuedScimProvisioningToken"];
                 };
             };
-            /** @description invalid_request */
+            /** @description invalid_request or scim_token_invalid_input */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8921,7 +8929,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No valid session or API key */
+            /** @description unauthorized: a valid browser session is required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -8930,7 +8938,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or scim_token_access_denied */
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8948,7 +8956,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed or scim_token_conflict */
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8957,7 +8965,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The API key's rate limit is used up */
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;

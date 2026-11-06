@@ -40,7 +40,7 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
-- [SCIM](/docs/scim) provides disabled-by-default provisioning-token administration only.
+- [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
   Users, Groups, discovery and IdP synchronization are not available yet.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
@@ -48,6 +48,12 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
+- CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
+  The [design and credential/discovery foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
+  adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
+  is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
+- [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
+  processing, payment settings and automatic refunds are not available.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.

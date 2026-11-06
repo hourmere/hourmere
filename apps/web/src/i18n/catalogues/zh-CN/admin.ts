@@ -11,7 +11,7 @@ export const admin = {
   'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
     '请立即复制此令牌。关闭令牌或离开此视图后，将无法再次查看。',
   'Copy token': '复制令牌',
-  'Dismiss token': '关闭令牌',
+  'Dismiss token': '隐藏令牌',
   'Provisioning token name': '预配令牌名称',
   'Create provisioning token': '创建预配令牌',
   'Loading provisioning tokens…': '正在加载预配令牌……',
@@ -66,6 +66,7 @@ export const admin = {
     '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
   'Could not remove the waitlist entry.': '无法移除此候补条目。',
   'Back to first page': '返回第一页',
+  'Previous page': '上一页',
   'Next page': '下一页',
   Refresh: '刷新',
 

@@ -6,7 +6,7 @@ import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@ho
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
@@ -48,7 +48,7 @@ it('requires explicit SCIM operator opt-in', () => {
 describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', () => {
   let owned: TestDatabase, db: Db, auth: Auth, authPool: ReturnType<typeof createAuthPool>
   let owner: Awaited<ReturnType<typeof createTestUser>>, organizationId: string, foreignId: string
-  let cookie: string, memberCookie: string, apiKey: string
+  let cookie: string, memberCookie: string, adminCookie: string, apiKey: string
   const path = () => `/api/v1/organizations/${organizationId}/provisioning-tokens`
   beforeAll(async () => {
     owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -58,10 +58,12 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     const f = createFixtures(db)
     owner = await createTestUser(db)
     const member = await createTestUser(db)
+    const admin = await createTestUser(db)
     organizationId = await f.organization('scim-http')
     foreignId = await f.organization('scim-foreign')
     await f.member(owner.id, organizationId, 'owner')
     await f.member(member.id, organizationId, 'member')
+    await f.member(admin.id, organizationId, 'admin')
     const signup = { mode: 'open', allowedDomains: [] } as const
     authPool = createAuthPool(owned.url, signup)
     auth = createAuth({
@@ -88,9 +90,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     }
     cookie = await session(owner.id)
     memberCookie = await session(member.id)
+    adminCookie = await session(admin.id)
     apiKey = (
       await auth.api.createApiKey({ body: { userId: owner.id, metadata: { organizationId } } })
     ).key
+  })
+  afterEach(async () => {
+    await db.deleteFrom('scim_provisioning_tokens').execute()
   })
   afterAll(async () => {
     await authPool?.end()
@@ -212,6 +218,105 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
           )
         ).status,
       ).toBe(bearer === issued.secret ? 401 : 403)
+  })
+  it('allows admins to list and revoke but never create or rotate', async () => {
+    const application = app()
+    const issued = await issue(application)
+    const extra = { cookie: adminCookie }
+    expect((await request(application, path(), 'POST', { name: 'Admin mint' }, extra)).status).toBe(
+      403,
+    )
+    expect(
+      (
+        await request(
+          application,
+          `${path()}/${issued.token.id}/rotate`,
+          'POST',
+          { overlapSeconds: 0 },
+          extra,
+        )
+      ).status,
+    ).toBe(403)
+    expect((await request(application, path(), 'GET', undefined, extra)).status).toBe(200)
+    expect(
+      (await request(application, `${path()}/${issued.token.id}`, 'DELETE', undefined, extra))
+        .status,
+    ).toBe(200)
+  })
+  it('keeps listing and revocation available while disabled, including a source-copy control', async () => {
+    const verify = async (factory = provisioningTokenRoutes) => {
+      const issued = await issue()
+      const application = app(false, factory)
+      expect((await request(application)).status).toBe(200)
+      expect(
+        (
+          await request(application, `${path()}/${issued.token.id}/rotate`, 'POST', {
+            overlapSeconds: 0,
+          })
+        ).status,
+      ).toBe(404)
+      expect(
+        (
+          await request(application, `${path()}/${issued.token.id}`, 'DELETE', undefined, {
+            cookie: adminCookie,
+          })
+        ).status,
+      ).toBe(200)
+    }
+    await verify()
+    const mutant = await sourceCopy<typeof import('./routes/provisioning-tokens.ts')>(
+      './routes/provisioning-tokens.ts',
+      ["if (!enabled && c.req.method === 'POST')", 'if (!enabled)'],
+    )
+    await expect(verify(mutant.provisioningTokenRoutes)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+  it('logs management method, route and status without raw URL credentials', async () => {
+    const verify = async (factory = createApp) => {
+      const messages: unknown[][] = []
+      const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+        messages.push(args)
+      })
+      try {
+        const response = await request(
+          app(true, provisioningTokenRoutes, factory),
+          `${path()}?secret=synthetic-private-marker`,
+        )
+        expect(response.status).toBe(200)
+        const logged = JSON.stringify(messages)
+        expect(logged).toContain(
+          'GET /api/v1/organizations/:organizationId/provisioning-tokens 200',
+        )
+        expect(logged.includes('synthetic-private-marker')).toBe(false)
+      } finally {
+        spy.mockRestore()
+      }
+    }
+    await verify()
+    const mutant = await sourceCopy<typeof import('./app.ts')>('./app.ts', [
+      "if (c.req.path.includes('/provisioning-tokens')) {",
+      "if (c.req.path.includes('/provisioning-tokens')) return next()\n  if (false) {",
+    ])
+    await expect(verify(mutant.createApp)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  it('paginates safe metadata and validates cursor and page size', async () => {
+    const application = app()
+    await issue(application)
+    const created = await request(application, path(), 'POST', { name: 'Ohm_sync' })
+    expect(created.status).toBe(201)
+    const first = await request(application, `${path()}?limit=1`)
+    expect(first.status).toBe(200)
+    const page = (await first.json()) as { tokens: { id: string }[]; nextCursor: string }
+    expect(page.tokens).toHaveLength(1)
+    expect(page.nextCursor).toBe(page.tokens[0]?.id)
+    const second = await request(application, `${path()}?limit=1&after=${page.nextCursor}`)
+    const next = (await second.json()) as { tokens: { id: string }[]; nextCursor: string | null }
+    expect(next.tokens).toHaveLength(1)
+    expect(next.tokens[0]?.id).not.toBe(page.tokens[0]?.id)
+    expect(next.nextCursor).toBeNull()
+    for (const query of ['limit=0', 'limit=101', 'after=invalid'])
+      expect((await request(application, `${path()}?${query}`)).status).toBe(400)
   })
   it('checks role, active organization, expected context and origin before writes', async () => {
     const application = app()
@@ -426,7 +531,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     await verifyHeader(control.provisioningTokenRoutes)
     await verifyExpected(control.provisioningTokenRoutes)
     for (const [mutation, verify] of [
-      [['if (!enabled)', 'if (false)'], verifyDisabled],
+      [["if (!enabled && c.req.method === 'POST')", 'if (false)'], verifyDisabled],
       [["if (c.req.raw.headers.has('authorization'))", 'if (false)'], verifyHeader],
       [
         ["c.req.header('x-expected-organization-id') !== principal.organization.id", 'false'],

@@ -35,7 +35,7 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
-| `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner/admin provisioning-token administration for team organizations. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
+| `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
 
@@ -429,3 +429,10 @@ for public apps; its private/development apps do not trigger those notifications
 ## Automatic Google Meet
 
 `GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See [automatic Google Meet](/docs/automatic-google-meet) for pending/failure and notification semantics.
+
+## Paid-booking foundation
+
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
+adapter. It has no runtime effect in this release: setting it to `true` does not permit
+hold creation or enable payment collection. Existing holds expire regardless of this
+setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).

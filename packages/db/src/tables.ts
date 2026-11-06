@@ -405,6 +405,12 @@ export interface Bookings {
   notification_snapshot: Json | null;
   oauth_consent_id: string | null;
   organization_id: string;
+  payment_confirmed_at: Timestamp | null;
+  payment_hold_expires_at: Timestamp | null;
+  payment_idempotency_key: string | null;
+  payment_pii_erased_at: Timestamp | null;
+  payment_reference: string | null;
+  payment_refund_required: Generated<boolean>;
   required_host_user_ids: Generated<string[]>;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
@@ -846,6 +852,7 @@ export interface Schedules {
 
 export interface ScimProvisioningTokens {
   created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
   id: Generated<string>;
   last_used_at: Timestamp | null;
   name: string;
@@ -853,6 +860,8 @@ export interface ScimProvisioningTokens {
   previous_token_hash: string | null;
   previous_valid_until: Timestamp | null;
   revoked_at: Timestamp | null;
+  rotated_at: Timestamp | null;
+  rotated_by_user_id: string | null;
   token_hash: string | null;
 }
 

@@ -2,7 +2,7 @@
 
 Status: token foundation only, reviewed against official sources on **2026-11-06**.
 `SCIM_PROVISIONING_ENABLED=false` by default. Enabling it permits credential
-administration, not user provisioning: every `/scim/v2` resource remains unavailable.
+creation and rotation, not user provisioning; listing and revocation remain available while off: every `/scim/v2` resource remains unavailable.
 The proposed protocol and lifecycle sections below are implementation requirements,
 not a description of shipped Users or Groups handlers. Every instance, including
 self-hosted installations, gets the same feature without a license or subscription.
@@ -51,7 +51,7 @@ SCIM identifiers or enumerate another organization's resources.
 | `GET /ResourceTypes`, `GET /ResourceTypes/{id}` | User and, only once implemented, Group resource descriptors and supported schema extensions. |
 | `GET /Schemas`, `GET /Schemas/{id}` | Exact implemented User/core enterprise fields and Group fields; no unsupported writable attributes advertised. |
 | `GET /Users`, `GET /Users/{id}` | Scoped list/read, including inactive managed entries; never a global email lookup. |
-| `POST /Users` | Create a managed provisioning entry; 201 with representation and Location; duplicate scoped identity gets 409. |
+| `POST /Users` | Create a managed provisioning entry; 201 with representation and Location; duplicate live scoped identity gets 409; retired entries do not conflict. |
 | `PUT /Users/{id}` | Full replacement of writable mapped fields, preserving server identity and local authorization controls; necessary for Okta. |
 | `PATCH /Users/{id}` | Atomic ordered add/replace/remove of supported fields and compatible forms below; return 200 with current representation. |
 | `DELETE /Users/{id}` | Retire the scoped entry and deactivate its membership; 204; no account or personal-data deletion. |
@@ -119,7 +119,7 @@ replacement, profile PUT, group member adds/removes and repeated identical reque
 
 A future `scim_users` row belongs to `(organization, connection)` with its own ID,
 externalId, normalized userName, lifecycle status and nullable linked account/membership.
-The mapping is not keyed solely by email. Persist uniqueness within the connection and
+The mapping is not keyed solely by email. Persist uniqueness among nondeleted entries within the connection and
 never recycle retired IDs. A provisioned entry can exist before the person claims an
 account; SCIM `active` describes desired lifecycle state, not proof of login eligibility.
 
@@ -170,16 +170,24 @@ booking-host handling policy must be reused: suspend eligibility for new team wo
 surface outstanding-booking handling to authorized admins; do not silently cancel meetings.
 
 DELETE performs the same revocation and permanently tombstones this SCIM resource;
-subsequent GET returns 404 and repeated DELETE returns 204. A later POST needs a fresh
-resource ID and explicit re-admission. Database retention/purge follows the eventual
+every subsequent operation on that resource, including repeated DELETE, returns 404
+(RFC 7644 §3.6). Retired tombstones never participate in userName or externalId uniqueness
+conflicts. A later POST with the same identifiers gets a fresh resource ID and requires
+explicit re-admission. Database retention/purge follows the eventual
 audited retention policy, not an IdP's DELETE command. `active:true` never resurrects
 revoked keys/grants or overrides a local suspension/removal tombstone.
 
-SCIM never grants owner or admin. New membership is member; optional group-to-role
-mapping is a separate future design. Preserve the last owner under the same organization
-lock used by native role/departure writes: reject a deactivation, delete or group change
-that would remove the final owner's effective access. An owner must appoint a replacement
-through ordinary administration first. Provisioning tokens are not recovery credentials.
+SCIM never grants owner or admin, and never deactivates, deletes or demotes a member
+who currently has either role, even if other owners remain. This applies to User and
+Group operations, including indirect removal of effective access through group changes.
+New membership is member; optional group-to-role mapping is a separate future design.
+Serialize the role check with native role/departure writes under the organization lock.
+Reject each forbidden change atomically with HTTP 403 and a SCIM Error containing
+`status: "403"`, `scimType: "mutability"` and safe detail explaining that privileged
+membership must be changed through ordinary administration first. The same 403 error
+applies to attempts to grant either role through any mapped field or PATCH form.
+Ordinary administration retains its last-owner protection. Provisioning tokens are not
+recovery credentials.
 
 The IdP owns mapped profile attributes and managed group membership; manual writes to
 those fields return a managed-resource conflict. Unmanaged memberships remain manual.
@@ -207,11 +215,11 @@ mapping ID. Names are labels, never authority: collision with a manual team retu
 no automatic adoption. Linking a pre-existing eligible child requires explicit owner
 approval through the future mapping controls. Mark team name and managed membership as
 SCIM-owned; reject conflicting manual changes while keeping unrelated team settings under
-ordinary administration. Retain local owners/recovery access separately; do not allow a
-Group replacement to demote/delete them. Deleting a group detaches managed memberships
+ordinary administration. Retain local owner/admin recovery access separately; no Group operation may
+deactivate, delete or demote either role. Deleting a group detaches managed memberships
 and archives its managed mapping, preserving team bookings/history and requiring the
-last-owner/departure checks. Nested Groups and indirect/transitive membership are
-unsupported: reject Group-as-member references. Group membership never grants owner.
+privileged-member/departure checks. Nested Groups and indirect/transitive membership are
+unsupported: reject Group-as-member references. Group membership never grants owner or admin.
 
 ## Credential foundation and security
 
@@ -219,19 +227,27 @@ Provisioning tokens are independent bearer credentials with the `scim_` prefix.
 Generate cryptographically random secrets, display the complete value only in the
 successful create/rotate response, and use the API-key SHA-256/base64url hashing approach for storage.
 Store only current/previous digests plus safe ID/name, organization, creation, overlap
-expiry, revocation and last-used metadata. The current credential has no lifetime
-expiry and the foundation does not yet record the issuing actor; future audit events
-must supply that attribution. Never store plaintext or reversible ciphertext;
+expiry, revocation and last-used metadata, plus the creating user ID/creation timestamp
+and most recent rotating user ID/rotation timestamp. Actor references become null on
+account deletion while timestamps remain. The current credential has no lifetime expiry. Never store plaintext or reversible ciphertext;
 never include secrets in list responses, logs, audit events, URLs, exception messages,
 analytics, localStorage or sessionStorage. Secret-bearing responses use no-store.
 A lost response requires a new token, not a retrieve-secret endpoint.
 
 Token write requests require `X-Expected-Organization-Id` matching the route and active
-session organization. Only current owner/admin browser sessions in a nonpersonal organization can create,
-list, rotate or revoke tokens. Bind requests to the expected organization and recheck
-role/scope inside writes. A user's loss of admin rights cannot be worked around through
+session organization. Only current owner browser sessions in a nonpersonal organization
+can create or rotate tokens, because both operations disclose a new plaintext secret.
+Current owners and admins can list metadata and revoke tokens, including while
+`SCIM_PROVISIONING_ENABLED=false`; only create and rotate require the switch. Bind requests to the expected organization and recheck
+role/scope inside writes. A user's loss of the required role cannot be worked around through
 a stale session. Credentials belong to the organization rather than the issuing person's
 future role; administrators must revoke a compromised organizational credential explicitly.
+
+Cap each organization at 10 active token rows, checked atomically with creation. One
+authoritative connection needs few credentials; ten allows staged IdP transitions and
+recovery without unbounded live credential growth. Revoke unused rows before creating
+more. List uses `limit` (default 20, maximum 100) and an optional `after` UUID cursor,
+with stable ID ordering and `nextCursor`; revoked history remains paginated.
 
 Rotation replaces the current digest on the same stable credential row, retaining one
 previous digest until an explicit overlap deadline (default 3,600 seconds; 0–86,400
@@ -258,12 +274,15 @@ organization mutation budgets to durable/shared storage before claiming cluster-
 limits. Optional IP allow-listing is initially an operator reverse-proxy control, not an
 application feature; trust forwarded addresses only through configured trusted proxies.
 
-The audit log is being built separately. Token foundation must never claim full audit
+Ordinary access logs retain method, route and response status for token administration,
+never bearer values, bodies or secret-bearing responses.
+
+The audit log is being built separately in [PR #246](https://github.com/hourmere/hourmere/pull/246). Token foundation must never claim full audit
 coverage. Required future actions: token.create, token.rotate, token.revoke;
 scim.authentication_failed and scim.rate_limited (bounded aggregation); scim.user.create,
 update, claim, deactivate, reactivate, delete; scim.group.create, update, delete;
 scim.group.member.add/remove; scim.mapping.link/unlink; scim.conflict;
-scim.last_owner_blocked; scim.membership.suspended; scim.credentials.revoked.
+scim.privileged_member_blocked; scim.last_owner_blocked; scim.membership.suspended; scim.credentials.revoked.
 Record organization/connection, safe credential ID or human actor, target opaque ID,
 request correlation ID, result and time; omit bearer, digest, attribute values and bodies.
 Transactional lifecycle audit integration is a release prerequisite for Users/Groups.
@@ -285,10 +304,10 @@ MCP tool or CLI command may mint or administer these secrets.
 
 | Current token route | Operation | Interface classification |
 |---|---|---|
-| `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | List safe metadata | Browser session, owner/admin; no MCP/CLI |
-| `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Create and show once | Browser-session-only credential administration exemption |
-| `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Rotate with overlap and show once | Same exemption |
-| `DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}` | Revoke | Same exemption |
+| `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | List safe metadata | Browser session, owner/admin, even while disabled; no MCP/CLI |
+| `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Create and show once | Owner browser session; credential administration exemption |
+| `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Rotate with overlap and show once | Owner browser session; same exemption |
+| `DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}` | Revoke | Owner/admin browser session, even while disabled; same exemption |
 
 Regenerate `apps/web/src/api/schema.d.ts`; response objects remain additive/open per
 [API conventions](api-conventions.md). Admin UI ships English and Simplified Chinese,
@@ -299,32 +318,49 @@ this foundation. No UI calls `/scim/v2` or bypasses the generated `/api/v1` clie
 ## Ordered implementation plan
 
 Each row is approximately one working day and owns only the listed interfaces. Dependencies
-name earlier rows; no row silently depends on a later UI or management route. All future
-flags below are planned, not current environment settings. Split further if acceptance
-cannot fit a day. SSO integration uses the accepted SSO foundation when it becomes available;
-keep enrollment disabled until its prerequisite security fixes are accepted.
+name earlier rows or explicit external PRs; no row silently depends on a later UI or
+management route. Split further if acceptance cannot fit a day. Audit integration depends
+on accepted [PR #246](https://github.com/hourmere/hourmere/pull/246); admission and
+suspension integration depend on accepted [SSO design PR #247](https://github.com/hourmere/hourmere/pull/247)
+and its implemented linking contract.
 
-| Step | Earlier dependencies | Owned endpoints / tools / commands | Flag state | Acceptance checks |
+**Resource test flag** means code-only dependency injection in the test harness. It is
+not an environment setting, operator setting, public parameter or production-build option.
+Users, Groups and discovery handlers remain unregistered in production code until all
+Users, Groups, conformance and release acceptance rows are complete. Every intermediate
+main commit can be released safely: `SCIM_PROVISIONING_ENABLED` enables credential
+creation/rotation only and cannot activate these resource handlers. The final release row
+alone owns changing production registration; test-only injection is never operator-accessible.
+
+| Step | Earlier / external dependencies | Owned endpoints / tools / commands | Flag state | Acceptance checks |
 |---|---|---|---|---|
-| Token foundation (this change) | None | Four `/api/v1/organizations/{organizationId}/provisioning-tokens` routes above; SCIM unavailable handler; no MCP/CLI | `SCIM_PROVISIONING_ENABLED` off by default; resources always unavailable | Hash-only, one-time display, role/scope isolation, rotate/revoke races, predecessor migration, jsdom en/zh-CN UI, source-copy mutations |
-| Connection identity and User schema | Token foundation | No new endpoint/tool/command; stable connection/resource/claim/tombstone storage | Resources off | Predecessor-data migration, unique identities, cross-org references rejected, rotation retains connection |
-| Discovery and query parser | Connection identity and User schema | GET ServiceProviderConfig, ResourceTypes and Schemas (collections and IDs); no MCP/CLI | Resource test flag only | Correct schemas/capabilities, bounded filters/projections/pagination, protocol errors, other-token refusal |
-| User reads | Discovery and query parser | GET Users and Users/{id}; no MCP/CLI | Resource test flag only | Filtered/unfiltered pagination, inactive entries, scoped not-found, no personal-account enumeration |
-| User creation and claim intent | User reads | POST Users; existing invitation issuance service; no MCP/CLI | Resource test flag only; no automatic admission | Duplicate/replay race, durable deduplicated notification, signup policy, pending claim, no verified-email mutation |
-| Claim completion and admission | User creation and claim intent | Existing invitation acceptance and accepted SSO linking completion interfaces; no new operation/tool/command | Resource test flag only | Own-account/mailbox proof, same-email conflict, expired invitation, manual/SCIM tombstones, claim replay |
-| User profile replacement | Claim completion and admission | PUT Users/{id}; no MCP/CLI | Resource test flag only | Okta replacement fixtures; server-owned fields protected; no global profile/email takeover |
-| User PATCH normalization | User profile replacement | PATCH Users/{id} profile operations; active changes still refused; no MCP/CLI | Resource test flag only | Ordered atomic patch, Entra forms, invalid-path rollback, bounded input, mutation assertions |
-| Organization access revocation | User PATCH normalization | Shared REST/MCP/native authorization and revocation services; no new route/tool/command | Resource test flag only | Team access denied on all credentials, personal/other-team preservation, cached/session race, pool cleanup, audit integration |
-| User lifecycle | Organization access revocation | Enable active writes on POST/PUT/PATCH; DELETE Users/{id}; no MCP/CLI | Resource test flag only | Last-owner lock races, tombstones, no resurrection, booking history, replay and audit atomicity |
-| Hierarchy authorization design | User lifecycle | No runtime interface; finalize parent/child permission contract | Groups off | Lead accepts scope, owner recovery, explicit linking and existing-team conflicts |
-| Hierarchy storage and guards | Hierarchy authorization design | No new public endpoint/tool/command; parent/child/mapping tables and authorization guards | Groups off | Predecessor-data preservation, cycle/cross-parent prevention, no sibling authority, last-owner races |
-| Mapping administration | Hierarchy storage and guards | GET/POST `/api/v1/scim/team-mappings`, DELETE `/api/v1/scim/team-mappings/{id}`; MCP `create_scim_team_mapping`, `delete_scim_team_mapping`; CLI `scim-team-mappings create`, `scim-team-mappings delete` | Groups test flag only | General administration uses REST/MCP/CLI parity; explicit parent and child owner authority; safe mapping metadata; en/zh-CN generated-client UI |
-| Group reads and creation | Mapping administration | GET Groups, GET Groups/{id}, POST Groups; discovery adds Group; no SCIM MCP/CLI | Groups test flag only | Managed child only, displayName collisions, externalId matching, members projection, no nested groups |
-| Group name and replacement | Group reads and creation | PUT Groups/{id}, PATCH Groups/{id} nonmember fields; no MCP/CLI | Groups test flag only | Manual edit conflicts, full replacement semantics, protected owners, transactional audit |
-| Group membership changes | Group name and replacement | PATCH Groups/{id} member operations; no MCP/CLI | Groups test flag only | Entra filtered/legacy removal, same-connection users, replay, local blockers, concurrent replacement |
-| Group retirement | Group membership changes | DELETE Groups/{id}; no MCP/CLI | Groups test flag only | Managed access removed, team history retained, last owner and outstanding bookings, idempotent delete |
-| RFC and provider corpus | Group retirement | No new endpoint/tool/command | Both resource flags off by default | RFC errors/filters/PATCH fixtures, Okta PUT and Entra variants, source-copy negative controls, bounded Postgres pools |
-| Local IdP acceptance and release docs | RFC and provider corpus | No new endpoint/tool/command; operator/provider docs | Enable only after acceptance; self-hosters receive full feature | Pinned Keycloak/plugin local fixture run, rotation/deprovision/recovery drills, rate limits/audit acceptance, explicit tested-provider matrix, rollback and limitations |
+| Token foundation (this change) | None | Four `/api/v1/organizations/{organizationId}/provisioning-tokens` routes above; SCIM unavailable handler; no MCP/CLI | Create/rotate switch off by default; list/revoke available; resources hard-off | Owner-only mint/rotate, owner/admin list/revoke while off, hash-only, one-time display, attribution, cap/pagination, scope isolation, races, migration, en/zh-CN UI, source-copy mutations |
+| Connection identity and User schema | Token foundation | No new endpoint/tool/command; connection/resource/claim/tombstone storage | Resources hard-off | Predecessor migration, live identity uniqueness, retired identifiers reusable with fresh IDs, cross-org references rejected, rotation retains connection |
+| Discovery representations | Connection identity and User schema | GET ServiceProviderConfig, ResourceTypes and Schemas (collections and IDs); no MCP/CLI | Resource test flag only | Exact schemas, truthful capabilities, organization scope, other-token refusal |
+| Query parser | Discovery representations | Shared filter/projection/pagination parser; no new endpoint/tool/command | Resource test flag only | Bounded quoted equality and escaped strings, projections, count/startIndex edge cases, SCIM errors |
+| User reads | Query parser | GET Users and Users/{id}; no MCP/CLI | Resource test flag only | Filtered/unfiltered pagination, inactive entries, scoped not-found, no personal-account enumeration |
+| User creation and claim intent | User reads; audit log PR #246 | POST Users; existing invitation issuance service; no MCP/CLI | Resource test flag only; no automatic admission | Duplicate/replay race, deduplicated notification, signup policy, pending claim, audit atomicity, no verified-email mutation |
+| Claim completion and admission | User creation and claim intent; SSO design PR #247 and accepted linking implementation | Existing invitation acceptance and SSO linking completion; no new operation/tool/command | Resource test flag only | Own-account/mailbox proof, same-email conflict, expired invitation, local/SCIM tombstones, claim replay |
+| User profile replacement | Claim completion and admission | PUT Users/{id}; no MCP/CLI | Resource test flag only | Okta replacement fixtures, server-owned fields protected, no global profile/email takeover |
+| User PATCH normalization | User profile replacement | PATCH Users/{id} profile operations; active changes refused; no MCP/CLI | Resource test flag only | Ordered atomic patch, Entra forms, invalid-path rollback, bounded input, mutation assertions |
+| Suspension checks on authorization | User PATCH normalization; SSO design PR #247 and accepted linking implementation | Shared REST/MCP/native membership authorization; no new interface | Resource test flag only | Every credential/cached proof refuses suspended team, personal/other-team preservation, native selection and JIT cannot bypass |
+| Session authorization revocation | Suspension checks on authorization | Shared session and team-proof revocation; no new interface | Resource test flag only | Active-team sessions revoked, other sessions cannot reselect suspended team, transaction/lock races, bounded pools |
+| API-key and OAuth revocation | Session authorization revocation; audit log PR #246 | Organization API-key and MCP grant/binding revocation; no new interface | Resource test flag only | Both credential types revoked atomically or durable outbox persisted before success, other-team credentials preserved, audit atomicity |
+| User lifecycle: suspension and reactivation | API-key and OAuth revocation; audit log PR #246 | Enable active writes on POST/PUT/PATCH; no MCP/CLI | Resource test flag only | Every owner/admin deactivation or demotion and role grant returns 403 mutability, role-change races serialize, no key/grant resurrection, local blockers win, audit atomicity |
+| User lifecycle: retirement | User lifecycle: suspension and reactivation | DELETE Users/{id}; no MCP/CLI | Resource test flag only | Every owner/admin deletion returns 403 mutability, all subsequent operations on retired ID return 404, fresh POST reuses identifiers only with re-admission, history retained, audit atomicity |
+| Managed membership server guards | User lifecycle: retirement; SSO design PR #247 and accepted linking implementation | Existing member/invitation/role management REST and native Better Auth writes and shared MCP services; no new operation/tool/command | Resource test flag only | Manual profile/membership changes cannot bypass management, local suspension wins, native/JIT and concurrent reactivation checks, protected owner/admin authority |
+| Managed membership UI | Managed membership server guards | Existing member-management UI; no new endpoint/tool/command | Resource test flag only | en/zh-CN managed status and blockers, forbidden manual actions explained, unknown readiness stays neutral, generated-client errors handled |
+| Hierarchy authorization design | Managed membership UI | No runtime interface; parent/child permission contract | Resources hard-off | Lead accepts scope, owner/admin recovery, explicit linking and existing-team conflicts |
+| Hierarchy storage and guards | Hierarchy authorization design | Parent/child/mapping tables and guards; no new public interface | Resource test flag only | Predecessor preservation, cycle/cross-parent prevention, no sibling authority, privileged-member races |
+| Mapping administration | Hierarchy storage and guards; audit log PR #246 | GET/POST `/api/v1/scim/team-mappings`, DELETE `/api/v1/scim/team-mappings/{id}`; MCP `create_scim_team_mapping`, `delete_scim_team_mapping`; CLI `scim-team-mappings create`, `scim-team-mappings delete` | Resource test flag only | REST/MCP/CLI parity, explicit parent/child owner authority, safe metadata, en/zh-CN generated-client UI, audit |
+| Group reads and creation | Mapping administration | GET Groups, GET Groups/{id}, POST Groups; discovery adds Group; no SCIM MCP/CLI | Resource test flag only | Managed child only, name collisions, externalId matching, members projection, no nested groups |
+| Group name and replacement | Group reads and creation; audit log PR #246 | PUT Groups/{id}, PATCH Groups/{id} nonmember fields; no MCP/CLI | Resource test flag only | Manual conflicts, replacement, any owner/admin demotion/removal or role grant returns 403 mutability, transactional audit |
+| Group membership changes | Group name and replacement | PATCH Groups/{id} member operations; no MCP/CLI | Resource test flag only | Entra removal forms, same-connection users, replay, blockers, concurrent replacement, owner/admin access cannot be removed |
+| Group retirement | Group membership changes | DELETE Groups/{id}; no MCP/CLI | Resource test flag only | Managed access removed, team history retained, privileged-member and booking checks, subsequent operations 404, retired uniqueness excluded |
+| RFC and provider corpus | Group retirement | No new endpoint/tool/command | Resources hard-off | RFC errors/filters/PATCH, Okta PUT/Entra variants, source-copy controls, bounded Postgres pools |
+| Local Keycloak harness | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
+| Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
+| Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers |
 
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional
@@ -342,7 +378,9 @@ revocation operation. If either generation is compromised, revoke that row and c
 a fresh credential. Backups contain only hashes, so operators cannot recover lost tokens.
 Revocation after a restored backup needs explicit review because restoring old state can
 restore a formerly valid credential; revoke/rotate restored credentials before reopening
-provisioning ingress. Disabling the flag is not token revocation.
+provisioning ingress. Disabling the flag is not token revocation. Owners/admins can still list and revoke
+credentials while disabled, before re-enabling; existing unrevoked rows otherwise become
+usable again when the flag is enabled.
 
 Current releases cannot pass an IdP connection test or synchronize users/groups, even
 with the flag enabled. Do not configure production provisioning yet. The

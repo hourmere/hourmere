@@ -170,6 +170,9 @@ const schema = z
       ),
     ),
     MAIL_FROM: optional(z.string()),
+    PAID_BOOKINGS_ENABLED: optional(z.enum(['true', 'false'])).transform(
+      (value) => value === 'true',
+    ),
     SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),

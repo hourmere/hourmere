@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router'
 import { api, unwrap } from '../api/client.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
@@ -11,38 +11,77 @@ const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance',
 export function ProvisioningTokens({
   organizationId,
   role,
+  timeZone,
 }: {
   organizationId: string
   role: string | null
+  timeZone?: string
 }) {
   const [instance] = useLoad(loadInstance)
   const location = useLocation()
-  if (
-    instance.status !== 'ready' ||
-    instance.data.scimProvisioningEnabled !== true ||
-    !role?.split(',').some((value) => ['owner', 'admin'].includes(value.trim()))
-  )
-    return null
+  if (!role?.split(',').some((value) => ['owner', 'admin'].includes(value.trim()))) return null
   // A navigation or organization change destroys the one-time secret and pending work.
   return (
-    <TokenPanel key={`${organizationId}:${location.key}:${role}`} organizationId={organizationId} />
+    <TokenPanel
+      key={`${organizationId}:${location.key}:${role}`}
+      organizationId={organizationId}
+      timeZone={timeZone}
+      canMint={
+        instance.status === 'ready' &&
+        instance.data.scimProvisioningEnabled === true &&
+        role?.split(',').some((value) => value.trim() === 'owner') === true
+      }
+    />
   )
 }
 
-function TokenPanel({ organizationId }: { organizationId: string }) {
-  const { t } = useI18n()
+function TokenPanel({
+  organizationId,
+  canMint,
+  timeZone,
+}: {
+  organizationId: string
+  canMint: boolean
+  timeZone?: string
+}) {
+  const { t, formatLocale } = useI18n()
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined])
+  const after = cursors.at(-1)
+  const formatDate = (iso: string) =>
+    new Intl.DateTimeFormat(formatLocale, {
+      calendar: 'gregory',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone,
+    }).format(new Date(iso))
   const mounted = useMounted()
   const load = useCallback(
-    (signal: AbortSignal) =>
-      unwrap(
+    async (signal: AbortSignal) => ({
+      after,
+      ...(await unwrap(
         api.GET('/api/v1/organizations/{organizationId}/provisioning-tokens', {
-          params: { path: { organizationId } },
+          params: { path: { organizationId }, query: { limit: 20, after } },
           signal,
         }),
-      ),
-    [organizationId],
+      )),
+    }),
+    [organizationId, after],
   )
   const [tokens, reload] = useLoad(load)
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (tokens.status !== 'ready') return
+    const deadlines = tokens.data.tokens.flatMap((token) =>
+      token.previousValidUntil &&
+      !token.revokedAt &&
+      Date.parse(token.previousValidUntil) > Math.max(now, Date.now())
+        ? [Date.parse(token.previousValidUntil)]
+        : [],
+    )
+    if (!deadlines.length) return
+    const timeout = setTimeout(() => setNow(Date.now()), Math.min(...deadlines) - Date.now() + 1)
+    return () => clearTimeout(timeout)
+  }, [tokens, now])
   const [name, setName] = useState('')
   const [secret, setSecret] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,7 +94,7 @@ function TokenPanel({ organizationId }: { organizationId: string }) {
 
   async function create(event: FormEvent) {
     event.preventDefault()
-    if (busy || !name.trim()) return
+    if (!canMint || busy || !name.trim()) return
     setBusy(true)
     setFailed(false)
     setSecret(null)
@@ -72,6 +111,7 @@ function TokenPanel({ organizationId }: { organizationId: string }) {
       if (!mounted.current) return
       setSecret(result.secret)
       setName('')
+      setCursors([undefined])
       reload()
     } catch {
       if (mounted.current) {
@@ -84,7 +124,7 @@ function TokenPanel({ organizationId }: { organizationId: string }) {
   }
 
   async function change() {
-    if (!confirmation || busy) return
+    if (!confirmation || busy || (confirmation.action === 'rotate' && !canMint)) return
     setBusy(true)
     setFailed(false)
     setSecret(null)
@@ -154,23 +194,25 @@ function TokenPanel({ organizationId }: { organizationId: string }) {
           </button>
         </section>
       )}
-      <form onSubmit={(event) => void create(event)} className="stack">
-        <label htmlFor="scim-token-name">{t('Provisioning token name')}</label>
-        <input
-          id="scim-token-name"
-          autoComplete="off"
-          maxLength={100}
-          required
-          value={name}
-          disabled={busy}
-          onChange={(event) => setName(event.target.value)}
-        />
-        <div>
-          <button className="button button-primary" type="submit" disabled={busy || !name.trim()}>
-            {t('Create provisioning token')}
-          </button>
-        </div>
-      </form>
+      {canMint && (
+        <form onSubmit={(event) => void create(event)} className="stack">
+          <label htmlFor="scim-token-name">{t('Provisioning token name')}</label>
+          <input
+            id="scim-token-name"
+            autoComplete="off"
+            maxLength={100}
+            required
+            value={name}
+            disabled={busy}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <div>
+            <button className="button button-primary" type="submit" disabled={busy || !name.trim()}>
+              {t('Create provisioning token')}
+            </button>
+          </div>
+        </form>
+      )}
       {tokens.status === 'loading' && <p role="status">{t('Loading provisioning tokens…')}</p>}
       {tokens.status === 'error' && (
         <div role="alert">
@@ -193,27 +235,32 @@ function TokenPanel({ organizationId }: { organizationId: string }) {
                 <p className="hint">
                   {token.revokedAt
                     ? t('Revoked')
-                    : token.previousValidUntil
-                      ? t('Previous token valid until: {date}', { date: token.previousValidUntil })
+                    : token.previousValidUntil &&
+                        Date.parse(token.previousValidUntil) > Math.max(now, Date.now())
+                      ? t('Previous token valid until: {date}', {
+                          date: formatDate(token.previousValidUntil),
+                        })
                       : t('Active')}
                 </p>
                 <p className="hint">
                   {token.lastUsedAt
-                    ? t('Last used: {date}', { date: token.lastUsedAt })
+                    ? t('Last used: {date}', { date: formatDate(token.lastUsedAt) })
                     : t('Never used')}
                 </p>
                 {!token.revokedAt && (
                   <div className="form-actions">
-                    <button
-                      type="button"
-                      className="button button-small"
-                      disabled={busy}
-                      onClick={() =>
-                        setConfirmation({ id: token.id, name: token.name, action: 'rotate' })
-                      }
-                    >
-                      {t('Rotate token')}
-                    </button>
+                    {canMint && (
+                      <button
+                        type="button"
+                        className="button button-small"
+                        disabled={busy}
+                        onClick={() =>
+                          setConfirmation({ id: token.id, name: token.name, action: 'rotate' })
+                        }
+                      >
+                        {t('Rotate token')}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="button button-small"
@@ -230,6 +277,36 @@ function TokenPanel({ organizationId }: { organizationId: string }) {
             ))}
           </ul>
         ))}
+      <div className="form-actions">
+        {cursors.length > 1 && (
+          <button
+            type="button"
+            className="button"
+            disabled={busy || (tokens.status === 'ready' && tokens.data.after !== after)}
+            onClick={() => {
+              setCursors((current) => current.slice(0, -1))
+              setConfirmation(null)
+              setSecret(null)
+            }}
+          >
+            {t('Previous page')}
+          </button>
+        )}
+        {tokens.status === 'ready' && tokens.data.nextCursor && (
+          <button
+            type="button"
+            className="button"
+            disabled={busy || tokens.data.after !== after}
+            onClick={() => {
+              setCursors((current) => [...current, tokens.data.nextCursor ?? undefined])
+              setConfirmation(null)
+              setSecret(null)
+            }}
+          >
+            {t('Next page')}
+          </button>
+        )}
+      </div>
       {confirmation && (
         <section className="alert alert-info stack" aria-label={t('Confirm token change')}>
           <p className="user-content">

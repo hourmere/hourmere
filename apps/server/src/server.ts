@@ -28,7 +28,7 @@ import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
-import { createJobs, oneTimeBookingLinksRetentionJob } from '@hourmere/jobs'
+import { createJobs, oneTimeBookingLinksRetentionJob, paymentHoldsExpiryJob } from '@hourmere/jobs'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -57,6 +57,7 @@ import {
   type BookingNotifier,
   cleanupWaitlist,
   ensureWaitlistKey,
+  expirePaymentHolds,
   leaveTeamMember,
   removeWaitlist,
   scanWaitlists,
@@ -512,6 +513,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       waitlistEmailJob(runWaitlistEmail),
       oneTimeBookingLinksRetentionJob(db),
+      paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,

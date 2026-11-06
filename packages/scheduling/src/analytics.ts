@@ -100,11 +100,13 @@ export async function getBookingActivity(
         (b.rescheduled_from_id IS NULL)::integer AS created,
         (b.rescheduled_from_id IS NOT NULL)::integer AS rescheduled, 0 AS cancelled
       FROM bookings b WHERE b.organization_id = ${organizationId}
+        AND (b.payment_hold_expires_at IS NULL OR b.payment_confirmed_at IS NOT NULL)
         AND b.created_at >= ${first.from} AND b.created_at < ${last.to}
         AND EXISTS (SELECT 1 FROM access)
       UNION ALL
       SELECT b.cancelled_at AS at, 0, 0, 1
       FROM bookings b WHERE b.organization_id = ${organizationId} AND b.status = 'cancelled'
+        AND (b.payment_hold_expires_at IS NULL OR b.payment_confirmed_at IS NOT NULL)
         AND b.cancelled_at >= ${first.from} AND b.cancelled_at < ${last.to}
         AND EXISTS (SELECT 1 FROM access)
         AND NOT EXISTS (

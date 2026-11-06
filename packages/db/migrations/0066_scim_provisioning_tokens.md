@@ -2,11 +2,16 @@
 
 Adds an empty organization-scoped credential table; no existing account, membership,
 booking or credential is rewritten. The number reserves space after the migrations in
-concurrent pull requests through 0065. The predecessor on main at authoring is 0061.
+concurrent pull requests through 0065. The predecessor on main is 0065.
 
 Only SHA-256 base64url digests are stored. The current digest is required until revocation;
 revocation erases both digests permanently. A single previous digest supports an explicit
-bounded rotation overlap. Token names and nonsecret timestamps are safe to list. Credentials
+bounded rotation overlap. Token names, creator/last rotator user ids and nonsecret timestamps are safe to list.
+Actor foreign keys become null on account deletion while the timestamps remain.
+Only owners can create or rotate; owners and admins can list and revoke.
+At most ten active credentials allow staged replacement and recovery for the single
+authoritative IdP. The organization lock serializes this cap. Lists use bounded UUID
+cursors and include revoked credentials. Credentials
 have no overall expiry in this foundation; revoke them or rotate with zero overlap to
 invalidate the current secret immediately. Rotation cannot replace an active overlap.
 

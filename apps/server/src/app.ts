@@ -330,7 +330,11 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
 // URL logger, including malformed tokens and refused embed attempts.
 const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
-  if (c.req.path.includes('/provisioning-tokens')) return next()
+  if (c.req.path.includes('/provisioning-tokens')) {
+    await next()
+    console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
+    return
+  }
   if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
   await next()
   console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))

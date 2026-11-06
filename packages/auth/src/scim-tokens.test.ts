@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { isUuid } from './organizations.ts'
 import * as service from './scim-tokens.ts'
 import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
@@ -77,6 +77,9 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
         .execute()
     }
   })
+  afterEach(async () => {
+    await db.deleteFrom('scim_provisioning_tokens').execute()
+  })
   afterAll(async () => {
     await database?.drop()
   })
@@ -104,7 +107,7 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
     expect(JSON.stringify(stored).includes(result.secret)).toBe(false)
     const listed = await implementation.listScimTokens(db, actor)
     expect(JSON.stringify(listed).includes(result.secret)).toBe(false)
-    expect(listed.find((t) => t.id === result.token.id)).not.toHaveProperty('token_hash')
+    expect(listed.tokens.find((t) => t.id === result.token.id)).not.toHaveProperty('token_hash')
   }
   it('stores only digests and returns secrets only at issuance', async () => {
     await hashOnly()
@@ -132,14 +135,15 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
       }),
     ).toBeNull()
     expect(
-      (await service.listScimTokens(db, actor)).find((t) => t.id === issued.token.id)?.lastUsedAt,
+      (await service.listScimTokens(db, actor)).tokens.find((t) => t.id === issued.token.id)
+        ?.lastUsedAt,
     ).not.toBeNull()
   })
   it('isolates list, rotation and revoke across organizations', async () => {
     const issued = await create()
-    expect((await service.listScimTokens(db, other)).some((t) => t.id === issued.token.id)).toBe(
-      false,
-    )
+    expect(
+      (await service.listScimTokens(db, other)).tokens.some((t) => t.id === issued.token.id),
+    ).toBe(false)
     await expect(
       service.rotateScimToken(db, { ...other, tokenId: issued.token.id, overlapSeconds: 0 }),
     ).rejects.toMatchObject({ code: 'not_found' })
@@ -217,7 +221,7 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
       .set({ role: 'admin' })
       .where('organizationId', '=', actor.organizationId)
       .execute()
-    await create()
+    await expect(create()).rejects.toMatchObject({ code: 'forbidden' })
     await db
       .updateTable('auth.member')
       .set({ role: 'owner' })
@@ -285,6 +289,131 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
     expect(await service.listScimTokens(db, actor)).toEqual(before)
     expect(database.pool.totalCount).toBeLessThanOrEqual(10)
   })
+  async function ownerProtection(implementation = service, rotationFirst = false) {
+    const issued = await create()
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('organizationId', '=', actor.organizationId)
+      .execute()
+    try {
+      if (rotationFirst)
+        await expect(
+          implementation.rotateScimToken(db, {
+            ...actor,
+            tokenId: issued.token.id,
+            overlapSeconds: 0,
+          }),
+        ).rejects.toMatchObject({ code: 'forbidden' })
+      await expect(
+        implementation.createScimToken(db, { ...actor, name: 'Admin' }),
+      ).rejects.toMatchObject({ code: 'forbidden' })
+      await expect(
+        implementation.rotateScimToken(db, {
+          ...actor,
+          tokenId: issued.token.id,
+          overlapSeconds: 0,
+        }),
+      ).rejects.toMatchObject({ code: 'forbidden' })
+      expect(
+        (await implementation.listScimTokens(db, actor)).tokens.some(
+          (t) => t.id === issued.token.id,
+        ),
+      ).toBe(true)
+      expect(
+        (await implementation.revokeScimToken(db, { ...actor, tokenId: issued.token.id }))
+          .revokedAt,
+      ).not.toBeNull()
+    } finally {
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'owner' })
+        .where('organizationId', '=', actor.organizationId)
+        .execute()
+    }
+  }
+  it('reserves issuance and rotation for owners while admins can list and revoke', async () => {
+    await ownerProtection()
+  })
+  async function capProtection(implementation = service) {
+    await db.deleteFrom('scim_provisioning_tokens').execute()
+    for (let i = 0; i < service.SCIM_MAX_ACTIVE_TOKENS - 1; i++) await create()
+    const raced = await Promise.allSettled([create(implementation), create(implementation)])
+    expect(raced.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    expect(raced.find((r) => r.status === 'rejected')).toMatchObject({
+      reason: { code: 'conflict' },
+    })
+  }
+  it('serializes the active cap and frees capacity after revocation', async () => {
+    await capProtection()
+    const first = (await service.listScimTokens(db, actor)).tokens[0]
+    if (!first) throw new Error('Missing token fixture')
+    await service.revokeScimToken(db, { ...actor, tokenId: first.id })
+    await create()
+  })
+  async function attribution(implementation = service) {
+    const issued = await create(implementation)
+    expect(issued.token.createdByUserId).toBe(actor.userId)
+    expect(issued.token.rotatedAt).toBeNull()
+    const rotated = await implementation.rotateScimToken(db, {
+      ...actor,
+      tokenId: issued.token.id,
+      overlapSeconds: 0,
+    })
+    expect(rotated.token.rotatedByUserId).toBe(actor.userId)
+    expect(rotated.token.createdByUserId).toBe(actor.userId)
+    expect(rotated.token.rotatedAt).not.toBeNull()
+  }
+  it('attributes creation and rotation without changing the creator', async () => {
+    await attribution()
+  })
+  async function pagination(implementation = service) {
+    await db.deleteFrom('scim_provisioning_tokens').execute()
+    for (let i = 0; i < 3; i++) await create()
+    const first = await implementation.listScimTokens(db, { ...actor, limit: 2 })
+    expect(first.tokens).toHaveLength(2)
+    expect(first.nextCursor).toBe(first.tokens[1]?.id)
+    const second = await implementation.listScimTokens(db, {
+      ...actor,
+      limit: 2,
+      after: first.nextCursor ?? undefined,
+    })
+    expect(second.tokens).toHaveLength(1)
+    expect(second.nextCursor).toBeNull()
+    expect(new Set([...first.tokens, ...second.tokens].map((t) => t.id)).size).toBe(3)
+  }
+  it('paginates metadata without duplicates and bounds input', async () => {
+    await pagination()
+    for (const input of [{ limit: 0 }, { limit: 101 }, { limit: 1.5 }, { after: 'bad' }])
+      await expect(service.listScimTokens(db, { ...actor, ...input })).rejects.toMatchObject({
+        code: 'invalid_input',
+      })
+    expect((await service.createScimToken(db, { ...actor, name: 'Ohm_sync' })).token.name).toBe(
+      'Ohm_sync',
+    )
+  })
+  it.each([
+    ['owner', "ownerOnly && manager.role !== 'owner'", 'false'],
+    ['owner rotation', "ownerOnly && manager.role !== 'owner'", 'false'],
+    ['cap', 'Number(count.count) >= SCIM_MAX_ACTIVE_TOKENS', 'false'],
+    ['creator', 'created_by_user_id: input.userId', 'created_by_user_id: null'],
+    ['rotator', 'rotated_by_user_id: input.userId', 'rotated_by_user_id: null'],
+    ['page', '.limit(limit + 1)', '.limit(1)'],
+  ] as const)('detects %s source-copy protection mutation', async (protection, from, to) => {
+    const verify =
+      protection === 'owner rotation'
+        ? (implementation: typeof service) => ownerProtection(implementation, true)
+        : protection === 'owner'
+          ? ownerProtection
+          : protection === 'cap'
+            ? capProtection
+            : protection === 'page'
+              ? pagination
+              : attribution
+    await expect(verify(sourceCopy([from, to]))).rejects.toMatchObject({ name: 'AssertionError' })
+    await db.deleteFrom('scim_provisioning_tokens').execute()
+    await verify(sourceCopy())
+  })
   it.each([
     ['hash-only', "createHash('sha256').update(secret).digest('base64url')", "'A'.repeat(43)"],
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source-copy anchor
@@ -304,7 +433,11 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
       ".where('revoked_at'",
     ],
     ['expiry', "eb('previous_valid_until', '>', sql<Date>`clock_timestamp()`)", 'eb.val(true)'],
-    ['authorization', 'await checkTeamManagementAccess(', 'await (async () => {}) ('],
+    [
+      'authorization',
+      'const manager = await checkTeamManagementAccess(',
+      "const manager = await (async () => ({role: 'owner'})) (",
+    ],
   ] as const)(
     'detects source-copy %s mutation and verifies restored source',
     async (protection, from, to) => {

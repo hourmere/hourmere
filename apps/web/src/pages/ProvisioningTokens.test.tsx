@@ -20,12 +20,17 @@ const TOKEN = {
 }
 // A noncredential marker keeps intentional assertion failures free of bearer material.
 const MARKER = 'one-time-display-marker'
-function view(role: string | null = 'owner', organizationId = ORG, locale = 'en') {
+function view(
+  role: string | null = 'owner',
+  organizationId = ORG,
+  locale = 'en',
+  timeZone = 'America/Los_Angeles',
+) {
   return (
     <MemoryRouter>
       <InterfaceScope surface="admin">
         <AccountLanguage locale={locale}>
-          <ProvisioningTokens organizationId={organizationId} role={role} />
+          <ProvisioningTokens organizationId={organizationId} role={role} timeZone={timeZone} />
           <Link to="?other">Navigate</Link>
         </AccountLanguage>
       </InterfaceScope>
@@ -58,18 +63,108 @@ describe('SCIM provisioning credentials', () => {
       expect(api.to(`GET ${BASE}`)).toHaveLength(0)
     },
   )
-  it.each([false, undefined])('requires explicitly enabled feature %s', async (flag) => {
-    const api = setup({
-      'GET /api/v1/instance': () => json(200, { scimProvisioningEnabled: flag }),
+  it.each([false, undefined])(
+    'allows revocation but no minting when feature is %s',
+    async (flag) => {
+      const api = setup({
+        'GET /api/v1/instance': () => json(200, { scimProvisioningEnabled: flag }),
+        [`DELETE ${BASE}/token-1`]: () => json(200, { token: TOKEN }),
+      })
+      render(view())
+      await waitFor(() => expect(api.to('GET /api/v1/instance')).toHaveLength(1))
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'Revoke token' }))
+      await user.click(screen.getByRole('button', { name: 'Confirm token change' }))
+      await waitFor(() => expect(api.to(`DELETE ${BASE}/token-1`)).toHaveLength(1))
+      expect(screen.queryByRole('button', { name: 'Create provisioning token' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Rotate token' })).toBeNull()
+    },
+  )
+  it('lets admins list and revoke but never create or rotate tokens', async () => {
+    const api = setup({ [`DELETE ${BASE}/token-1`]: () => json(200, { token: TOKEN }) })
+    render(view('admin'))
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Revoke token' }))
+    expect(screen.queryByRole('button', { name: 'Create provisioning token' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Rotate token' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Confirm token change' }))
+    await waitFor(() => expect(api.to(`DELETE ${BASE}/token-1`)).toHaveLength(1))
+  })
+  it.each(['en', 'zh-CN'])(
+    'formats timestamps with the user locale and time zone (%s)',
+    async (locale) => {
+      const date = '2026-11-06T12:00:00Z'
+      setup({
+        [`GET ${BASE}`]: () =>
+          json(200, {
+            tokens: [{ ...TOKEN, lastUsedAt: date, previousValidUntil: '2000-01-01T00:00:00Z' }],
+          }),
+      })
+      render(view('owner', ORG, locale, 'Pacific/Honolulu'))
+      const formatted = new Intl.DateTimeFormat(locale, {
+        calendar: 'gregory',
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'Pacific/Honolulu',
+      }).format(new Date(date))
+      await screen.findByText((text) => text.includes(formatted))
+      expect(screen.getByText(locale === 'en' ? 'Active' : '启用')).toBeDefined()
+      expect(document.body.textContent).not.toContain(date)
+      expect(document.body.textContent).not.toContain('2000-01-01')
+    },
+  )
+  it('shows a future overlap using a localized date', async () => {
+    const date = new Date(Date.now() + 3600000).toISOString()
+    setup({
+      [`GET ${BASE}`]: () => json(200, { tokens: [{ ...TOKEN, previousValidUntil: date }] }),
     })
     render(view())
-    await waitFor(() => expect(api.to('GET /api/v1/instance')).toHaveLength(1))
-    expect(screen.queryByRole('heading', { name: 'SCIM provisioning tokens' })).toBeNull()
-    expect(api.to(`GET ${BASE}`)).toHaveLength(0)
+    const formatted = new Intl.DateTimeFormat('en', {
+      calendar: 'gregory',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'America/Los_Angeles',
+    }).format(new Date(date))
+    await screen.findByText(`Previous token valid until: ${formatted}`)
+  })
+  it('paginates token metadata using the server cursor and can return to the first page', async () => {
+    const api = setup({
+      [`GET ${BASE}`]: (call: { path: string }) =>
+        json(
+          200,
+          new URL(call.path, 'http://localhost').searchParams.has('after')
+            ? { tokens: [{ ...TOKEN, id: 'second', name: 'Second directory' }], nextCursor: null }
+            : { tokens: [TOKEN], nextCursor: TOKEN.id },
+        ),
+    })
+    render(view())
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Next page' }))
+    await screen.findByText('Second directory')
+    expect(screen.queryByText('Directory')).toBeNull()
+    expect(api.to(`GET ${BASE}`).at(-1)?.path).toContain('after=token-1')
+    expect(api.to(`GET ${BASE}`).at(-1)?.path).toContain('limit=20')
+    await user.click(screen.getByRole('button', { name: 'Previous page' }))
+    await screen.findByText('Directory')
+    expect(screen.queryByText('Second directory')).toBeNull()
+  })
+  it('allows returning to the previous page after a pagination request fails', async () => {
+    setup({
+      [`GET ${BASE}`]: (call: { path: string }) =>
+        call.path.includes('after=')
+          ? json(503, {})
+          : json(200, { tokens: [TOKEN], nextCursor: TOKEN.id }),
+    })
+    render(view())
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Next page' }))
+    await screen.findByText('Could not load provisioning tokens.')
+    await user.click(screen.getByRole('button', { name: 'Previous page' }))
+    await screen.findByText('Directory')
   })
   it('shows the response once, pins writes to the organization and clears on dismissal', async () => {
     const api = setup()
-    render(view('admin'))
+    render(view('owner'))
     const user = await create()
     expect(document.body.textContent?.includes(MARKER)).toBe(true)
     expect(api.to(`POST ${BASE}`)[0]?.headers.get('X-Expected-Organization-Id')).toBe(ORG)
@@ -148,5 +243,10 @@ describe('SCIM provisioning credentials', () => {
     await screen.findByRole('button', { name: '轮换令牌' })
     expect(screen.getByText('SCIM 预配令牌')).toBeDefined()
     expect(screen.queryByText('Create provisioning token')).toBeNull()
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText('预配令牌名称'), 'Directory')
+    await user.click(screen.getByRole('button', { name: '创建预配令牌' }))
+    await user.click(await screen.findByRole('button', { name: '隐藏令牌' }))
+    expect(document.body.textContent?.includes(MARKER)).toBe(false)
   })
 })

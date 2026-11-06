@@ -68,6 +68,7 @@ export const admin = {
     'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.',
   'Could not remove the waitlist entry.': 'Could not remove the waitlist entry.',
   'Back to first page': 'Back to first page',
+  'Previous page': 'Previous page',
   'Next page': 'Next page',
   Refresh: 'Refresh',
 

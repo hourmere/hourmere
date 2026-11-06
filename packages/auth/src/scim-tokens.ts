@@ -6,6 +6,8 @@ import { checkTeamManagementAccess, TeamManagementError } from './team-managemen
 
 export const SCIM_TOKEN_PREFIX = 'scim_'
 export const SCIM_MAX_OVERLAP_SECONDS = 86400
+// One authoritative IdP, with room for staged replacement and recovery credentials.
+export const SCIM_MAX_ACTIVE_TOKENS = 10
 export class ScimTokenError extends Error {
   readonly code: 'forbidden' | 'not_found' | 'conflict' | 'invalid_input'
   readonly status: 400 | 403 | 404 | 409
@@ -31,6 +33,9 @@ const metadata = [
   'organization_id as organizationId',
   'name',
   'created_at as createdAt',
+  'created_by_user_id as createdByUserId',
+  'rotated_by_user_id as rotatedByUserId',
+  'rotated_at as rotatedAt',
   'last_used_at as lastUsedAt',
   'revoked_at as revokedAt',
   'previous_valid_until as previousValidUntil',
@@ -41,10 +46,11 @@ async function authorized<T>(
   db: Db,
   actor: ScimTokenActor,
   work: (trx: Db) => Promise<T>,
+  ownerOnly = false,
 ): Promise<T> {
   return db.transaction().execute(async (trx) => {
     try {
-      await checkTeamManagementAccess(
+      const manager = await checkTeamManagementAccess(
         trx,
         {
           kind: 'session',
@@ -56,6 +62,7 @@ async function authorized<T>(
         true,
         { expectedOrganizationId: actor.organizationId, allowPersonal: false },
       )
+      if (ownerOnly && manager.role !== 'owner') throw new ScimTokenError('forbidden', 403)
     } catch (error) {
       if (error instanceof TeamManagementError) throw new ScimTokenError('forbidden', 403)
       throw error
@@ -69,30 +76,62 @@ export async function createScimToken(db: Db, input: ScimTokenActor & { name: st
   if (
     name.length < 1 ||
     name.length > 100 ||
-    /(?:scim_|hm_)[A-Za-z0-9_-]+/.test(name) ||
+    /^(?:scim_[A-Za-z0-9_-]{43}|hm_[A-Za-z0-9_-]{64})$/.test(name) ||
     [...name].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
   )
     throw new ScimTokenError('invalid_input', 400)
-  return authorized(db, input, async (trx) => {
-    const secret = mint()
-    const token = await trx
-      .insertInto('scim_provisioning_tokens')
-      .values({ organization_id: input.organizationId, name, token_hash: hash(secret) })
-      .returning(metadata)
-      .executeTakeFirstOrThrow()
-    return { token, secret }
-  })
+  return authorized(
+    db,
+    input,
+    async (trx) => {
+      const count = await trx
+        .selectFrom('scim_provisioning_tokens')
+        .select((eb) => eb.fn.countAll<string>().as('count'))
+        .where('organization_id', '=', input.organizationId)
+        .where('revoked_at', 'is', null)
+        .executeTakeFirstOrThrow()
+      if (Number(count.count) >= SCIM_MAX_ACTIVE_TOKENS) throw new ScimTokenError('conflict', 409)
+      const secret = mint()
+      const token = await trx
+        .insertInto('scim_provisioning_tokens')
+        .values({
+          organization_id: input.organizationId,
+          name,
+          token_hash: hash(secret),
+          created_by_user_id: input.userId,
+        })
+        .returning(metadata)
+        .executeTakeFirstOrThrow()
+      return { token, secret }
+    },
+    true,
+  )
 }
-export async function listScimTokens(db: Db, input: ScimTokenActor) {
-  return authorized(db, input, (trx) =>
-    trx
+export async function listScimTokens(
+  db: Db,
+  input: ScimTokenActor & { limit?: number; after?: string },
+) {
+  const limit = input.limit ?? 20
+  if (
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 100 ||
+    (input.after !== undefined && !isUuid(input.after))
+  )
+    throw new ScimTokenError('invalid_input', 400)
+  return authorized(db, input, async (trx) => {
+    let query = trx
       .selectFrom('scim_provisioning_tokens')
       .select(metadata)
       .where('organization_id', '=', input.organizationId)
-      .orderBy('created_at', 'desc')
-      .orderBy('id')
-      .execute(),
-  )
+    if (input.after) query = query.where('id', '<', input.after)
+    const rows = await query
+      .orderBy('id', 'desc')
+      .limit(limit + 1)
+      .execute()
+    const tokens = rows.slice(0, limit)
+    return { tokens, nextCursor: rows.length > limit ? (tokens.at(-1)?.id ?? null) : null }
+  })
 }
 export async function rotateScimToken(
   db: Db,
@@ -105,38 +144,45 @@ export async function rotateScimToken(
     input.overlapSeconds > SCIM_MAX_OVERLAP_SECONDS
   )
     throw new ScimTokenError('invalid_input', 400)
-  return authorized(db, input, async (trx) => {
-    const row = await trx
-      .selectFrom('scim_provisioning_tokens')
-      .selectAll()
-      .where('id', '=', input.tokenId)
-      .where('organization_id', '=', input.organizationId)
-      .forUpdate()
-      .executeTakeFirst()
-    if (!row) throw new ScimTokenError('not_found', 404)
-    if (row.revoked_at) throw new ScimTokenError('conflict', 409)
-    const overlapping = await trx
-      .selectNoFrom(
-        sql<boolean>`${row.previous_valid_until}::timestamptz > clock_timestamp()`.as('active'),
-      )
-      .executeTakeFirstOrThrow()
-    if (overlapping.active) throw new ScimTokenError('conflict', 409)
-    const secret = mint()
-    const token = await trx
-      .updateTable('scim_provisioning_tokens')
-      .set({
-        token_hash: hash(secret),
-        previous_token_hash: input.overlapSeconds > 0 ? row.token_hash : null,
-        previous_valid_until:
-          input.overlapSeconds > 0
-            ? sql`clock_timestamp() + ${input.overlapSeconds} * interval '1 second'`
-            : null,
-      })
-      .where('id', '=', row.id)
-      .returning(metadata)
-      .executeTakeFirstOrThrow()
-    return { token, secret }
-  })
+  return authorized(
+    db,
+    input,
+    async (trx) => {
+      const row = await trx
+        .selectFrom('scim_provisioning_tokens')
+        .selectAll()
+        .where('id', '=', input.tokenId)
+        .where('organization_id', '=', input.organizationId)
+        .forUpdate()
+        .executeTakeFirst()
+      if (!row) throw new ScimTokenError('not_found', 404)
+      if (row.revoked_at) throw new ScimTokenError('conflict', 409)
+      const overlapping = await trx
+        .selectNoFrom(
+          sql<boolean>`${row.previous_valid_until}::timestamptz > clock_timestamp()`.as('active'),
+        )
+        .executeTakeFirstOrThrow()
+      if (overlapping.active) throw new ScimTokenError('conflict', 409)
+      const secret = mint()
+      const token = await trx
+        .updateTable('scim_provisioning_tokens')
+        .set({
+          token_hash: hash(secret),
+          rotated_by_user_id: input.userId,
+          rotated_at: sql`clock_timestamp()`,
+          previous_token_hash: input.overlapSeconds > 0 ? row.token_hash : null,
+          previous_valid_until:
+            input.overlapSeconds > 0
+              ? sql`clock_timestamp() + ${input.overlapSeconds} * interval '1 second'`
+              : null,
+        })
+        .where('id', '=', row.id)
+        .returning(metadata)
+        .executeTakeFirstOrThrow()
+      return { token, secret }
+    },
+    true,
+  )
 }
 export async function revokeScimToken(db: Db, input: ScimTokenActor & { tokenId: string }) {
   if (!isUuid(input.tokenId)) throw new ScimTokenError('invalid_input', 400)
