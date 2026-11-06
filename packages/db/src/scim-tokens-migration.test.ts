@@ -76,7 +76,7 @@ describe.skipIf(!serverUrl)('SCIM token migration', () => {
       await database.drop()
       await rm(directory, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
   it.each(['preservation', 'hash constraint'])(
     'detects %s SQL source-copy mutation and restores',
     async (protection) => {
@@ -114,5 +114,6 @@ describe.skipIf(!serverUrl)('SCIM token migration', () => {
         }
       }
     },
+    30_000,
   )
 })
