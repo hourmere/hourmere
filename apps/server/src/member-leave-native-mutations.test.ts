@@ -320,22 +320,40 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     expect(await currentMembership(f)).toEqual({ id: f.memberId })
   }
 
-  async function assertOwnerRequired(factory: NativeCopy) {
+  async function assertOwnerRequired(factory: NativeCopy, demoteAfterNativeCheck = false) {
     const f = await fixture(false)
-    // Better Auth's early owner check does not trim this legacy actor role; the
-    // persistence interception must still apply the shared locked owner check.
+    // Patched Better Auth recognizes this legacy role in its early owner check.
+    // A later demotion must also be caught by Hourmere's locked persistence check.
     await db
       .updateTable('auth.member')
       .set({ role: 'member, owner' })
       .where('id', '=', f.memberId)
       .execute()
-    await db
-      .updateTable('auth.member')
-      .set({ role: 'member' })
-      .where('organizationId', '=', f.teamId)
-      .where('userId', '=', f.owner.id)
-      .execute()
-    const response = await post(app(factory), f)
+    const demoteOtherOwner = () =>
+      db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', f.teamId)
+        .where('userId', '=', f.owner.id)
+        .execute()
+    let reachedPersistence = false
+    if (!demoteAfterNativeCheck) await demoteOtherOwner()
+    const server = app(
+      demoteAfterNativeCheck
+        ? {
+            ...factory,
+            leaveTeamMember: async (deps, input) => {
+              // Both owners passed native admission. Remove the other owner's role
+              // before the real locked service runs, exercising its error translation.
+              reachedPersistence = true
+              await demoteOtherOwner()
+              return factory.leaveTeamMember(deps, input)
+            },
+          }
+        : factory,
+    )
+    const response = await post(server, f)
+    if (demoteAfterNativeCheck) expect(reachedPersistence).toBe(true)
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       code: 'member_departure_owner_required',
@@ -386,6 +404,7 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
 
   it('passes native owner refusal assertions with an unchanged source copy', async () => {
     await assertOwnerRequired(await sourceCopy())
+    await assertOwnerRequired(await sourceCopy(), true)
   })
 
   it('passes native removal protection assertions with an unchanged source copy', async () => {
@@ -412,6 +431,7 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     await expect(
       assertOwnerRequired(
         await sourceCopy(['error instanceof MemberDepartureOwnerRequiredError', 'false']),
+        true,
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })

@@ -1,4 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import {
   type Auth,
   createAuth,
@@ -13,11 +15,24 @@ import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { productRoutes } from './server.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4391'
 const signup: SignupPolicy = { mode: 'open', allowedDomains: [] }
 const expectedHeader = 'x-expected-organization-id'
+// GHSA-c85h-5mrr-mgx4: role spelling must never widen invitation or assignment authority.
+const ownerVariants = [
+  'owner',
+  ' owner',
+  'owner ',
+  '\towner\n',
+  '\u00a0owner\u00a0',
+  'OWNER',
+  'Owner',
+  'member, owner',
+]
+const ownerInputs = ownerVariants.flatMap((role) => [role, [role]])
 const denial = {
   code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
   message: 'team_management_access_denied',
@@ -219,6 +234,58 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       .returning(['id', 'email'])
       .executeTakeFirstOrThrow()
   }
+
+  it.each(ownerInputs.map((role) => ({ role })))(
+    'denies admin invitation and member/self role assignment for owner variant $role',
+    async ({ role }) => {
+      const f = await fixture('admin')
+      const before = await snapshot(f)
+      await refused(
+        await post(f, 'invite-member', {
+          organizationId: f.teamId,
+          email: `${randomUUID()}@example.com`,
+          role,
+        }),
+      )
+      for (const memberId of [f.targetMemberId, f.actorMemberId]) {
+        await refused(
+          await post(f, 'update-member-role', { organizationId: f.teamId, memberId, role }),
+        )
+      }
+      expect(await snapshot(f)).toEqual(before)
+    },
+  )
+
+  it('exposes no REST invitation creation or member role assignment bypass', async () => {
+    const f = await fixture('admin')
+    const before = await snapshot(f)
+    const production = createApp({
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      checkDb: async () => {},
+      publicUrl: origin,
+      routes: productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
+    })
+    for (const role of ownerInputs) {
+      for (const [method, path] of [
+        ['POST', '/api/v1/team/invitations'],
+        ['PATCH', `/api/v1/team/members/${f.targetMemberId}`],
+      ]) {
+        const response = await production.request(path as string, {
+          method,
+          headers: {
+            cookie: f.actor.cookie,
+            origin,
+            'content-type': 'application/json',
+            [expectedHeader]: f.teamId,
+          },
+          body: JSON.stringify({ email: `${randomUUID()}@example.com`, role }),
+        })
+        expect(response.status).toBe(404)
+      }
+    }
+    expect(await snapshot(f)).toEqual(before)
+  })
 
   const invitationCells = ['owner', 'admin', 'member'].flatMap((actorRole) =>
     [
@@ -981,4 +1048,41 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       }
     },
   )
+})
+
+// Evaluate the production validator in memory; never alter the shared source tree.
+describe('owner role spelling source-copy regression', () => {
+  function validator(allowOwner = false): (value: unknown) => unknown {
+    const source = readFileSync(
+      new URL('../../../packages/auth/src/team-role-policy.ts', import.meta.url),
+      'utf8',
+    )
+    const start = source.indexOf('export function fixedTeamRole(')
+    const end = source.indexOf('\nfunction body(', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    let copy = source.slice(start, end).replace('export ', '')
+    if (allowOwner) {
+      const guard = "return role === 'admin' || role === 'member' ? role : undefined"
+      expect(copy).toContain(guard)
+      copy = copy.replace(
+        guard,
+        "return typeof role === 'string' ? role.trim().toLowerCase() : undefined",
+      )
+    }
+    return new Function(`${stripTypeScriptTypes(copy)}; return fixedTeamRole`)()
+  }
+
+  function verify(check: (value: unknown) => unknown) {
+    expect(check('member')).toBe('member')
+    expect(check(['admin'])).toBe('admin')
+    for (const role of ownerInputs) expect(check(role)).toBeUndefined()
+  }
+
+  it('rejects owner spellings in the unmodified source copy', () => verify(validator()))
+  it('detects an allow-any-normalized-role mutant through a real assertion failure', () => {
+    const mutant = validator(true)
+    expect(() => verify(mutant)).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
+    verify(validator())
+  })
 })

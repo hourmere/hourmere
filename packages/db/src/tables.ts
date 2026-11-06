@@ -423,6 +423,12 @@ export interface Bookings {
   notification_snapshot: Json | null;
   oauth_consent_id: string | null;
   organization_id: string;
+  payment_confirmed_at: Timestamp | null;
+  payment_hold_expires_at: Timestamp | null;
+  payment_idempotency_key: string | null;
+  payment_pii_erased_at: Timestamp | null;
+  payment_reference: string | null;
+  payment_refund_required: Generated<boolean>;
   required_host_user_ids: Generated<string[]>;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;

@@ -360,7 +360,8 @@ export function createAuth({
             // Every account starts from a proven email address. A provider that does not vouch
             // for the address (Microsoft often does not) could otherwise create an account for
             // someone else's email and mint API keys in it before the owner ever signs in.
-            if (!user.emailVerified) {
+            // Strict: only a real boolean true counts, so a provider value like "false" cannot pass.
+            if (user.emailVerified !== true) {
               throw new APIError('FORBIDDEN', {
                 code: 'EMAIL_NOT_VERIFIED',
                 message:
