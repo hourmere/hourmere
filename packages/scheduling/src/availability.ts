@@ -106,6 +106,7 @@ export interface PublicEventTypeRecord {
   hostUserIds: string[]
   eligibleHostUserIds: string[]
   successRedirect: SuccessRedirect | null
+  waitlistEnabled: boolean
   zoomConnectionId?: string | null
   conferenceOrganizerUserId: string | null
   schedulingType: 'individual' | 'collective' | 'round_robin'
@@ -185,6 +186,7 @@ async function findPersonalEventType(
       'et.questions',
       'et.allow_guests',
       'et.success_redirect',
+      'et.waitlist_enabled',
       'p.user_id',
       'p.handle',
       'p.time_zone',
@@ -233,6 +235,7 @@ async function findPersonalEventType(
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
+    waitlistEnabled: row.waitlist_enabled,
     hostName: row.name.trim() || row.handle,
     ...(image && { hostImage: image }),
     hostTimeZone: row.time_zone,
@@ -368,6 +371,7 @@ async function findTeamEventType(
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
+    waitlistEnabled: row.waitlist_enabled,
     hostName:
       row.scheduling_type === 'round_robin' ? row.team_name : views.map((h) => h.name).join(', '),
     hostTimeZone: views[0]?.timeZone ?? 'UTC',
@@ -410,7 +414,7 @@ export async function getOneTimeBookingPage(
   const link = await resolveOneTimeBookingLink(ctx, token)
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
-  const page = publicEventType(eventType)
+  const page = publicEventType({ ...eventType, waitlistEnabled: false })
   // Keep this projection explicit: additions to the reusable public page must not
   // silently expose an address or navigation capability to one-time recipients.
   return {
@@ -449,6 +453,7 @@ export interface PublicEventType {
   location: { kind: LocationKind } | null
   questions: Question[]
   allowGuests: boolean
+  waitlist?: { enabled: true }
   /** Only the saved parent-navigation opt-in; never the redirect target or parameters. */
   allowEmbedParentRedirect?: boolean
   host: { name: string; timeZone?: string; image?: string }
@@ -486,6 +491,10 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     allowGuests: et.allowGuests,
+    ...(et.waitlistEnabled &&
+      et.schedulingType === 'individual' &&
+      et.hostUserIds.length === 1 &&
+      et.eligibleHostUserIds.length === 1 && { waitlist: { enabled: true as const } }),
     ...(et.successRedirect?.allowEmbedParent === true && { allowEmbedParentRedirect: true }),
     host: {
       name: et.hostName,
@@ -852,9 +861,10 @@ export function assertCachedCalendarSync(
  *   local day boundaries in the schedule being evaluated, independently of calendar zone.
  * - bookings: the host's active bookings (`booking_hosts.active`, in any organization),
  *   each with the buffers of its own event type (0 when it has none). Bookings of this
- *   event type are passed as `bookings`, so they count toward `max_bookings_per_day`;
+ *   event type are passed as `bookings`, so they count toward the daily, weekly and
+ *   monthly limits. Complete local weeks/months are loaded when those limits are set;
  *   bookings of other event types block the same time (widened by their own buffers) but
- *   are passed as busy time, so the daily limit counts this event type only.
+ *   are passed as busy time, so booking limits count this event type only.
  * - eventType: the rules of the event type.
  *
  * Works on a transaction too. Throws `event_type_not_found` for an unknown event type.
@@ -887,6 +897,8 @@ async function buildAvailabilityInputForMode(
       'et.minimum_notice_minutes',
       'et.booking_window_days',
       'et.max_bookings_per_day',
+      'et.max_bookings_per_week',
+      'et.max_bookings_per_month',
       'h.schedule_id',
     ])
     .where('et.id', '=', eventTypeId)
@@ -932,6 +944,49 @@ async function buildAvailabilityInputForMode(
   // extra local day on each side (UTC offsets stay within ±14 hours), and a booking's
   // buffers plus the new slot's reach at most 2 × 1440 minutes.
   const window = { start: rangeStart.subtract({ hours: 72 }), end: rangeEnd.add({ hours: 72 }) }
+  // Limit counts must see starts anywhere in the target local period, even for a
+  // single-slot transaction check. Keep calendar synchronization and other-event busy
+  // time on the original short window; only this event type needs complete periods.
+  // Like the engine, include one local date on each side for zones that have moved
+  // backwards across midnight. Calendar arithmetic preserves DST and month lengths.
+  const firstDate = rangeStart
+    .toZonedDateTimeISO(schedule.time_zone)
+    .toPlainDate()
+    .subtract({ days: 1 })
+  const lastDate = rangeEnd.toZonedDateTimeISO(schedule.time_zone).toPlainDate().add({ days: 1 })
+  const periodWindows: { start: Temporal.Instant; end: Temporal.Instant }[] = []
+  if (eventType.max_bookings_per_week !== null) {
+    periodWindows.push({
+      start: firstDate
+        .subtract({ days: firstDate.dayOfWeek - 1 })
+        .toZonedDateTime(schedule.time_zone)
+        .toInstant(),
+      end: lastDate
+        .add({ days: 8 - lastDate.dayOfWeek })
+        .toZonedDateTime(schedule.time_zone)
+        .toInstant(),
+    })
+  }
+  if (eventType.max_bookings_per_month !== null) {
+    periodWindows.push({
+      start: firstDate.with({ day: 1 }).toZonedDateTime(schedule.time_zone).toInstant(),
+      end: lastDate
+        .with({ day: 1 })
+        .add({ months: 1 })
+        .toZonedDateTime(schedule.time_zone)
+        .toInstant(),
+    })
+  }
+  const bookingWindow = periodWindows.reduce(
+    (bounds, period) => ({
+      // A rollback just after midnight can revisit the preceding period after
+      // its nominal end (St_Johns, November 2009). Include the full possible
+      // 24-hour offset change; the engine's local keys discard extra starts.
+      start: earlier(bounds.start, period.start.subtract({ hours: 24 })),
+      end: later(bounds.end, period.end.add({ hours: 24 })),
+    }),
+    window,
+  )
   const googleCalendars = await db
     .selectFrom('calendars as c')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
@@ -962,6 +1017,21 @@ async function buildAvailabilityInputForMode(
       eb.val('milliseconds'),
       sql`${instant} + interval '999 microseconds'`,
     ])
+
+  const hostBookings = db
+    .selectFrom('booking_hosts as bh')
+    .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
+    .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
+    .select((eb) => [
+      floorMs(eb, eb.ref('b.start_at')).as('start_at'),
+      ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
+      'b.event_type_id',
+      'bet.buffer_before_minutes',
+      'bet.buffer_after_minutes',
+    ])
+    .where('bh.user_id', '=', hostUserId)
+    .where('bh.active', '=', true)
+    .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
 
   const [overrides, busy, bookings] = await Promise.all([
     schedule
@@ -1040,21 +1110,20 @@ async function buildAvailabilityInputForMode(
         ),
       )
       .execute(),
-    db
-      .selectFrom('booking_hosts as bh')
-      .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
-      .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
-      .select((eb) => [
-        floorMs(eb, eb.ref('b.start_at')).as('start_at'),
-        ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
-        'b.event_type_id',
-        'bet.buffer_before_minutes',
-        'bet.buffer_after_minutes',
-      ])
-      .where('bh.user_id', '=', hostUserId)
-      .where('bh.active', '=', true)
+    hostBookings
       .where((eb) => eb('bh.period', '&&', windowRange(eb)))
-      .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
+      // Keep the overlap GiST and event-type/start indexes usable in separate branches.
+      // Unlimited types need only the short window. Exclude its rows from the complete
+      // period branch so UNION ALL cannot count a booking twice.
+      .$if(periodWindows.length > 0, (q) =>
+        q.unionAll(
+          hostBookings
+            .where('b.event_type_id', '=', eventTypeId)
+            .where('b.start_at', '>=', new Date(bookingWindow.start.epochMilliseconds))
+            .where('b.start_at', '<', new Date(bookingWindow.end.epochMilliseconds))
+            .where((eb) => eb.not(eb('bh.period', '&&', windowRange(eb)))),
+        ),
+      )
       .execute(),
   ])
 
@@ -1113,6 +1182,8 @@ async function buildAvailabilityInputForMode(
       bufferAfterMinutes: eventType.buffer_after_minutes,
       minimumNoticeMinutes: eventType.minimum_notice_minutes,
       maxBookingsPerDay: eventType.max_bookings_per_day ?? undefined,
+      maxBookingsPerWeek: eventType.max_bookings_per_week ?? undefined,
+      maxBookingsPerMonth: eventType.max_bookings_per_month ?? undefined,
       bookingWindowDays: eventType.booking_window_days ?? undefined,
     },
     ...(explain && { durationMinutes, blockingBookings }),

@@ -51,6 +51,8 @@ function fixture(contents?: string) {
   mkdirSync(scripts)
   writeFileSync(join(scripts, 'enable-worker.sh'), source, { mode: 0o755 })
   writeFileSync(join(scripts, 'disable-worker.sh'), disable, { mode: 0o755 })
+  copyFileSync(new URL('scripts/compose-up.sh', root), join(scripts, 'compose-up.sh'))
+  writeFileSync(join(directory, 'Caddyfile'), 'synthetic-worker-start-configuration\n')
   const envFile = join(directory, '.env')
   if (contents !== undefined) writeFileSync(envFile, contents, { mode: 0o644 })
   return {
@@ -376,12 +378,12 @@ describe('private worker overlay configuration', () => {
       '# Bundled HTTPS only; omit this check in plain mode.\n  docker compose config --services | grep -qx proxy &&\n  docker compose config --services | grep -qx worker',
     )
     expect(enabled.stdout).toContain(
-      'docker compose config --services | grep -qx worker &&\n    docker compose up -d --build --wait',
+      'docker compose config --services | grep -qx worker &&\n    ./scripts/compose-up.sh -d --build --wait',
     )
     const disabled = setup.run('off')
     expect(disabled.status).toBe(0)
     expect(disabled.stdout).toContain('Remove any legacy HOURMERE_ROLE=web setting from .env')
-    expect(disabled.stdout).toContain('docker compose up -d --build --wait --remove-orphans')
+    expect(disabled.stdout).toContain('./scripts/compose-up.sh -d --build --wait --remove-orphans')
   })
 
   it.each([image, `./${image}`])(
@@ -392,11 +394,11 @@ describe('private worker overlay configuration', () => {
       )
       const enabled = setup.run()
       expect(enabled.status).toBe(0)
-      expect(enabled.stdout).toContain('docker compose up -d --wait')
+      expect(enabled.stdout).toContain('./scripts/compose-up.sh -d --wait')
       expect(enabled.stdout).not.toContain('--build')
       const disabled = setup.run('off')
       expect(disabled.status).toBe(0)
-      expect(disabled.stdout).toContain('docker compose up -d --wait --remove-orphans')
+      expect(disabled.stdout).toContain('./scripts/compose-up.sh -d --wait --remove-orphans')
       expect(disabled.stdout).not.toContain('--build')
     },
   )
@@ -407,7 +409,7 @@ describe('private worker overlay configuration', () => {
     )
     const enabled = setup.run()
     expect(enabled.status).toBe(0)
-    expect(enabled.stdout).toContain('docker compose up -d --build --wait')
+    expect(enabled.stdout).toContain('./scripts/compose-up.sh -d --build --wait')
   })
 
   it.each(
@@ -438,6 +440,7 @@ esac
         { mode: 0o755 },
       )
       const run = spawnSync('/bin/sh', ['-c', commands ?? 'exit 99'], {
+        cwd: setup.directory,
         encoding: 'utf8',
         env: {
           PATH: `${bin}:${process.env.PATH}`,

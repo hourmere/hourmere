@@ -10,6 +10,11 @@ import {
 } from './availability.ts'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
+import {
+  compatLocation,
+  locationOptionsFromLegacy,
+  validateLocationOptions,
+} from './location-options.ts'
 import type { getManagedBookingDetails } from './manage.ts'
 
 type Change = readonly [string, string]
@@ -27,6 +32,8 @@ function fieldNormalization(change?: Change) {
     validTitle: identity,
     validDescription: identity,
     validLocation: identity,
+    validateLocationOptions: (value: unknown) => validateLocationOptions(value ?? null),
+    compatLocation,
     validateSuccessRedirect: identity,
     validateQuestions: identity,
   }
@@ -37,9 +44,17 @@ function fieldNormalization(change?: Change) {
 
 function legacyFieldProjection(change?: Change) {
   const copy = source('event-types', 'function fieldsOf(', 'function columns(', change)
-  return new Function('parseQuestions', `${copy}; return fieldsOf`)((value: unknown) => value) as (
-    input: Record<string, unknown>,
-  ) => DurationFields
+  return new Function(
+    'parseQuestions',
+    'compatLocation',
+    'locationOptionsFromLegacy',
+    `${copy}; return fieldsOf`,
+  )(
+    (value: unknown) => value,
+    compatLocation,
+    (value: Parameters<typeof locationOptionsFromLegacy>[0]) =>
+      locationOptionsFromLegacy(value ?? null),
+  ) as (input: Record<string, unknown>) => DurationFields
 }
 
 function verifyNormalization(normalize: ReturnType<typeof fieldNormalization>) {

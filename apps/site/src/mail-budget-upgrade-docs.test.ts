@@ -9,6 +9,7 @@ const siteDocs = 'apps/site/src/content/docs/docs'
 const notes = [
   {
     path: 'CHANGELOG.md',
+    start: 'docker compose up',
     text:
       read('CHANGELOG.md')
         .split('- **Coordinate the mail-budget upgrade (migration 0040).**')[1]
@@ -16,6 +17,7 @@ const notes = [
   },
   {
     path: `${siteDocs}/self-hosting.md`,
+    start: './scripts/compose-up.sh',
     text:
       read(`${siteDocs}/self-hosting.md`)
         .split(
@@ -36,16 +38,19 @@ describe('mail-budget upgrade documentation', () => {
     expect(text).toMatch(/Old workers (?:nevertheless send|would still send) without being counted/)
   })
 
-  it.each(notes)('builds then stops every old sender before new startup in $path', ({ text }) => {
-    expect(text).toMatch(/(?:every old|all old) `web`, `all` and `worker` process/)
-    expect(text).toContain('including any on other hosts')
-    expect(text).toContain('build → stop app (and any separate worker) → up')
-    expect(text).toMatch(
-      /`docker compose build`, `docker compose stop app`, `docker compose stop worker` if configured, then `docker compose up -d --wait`/,
-    )
-    expect(text).toMatch(/(?:Keep|Leave) PostgreSQL running/)
-    expect(text).toContain('the first new process applies')
-  })
+  it.each(notes)(
+    'builds then stops every old sender before new startup in $path',
+    ({ text, start }) => {
+      expect(text).toMatch(/(?:every old|all old) `web`, `all` and `worker` process/)
+      expect(text).toContain('including any on other hosts')
+      expect(text).toContain('build → stop app (and any separate worker) → up')
+      expect(text).toContain(
+        `\`docker compose build\`, \`docker compose stop app\`, \`docker compose stop worker\` if configured, then \`${start} -d --wait\``,
+      )
+      expect(text).toMatch(/(?:Keep|Leave) PostgreSQL running/)
+      expect(text).toContain('the first new process applies')
+    },
+  )
 
   it('documents sign-in defaults and their shared instance reserve without old headroom advice', () => {
     const config = read(`${siteDocs}/configuration.md`)

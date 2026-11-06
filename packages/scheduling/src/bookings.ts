@@ -524,7 +524,7 @@ async function toBookings(
           .onRef('co_member.organizationId', '=', 'co_booking.organization_id'),
       )
       .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
-      .select(['h.booking_id', 'u.name', 'p.handle'])
+      .select(['co_booking.id as booking_id', 'u.name', 'p.handle'])
       .where(
         'h.booking_id',
         'in',
@@ -581,6 +581,7 @@ async function toBookings(
         sql<string>`coalesce(p.time_zone,s.time_zone,'UTC')`.as('time_zone'),
       ])
       .where('h.booking_id', 'in', assignedIds)
+      .$narrowType<{ booking_id: string }>()
       .execute()
     for (const host of hosts)
       assigned.set(host.booking_id, {
@@ -660,10 +661,21 @@ async function loadBooking(db: Db, id: string): Promise<Booking> {
 
 // --- Writing bookings -------------------------------------------------------------------
 
+/** The existing booking form cannot collect an invitee's phone number yet. */
+function requireCollectedPhone(location: Location | null): void {
+  if (location?.kind === 'phone' && location.askInvitee === true) {
+    throw new DomainError(
+      'invalid',
+      'invalid_invitee_phone',
+      'Provide a phone number in E.164 format.',
+    )
+  }
+}
+
 /**
  * Serializes booking writes per host for the rest of the transaction. The exclusion
  * constraint alone stops overlapping meetings, but not two concurrent bookings that only
- * collide through buffers or the daily limit; with the lock, the second one recomputes
+ * collide through buffers or day/week/month limits; with the lock, the second recomputes
  * availability after the first has committed. Sorted, so multi-host bookings cannot deadlock.
  */
 async function lockHosts(db: Db, userIds: readonly string[]): Promise<void> {
@@ -1108,6 +1120,7 @@ async function publicBooking(
           throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
         throw unavailable()
       }
+      requireCollectedPhone(current.location)
       if (guests.length > 0 && !current.allowGuests) {
         throw new DomainError(
           'invalid',

@@ -23,6 +23,8 @@ const restContract = {
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
     'GET /api/v1/event-type-hosts',
+    'GET /api/v1/event-types/{id}/waitlist',
+    'GET /api/v1/event-types/{id}/waitlist/entries',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/schedules',
@@ -61,6 +63,10 @@ const restContract = {
     'POST /api/v1/bookings/manage/reschedule',
     'POST /api/v1/public/{handle}/{slug}/bookings',
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
+    'POST /api/v1/public/{handle}/{slug}/waitlist',
+    'POST /api/v1/public/{handle}/{slug}/waitlist/resend',
+    'POST /api/v1/public/teams/{handle}/{slug}/waitlist',
+    'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   session_only: [
     'GET /api/v1/bookings/{id}/organization',
@@ -103,6 +109,8 @@ const restContract = {
     'DELETE /api/v1/event-types/{id}',
     'PATCH /api/v1/event-types/{id}',
     'PUT /api/v1/event-types/{id}/notifications',
+    'PUT /api/v1/event-types/{id}/waitlist',
+    'DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}',
     'POST /api/v1/event-types/{id}/round-robin/activate',
     'PUT /api/v1/profile',
     'PATCH /api/v1/profile/name',
@@ -279,6 +287,32 @@ function verifyNotificationWrites(allows: Allows) {
   }
 }
 
+function verifyWaitlistScopes(operation: typeof apiKeyOperation) {
+  for (const id of [
+    'GET /api/v1/event-types/{id}/waitlist',
+    'GET /api/v1/event-types/{id}/waitlist/entries',
+    'mcp:get_event_type_waitlist',
+    'mcp:list_waitlist_entries',
+    'cli:event-waitlist',
+    'cli:waitlist-entries',
+  ])
+    expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+  for (const id of [
+    'PUT /api/v1/event-types/{id}/waitlist',
+    'DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}',
+    'mcp:set_event_type_waitlist',
+    'mcp:remove_waitlist_entry',
+    'cli:set-event-waitlist',
+    'cli:remove-waitlist-entry',
+  ])
+    expect(operation(id)?.allowedScopes).toEqual(['full'])
+  for (const name of ['join_waitlist', 'resend_waitlist_verification'])
+    for (const mode of ['', ':personal', ':team'])
+      expect(operation(`mcp:${name}${mode}`)?.allowedScopes).toEqual(['full', 'bookings'])
+  for (const name of ['join-waitlist', 'resend-waitlist-verification'])
+    expect(operation(`cli:${name}`)?.allowedScopes).toEqual(['full', 'bookings'])
+}
+
 describe('shared API-key scope policy', () => {
   for (const [operationClass, operations] of Object.entries(restContract)) {
     describe(operationClass, () => {
@@ -326,6 +360,12 @@ describe('shared API-key scope policy', () => {
         'revoke_one_time_link',
         'list_calendar_connections',
         'list_conference_connections',
+        'get_event_type_waitlist',
+        'set_event_type_waitlist',
+        'list_waitlist_entries',
+        'remove_waitlist_entry',
+        'join_waitlist',
+        'resend_waitlist_verification',
       ],
       read: [
         'whoami',
@@ -339,6 +379,8 @@ describe('shared API-key scope policy', () => {
         'list_one_time_links',
         'list_calendar_connections',
         'list_conference_connections',
+        'get_event_type_waitlist',
+        'list_waitlist_entries',
       ],
       bookings: [
         'create_one_time_link',
@@ -354,6 +396,8 @@ describe('shared API-key scope policy', () => {
         'get_profile',
         'list_event_types',
         'get_event_type',
+        'join_waitlist',
+        'resend_waitlist_verification',
       ],
     }
     for (const apiKeyScope of ['full', 'read', 'bookings'] as const) {
@@ -387,6 +431,9 @@ describe('shared API-key scope policy', () => {
 
   it('classifies event type writes as full-only account configuration', () =>
     verifyEventTypeConfigurationScopes(apiKeyOperation))
+
+  it('separates manager waitlist reads and writes from invitee admission', () =>
+    verifyWaitlistScopes(apiKeyOperation))
 
   it('lets full and non-key principals retain their native authorization for unknown operations', () => {
     const principals: ApiKeyScopePrincipal[] = [
@@ -431,6 +478,41 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "mcp('get_event_type_waitlist', 'other_read'",
+      "mcp('get_event_type_waitlist', 'booking_read'",
+    ],
+
+    [
+      "rest('GET', '/api/v1/event-types/{id}/waitlist/entries', 'other_read'",
+      "rest('GET', '/api/v1/event-types/{id}/waitlist/entries', 'booking_read'",
+    ],
+    [
+      "rest('PUT', '/api/v1/event-types/{id}/waitlist', 'other_write'",
+      "rest('PUT', '/api/v1/event-types/{id}/waitlist', 'booking_write'",
+    ],
+    [
+      "rest('DELETE', '/api/v1/event-types/{id}/waitlist/entries/{entryId}', 'other_write'",
+      "rest('DELETE', '/api/v1/event-types/{id}/waitlist/entries/{entryId}', 'booking_write'",
+    ],
+    ["mcp('list_waitlist_entries', 'other_read'", "mcp('list_waitlist_entries', 'booking_read'"],
+    [
+      "mcp('set_event_type_waitlist', 'other_write'",
+      "mcp('set_event_type_waitlist', 'booking_write'",
+    ],
+    ["mcp('remove_waitlist_entry', 'other_write'", "mcp('remove_waitlist_entry', 'booking_write'"],
+    ["mcp(tool, 'booking_write', [personal, team])", "mcp(tool, 'booking_read', [personal, team])"],
+    [
+      "cli('waitlist-entries', 'list_waitlist_entries')",
+      "cli('waitlist-entries', 'list_bookings')",
+    ],
+  ] as const)('kills broadened waitlist scope policy: %s', (before, after) => {
+    verifyWaitlistScopes(sourceCopyRegistry())
+    expect(() => verifyWaitlistScopes(sourceCopyRegistry([before, after]))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
   it.each([
     [
       "rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_write'",

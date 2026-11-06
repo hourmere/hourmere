@@ -303,7 +303,7 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
 link "$staging/.env" "$env_file" 2>/dev/null || fail 'Could not create .env; it may already exist. No existing file was changed.'
 printf '%s\n' 'Created private .env (mode 600). Back it up securely.'
 if [ "$install_path" = image ]; then
-  printf '%s\n' 'Start Hourmere: docker compose pull && docker compose up -d --wait'
+  printf '%s\n' 'Start Hourmere: docker compose pull && ./scripts/compose-up.sh -d --wait'
 else
-  printf '%s\n' 'Start Hourmere: docker compose up -d --build --wait'
+  printf '%s\n' 'Start Hourmere: ./scripts/compose-up.sh -d --build --wait'
 fi

@@ -20,6 +20,7 @@ interface Operation {
   operation: string
   actor_user_id: string
   booking_id: null
+  group_slot_id: null
   target_user_id: string
   previous_role: string
   new_role: string | null
@@ -151,6 +152,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       operation: newRole === undefined ? 'member_removed' : 'member_role_changed',
       actor_user_id: actorUserId,
       booking_id: null,
+      group_slot_id: null,
       target_user_id: f.target.id,
       previous_role: 'member',
       new_role: newRole ?? null,

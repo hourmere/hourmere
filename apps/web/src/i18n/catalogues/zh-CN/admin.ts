@@ -1,5 +1,44 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    '无法在此处更改已保存的地点选项。请保留原地点后重试。',
+  'Checking waitlist management access…': '正在检查候补名单管理权限……',
+  'Could not check waitlist management access. Try again.': '无法检查候补名单管理权限，请重试。',
+  'Not notified yet': '尚未通知',
+
+  'Booking waitlist': '预约候补',
+  'Only team owners and admins can manage the waitlist.':
+    '只有团队所有者和管理员可以管理候补名单。',
+  'Waitlist management is unavailable for this account.': '此账户目前无法使用候补管理。',
+  'Let invitees join a waitlist when no times are available':
+    '没有可预约时间时，允许受邀人加入候补名单',
+  'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
+    '系统会统一向符合条件的受邀人发送通知。不会预留任何时段，最先成功预约的人获得该时段。关闭此功能会移除现有候补条目，且不会发送邮件。',
+  'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).':
+    '候补名单仅适用于只有一位主持人的一对一活动类型（不含轮询和集体活动）。',
+  'View waitlist entries': '查看候补名单',
+  'Pending verification': '等待邮箱验证',
+  'Waiting for a time': '等待空闲时段',
+  Notified: '已通知',
+  Removed: '已移除',
+  'Waitlist entries': '候补名单',
+  'Loading waitlist entries…': '正在加载候补名单……',
+  'Could not load waitlist entries.': '无法加载候补名单。',
+  '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.':
+    '“最近通知”显示现有记录中邮件服务器最近一次接受通知邮件的时间，并不代表邮件已送达收件箱。较早的通知记录可能已被清除。',
+  'No waitlist entries.': '暂无候补条目。',
+  'Contact details cleared': '联系信息已清除',
+  'Requested period': '期望时段',
+  'Last notified': '最近通知',
+  'Notification time unavailable': '通知时间未知',
+  'Remove entry': '移除条目',
+  'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.':
+    '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
+  'Could not remove the waitlist entry.': '无法移除此候补条目。',
+  'Back to first page': '返回第一页',
+  'Next page': '下一页',
+  Refresh: '刷新',
+
   'Enter button text so visitors can identify the button.':
     '请输入按钮文字，以便访客了解按钮的用途。',
   Embed: '嵌入',

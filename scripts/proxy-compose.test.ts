@@ -22,18 +22,23 @@ interface Service {
   depends_on?: Record<string, unknown>
   restart?: string
   stop_grace_period?: string
+  labels?: Record<string, string>
 }
 
 // Interpolate synthetic values in an isolated directory, never the operator's .env.
 // This uses Compose's real merge semantics; it needs the CLI, but no Docker daemon.
-function render(overrides: ('proxy' | 'worker')[] = [], env: Record<string, string> = {}) {
+function render(
+  overrides: ('proxy' | 'worker')[] = [],
+  env: Record<string, string> = {},
+  proxySource = proxy,
+) {
   const dir = mkdtempSync(join(tmpdir(), 'hourmere-proxy-config-'))
   try {
     writeFileSync(join(dir, 'docker-compose.yml'), base)
     const files = ['docker-compose.yml']
     for (const override of overrides) {
       const file = `docker-compose.${override}.yml`
-      writeFileSync(join(dir, file), override === 'proxy' ? proxy : worker)
+      writeFileSync(join(dir, file), override === 'proxy' ? proxySource : worker)
       files.push(file)
     }
     writeFileSync(
@@ -78,6 +83,39 @@ function render(overrides: ('proxy' | 'worker')[] = [], env: Record<string, stri
 }
 
 describe.skipIf(!hasCompose)('Caddy deployment (requires Compose CLI)', () => {
+  function verifyDigestLabel(source = proxy) {
+    const digest = 'a'.repeat(64)
+    const { services } = render(['proxy', 'worker'], { CADDYFILE_SHA256: digest }, source)
+    expect(services.proxy.labels?.['io.hourmere.caddyfile-sha256']).toBe(digest)
+    expect(services.app.labels?.['io.hourmere.caddyfile-sha256']).toBeUndefined()
+    expect(services.db.labels?.['io.hourmere.caddyfile-sha256']).toBeUndefined()
+    expect(services.worker.labels?.['io.hourmere.caddyfile-sha256']).toBeUndefined()
+    expect(services.proxy.volumes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: expect.stringMatching(/\/Caddyfile$/),
+          target: '/etc/caddy/Caddyfile',
+          read_only: true,
+        }),
+      ]),
+    )
+  }
+
+  it('uses the current file digest to recreate only the proxy and retains the operator path', () => {
+    verifyDigestLabel()
+  })
+
+  it('detects removing or freezing the digest label in a source copy', () => {
+    for (const replacement of ['', '      io.hourmere.caddyfile-sha256: frozen']) {
+      const mutant = proxy.replace(/^ {6}io\.hourmere\.caddyfile-sha256:.*$/m, replacement)
+      expect(mutant).not.toBe(proxy)
+      expect(() => verifyDigestLabel(mutant)).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    }
+    verifyDigestLabel()
+  })
+
   it('keeps the plain deployment on loopback with an unpublished database', () => {
     const { services } = render()
     expect(services.app.ports).toEqual([

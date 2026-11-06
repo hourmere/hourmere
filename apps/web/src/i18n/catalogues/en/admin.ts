@@ -1,5 +1,46 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+  'Checking waitlist management access…': 'Checking waitlist management access…',
+  'Could not check waitlist management access. Try again.':
+    'Could not check waitlist management access. Try again.',
+  'Not notified yet': 'Not notified yet',
+
+  'Booking waitlist': 'Booking waitlist',
+  'Only team owners and admins can manage the waitlist.':
+    'Only team owners and admins can manage the waitlist.',
+  'Waitlist management is unavailable for this account.':
+    'Waitlist management is unavailable for this account.',
+  'Let invitees join a waitlist when no times are available':
+    'Let invitees join a waitlist when no times are available',
+  'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
+    'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.',
+  'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).':
+    'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).',
+  'View waitlist entries': 'View waitlist entries',
+  'Pending verification': 'Pending verification',
+  'Waiting for a time': 'Waiting for a time',
+  Notified: 'Notified',
+  Removed: 'Removed',
+  'Waitlist entries': 'Waitlist entries',
+  'Loading waitlist entries…': 'Loading waitlist entries…',
+  'Could not load waitlist entries.': 'Could not load waitlist entries.',
+  '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.':
+    '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.',
+  'No waitlist entries.': 'No waitlist entries.',
+  'Contact details cleared': 'Contact details cleared',
+  'Requested period': 'Requested period',
+  'Last notified': 'Last notified',
+  'Notification time unavailable': 'Notification time unavailable',
+  'Remove entry': 'Remove entry',
+  'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.':
+    'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.',
+  'Could not remove the waitlist entry.': 'Could not remove the waitlist entry.',
+  'Back to first page': 'Back to first page',
+  'Next page': 'Next page',
+  Refresh: 'Refresh',
+
   'Enter button text so visitors can identify the button.':
     'Enter button text so visitors can identify the button.',
   Embed: 'Embed',

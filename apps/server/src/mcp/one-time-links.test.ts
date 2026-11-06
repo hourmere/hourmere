@@ -120,6 +120,7 @@ function framework<T>(name: string, change?: Change): T {
       z,
       ...auth,
       DomainError: scheduling.DomainError,
+      WaitlistRateLimitError: scheduling.WaitlistRateLimitError,
       inspect,
       hasUnsafeJsonText,
       redactOneTimeLogDetails,

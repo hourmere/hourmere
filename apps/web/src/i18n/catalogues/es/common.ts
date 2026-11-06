@@ -1,4 +1,40 @@
 export const common = {
+  'This location is unavailable. Contact the host to book.':
+    'Esta ubicación no está disponible. Contacta con el anfitrión para reservar.',
+  'The host or the team’s owners and admins can see your email, name and requested period.':
+    'El anfitrión o los propietarios y administradores del equipo pueden ver su correo electrónico, su nombre y el período solicitado.',
+  '{count} second': '{count} segundo',
+  '{count} seconds': '{count} segundos',
+  '{count} minute': '{count} minuto',
+  '{count} minutes': '{count} minutos',
+  '{count} hour': '{count} hora',
+  '{count} hours': '{count} horas',
+
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'Para unirse a la lista de espera, elija la duración predeterminada ({duration}).',
+  'Join the waitlist': 'Unirse a la lista de espera',
+  'No available times in this period.': 'No hay horarios disponibles en este período.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'Si se libera un horario, se puede avisar a todas las personas que cumplan los requisitos. No se reserva ningún horario; lo obtiene quien complete primero la reserva.',
+  'From {start} to {end} ({timeZone})': 'Del {start} al {end} ({timeZone})',
+  'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.':
+    'La espera termina el {date}. Las solicitudes sin confirmar caducan después de 24 horas.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'Acepto recibir correos de la lista de espera para este período. Puedo salir de la lista mediante el enlace de cualquiera de esos correos.',
+  'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.':
+    'Al salir se borran sus datos de contacto. Conservamos registros cifrados con hash (no legibles) durante 2 días para evitar abusos y hasta 64 días para evitar notificaciones repetidas.',
+  'Check your email to confirm': 'Revise su correo para confirmar',
+  'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.':
+    'Si se puede aceptar su solicitud, enviaremos un enlace de confirmación. Los límites de envío pueden impedir la entrega. El correo de confirmación no se reenvía al volver a enviar el formulario.',
+  'Resend confirmation email': 'Reenviar correo de confirmación',
+  'Confirmation email requested. Check your email; sending limits may prevent delivery.':
+    'Se ha solicitado el correo de confirmación. Revise su correo; el envío está sujeto a límites.',
+  'Agree to receive waitlist emails before joining.':
+    'Acepte recibir correos de la lista de espera antes de inscribirse.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'La lista de espera no está disponible para este período. Consulte los horarios disponibles e inténtelo de nuevo.',
+  'Joining…': 'Inscripción en curso…',
+  'Sending…': 'Enviando…',
   'We could not use the time details in this link. Please choose a time.':
     'No hemos podido utilizar los datos de fecha y hora de este enlace. Elija un horario.',
   'This meeting length is no longer offered. Please choose a time again.':
@@ -302,8 +338,8 @@ export const common = {
   'To be confirmed by the host': 'Pendiente de confirmación del anfitrión',
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     'Para consultar, reprogramar o cancelar una reserva, abra el enlace de su correo electrónico de confirmación o el que guardó al reservar. Por su seguridad, el enlace se elimina de la barra de direcciones al abrirlo, por lo que deberá volver a utilizarlo si recarga esta página.',
-  'Too many requests from your network. Try again in {0} seconds.':
-    'Hay demasiadas solicitudes desde su red. Vuelva a intentarlo en {0} s.',
+  'Too many requests from your network. Try again in {duration}.':
+    'Demasiadas solicitudes desde su red. Vuelva a intentarlo en {duration}.',
   'Too many requests from your network. Wait a minute and try again.':
     'Hay demasiadas solicitudes desde su red. Espere un minuto y vuelva a intentarlo.',
   'Too many requests. Wait a minute and try again.':

@@ -72,6 +72,10 @@ export interface EventTypeRules {
    * date of each booking's start) offers no slots, 1–1000. Unlimited if omitted.
    */
   readonly maxBookingsPerDay?: number
+  /** Host-local Monday–Sunday week, counted by booking starts, 1–1000. Unlimited if omitted. */
+  readonly maxBookingsPerWeek?: number
+  /** Host-local calendar month, counted by booking starts, 1–1000. Unlimited if omitted. */
+  readonly maxBookingsPerMonth?: number
   /**
    * A slot may start at most this many calendar days after `now`, counted in the
    * host's time zone (same wall-clock time N days later), 1–3650. Unlimited if omitted.
@@ -103,7 +107,7 @@ export interface AvailabilityInput {
   readonly durationMinutes?: number
   /**
    * Busy times from connected calendars, as plain intervals. They block slots but
-   * do not count toward the daily limit.
+   * do not count toward booking limits.
    */
   readonly busy?: readonly InstantInterval[]
   /**
@@ -111,8 +115,9 @@ export interface AvailabilityInput {
    * [start - its bufferBefore, end + its bufferAfter]; a new slot's window
    * [start - eventType.bufferBefore, end + eventType.bufferAfter] must not overlap
    * that, so the buffers on both sides add up. A booking counts toward
-   * `maxBookingsPerDay` on the host-local date of its real `start` (buffers never
-   * move it to another day). Pass bookings that should not count in `busy` instead.
+   * each configured limit on the host-local date, Monday–Sunday week and calendar
+   * month of its real `start` (buffers never move it to another period). Pass
+   * bookings that should not count in `busy` instead.
    */
   readonly bookings?: readonly ExistingBooking[]
   /**

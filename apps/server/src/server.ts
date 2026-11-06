@@ -74,6 +74,7 @@ import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import type { Tool } from './mcp/tools.ts'
+import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
@@ -201,6 +202,7 @@ export function productRoutes({
     publicRoutes({
       db,
       waitlistSecret,
+      publicUrl,
       notify,
       automaticMeet,
       automaticZoom,
@@ -228,6 +230,7 @@ export function productRoutes({
 /** The same tool registry is used by the running server and capability contract tests. */
 export function productTools({
   db,
+  waitlistSecret,
   publicUrl,
   followUpHostNotesEnabled,
   successRedirectPolicy,
@@ -239,7 +242,8 @@ export function productTools({
   zoomConference,
 }: {
   db: Db
-  publicUrl?: string
+  waitlistSecret?: string | undefined
+  publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notify?: BookingNotifier | undefined
@@ -251,7 +255,14 @@ export function productTools({
 }): Tool[] {
   return [
     whoamiTool,
-    ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
+    ...bookingTools({
+      db,
+      waitlistSecret,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      bookingMaxInviteeReschedules,
+    }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
     ...eventTypeTools({
       db,
@@ -265,6 +276,7 @@ export function productTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
     }),
+    ...waitlistTools({ db, secret: waitlistSecret, publicUrl }),
   ]
 }
 
@@ -669,6 +681,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           : {}),
         tools: productTools({
           db,
+          waitlistSecret: config.BETTER_AUTH_SECRET,
           publicUrl: config.PUBLIC_URL,
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
           successRedirectPolicy,

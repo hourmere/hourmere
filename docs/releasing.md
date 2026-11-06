@@ -305,7 +305,7 @@ explicitly acknowledge the private trial. No real provider credentials are neede
 ```sh
 COMPOSE_PROJECT_NAME=hourmere-rc-trial ./scripts/setup.sh --image --version 1.0.0-rc.1
 docker compose pull
-docker compose up -d --wait
+./scripts/compose-up.sh -d --wait
 curl --fail http://127.0.0.1:4187/api/health
 ```
 
@@ -320,9 +320,9 @@ bundled proxy separately with the documented HTTPS/SMTP prerequisites. Keep prov
 acceptance limits: synthetic sign-in and health do not establish real SMTP, Google,
 Microsoft or Zoom acceptance.
 
-Before changing the version, back up the database, `.env`, deployed commit/tag and Caddy
-state. Change `HOURMERE_VERSION`, then `docker compose pull`, stop every old app/worker,
-then `docker compose up -d --wait`. Before new-version startup, revert the version and
+Before changing the version, back up the database, `.env`, deployed commit/tag,
+host `Caddyfile` and Caddy state. Change `HOURMERE_VERSION`, then `docker compose pull`, stop every old app/worker,
+then `./scripts/compose-up.sh -d --wait`. Before new-version startup, revert the version and
 checkout/Compose selection to recover. Once `up` is attempted (or any migration runs
 earlier), use the pre-upgrade backup/restore procedure; old code against a new schema is
 unsafe. Never delete a production volume as part of upgrading or rolling back.
@@ -366,14 +366,21 @@ Make the documentation changes in a separate follow-up after verifying public ac
   | File / preparation lines | Release-day change |
   |---|---|
   | Website publication branch | Cut `site-live` from `v1.0.0`, push it with its upstream, then cherry-pick the reviewed release-day website edits from `main` and deploy only from `site-live`; see [Website publication](#website-publication). |
-  | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative. |
+  | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `./scripts/compose-up.sh -d --wait` without `--build`; retain explicit `--source` alternative. |
   | `README.md:135–169` (upgrade/recovery) | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup. |
   | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker. |
   | Same guide `:122–173`, `:221–397` (plain / worker / webhook) | Preserve the image overlay in every file list and remove image-path builds. |
   | Same guide `:454–551` (restore) | Preserve the backed-up image selection/version and pull instead of building; keep drill isolation and fresh-volume restore. |
-  | Same guide `:553–745` (Upgrade and roll back) | Make version edit → `docker compose pull` → stop all old roles → `docker compose up -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives. |
+  | Same guide `:553–745` (Upgrade and roll back) | Make version edit → `docker compose pull` → stop all old roles → `./scripts/compose-up.sh -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives. |
   | `apps/site/src/legal-content.test.ts:80` (comparison introduction guard) | Replace the unpublished-image assertion with a published-image link assertion alongside the comparison copy in card 213; add install/version/rollback guards for README and self-hosting without weakening provider-acceptance guards. |
   | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts` | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling. |
+
+  The pending release-day PRs [#77](https://github.com/hourmere/hourmere/pull/77) (image
+  install) and [#98](https://github.com/hourmere/hourmere/pull/98) (release-day docs) must
+  use `./scripts/compose-up.sh` for full-stack starts and upgrades, and must not reintroduce
+  the bare Compose startup command. Preserve host `Caddyfile` backups and the explicit
+  proxy recreation in rollback and restore procedures, including older revisions without
+  the helper.
 
 - Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
   the site's self-hosting, comparison and index guides, homepage, site description and

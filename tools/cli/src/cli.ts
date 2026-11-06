@@ -10,6 +10,12 @@ export const COMMANDS = {
   'create-event': 'create_event_type',
   'update-event': 'update_event_type',
   'set-event-notifications': 'set_event_type_notifications',
+  'event-waitlist': 'get_event_type_waitlist',
+  'set-event-waitlist': 'set_event_type_waitlist',
+  'waitlist-entries': 'list_waitlist_entries',
+  'remove-waitlist-entry': 'remove_waitlist_entry',
+  'join-waitlist': 'join_waitlist',
+  'resend-waitlist-verification': 'resend_waitlist_verification',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
   slots: 'find_available_slots',
@@ -33,6 +39,8 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
+Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
+           join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
@@ -260,6 +268,11 @@ export async function runCli(options: {
         throw new CliError('invalid_manage_token')
       secrets.push(input.manageToken)
     }
+    if (Object.hasOwn(input, 'waitlistToken')) {
+      if (typeof input.waitlistToken !== 'string' || input.waitlistToken.length > 256)
+        throw new CliError('invalid_waitlist_token')
+      secrets.push(input.waitlistToken)
+    }
     if (
       ['book', 'one-time-links create'].includes(args.command) &&
       (typeof input.idempotencyKey !== 'string' ||
@@ -282,8 +295,9 @@ export async function runCli(options: {
       fetch: options.fetch,
     })
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
+    const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
-      await output.writeFile(printable(result, [key, oneTimeToken]))
+      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken]))
       await output.sync()
       options.stdout('{"outputWritten":true}\n')
     } else {

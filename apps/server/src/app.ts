@@ -132,9 +132,21 @@ const httpErrorCodes: Record<number, string> = {
   429: 'rate_limited',
 }
 
+/** Admission bodies carry private contacts and arbitrary keys can themselves contain PII. */
+function isWaitlistAdmissionPath(path: string): boolean {
+  let decoded = path
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {}
+  const admission = /^\/api\/v1\/public\/(?:teams\/)?[^/]+\/[^/]+\/waitlist(?:\/resend)?\/?$/i
+  // Hono keeps encoded slashes inside route parameters; decoding must not hide a match.
+  return admission.test(path) || admission.test(decoded)
+}
+
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
+  if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   const message = result.error.issues
     .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
@@ -333,7 +345,9 @@ export function createApp({
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
-  const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) => {
+  const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
+    // Driver messages and disconnect causes can echo contact values and malformed keys.
+    const text = isWaitlistAdmissionPath(c.req.path) ? 'private waitlist request failed' : detail
     const path = isOneTimeCapabilityPath(c.req.path)
       ? '/book/[redacted]'
       : isOneTimeLinkPath(c.req.path)
@@ -371,7 +385,9 @@ export function createApp({
       if (err.res) return err.getResponse()
       const error = httpErrorCodes[err.status] ?? 'invalid_request'
       return c.json(
-        err.message && !isOneTimeLinkPath(c.req.path) ? { error, message: err.message } : { error },
+        err.message && !isOneTimeLinkPath(c.req.path) && !isWaitlistAdmissionPath(c.req.path)
+          ? { error, message: err.message }
+          : { error },
         err.status,
       )
     }
@@ -399,6 +415,7 @@ export function createApp({
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
           }),
       }
+      if (isWaitlistAdmissionPath(c.req.path)) delete body.message
       return c.json(body, domainStatus[err.kind])
     }
     logError(c, '', err)
