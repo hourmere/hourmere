@@ -277,6 +277,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           socialProviders: {},
           invitationMailLimits: { secret },
           waitlistSecret: secret,
+          smtpConfigured: true,
           webhooks: webhookSettings,
         }),
       })

@@ -200,6 +200,7 @@ const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 export interface BookingToolsDeps {
   db: Db
   waitlistSecret?: string | undefined
+  smtpConfigured?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
@@ -223,6 +224,7 @@ export interface BookingToolsDeps {
 export function bookingTools({
   db,
   waitlistSecret,
+  smtpConfigured,
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
@@ -233,6 +235,7 @@ export function bookingTools({
   const pub: PublicContext = {
     db,
     waitlistSecret,
+    smtpConfigured,
     now,
     notify,
     automaticMeet,

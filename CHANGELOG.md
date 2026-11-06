@@ -20,8 +20,11 @@ must approve publication through the [release workflow](https://github.com/hourm
   Web and worker must share the setting; Hourmere Cloud must never set it.
 - Hosts can offer 1–12 meeting lengths on one event type in the editor, REST, MCP and CLI,
   with an explicit default. Invitees choose a length before selecting an available time.
+- Hosts can set daily, weekly and monthly booking limits per event type in the editor,
+  REST, MCP and CLI. Limits use each host’s schedule time zone; lowering a ceiling
+  does not cancel existing bookings.
 - Personal booking pages and direct-link unlisted event types, with configurable duration,
-  booking questions, locations, buffers, minimum notice, booking windows and daily limits.
+  booking questions, locations, buffers, minimum notice, booking windows and booking limits.
   Working-hours schedules, date overrides and IANA time zones account for daylight saving.
 - Team invitations and organization roles; single-host team events, collective meetings
   with two to eight required hosts, and explicitly activated equal-rotation round-robin
@@ -145,6 +148,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Known limitations
 
+- [Booking limits](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/booking-limits.md) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. Email abuse budgets apply per instance/database; separate instances do not
   share limits. Per-IP request limits remain in process memory.

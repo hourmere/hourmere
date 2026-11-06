@@ -9,6 +9,7 @@ import {
   type WaitlistContext,
   waitlistNow,
 } from './waitlist.ts'
+import { WAITLIST_SLOT_RETENTION_DAYS } from './waitlist-policy.ts'
 
 interface Entry {
   id: string
@@ -248,7 +249,7 @@ export async function scanWaitlistEvent(
           : await sql`INSERT INTO waitlist_slot_tombstones
           (event_type_id,recipient_hash,start_at,end_at,purge_at)
           VALUES (${eventTypeId},${entry.recipient_hash},${slot.start}::timestamptz,
-            ${slot.end}::timestamptz,${new Date(slotEnd + 172_800_000)})
+            ${slot.end}::timestamptz,${new Date(slotEnd + WAITLIST_SLOT_RETENTION_DAYS * 86_400_000)})
           ON CONFLICT DO NOTHING RETURNING event_type_id`.execute(trx)
         if (!inserted.rows.length) continue
         selected.push(slot)

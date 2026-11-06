@@ -1,4 +1,9 @@
 export const common = {
+  'This waitlist is full (100 entries). Please check available times later.':
+    'Diese Warteliste ist voll (100 Einträge). Bitte prüfen Sie die verfügbaren Zeiten später erneut.',
+  'Waitlist email is unavailable. Please contact the host.':
+    'E-Mails zur Warteliste sind nicht verfügbar. Bitte kontaktieren Sie den Gastgeber.',
+
   'This imported booking is read-only and managed in the original system.':
     'Diese importierte Buchung ist schreibgeschützt und wird im ursprünglichen System verwaltet.',
   'This location is unavailable. Contact the host to book.':

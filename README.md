@@ -10,6 +10,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 - [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
 - [REST](https://hourmere.com/docs/rest), [MCP](https://hourmere.com/docs/mcp) and
   [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
+- [Booking waitlists](https://hourmere.com/docs/booking-waitlist) for fully booked
+  one-on-one single-host types; everyone eligible can be notified, with no reservation.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
   [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
 
@@ -400,10 +402,13 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
   [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
-  in process memory.
+  in process memory, except the additional durable booking-waitlist admission limits.
 - Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
@@ -416,8 +421,9 @@ and linked operating guides before deploying:
 - Hourmere must be served at the root of its own host name (no path prefix) in every deployment.
   Bundled Caddy additionally requires ports 80/443, an HTTPS host name without a port,
   and an IPv4-only ingress network.
-- Rate limiting uses in-process memory; multiple web replicas multiply the limits. Run a
-  single web process; a separate worker is supported.
+- Rate limiting uses in-process memory at the transport layer; multiple web replicas multiply the limits.
+  Booking waitlists additionally enforce durable mailbox, event and trusted-IP admission
+  budgets in PostgreSQL across replicas. Run a single web process; a separate worker is supported.
 - [Public booking pages and emails](https://hourmere.com/docs/interface-languages) support English,
   Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces support English and
   Simplified Chinese. Missing translations fall back to English; dates follow the active locale.
