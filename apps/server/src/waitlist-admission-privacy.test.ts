@@ -166,7 +166,7 @@ describe('waitlist admission input privacy', () => {
   })
   it('detects source-copy raw private diagnostics', async () => {
     const module = await copy([
-      "isWaitlistAdmissionPath(c.req.path) ? 'private waitlist request failed' : detail",
+      "isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)\n        ? 'private waitlist request failed'\n        : detail",
       'detail',
     ])
     await expect(assertDiagnostics(module, 'unexpected')).rejects.toMatchObject({
@@ -193,4 +193,57 @@ describe('waitlist admission input privacy', () => {
     ])
     await expect(assertValidation(module)).rejects.toMatchObject({ name: 'AssertionError' })
   })
+})
+
+async function assertEntryDiagnostics(module: AppCopy, method: 'GET' | 'DELETE') {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const a = module.createApp({
+      publicUrl: 'http://localhost',
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      routes: [
+        ({ app }) => {
+          app.on(method, '/api/v1/event-types/:id/waitlist/entries/:entryId?', () => {
+            throw new Error(`Failing row contains (${privateMarker})`, {
+              cause: { detail: privateMarker, parameters: [privateMarker] },
+            })
+          })
+        },
+      ],
+    })
+    const suffix = method === 'DELETE' ? '/00000000-0000-4000-8000-000000000017' : ''
+    const response = await a.request(
+      `/api/v1/event-types/00000000-0000-4000-8000-000000000018/waitlist/entries${suffix}`,
+      { method },
+    )
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'internal_error' })
+    expect(log).toHaveBeenCalledOnce()
+    const diagnostics = JSON.stringify(log.mock.calls)
+    expect(diagnostics).toContain('private waitlist request failed')
+    expect(diagnostics).not.toContain('private-invitee@example.test')
+    expect(diagnostics).not.toContain('private-name')
+  } finally {
+    log.mockRestore()
+  }
+}
+
+describe('waitlist management error privacy', () => {
+  it.each(['GET', 'DELETE'] as const)(
+    'redacts contacts from %s entry diagnostics',
+    async (method) => {
+      await assertEntryDiagnostics(await copy(), method)
+    },
+  )
+  it.each(['GET', 'DELETE'] as const)(
+    'kills source-copy removal of %s entry redaction',
+    async (method) => {
+      const module = await copy([' || isWaitlistEntryPath(c.req.path)', ''])
+      await expect(assertEntryDiagnostics(module, method)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
 })

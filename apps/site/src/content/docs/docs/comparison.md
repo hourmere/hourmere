@@ -81,6 +81,10 @@ is shown only on creation; metadata cannot recover it. Optional expiry and edita
 invitee prefill are supported. Hidden event types only leave the public profile listing;
 their ordinary direct address stays reusable. One-time links are a separate capability.
 
+Hourmere also offers [booking waitlists](/docs/booking-waitlist) for one-on-one single-host
+event types, including self-hosted installations. Everyone eligible can be notified when
+a matching time opens; nothing is reserved and the first successful booking wins.
+
 Check the documented limits when evaluating it:
 
 - Reminders are skipped unless their send time is more than one hour after booking or
