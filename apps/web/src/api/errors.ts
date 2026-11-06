@@ -146,6 +146,8 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    imported_booking_read_only:
+      'This imported booking is read-only and managed in the original system.',
     location_options_conflict:
       'The saved location options cannot be changed here. Keep the location unchanged and try again.',
     invalid_invitee_phone: 'This location is unavailable. Contact the host to book.',

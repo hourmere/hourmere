@@ -392,7 +392,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Imported records fail with imported_booking_read_only and remain managed in the original system. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {
@@ -427,7 +427,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Cancel a booking',
     description:
-      "Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Returns the cancelled booking. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past (and booking_changed, try again, if with an email's token the meeting kept being rescheduled while the call waited).",
+      "Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Imported records fail with imported_booking_read_only and remain managed in the original system. Returns the cancelled booking. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past (and booking_changed, try again, if with an email's token the meeting kept being rescheduled while the call waited).",
     input: CancelInput,
     output: Booking,
     annotations: {
@@ -459,7 +459,7 @@ export function bookingTools({
     name: 'list_bookings',
     title: 'List my bookings',
     description:
-      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status. When nextCursor is not null, call again with it as cursor and the same filters and order for the next page. Times are UTC; each attendee has their own timeZone.",
+      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status. When nextCursor is not null, call again with it as cursor and the same filters and order for the next page. Times are UTC; each attendee has their own timeZone. Imported records carry managementPolicy=local_only_read_only and remain managed in the original system; they cannot be changed or retried here.",
     input: ListBookingsInput,
     output: BookingPage,
     annotations: {

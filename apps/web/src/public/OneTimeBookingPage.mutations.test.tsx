@@ -172,6 +172,38 @@ async function killed(
 }
 
 describe('one-time public protection source-copy controls', () => {
+  it('detects imported confirmation management and calendar capabilities', async () => {
+    async function assertion(text: string) {
+      fakeApi(
+        routes({
+          [`POST ${BASE}/bookings`]: () =>
+            json(201, { booking: booking({ source: 'import' }), manageToken: TOKEN }),
+        }),
+      )
+      const view = display(pageCopy(text))
+      try {
+        await pick()
+        await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
+        await waitFor(() =>
+          expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull(),
+        )
+        expect(
+          screen.queryByText(
+            'This imported booking is read-only and managed in the original system.',
+          ),
+        ).not.toBeNull()
+        expect(document.querySelector('a[download], a[href*="#token="]')).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(
+      assertion,
+      "if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only')",
+      'if (false)',
+    )
+  })
+
   it.each([
     ['ordinary iframe', 'window.parent !== window', 'false'],
     ['dedicated embed route', "pathname.startsWith('/embed/')", 'false'],

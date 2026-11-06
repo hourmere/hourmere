@@ -57,6 +57,8 @@ Secrets are never accepted as command-line flags. No .env or credential store is
 stdout is JSON with management capabilities redacted. --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
+Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
+Cancel, reschedule and retry commands refuse them with imported_booking_read_only.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
 one-time-links create requires bookings or full scope, eventTypeId and an explicit idempotencyKey.
 Its secret URL is printed once to stdout; --output is refused and nothing is stored.

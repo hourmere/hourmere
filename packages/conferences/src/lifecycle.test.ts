@@ -1217,7 +1217,8 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
                 return result
               }),
           })
-        return Reflect.get(target, prop, receiver)
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
       },
     }) as Db
     deps.zoomConferenceWork = createZoomConferenceWork(
@@ -1258,7 +1259,8 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
               return result
             },
           })
-        return Reflect.get(target, prop, receiver)
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
       },
     }) as Db
     deps.zoomConferenceWork = createZoomConferenceWork(
@@ -1313,7 +1315,8 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
               return result
             },
           })
-        return Reflect.get(target, prop, receiver)
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
       },
     }) as Db
     deps.zoomConferenceWork = createZoomConferenceWork(

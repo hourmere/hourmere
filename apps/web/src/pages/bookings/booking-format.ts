@@ -83,6 +83,7 @@ export const SOURCE_LABELS: Record<Booking['source'], string> = {
   embed: 'an embedded booking page',
   api: 'an agent or script (API)',
   mcp: 'an AI agent (MCP)',
+  import: 'the original scheduling system',
 }
 
 /** An answer as text: options joined, checkboxes as Yes or No. */

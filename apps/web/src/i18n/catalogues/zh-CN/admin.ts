@@ -1,5 +1,8 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  Imported: '已导入',
+  'the original scheduling system': '原预约系统',
+
   'The saved location options cannot be changed here. Keep the location unchanged and try again.':
     '无法在此处更改已保存的地点选项。请保留原地点后重试。',
   'Checking waitlist management access…': '正在检查候补名单管理权限……',

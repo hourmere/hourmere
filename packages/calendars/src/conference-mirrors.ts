@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { importedBookingCondition, isImportedBooking } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { conferenceJoinUrl } from '@hourmere/scheduling/conference-url'
@@ -34,6 +35,7 @@ export function conferenceMirrorDispatchJob(
         .select('m.root_booking_id')
         .distinct()
         .where('m.state', '=', 'pending')
+        .where((eb) => eb.not(importedBookingCondition(eb.ref('m.root_booking_id'))))
         .where('m.next_attempt_at', '<=', clock(deps))
         .where((eb) =>
           eb.or([eb('m.lease_until', 'is', null), eb('m.lease_until', '<=', clock(deps))]),
@@ -56,6 +58,7 @@ export function conferenceMirrorDispatchJob(
 }
 async function claim(deps: CalendarDeps, root: string, userId: string) {
   return deps.db.transaction().execute(async (trx) => {
+    if (await isImportedBooking(trx, root)) return
     const m = await trx
       .selectFrom('booking_conference_mirrors')
       .selectAll()
@@ -425,8 +428,22 @@ export async function retryConferenceMirror(ctx: ServiceContext, bookingId: stri
       .selectFrom('bookings')
       .select(['organization_id', 'status', 'start_at'])
       .where('id', '=', bookingId)
+      .where('organization_id', '=', ctx.principal.organization.id)
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('booking_hosts')
+            .select('booking_id')
+            .whereRef('booking_id', '=', 'bookings.id')
+            .where('user_id', '=', ctx.principal.user.id),
+        ),
+      )
       .forUpdate()
       .executeTakeFirst()
+    if (!user || !org || !member || !b)
+      throw new DomainError('not_found', 'calendar_copy_not_found')
+    if (await isImportedBooking(trx, bookingId))
+      throw new DomainError('conflict', 'imported_booking_read_only')
     const c = await trx
       .selectFrom('booking_conferences')
       .selectAll()

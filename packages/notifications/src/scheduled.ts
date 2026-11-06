@@ -1,7 +1,7 @@
 // Configurable booking mail. Durable rows own retries; pg-boss only wakes exact identities.
 import { randomUUID } from 'node:crypto'
 import { interfaceLanguage } from '@hourmere/core/language'
-import type { Db } from '@hourmere/db'
+import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import {
   bookingEmail,
@@ -87,6 +87,7 @@ export async function enqueueScheduledBookingEmails(
   decisionNow: Temporal.Instant,
 ): Promise<boolean> {
   const trx = transaction as Db
+  if (await isImportedBooking(trx, bookingId)) return true
   const result = await sql<{
     organization_id: string
     start_at: Date
@@ -193,6 +194,7 @@ export async function deliverScheduledBookingEmail(
   const claim = await deps.db.transaction().execute(async (trx) => {
     const row = await currentRow(trx, messageId, true)
     if (!row || !['pending', 'processing'].includes(row.state)) return
+    if (await isImportedBooking(trx, row.booking_id)) return
     const now = clock(deps)
     if (row.state === 'processing' && row.lease_until && row.lease_until > row.wall_now) return
     const obsolete = obsoleteReason(row, now)
@@ -522,6 +524,7 @@ export async function repairScheduledBookingEmails(
       await deps.db.transaction().execute(async (trx) => {
         const row = await currentRow(trx, id, true)
         if (!row || !['pending', 'processing'].includes(row.state)) return
+        if (await isImportedBooking(trx, row.booking_id)) return
         if (row.state === 'processing' && row.lease_until && row.lease_until > row.wall_now) return
         const obsolete = obsoleteReason(row, clock(deps))
         if (obsolete) {

@@ -384,6 +384,7 @@ export interface Bookings {
   id: Generated<string>;
   idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;
+  import_questions: Json | null;
   location: Json | null;
   location_option: Json | null;
   manage_token_hash: Buffer | null;
@@ -611,6 +612,29 @@ export interface GroupSlots {
   title: string;
   updated_at: Generated<Timestamp>;
   zoom_connection_id: string | null;
+}
+
+export interface ImportItems {
+  contract_version: number;
+  deleted_at: Timestamp | null;
+  entity_kind: string;
+  imported_at: Generated<Timestamp>;
+  policy: string | null;
+  question_crosswalk: Generated<Json>;
+  source_fingerprint: string | null;
+  source_id: string;
+  source_primary_key: string;
+  source_user_primary_key: string | null;
+  target_fingerprint: string | null;
+  target_id: string | null;
+}
+
+export interface ImportSources {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  id: Generated<string>;
+  schema_fingerprint: string;
+  source_version: string;
 }
 
 export interface InvitationDeliveries {
@@ -950,6 +974,8 @@ export interface DB {
   group_booking_move_receipts: GroupBookingMoveReceipts;
   group_slot_cancel_receipts: GroupSlotCancelReceipts;
   group_slots: GroupSlots;
+  import_items: ImportItems;
+  import_sources: ImportSources;
   invitation_deliveries: InvitationDeliveries;
   invitation_email_requests: InvitationEmailRequests;
   mcp_oauth_client_activity: McpOauthClientActivity;
