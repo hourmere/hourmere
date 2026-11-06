@@ -8,6 +8,21 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('requires explicit opt-in for paid booking foundation in every process role', () => {
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const env = { ...base, HOURMERE_ROLE }
+      for (const value of [undefined, '', 'false'])
+        expect(loadConfig({ ...env, PAID_BOOKINGS_ENABLED: value }).PAID_BOOKINGS_ENABLED).toBe(
+          false,
+        )
+      expect(loadConfig({ ...env, PAID_BOOKINGS_ENABLED: 'true' }).PAID_BOOKINGS_ENABLED).toBe(true)
+      for (const value of ['yes', '1', 'TRUE', ' '])
+        expect(() => loadConfig({ ...env, PAID_BOOKINGS_ENABLED: value })).toThrow(
+          /PAID_BOOKINGS_ENABLED/,
+        )
+    }
+  })
+
   it('allows operators to disable follow-up host notes in every process role', () => {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
       const env = { ...base, HOURMERE_ROLE }
