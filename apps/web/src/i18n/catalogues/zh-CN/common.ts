@@ -1,10 +1,12 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '已配置 {0} 个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   'Meeting location': '会议地点',
   'Your phone number': '您的电话号码',
   'Choose one of the available locations.': '请选择一个可用的会议地点。',
-  'Enter a phone number with + and country code, followed by 7–15 digits.':
-    '请输入以 + 和国家代码开头、共含 7–15 位数字的电话号码。',
+  'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
+    '请输入 + 和共 7–15 位数字（包括国家代码）。可使用空格、括号、点和连字符。',
 
   'This imported booking is read-only and managed in the original system.':
     '此导入预约为只读记录，请在原系统中管理。',

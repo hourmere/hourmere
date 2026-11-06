@@ -296,3 +296,30 @@ describe('one-time public booking', () => {
     )
   })
 })
+
+it('loads one-time availability for the selected location', async () => {
+  const api = fakeApi(
+    routes({
+      [`GET ${BASE}`]: () =>
+        json(200, {
+          eventType: {
+            ...ONE_TIME_EVENT,
+            locations: [
+              { id: 'office', kind: 'in_person', label: 'Office' },
+              { id: 'meet', kind: 'google_meet', label: 'Meet' },
+            ],
+          },
+          prefill: PREFILL,
+        }),
+    }),
+  )
+  const user = userEvent.setup()
+  renderApp(PAGE)
+  await user.click(await screen.findByRole('radio', { name: 'Meet' }))
+  await pick(user)
+  expect(
+    new URL(api.to(`GET ${BASE}/slots`).at(-1)?.path ?? '', 'http://x').searchParams.get(
+      'locationOptionId',
+    ),
+  ).toBe('meet')
+})

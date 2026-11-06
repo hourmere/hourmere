@@ -237,7 +237,8 @@ describe('server errors on the form', () => {
 it('maps location errors to localized fields and keeps readiness wording neutral', () => {
   expect(bookingErrors(new RequestError(422, 'invalid_invitee_phone', 'private'), [])).toEqual({
     fields: {
-      inviteePhone: 'Enter a phone number with + and country code, followed by 7–15 digits.',
+      inviteePhone:
+        'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
     },
     form: null,
   })

@@ -6,7 +6,8 @@ description: Offer meeting locations, collect a phone number and preserve the in
 Offer up to five meeting locations on one event type. Invitees choose a location on the
 public booking form; the default starts selected. A single option does not show a choice.
 Personal, team, embedded and one-time booking pages support the same form, including a
-required phone field when the host will call the invitee. This feature is included in
+required phone field when the host will call the invitee. Choose the location before
+choosing a time so availability reflects that option. This feature is included in
 self-hosted installations without an additional setting or subscription.
 
 ## Configure locations
@@ -14,7 +15,9 @@ self-hosted installations without an additional setting or subscription.
 Use REST `POST /api/v1/event-types` or `PATCH /api/v1/event-types/{id}`, MCP
 `create_event_type` / `update_event_type`, or CLI `create-event` / `update-event`.
 Configuration writes require a **Full account access** API key and the existing owner or
-team permissions. The web event editor does not yet offer a multiple-location editor.
+team permissions. The web event editor shows a read-only notice when multiple options
+are configured, with instructions to manage them through REST, MCP or CLI. It preserves
+those options when saving unchanged legacy location settings.
 
 `locations` is an ordered list of 1–5 options, or `null` to clear it. Each option needs a
 stable `id` and a distinct kind. IDs contain 1–64 ASCII letters, digits, underscores or
@@ -76,6 +79,15 @@ input. For example, add these fields to an ordinary personal, team or one-time b
 }
 ```
 
+Slot queries also accept `locationOptionId` (REST query parameter, MCP
+`find_available_slots`, or CLI `slots` JSON input). Automatic Meet availability and
+round-robin assignment use the same Meet-eligible host pool; fairness chooses among
+those eligible hosts.
+
+Invitee phone input accepts spaces, parentheses, hyphens and periods and normalizes
+them to E.164: `+` followed by 7–15 digits **in total**, including the country code,
+with a nonzero first digit. Extensions and local numbers without a country code are invalid.
+
 Omitting the choice uses the default. A removed or unknown ID returns
 `invalid_location_choice`; an absent or invalid required phone returns
 `invalid_invitee_phone`. A chosen automatic location that cannot be provided for the
@@ -85,7 +97,10 @@ the same key is a different request.
 
 The booking stores the selected option and resolved details. Confirmation and management
 pages, host booking details, host/invitee emails and calendar invitations use the saved
-location. An invitee-provided phone number is visible to the host. Choosing an automatic
+location. An invitee-provided phone number is visible only to hosts, authorized host
+administration and the invitee themself. Guest emails and calendar invitations use
+neutral phone-call text without the number. Phone details explain whether the host
+calls the invitee or the invitee calls the host. Choosing an automatic
 video option starts the existing conference workflow, with pending/failure handling and
 ready-link invitations; other options create no conference.
 
@@ -99,5 +114,5 @@ ready-link invitations; other options create no conference.
 - Automatic Zoom supports only individual events with one authorized host. Collective and
   round-robin Zoom remain unsupported. Meet uses the required collective organizer or the
   actual assigned round-robin host; it never borrows another host’s connection.
-- Group-seat events are not yet enabled for users. Seats in a shared slot must use the same
-  location; a seat cannot create a second conference or change that shared location.
+- Group-seat events are not yet enabled for users. Future enablement must enforce one
+  shared location and conference per slot; these seat constraints are not implemented yet.

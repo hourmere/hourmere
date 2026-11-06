@@ -123,6 +123,35 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     db.selectFrom('booking_calendar_targets').select(['user_id', 'calendar_id']).execute()
   const imports = () => provider.calls.filter((call) => call.url.pathname.endsWith('/import'))
 
+  it('keeps ordinary phone calendar copies private and free of attendee payloads', async () => {
+    const id = await booking()
+    const number = '+14155550123'
+    await db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'phone', number }) })
+      .where('id', '=', id)
+      .execute()
+    await db
+      .insertInto('booking_attendees')
+      .values({
+        booking_id: id,
+        name: 'Guest',
+        email: 'guest@example.com',
+        is_booker: false,
+        time_zone: 'UTC',
+      })
+      .execute()
+    await notify(id)
+    await writeBookingCalendar(deps, id)
+    const copies = [...provider.controls.storedEvents.values()]
+    expect(copies).toHaveLength(1)
+    for (const copy of copies) {
+      expect(copy).not.toHaveProperty('attendees')
+      expect(copy).not.toHaveProperty('location')
+      expect(JSON.stringify(copy)).not.toContain(number)
+      expect(JSON.stringify(copy)).not.toContain('guest@example.com')
+    }
+  })
   it.each(['needs_reauth', 'permissions_missing'] as const)(
     'continues to later hosts after one host has %s',
     async (error) => {

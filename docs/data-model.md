@@ -542,7 +542,10 @@ reads, notifications and calendars: host or collected invitee phone, saved addre
 or link, or the conference kind/opt-in until its ready join URL is added by existing
 conference reconciliation. The resolver returns both `locationOption` and `location`;
 for invitee phone, the configuration snapshot retains `askInvitee: true` and the
-resolved location contains the supplied number. Neither configuration edits nor
+resolved location contains the normalized E.164 number. Common spaces, parentheses,
+hyphens and periods are removed before validating 7–15 total digits including the country
+code. Host and invitee notifications can show that number; guest email and ICS payloads
+use neutral phone-call wording without it. Neither configuration edits nor
 conference URL updates rewrite the chosen snapshot. Snapshot storage is private,
 just like resolved contact details, and follows the booking's retention policy.
 Migration 0056 backfills each existing non-null resolved booking location as
@@ -572,7 +575,8 @@ write permissions stay unchanged. Every automatic option is checked on configura
 writes, including non-default options. Booking-time readiness must be checked again
 under the existing booking locks: individual Meet uses that host's capable destination;
 collective Meet uses an explicitly selected required host as organizer; round-robin
-Meet uses the actually assigned host and its own capable destination. Do not borrow
+Meet filters candidates to Meet-eligible hosts before slot listing and fair assignment
+for the selected option, then uses the assigned host and its own capable destination. Do not borrow
 another host's account. Automatic Zoom remains limited to individual scheduling with
 one explicitly authorized host and that host's pinned meeting-mode connection;
 collective and round-robin Zoom are rejected even as non-default choices. The pure

@@ -51,7 +51,7 @@ describe('catalogue coverage and interpolation', () => {
       'Meeting location',
       'Your phone number',
       'Choose one of the available locations.',
-      'Enter a phone number with + and country code, followed by 7–15 digits.',
+      'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
     ]
     for (const { code } of registeredLocales) {
       const catalogue = groups.common[`./catalogues/${code}/common.ts`]

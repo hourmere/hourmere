@@ -751,6 +751,21 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   })
 
   describe('find_available_slots', () => {
+    it('validates the selected location when finding slots', async () => {
+      expect(
+        errorOf(
+          await call('find_available_slots', {
+            handle: 'ada',
+            slug: 'intro',
+            timeZone: 'UTC',
+            startDate: '2026-11-02',
+            endDate: '2026-11-02',
+            locationOptionId: 'missing',
+          }),
+        ).error,
+      ).toBe('invalid_location_choice')
+    })
+
     it('reads the dates in the requested time zone and gives each slot in UTC and in it', async () => {
       const berlin = ok<{
         eventType: { title: string; questions: unknown[]; host: { timeZone: string } }

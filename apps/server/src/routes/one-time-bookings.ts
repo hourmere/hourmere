@@ -93,6 +93,7 @@ export function oneTimeBookingRoutes({
             start: Instant,
             end: Instant,
             durationMinutes: z.coerce.number().pipe(SelectedDurationMinutes).optional(),
+            locationOptionId: z.string().optional(),
           }),
         },
         responses: {
@@ -103,7 +104,7 @@ export function oneTimeBookingRoutes({
         },
       }),
       async (c) => {
-        const { start, end, durationMinutes } = c.req.valid('query')
+        const { start, end, durationMinutes, locationOptionId } = c.req.valid('query')
         return c.json(
           {
             data: await listOneTimeBookingSlots(ctx, {
@@ -111,6 +112,7 @@ export function oneTimeBookingRoutes({
               start: Temporal.Instant.from(start),
               end: Temporal.Instant.from(end),
               durationMinutes,
+              locationOptionId,
             }),
           },
           200,

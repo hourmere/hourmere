@@ -40,6 +40,7 @@ import {
   type LocationOption,
   type PublicLocationOption,
   publicLocationOptions,
+  selectLocationOption,
 } from './location-options.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
@@ -663,6 +664,7 @@ export async function listPublicSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
 ): Promise<SlotView[]> {
   return publicSlots(ctx, input, findPublicEventType)
@@ -676,6 +678,7 @@ export async function listPublicTeamSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
 ): Promise<SlotView[]> {
   return publicSlots(ctx, input, findPublicTeamEventType)
@@ -689,6 +692,7 @@ async function publicSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
   resolve: typeof findPublicEventType,
 ): Promise<SlotView[]> {
@@ -705,6 +709,7 @@ export async function listOneTimeBookingSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
 ): Promise<SlotView[]> {
   const link = await resolveOneTimeBookingLink(ctx, input.token)
@@ -716,17 +721,23 @@ export async function listOneTimeBookingSlots(
 
 async function eventSlots(
   ctx: PublicContext,
-  input: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
+  input: {
+    start: Temporal.Instant
+    end: Temporal.Instant
+    durationMinutes?: number
+    locationOptionId?: string
+  },
   et: PublicEventTypeRecord,
 ): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
+  const chosenOption = selectLocationOption(et.locations, input.locationOptionId)
   const now = ctx.now()
-  if ((et.locations?.length ?? 0) <= 1 && automaticZoom(et.location)) {
+  if (automaticZoom(chosenOption)) {
     if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
       throw new DomainError('conflict', 'automatic_zoom_host_policy')
     await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
   }
-  if ((et.locations?.length ?? 0) <= 1 && automaticMeet(et.location)) {
+  if (automaticMeet(chosenOption)) {
     if (et.schedulingType === 'round_robin')
       et.eligibleHostUserIds = await eligibleMeetHosts(
         ctx.db,

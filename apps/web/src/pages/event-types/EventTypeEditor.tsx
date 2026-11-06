@@ -743,6 +743,14 @@ function EventTypeForm({
 
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">{t('Location')}</h2>
+            {(saved?.locations?.length ?? 0) > 1 && (
+              <p className="hint">
+                {t(
+                  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+                  { '0': saved?.locations?.length ?? 0 },
+                )}
+              </p>
+            )}
             <LocationFields draft={draft} errors={errors} set={set} />
             {draft.locationKind === 'zoom' && (
               <ZoomMeetingFields

@@ -6,6 +6,7 @@ import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hou
 import {
   bookingEmail,
   bookingHostName,
+  bookingLocationForRecipient,
   followUpEmail,
   type MailMessage,
   MailRejectedError,
@@ -378,11 +379,24 @@ export async function deliverScheduledBookingEmail(
                     email,
                   }))
                 : { name: organizer.name, email: organizer.email }
+            const recipientMeeting = {
+              ...meeting,
+              location: bookingLocationForRecipient(
+                meeting.location,
+                data.booking.inviteePhone,
+                recipient.host
+                  ? 'host'
+                  : recipient.key === `attendee:${booker?.id}`
+                    ? 'invitee'
+                    : 'guest',
+                recipient.locale,
+              ),
+            }
             if (claim.kind === 'reminder')
               return {
                 ...bookingEmail(
                   'reminder',
-                  meeting,
+                  recipientMeeting,
                   {
                     ...(recipient.host
                       ? {
@@ -416,7 +430,7 @@ export async function deliverScheduledBookingEmail(
                 replyTo,
               }
             const followUp = followUpEmail(
-              meeting,
+              recipientMeeting,
               {
                 ...(recipient.host
                   ? {

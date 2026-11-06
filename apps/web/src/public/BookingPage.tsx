@@ -408,11 +408,13 @@ function BookingFlow({
       else setDurationRefresh({ status: 'error', message: failureMessage(err) })
     }
   }, [handle, slug, team, oneTimeToken])
+  const chosenLocation = selectedLocation(event.locations ?? [], values.locationOptionId)
+  const locationOptionId = chosenLocation?.id
   const loadSlots = useMemo<SlotLoader>(() => {
     const duration = hasDurationChoices || directFlow ? durationMinutes : undefined
     const load = oneTimeToken
-      ? oneTimeLinkSlots(oneTimeToken, duration)
-      : eventSlots(handle, slug, team, duration)
+      ? oneTimeLinkSlots(oneTimeToken, duration, locationOptionId)
+      : eventSlots(handle, slug, team, duration, locationOptionId)
     return async (start, end, signal) => {
       try {
         return await load(start, end, signal)
@@ -424,11 +426,11 @@ function BookingFlow({
         if (
           signal.aborted ||
           !(err instanceof PublicRequestError) ||
-          codeOf(err) !== 'invalid_duration'
+          !['invalid_duration', 'invalid_location_choice'].includes(codeOf(err) ?? '')
         )
           throw err
         setNotice(
-          directFlow
+          directFlow && codeOf(err) === 'invalid_duration'
             ? 'This meeting length is no longer offered. Please choose a time again.'
             : bookingErrors(err, event.questions).form,
         )
@@ -443,6 +445,7 @@ function BookingFlow({
     oneTimeToken,
     durationMinutes,
     hasDurationChoices,
+    locationOptionId,
     directFlow,
     event.questions,
     refreshDurations,
@@ -581,8 +584,6 @@ function BookingFlow({
     setBackToPicker(true)
   }
 
-  const chosenLocation = selectedLocation(event.locations ?? [], values.locationOptionId)
-
   async function submit() {
     if (!slot || inFlight.current || directPending || directError) return
     const guests = guestsFor(values.guests)
@@ -591,7 +592,7 @@ function BookingFlow({
       start: slot.start,
       ...(chosenLocation && { locationOptionId: chosenLocation.id }),
       ...(chosenLocation?.askInvitee && {
-        inviteePhone: values.inviteePhone?.trim(),
+        inviteePhone: values.inviteePhone?.replace(/[ ().-]/g, ''),
       }),
       ...(waitlist && { waitlistToken: waitlist.token }),
       ...((hasDurationChoices || directFlow) && { durationMinutes }),
@@ -869,6 +870,14 @@ function BookingFlow({
                 questions={event.questions}
                 values={values}
                 onChange={(next) => {
+                  if (
+                    selectedLocation(event.locations ?? [], next.locationOptionId)?.id !==
+                    locationOptionId
+                  ) {
+                    dismissDirect()
+                    attempt.current = null
+                    setSlot(null)
+                  }
                   setValues(next)
                   setServerErrors({})
                 }}
@@ -902,44 +911,76 @@ function BookingFlow({
               load={loadSlots}
               durationMinutes={durationMinutes}
               afterTitle={
-                hasDurationChoices ? (
-                  <fieldset className="duration-picker">
-                    <legend>{t('Meeting length')}</legend>
-                    <div className="duration-options">
-                      {event.allowedDurationsMinutes?.map((minutes) => (
-                        <label key={minutes} className="duration-option">
-                          <input
-                            type="radio"
-                            name="durationMinutes"
-                            value={minutes}
-                            checked={durationMinutes === minutes}
-                            onChange={() => {
-                              dismissDirect()
-                              attempt.current = null
-                              setSlot(null)
-                              setDurationMinutes(minutes)
-                              setNotice(null)
-                              setFormError(null)
-                            }}
-                          />
-                          <span>{formatDuration(minutes, displayLocale)}</span>
-                        </label>
-                      ))}
-                    </div>
-                    {waitlistOfferEnabled(
-                      Boolean(oneTimeToken),
-                      'waitlist' in event ? event.waitlist?.enabled : undefined,
-                    ) &&
-                      durationMinutes !== event.durationMinutes && (
-                        <p className="hint">
-                          {t(
-                            'To join the waitlist, choose the default meeting length ({duration}).',
-                            { duration: formatDuration(event.durationMinutes, displayLocale) },
-                          )}
-                        </p>
-                      )}
-                  </fieldset>
-                ) : undefined
+                <>
+                  {(event.locations?.length ?? 0) > 1 && (
+                    <fieldset className="duration-picker">
+                      <legend>{t('Meeting location')}</legend>
+                      <div className="duration-options">
+                        {event.locations?.map((option) => (
+                          <label key={option.id} className="duration-option">
+                            <input
+                              type="radio"
+                              name="slotLocation"
+                              value={option.id}
+                              checked={locationOptionId === option.id}
+                              onChange={() => {
+                                dismissDirect()
+                                attempt.current = null
+                                setSlot(null)
+                                setValues((current) => ({
+                                  ...current,
+                                  locationOptionId: option.id,
+                                  inviteePhone: '',
+                                }))
+                                setNotice(null)
+                                setFormError(null)
+                              }}
+                            />
+                            <span>{option.label ?? ui(locationLabel(option.kind))}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  )}
+                  {hasDurationChoices ? (
+                    <fieldset className="duration-picker">
+                      <legend>{t('Meeting length')}</legend>
+                      <div className="duration-options">
+                        {event.allowedDurationsMinutes?.map((minutes) => (
+                          <label key={minutes} className="duration-option">
+                            <input
+                              type="radio"
+                              name="durationMinutes"
+                              value={minutes}
+                              checked={durationMinutes === minutes}
+                              onChange={() => {
+                                dismissDirect()
+                                attempt.current = null
+                                setSlot(null)
+                                setDurationMinutes(minutes)
+                                setNotice(null)
+                                setFormError(null)
+                              }}
+                            />
+                            <span>{formatDuration(minutes, displayLocale)}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {waitlistOfferEnabled(
+                        Boolean(oneTimeToken),
+                        'waitlist' in event ? event.waitlist?.enabled : undefined,
+                      ) &&
+                        durationMinutes !== event.durationMinutes && (
+                          <p className="hint">
+                            {t(
+                              'To join the waitlist, choose the default meeting length ({duration}).',
+                              { duration: formatDuration(event.durationMinutes, displayLocale) },
+                            )}
+                          </p>
+                        )}
+                    </fieldset>
+                  ) : undefined}
+                </>
               }
               timeZone={timeZone}
               onTimeZoneChange={(zone) => {

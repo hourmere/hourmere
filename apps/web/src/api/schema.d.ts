@@ -239,6 +239,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -2475,6 +2476,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -2709,6 +2711,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };

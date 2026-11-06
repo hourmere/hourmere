@@ -1,9 +1,11 @@
 export const common = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    'Hay {0} opciones de ubicación configuradas. Gestiónalas mediante REST, MCP o CLI. Al guardar otros campos se conservan.',
   'Meeting location': 'Lugar de la reunión',
   'Your phone number': 'Tu número de teléfono',
   'Choose one of the available locations.': 'Elige uno de los lugares disponibles.',
-  'Enter a phone number with + and country code, followed by 7–15 digits.':
-    'Introduce un número con + y el prefijo del país, con un total de 7 a 15 dígitos.',
+  'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
+    'Introduce + y entre 7 y 15 dígitos en total, incluido el código de país. Se permiten espacios, paréntesis, puntos y guiones.',
 
   'This imported booking is read-only and managed in the original system.':
     'Esta reserva importada es de solo lectura y se gestiona en el sistema original.',

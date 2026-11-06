@@ -40,7 +40,7 @@ import {
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, lockOrganization } from './hosts.ts'
-import { resolveLocationChoice } from './location-options.ts'
+import { resolveLocationChoice, selectLocationOption } from './location-options.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -697,10 +697,7 @@ async function resolveBookingLocation(
   input: Pick<CreateBookingInput, 'locationOptionId' | 'inviteePhone'>,
 ) {
   const options = event.locations
-  const chosen =
-    input.locationOptionId === undefined
-      ? (options?.find((option) => option.isDefault === true) ?? options?.[0])
-      : options?.find((option) => option.id === input.locationOptionId)
+  const chosen = selectLocationOption(options, input.locationOptionId)
   const organizer =
     event.schedulingType === 'collective' ? event.conferenceOrganizerUserId : hosts[0]
   const meetReady: string[] = []
@@ -1269,20 +1266,15 @@ async function publicBooking(
       const responses = validateResponses(current.questions, input.responses ?? {})
       const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
       const end = input.start.add({ minutes: durationMinutes })
+      const chosenOption = selectLocationOption(current.locations, input.locationOptionId)
       let selectedHostIds = current.hostUserIds
       if (current.schedulingType === 'round_robin') {
         await lockRoundRobinState(trx, current.id)
         const available: string[] = []
         let stale = false
-        const candidates =
-          (current.locations?.length ?? 0) <= 1 && automaticMeet(current.location)
-            ? await eligibleMeetHosts(
-                trx,
-                current.eligibleHostUserIds,
-                current.id,
-                ctx.automaticMeet,
-              )
-            : current.eligibleHostUserIds
+        const candidates = automaticMeet(chosenOption)
+          ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
+          : current.eligibleHostUserIds
         for (const hostUserId of candidates) {
           try {
             const slots = await findSlots(trx, {

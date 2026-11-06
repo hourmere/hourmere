@@ -249,6 +249,33 @@ describe('CLI transport and arguments', () => {
     expect(JSON.parse(String(init?.body)).params.arguments).toEqual(input)
   })
 
+  async function verifySlotLocation(runner = runCli) {
+    const input = {
+      teamSlug: 'team',
+      slug: 'intro',
+      from: '2026-12-01T10:00:00Z',
+      to: '2026-12-01T12:00:00Z',
+      locationOptionId: 'meet',
+    }
+    const result = await run(['slots', '--input', '-'], input, { runner })
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params).toMatchObject({
+      name: 'find_available_slots',
+      arguments: input,
+    })
+  }
+  it('forwards the selected location to slot availability through JSON', async () => {
+    await verifySlotLocation()
+    await verifySlotLocation(sourceCopy())
+    await expect(
+      verifySlotLocation(sourceCopy([
+        'const input = await readInput(args.input, options.stdin)',
+        'const input = await readInput(args.input, options.stdin); delete input.locationOptionId',
+      ])),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
   async function verifyRedirectFlags(runner = runCli) {
     for (const command of ['create-event', 'update-event']) {
       const redirect = {

@@ -158,7 +158,7 @@ export const CreateBooking = z
     }),
     inviteePhone: z.string().optional().openapi({
       description:
-        'Required for an askInvitee phone option, in E.164 format, for example +14155550123.',
+        'Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation.',
     }),
     invitee: z.strictObject({
       name,
@@ -350,6 +350,7 @@ export function publicRoutes({
               start: Instant,
               end: Instant,
               durationMinutes: z.coerce.number().pipe(SelectedDurationMinutes).optional(),
+              locationOptionId: z.string().optional(),
             }),
           },
           responses: {
@@ -365,12 +366,13 @@ export function publicRoutes({
           },
         }),
         async (c) => {
-          const { start, end, durationMinutes } = c.req.valid('query')
+          const { start, end, durationMinutes, locationOptionId } = c.req.valid('query')
           const slots = await target.slots(ctx, {
             ...c.req.valid('param'),
             start: Temporal.Instant.from(start),
             end: Temporal.Instant.from(end),
             durationMinutes,
+            locationOptionId,
           })
           return c.json({ data: slots }, 200)
         },

@@ -89,5 +89,10 @@
   "waitlist.notice.expiry": "These suggestions expire at {expiry}. This deadline does not reserve a time.",
   "waitlist.notice.page": "Check all current times on the booking page:",
   "waitlist.notice.waiting": "If a time is gone, you stay on the waitlist until your original deadline. If you booked elsewhere, use the removal link below to leave.",
-  "waitlist.notice.footer": "You received this email because you verified a waitlist request for this meeting."
+  "waitlist.notice.footer": "You received this email because you verified a waitlist request for this meeting.",
+  "phone.callInvitee": "Phone call — call the invitee at {number}",
+  "phone.hostCallsYou": "Phone call — the host will call you at {number}",
+  "phone.hostCallsInvitee": "Phone call — the host will call the invitee",
+  "phone.inviteeCallsYou": "Phone call — the invitee will call you at {number}",
+  "phone.callHost": "Phone call — call the host at {number}"
 }

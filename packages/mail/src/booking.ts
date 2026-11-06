@@ -218,6 +218,27 @@ function formatShortTime(
 
 // --- Locations ----------------------------------------------------------------------------
 
+/** Recipient-specific phone wording; collected numbers never enter guest payloads. */
+export function bookingLocationForRecipient(
+  location: MeetingLocation | null,
+  inviteePhone: boolean,
+  role: 'host' | 'invitee' | 'guest',
+  locale?: string | null,
+): MeetingLocation | null {
+  if (location?.kind !== 'phone') return location
+  const language = interfaceLanguage(locale) ?? 'en'
+  const key = inviteePhone
+    ? role === 'host'
+      ? 'phone.callInvitee'
+      : role === 'invitee'
+        ? 'phone.hostCallsYou'
+        : 'phone.hostCallsInvitee'
+    : role === 'host'
+      ? 'phone.inviteeCallsYou'
+      : 'phone.callHost'
+  return { kind: 'custom', text: message(language, key, { number: location.number }) }
+}
+
 /** The location as plain text, e.g. for a calendar invitation's LOCATION. */
 export function meetingLocationText(location: MeetingLocation): string {
   switch (location.kind) {

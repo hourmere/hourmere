@@ -89,5 +89,10 @@
   "waitlist.notice.expiry": "Diese Vorschläge gelten bis {expiry}. Diese Frist reserviert keinen Termin.",
   "waitlist.notice.page": "Alle aktuell angebotenen Zeiten finden Sie auf der Buchungsseite:",
   "waitlist.notice.waiting": "Ist eine Zeit nicht mehr verfügbar, bleiben Sie bis zum ursprünglichen Ablaufdatum auf der Warteliste. Falls Sie anderweitig gebucht haben, verlassen Sie die Warteliste über den folgenden Link.",
-  "waitlist.notice.footer": "Sie erhalten diese E-Mail, weil Sie eine Wartelistenanfrage für diesen Termin bestätigt haben."
+  "waitlist.notice.footer": "Sie erhalten diese E-Mail, weil Sie eine Wartelistenanfrage für diesen Termin bestätigt haben.",
+  "phone.callInvitee": "Telefonat — rufen Sie den eingeladenen Gast unter {number} an",
+  "phone.hostCallsYou": "Telefonat — der Gastgeber ruft Sie unter {number} an",
+  "phone.hostCallsInvitee": "Telefonat — der Gastgeber ruft den eingeladenen Gast an",
+  "phone.inviteeCallsYou": "Telefonat — der eingeladene Gast ruft Sie unter {number} an",
+  "phone.callHost": "Telefonat — rufen Sie den Gastgeber unter {number} an"
 }

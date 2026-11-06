@@ -121,6 +121,14 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(body.booking).not.toHaveProperty('locationOption')
   })
 
+  it('validates the selected location when listing slots', async () => {
+    const response = await get(
+      '/api/v1/public/ada/intro/slots?start=2026-11-02T00:00:00Z&end=2026-11-03T00:00:00Z&locationOptionId=missing',
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_location_choice' })
+  })
+
   it('shows the public event type', async () => {
     const res = await get('/api/v1/public/ada/intro')
     expect(res.status).toBe(200)

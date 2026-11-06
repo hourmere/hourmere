@@ -115,6 +115,15 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
       body: JSON.stringify(payload),
     })
 
+  it('validates the selected location on one-time slot queries', async () => {
+    const s = await setup()
+    const response = await app.request(
+      `${path(s.token)}/slots?start=2026-11-02T00:00:00Z&end=2026-11-03T00:00:00Z&locationOptionId=missing`,
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_location_choice' })
+  })
+
   it.each([false, true])(
     'serves only presentation keys for hidden types (team=%s)',
     async (team) => {

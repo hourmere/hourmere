@@ -89,5 +89,10 @@
   "waitlist.notice.expiry": "Estas sugerencias caducan el {expiry}. Este plazo no reserva ningún horario.",
   "waitlist.notice.page": "Consulte todos los horarios disponibles actualmente en la página de reservas:",
   "waitlist.notice.waiting": "Si un horario ya no está disponible, seguirá en la lista de espera hasta la fecha de vencimiento original. Si ha reservado por otra vía, utilice el siguiente enlace para salir.",
-  "waitlist.notice.footer": "Ha recibido este correo porque ha confirmado una solicitud para unirse a la lista de espera de esta reunión."
+  "waitlist.notice.footer": "Ha recibido este correo porque ha confirmado una solicitud para unirse a la lista de espera de esta reunión.",
+  "phone.callInvitee": "Llamada — llama al invitado al {number}",
+  "phone.hostCallsYou": "Llamada — el anfitrión te llamará al {number}",
+  "phone.hostCallsInvitee": "Llamada — el anfitrión llamará al invitado",
+  "phone.inviteeCallsYou": "Llamada — el invitado te llamará al {number}",
+  "phone.callHost": "Llamada — llama al anfitrión al {number}"
 }

@@ -183,7 +183,7 @@ export function bookingErrors(
         else if (path === 'invitee.timeZone') fields.timeZone = 'Choose a time zone from the list.'
         else if (path === 'inviteePhone')
           fields.inviteePhone =
-            'Enter a phone number with + and country code, followed by 7–15 digits.'
+            'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.'
         else if (path === 'locationOptionId')
           fields.locationOptionId = 'Choose one of the available locations.'
         else if (path === 'guests')
@@ -211,7 +211,8 @@ export function bookingErrors(
       fields.locationOptionId = 'Choose one of the available locations.'
       return { fields, form: null }
     case 'invalid_invitee_phone':
-      fields.inviteePhone = 'Enter a phone number with + and country code, followed by 7–15 digits.'
+      fields.inviteePhone =
+        'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.'
       return { fields, form: null }
     case 'invalid_invitee':
       if (/name/i.test(message))

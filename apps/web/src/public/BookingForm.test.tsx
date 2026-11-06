@@ -311,7 +311,7 @@ describe('invitee location choice', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(submit).not.toHaveBeenCalled()
     await user.clear(phone)
-    await user.type(phone, '+14155550123')
+    await user.type(phone, '+1 (415) 555-0123')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(submit).toHaveBeenCalledOnce()
   })
@@ -329,7 +329,7 @@ describe('invitee location choice', () => {
       '+123456',
       '+1234567890123456',
       '4155550123',
-      '+1 4155550123',
+      '+1/4155550123',
     ]) {
       expect(validateBookingForm([], { ...valid, inviteePhone }, locationChoices)).toHaveProperty(
         'inviteePhone',

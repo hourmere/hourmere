@@ -11,3 +11,12 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
+
+For phone locations, booking emails and calendar invitations state who calls whom. A phone
+number collected from the invitee is included only for hosts and that invitee. Guests receive
+“Phone call — the host will call the invitee” without the number, including confirmations,
+reschedules, cancellations and reminders. Configured reminders use the same recipient policy;
+follow-ups contain no meeting location. The booking's saved location-option snapshot determines
+this policy even after the event type is edited or the booking is rescheduled. Host-provided
+phone numbers remain shared with attendees so they can call the host. Ordinary provider calendar
+copies remain host-only busy-time records and do not currently include meeting locations.

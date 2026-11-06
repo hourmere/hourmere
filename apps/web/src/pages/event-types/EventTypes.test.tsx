@@ -1742,3 +1742,24 @@ it('keeps the event type editor inside the app shell while its skeleton loads', 
   await loading.answer(json(200, eventType()))
   expect(screen.getByRole('heading', { name: 'Edit “Intro call”', level: 1 })).toBeDefined()
 })
+
+it('shows configured location options and preserves them when saving the legacy editor', async () => {
+  const locations = [
+    { id: 'office', kind: 'in_person' as const, address: '1 Main Street' },
+    { id: 'call', kind: 'phone' as const, askInvitee: true as const },
+  ]
+  const api = eventTypeServer([
+    eventType({ location: { kind: 'in_person', address: '1 Main Street' }, locations }),
+  ])
+  const user = userEvent.setup()
+  renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+  await screen.findByText(
+    '2 location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+  )
+  await user.type(screen.getByLabelText('Title'), ' updated')
+  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByText('Saved.')
+  const body = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+  expect(body).not.toHaveProperty('location')
+  expect(body).not.toHaveProperty('locations')
+})

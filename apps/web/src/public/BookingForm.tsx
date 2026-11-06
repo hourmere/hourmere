@@ -61,8 +61,12 @@ export function validateBookingForm(
   const chosen = selectedLocation(locations, values.locationOptionId)
   if (locations.length && !chosen)
     errors.locationOptionId = 'Choose one of the available locations.'
-  if (chosen?.askInvitee && !/^\+[1-9][0-9]{6,14}$/.test(values.inviteePhone?.trim() ?? ''))
-    errors.inviteePhone = 'Enter a phone number with + and country code, followed by 7–15 digits.'
+  if (
+    chosen?.askInvitee &&
+    !/^\+[1-9][0-9]{6,14}$/.test((values.inviteePhone ?? '').replace(/[ ().-]/g, ''))
+  )
+    errors.inviteePhone =
+      'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.'
   const name = nameError(values.name)
   if (name) errors.name = name
   const email = emailError(values.email)
@@ -184,7 +188,7 @@ export function BookingForm({
     label: string,
     value: string,
     set: (v: string) => void,
-    options: { type?: string; autoComplete?: string; required?: boolean } = {},
+    options: { type?: string; autoComplete?: string; required?: boolean; hint?: string } = {},
   ) => (
     <div className="field">
       <label htmlFor={fieldId(field)}>
@@ -198,10 +202,15 @@ export function BookingForm({
         autoComplete={options.autoComplete}
         value={value}
         aria-invalid={errors[field] ? true : undefined}
-        aria-describedby={describedBy(field)}
+        aria-describedby={describedBy(field, options.hint ? `${fieldId(field)}-hint` : undefined)}
         aria-required={options.required !== false}
         onChange={(e) => set(e.target.value)}
       />
+      {options.hint && (
+        <p className="hint" id={`${fieldId(field)}-hint`}>
+          {ui(options.hint)}
+        </p>
+      )}
       {errorText(field)}
     </div>
   )
@@ -238,7 +247,11 @@ export function BookingForm({
           'Your phone number',
           values.inviteePhone ?? '',
           (inviteePhone) => update({ inviteePhone }),
-          { type: 'tel', autoComplete: 'tel' },
+          {
+            type: 'tel',
+            autoComplete: 'tel',
+            hint: 'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
+          },
         )}
       {textInput('name', 'Your name', values.name, (name) => update({ name }), {
         autoComplete: 'name',
