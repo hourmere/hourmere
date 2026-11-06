@@ -9,23 +9,40 @@ describe('mail catalogue coverage', () => {
       '电话通话 — 主持人将拨打你的号码 +14155550123',
     )
     expect(mailMessage('zh-CN', 'phone.inviteeCallsYou', { number: '+14155550123' })).toBe(
-      '电话通话 — 受邀者将拨打你的号码 +14155550123',
+      '电话通话 — 预约人将拨打你的号码 +14155550123',
     )
+    expect(mailMessage('zh-CN', 'phone.callInvitee', { number: '+14155550123' })).toBe(
+      '电话通话 — 请拨打预约人的号码 +14155550123',
+    )
+    expect(mailMessage('zh-CN', 'phone.hostCallsInvitee')).toBe('电话通话 — 主持人将致电预约人')
     expect(mailMessage('de', 'phone.hostCallsInvitee')).toBe(
-      'Telefonat — die gastgebende Person ruft die eingeladene Person an',
+      'Telefonat — die gastgebende Person ruft die buchende Person an',
     )
     expect(mailMessage('de', 'phone.callInvitee', { number: '+14155550123' })).toBe(
-      'Telefonat — rufen Sie die eingeladene Person unter +14155550123 an',
+      'Telefonat — rufen Sie die buchende Person unter +14155550123 an',
     )
     expect(mailMessage('de', 'phone.hostCallsYou', { number: '+14155550123' })).toBe(
       'Telefonat — die gastgebende Person ruft Sie unter +14155550123 an',
     )
     expect(mailMessage('de', 'phone.inviteeCallsYou', { number: '+14155550123' })).toBe(
-      'Telefonat — die eingeladene Person ruft Sie unter +14155550123 an',
+      'Telefonat — die buchende Person ruft Sie unter +14155550123 an',
     )
     expect(mailMessage('de', 'phone.callHost', { number: '+14155550123' })).toBe(
       'Telefonat — rufen Sie die gastgebende Person unter +14155550123 an',
     )
+  })
+
+  it('names the booker in phone strings with the catalogue invitee label', () => {
+    const label = { 'zh-CN': '预约人', de: 'buchende Person' } as const
+    expect(mailMessage('zh-CN', 'Invitee')).toBe(label['zh-CN'])
+    expect(mailMessage('de', 'Invitee')).toBe('Buchende Person')
+    for (const locale of ['zh-CN', 'de'] as const)
+      for (const key of [
+        'phone.callInvitee',
+        'phone.hostCallsInvitee',
+        'phone.inviteeCallsYou',
+      ] as const)
+        expect(mailMessage(locale, key, { number: '+14155550123' })).toContain(label[locale])
   })
 
   for (const { code } of registeredLocales) {

@@ -90,9 +90,9 @@
   "waitlist.notice.page": "Alle aktuell angebotenen Zeiten finden Sie auf der Buchungsseite:",
   "waitlist.notice.waiting": "Ist eine Zeit nicht mehr verfügbar, bleiben Sie bis zum ursprünglichen Ablaufdatum auf der Warteliste. Falls Sie anderweitig gebucht haben, verlassen Sie die Warteliste über den folgenden Link.",
   "waitlist.notice.footer": "Sie erhalten diese E-Mail, weil Sie eine Wartelistenanfrage für diesen Termin bestätigt haben.",
-  "phone.callInvitee": "Telefonat — rufen Sie die eingeladene Person unter {number} an",
+  "phone.callInvitee": "Telefonat — rufen Sie die buchende Person unter {number} an",
   "phone.hostCallsYou": "Telefonat — die gastgebende Person ruft Sie unter {number} an",
-  "phone.hostCallsInvitee": "Telefonat — die gastgebende Person ruft die eingeladene Person an",
-  "phone.inviteeCallsYou": "Telefonat — die eingeladene Person ruft Sie unter {number} an",
+  "phone.hostCallsInvitee": "Telefonat — die gastgebende Person ruft die buchende Person an",
+  "phone.inviteeCallsYou": "Telefonat — die buchende Person ruft Sie unter {number} an",
   "phone.callHost": "Telefonat — rufen Sie die gastgebende Person unter {number} an"
 }
