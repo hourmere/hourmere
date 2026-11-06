@@ -55,6 +55,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Requests to choose another time](/docs/request-reschedule) retain the original booking
   until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
   bookings do not support requests.
+- [Branding settings](/docs/branding) store a logo and primary colour per space; public
+  booking pages and emails do not apply them yet.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.

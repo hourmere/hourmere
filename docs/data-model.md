@@ -64,6 +64,34 @@ available in this foundation release.
 
 ## Tables
 
+### Organization branding
+
+Migration `0063_organization_branding.sql` adds `organization_branding`, keyed by organization, with nullable
+`brand_logo` and `brand_primary_color`. Keeping these settings outside `auth.organization`
+preserves the native Better Auth response boundary. A missing row means both settings
+are unset. Existing organizations keep their data and receive no custom
+branding. Colours are normalized to uppercase `#RRGGBB`, with a database format constraint.
+The logo reference is a SHA-256 digest of normalized PNG bytes in
+`organization_brand_logos`. A composite foreign key binds the reference to the same
+organization; each organization has at most one image row, capped at 524,288 bytes.
+The reference constraint is deferred so replacement can update the image and reference
+atomically. Clearing a logo removes its stored bytes; deleting an organization cascades
+to its image. Replaced hashes are not retained as a history or public asset catalogue.
+
+The upload service accepts bounded PNG, JPEG and WebP, decodes and re-encodes pixels,
+and refuses animation, unsupported types, mismatched media types and oversized images.
+Protected image reads serve only normalized PNG with restrictive browser headers.
+Personal owners and team owners/admins manage branding through REST, MCP and CLI;
+binary uploads use REST or CLI. Writes serialize on the organization, preserve omitted
+fields and recheck access before committing. Repeating the same input produces the same
+stored settings; concurrent writes are ordered, with the last committed value winning
+for a field changed by both callers.
+
+Contrast calculations select black or white text with the greater WCAG 2.x ratio and
+report the primary colour's ratio against white separately. These settings do not yet
+change public pages, bookings or mail. See [branding](https://hourmere.com/docs/branding)
+for limits and client instructions.
+
 ### `auth` (Better Auth: core + organization + api-key plugins)
 
 | Table | Purpose |
