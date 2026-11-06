@@ -89,5 +89,9 @@
   "waitlist.notice.expiry": "These suggestions expire at {expiry}. This deadline does not reserve a time.",
   "waitlist.notice.page": "Check all current times on the booking page:",
   "waitlist.notice.waiting": "If a time is gone, you stay on the waitlist until your original deadline. If you booked elsewhere, use the removal link below to leave.",
-  "waitlist.notice.footer": "You received this email because you verified a waitlist request for this meeting."
+  "waitlist.notice.footer": "You received this email because you verified a waitlist request for this meeting.",
+  "rescheduleRequest.subject": "Choose another time: {event}",
+  "rescheduleRequest.introduction": "{host} asks you to choose another time. Your original booking stays reserved until you pick a new time or cancel. This request expires at {expiry}; if it expires, your original booking stays in place.",
+  "rescheduleRequest.expiredSubject": "Reschedule request expired: {event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} did not choose a new time before the request expired. The original booking remains in place."
 }
