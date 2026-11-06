@@ -37,6 +37,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
   permit one active export per organization. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
+- Group seats currently have internal storage and service support only. Public booking
+  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
+  this limitation applies equally to self-hosted installations.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

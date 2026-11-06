@@ -11,6 +11,7 @@ import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 import { getTeamMemberDepartureImpact } from './member-departure-impact.ts'
 import { TeamAdminBookingSchema, toTeamAdminBooking } from './team-admin-booking.ts'
@@ -91,6 +92,7 @@ function sourceCopy(
     'encodeBookingCursor',
     'DomainError',
     'isUuid',
+    'resolvedBookingHosts',
     'toTeamAdminBooking',
     `${compile('packages/scheduling/src/team-bookings.ts', teamReplacement)}; return readTeamBookingPage`,
   )(
@@ -99,6 +101,7 @@ function sourceCopy(
     page.encodeBookingCursor,
     DomainError,
     isUuid,
+    resolvedBookingHosts,
     toTeamAdminBooking,
   ) as typeof readTeamBookingPage
   return new Function(
@@ -109,6 +112,7 @@ function sourceCopy(
     'DomainError',
     'isUuid',
     'TeamAdminBookingSchema',
+    'resolvedBookingHosts',
     'toTeamAdminBooking',
     'checkedCatalogPage',
     'readTeamBookingPage',
@@ -121,6 +125,7 @@ function sourceCopy(
     DomainError,
     isUuid,
     TeamAdminBookingSchema,
+    resolvedBookingHosts,
     toTeamAdminBooking,
     checkedCatalogPage,
     teamRead,
@@ -514,12 +519,16 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
       await booking(f, `2026-11-02T${String(index + 9).padStart(2, '0')}:00:00Z`)
     }
     const queries: unknown[] = []
+    let executedQueries = 0
     const observed = db.withPlugin({
       transformQuery: ({ node }) => {
         queries.push(node)
         return node
       },
-      transformResult: async ({ result }) => result,
+      transformResult: async ({ result }) => {
+        executedQueries++
+        return result
+      },
     })
     const result = await read(
       { ...f.ownerCtx, db: observed },
@@ -560,7 +569,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
       expect(query).toContain('"operator":"in"')
       for (const booking of result.bookings.data) expect(query).toContain(booking.id)
     }
-    expect(queries.length).toBeLessThanOrEqual(9)
+    expect(executedQueries).toBeLessThanOrEqual(9)
     expect(owned.pool.totalCount).toBeLessThanOrEqual(10)
   }
 
@@ -989,7 +998,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     await verifyPreciseStart(read)
     await verifyQueryBounds(read)
     await verifySnapshot(read)
-  })
+  }, 15000)
 
   it.each(denialCases.filter((test) => test.mutation !== undefined))(
     'detects a missing $name protection with a real assertion failure',

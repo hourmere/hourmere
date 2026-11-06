@@ -5,6 +5,7 @@ import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from '.
 import { cancelTeamBookingInTransaction } from './bookings.ts'
 import type { BookingNotifier, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 import {
   type TeamAdminBookingListPage,
@@ -105,7 +106,7 @@ async function teamManager(ctx: ServiceContext): Promise<string> {
 async function pageParticipants(db: Db, teamId: string, bookingIds: string[]) {
   const [hosts, attendees] = await Promise.all([
     db
-      .selectFrom('booking_hosts as host')
+      .selectFrom(resolvedBookingHosts(db).as('host'))
       .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
       .innerJoin('auth.user as user', 'user.id', 'host.user_id')
       .select(['booking.id as booking_id', 'host.user_id', 'user.name'])
@@ -174,7 +175,7 @@ async function enrichTeamBookings(
   const ids = data.map((booking) => booking.id)
   const [hosts, events, replacements] = await Promise.all([
     ctx.db
-      .selectFrom('booking_hosts as host')
+      .selectFrom(resolvedBookingHosts(ctx.db).as('host'))
       .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
       .leftJoin('profiles as profile', 'profile.user_id', 'host.user_id')
       .select(['host.booking_id', 'host.user_id', 'profile.time_zone'])
@@ -297,7 +298,7 @@ function teamBookingQuery(
       q.where((eb) =>
         eb.exists(
           eb
-            .selectFrom('booking_hosts as assigned_host')
+            .selectFrom(resolvedBookingHosts(ctx.db).as('assigned_host'))
             .select('assigned_host.booking_id')
             .whereRef('assigned_host.booking_id', '=', 'b.id')
             .where('assigned_host.user_id', '=', hostUserId as string),
