@@ -37,6 +37,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
+- Group seats currently have internal storage and service support only. Public booking
+  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
+  this limitation applies equally to self-hosted installations.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
