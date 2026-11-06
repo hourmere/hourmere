@@ -42,7 +42,6 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
   Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
-
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
