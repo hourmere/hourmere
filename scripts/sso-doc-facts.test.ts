@@ -48,7 +48,8 @@ describe('SSO design numeric commitments (not runtime verification)', () => {
 })
 
 // These guard the written contract only. Signed protocol fixtures belong to the
-// implementation's SAML verifier step; no product verifier exists in this PR.
+// implementation's SAML verifier and SAML timing and replay steps; no product
+// verifier exists in this PR.
 const samlCommitments = {
   requiredTimestamps:
     'require finite Conditions NotBefore and NotOnOrAfter, bearer SubjectConfirmationData NotOnOrAfter and assertion IssueInstant.',
@@ -62,20 +63,23 @@ const samlCommitments = {
 } as const
 
 // A lifetime-based rejection anywhere would contradict the deadline rule, so every
-// sentence of the whole document is checked, not one section. Negated sentences such
-// as "Do not reject an assertion solely because ..." are the protected rule itself.
+// sentence of the whole document is checked, not one section. Only a negation directly
+// before the verb ("Do not reject ...", "are not rejected") marks the protected rule.
 function lifetimeRejections(document: string) {
   return document
     .replace(/\s+/g, ' ')
     .split(/(?<=[.!?]) /)
-    .filter(
-      (sentence) =>
-        /\b(?:reject|refus|den(?:y|ie))\w*/i.test(sentence) &&
+    .filter((sentence) => {
+      const verb = /\b(?:reject|refus|den(?:y|ie))\w*/i.exec(sentence)
+      if (!verb) return false
+      const before = sentence.slice(0, verb.index).trim().split(' ').slice(-3).join(' ')
+      return (
         /\bassertions?\b/i.test(sentence) &&
         /\blifetimes?\b/i.test(sentence) &&
         /\b(?:exceed\w*|longer than|more than|greater than|above)\b/i.test(sentence) &&
-        !/\b(?:do not|does not|don't|never|not solely)\b/i.test(sentence),
-    )
+        !/\b(?:not|never|don't)$/i.test(before)
+      )
+    })
 }
 
 function assertSamlCommitments(document: string) {
@@ -114,6 +118,8 @@ describe('SAML acceptance deadline documentation (not runtime verification)', ()
       'Assertions whose lifetime exceeds maximumSamlAssertionLifetime are rejected.',
       'Refuse assertions whose lifetime exceeds the configured maximum.',
       'Deny any assertion with a lifetime longer than 600 seconds.',
+      'Reject assertions whose lifetime exceeds 600 seconds; do not log them.',
+      'Reject assertions whose lifetime exceeds the maximum and never accept unsigned ones.',
     ]) {
       expect(source).toContain(heading)
       const mutated = source.replace(heading, `${heading}\n${rule}\n`)
