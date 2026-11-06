@@ -15,6 +15,9 @@ import {
 } from './waitlist.ts'
 
 const bootstrap = process.env.DATABASE_URL
+
+import { WAITLIST_ABUSE_RETENTION_DAYS } from './waitlist-policy.ts'
+
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 const HOUR = 3600000
 const DAY = 24 * HOUR
@@ -33,9 +36,10 @@ function sourceCopy(): typeof cleanupWaitlist {
     'waitlistNow',
     'sql',
     'DAY',
+    'WAITLIST_ABUSE_RETENTION_DAYS',
     'LIVE',
     `${source}; return cleanupWaitlist`,
-  )(ensureWaitlistKey, waitlistNow, sql, DAY, [
+  )(ensureWaitlistKey, waitlistNow, sql, DAY, WAITLIST_ABUSE_RETENTION_DAYS, [
     'pending_verification',
     'active',
     'notified',

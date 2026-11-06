@@ -467,17 +467,20 @@ export async function getPublicEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicEventType(ctx.db, handle, slug))
+  return publicEventType(await findPublicEventType(ctx.db, handle, slug), ctx.smtpConfigured)
 }
 
 export async function getPublicTeamEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicTeamEventType(ctx.db, handle, slug))
+  return publicEventType(await findPublicTeamEventType(ctx.db, handle, slug), ctx.smtpConfigured)
 }
 
-function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType {
+function publicEventType(
+  et: PublicEventTypeRecord | undefined,
+  smtpConfigured = false,
+): PublicEventType {
   if (!et) throw eventTypeNotFound()
   return {
     handle: et.handle,
@@ -491,7 +494,8 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     allowGuests: et.allowGuests,
-    ...(et.waitlistEnabled &&
+    ...(smtpConfigured &&
+      et.waitlistEnabled &&
       et.schedulingType === 'individual' &&
       et.hostUserIds.length === 1 &&
       et.eligibleHostUserIds.length === 1 && { waitlist: { enabled: true as const } }),

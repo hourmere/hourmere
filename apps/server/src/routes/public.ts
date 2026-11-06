@@ -200,6 +200,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 
 export interface PublicRoutesDeps {
   db: Db
+  smtpConfigured?: boolean | undefined
   waitlistSecret?: string | undefined
   publicUrl?: string | undefined
   successRedirectPolicy?: PublicContext['successRedirectPolicy']
@@ -224,6 +225,7 @@ export function publicRoutes({
   automaticZoom,
   successRedirectPolicy,
   waitlistSecret,
+  smtpConfigured,
   publicUrl = 'http://localhost:3000',
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
@@ -235,6 +237,7 @@ export function publicRoutes({
     automaticZoom,
     successRedirectPolicy,
     waitlistSecret,
+    smtpConfigured,
   }
   const limit = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
@@ -363,7 +366,7 @@ export function publicRoutes({
               ? 'Explicitly request another verification email'
               : 'Request to join a booking waitlist',
             description:
-              'Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.',
+              'Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.',
             middleware: bookLimit,
             request: {
               params: PageParams,
@@ -383,13 +386,14 @@ export function publicRoutes({
               ),
               404: eventTypeNotFound,
               409: error(
-                'waitlist_unavailable or availability_changed: refresh availability before trying again',
+                'waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again',
               ),
               429: rateLimited,
             },
           }),
           async (c) => {
             if (!waitlistSecret) return c.json({ error: 'waitlist_unavailable' }, 409)
+            if (!smtpConfigured) return c.json({ error: 'waitlist_smtp_not_configured' }, 409)
             const context = { ...ctx, secret: waitlistSecret, publicUrl, trustedIp: c.var.clientIp }
             const reference = { ...c.req.valid('param'), team: target.team }
             const body = c.req.valid('json')

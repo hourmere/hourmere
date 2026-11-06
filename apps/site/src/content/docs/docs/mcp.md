@@ -679,3 +679,10 @@ a known meeting ID without selecting another account or creating a replacement. 
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
 ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.
+
+## Booking waitlists
+
+See [booking waitlists](/docs/booking-waitlist) for host settings, entry management,
+invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
+Nothing is reserved: every eligible invitee can be notified and the first successful
+ordinary booking wins.
