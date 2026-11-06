@@ -798,6 +798,68 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       )
     },
   )
+  it('refuses a genuinely incomplete batch instead of acknowledging a complete replay', async () => {
+    const f = await setup()
+    f.input.exclusions = { bookings: [1000], acknowledged: true }
+    f.plan = await repreview(f)
+    expect(await apply(f)).toMatchObject({ status: 'applied', committed: true })
+    const counts = await businessCounts(f.user.id)
+    expect(counts).toEqual({ profiles: 1, schedules: 1, events: 1, bookings: 0 })
+    expect(
+      (
+        await target.pool.query(
+          "SELECT question_crosswalk FROM import_items WHERE source_id=$1 AND entity_kind='user'",
+          [f.input.sourceId],
+        )
+      ).rows,
+    ).toEqual([{ question_crosswalk: {} }])
+
+    delete f.input.exclusions
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    expect(f.plan.entities).toContainEqual(
+      expect.objectContaining({ kind: 'booking', disposition: 'create' }),
+    )
+    expect(f.plan.entities).toContainEqual(
+      expect.objectContaining({ kind: 'user', disposition: 'noop' }),
+    )
+    const state = await readTargetState(
+      target.pool,
+      f.input.sourceId,
+      f.input.authorization,
+      f.snapshot.cutoff,
+    )
+    expect(allMappingsUnchanged(f.plan, state)).toBe(false)
+    expect(await apply(f)).toMatchObject({
+      status: 'failed',
+      code: 'IMPORT_PARTIAL_MAPPING',
+      committed: false,
+      created: [],
+      failures: [{ code: 'IMPORT_PARTIAL_MAPPING', stage: 'verify_target' }],
+    })
+    expect(await businessCounts(f.user.id)).toEqual(counts)
+    await checkSourceMutation(
+      new URL('./preview.ts', import.meta.url),
+      "preview.entities.every((e) => e.disposition === 'noop') &&",
+      '',
+      (module) => module.allMappingsUnchanged as typeof allMappingsUnchanged,
+      (unchanged) => expect(unchanged(f.plan, state)).toBe(false),
+    )
+    await checkSourceMutation(
+      new URL('./apply.ts', import.meta.url),
+      'allMappingsUnchanged(fresh, state)',
+      'true',
+      (module) => module.applyExtractedImport as typeof applyExtractedImport,
+      async (mutant) => {
+        expect(await mutant(target.pool, f.plan, f.input, async () => f.snapshot)).toMatchObject({
+          status: 'failed',
+          code: 'IMPORT_PARTIAL_MAPPING',
+          committed: false,
+        })
+      },
+    )
+    expect(await businessCounts(f.user.id)).toEqual(counts)
+  })
   it('keeps a committed lost-response replay a no-op after its start', async () => {
     const start = Temporal.Now.instant()
       .add({ seconds: 1 })
@@ -1025,7 +1087,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     await concurrentScheduleWrite()
     await checkSourceMutation(
       new URL('./apply.ts', import.meta.url),
-      'await client.query(`LOCK TABLE auth."user",auth.organization,auth.member, personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts, bookings,booking_hosts,booking_attendees,import_sources,import_items,schema_migrations, waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)',
+      'await client.query(`LOCK TABLE auth."user",auth.organization,auth.member, personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts, bookings,booking_hosts,group_slots,booking_attendees,import_sources,import_items,schema_migrations, waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)',
       '{}',
       (m) => m.applyExtractedImport as typeof applyExtractedImport,
       concurrentScheduleWrite,
