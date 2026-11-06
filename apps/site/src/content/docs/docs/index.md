@@ -37,6 +37,7 @@ The website at hourmere.com is separate from your Hourmere instance.
   MCP or CLI. Available in full to self-hosters.
 
 ## Known limitations
+
 - Organization OIDC/SAML SSO is in design and is not available yet. The
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
   self-hosting, linking, enforcement and the planned implementation sequence.
