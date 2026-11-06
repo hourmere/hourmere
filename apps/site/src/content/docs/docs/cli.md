@@ -339,5 +339,8 @@ requires a later per-host policy. See [Automatic Zoom for one host](/docs/automa
 [Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
 scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
 MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
-`noShow`. API keys require `bookings` or `full` plus host or team administrator authority.
+`noShow`. API keys require `bookings` or `full` plus booked-host authority. API keys
+of every scope and MCP OAuth can read or mark attendees only on bookings the caller
+hosts in the current organization. Non-host team owners/admins need a browser session;
+agent credentials receive `booking_not_found`, just as for a missing booking.
 Invitee pages and messages are unchanged, including scheduled follow-ups.

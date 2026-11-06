@@ -494,7 +494,7 @@ export function bookingTools({
     name: 'get_booking_attendees',
     title: 'Read booking attendees',
     description:
-      'Read attendee identifiers and no-show markers for a known booking ID. Only booked hosts and team owners/admins. Team administrators can obtain booking IDs from the team dashboard; this does not expand list_bookings visibility.',
+      'Read attendee identifiers and no-show markers for a known booking ID. Only booked hosts may read via API keys or OAuth. Non-host team administrators must use the browser dashboard; other bookings return booking_not_found.',
     input: z.strictObject({ bookingId: z.uuid() }),
     output: BookingAttendees,
     annotations: {
@@ -511,7 +511,7 @@ export function bookingTools({
     name: 'set_attendee_no_show',
     title: 'Mark or unmark an attendee no-show',
     description:
-      'Set noShow true to mark or false to unmark one attendee after the scheduled start. Only booked hosts and team owners/admins may act. Imported and cancelled bookings refuse changes. Replays preserve the original marker. Invitee pages, email and scheduled follow-ups are unchanged. Get attendeeId from authenticated booking reads.',
+      'Set noShow true to mark or false to unmark one attendee after the scheduled start. Only booked hosts may act via API keys or OAuth. Non-host team administrators must use the browser dashboard; other bookings return booking_not_found. Imported and cancelled bookings refuse changes. Replays preserve the original marker. Invitee pages, email and scheduled follow-ups are unchanged. Get attendeeId from authenticated booking reads.',
     input: z.strictObject({ bookingId: z.uuid(), attendeeId: z.uuid(), noShow: z.boolean() }),
     output: AttendeeNoShow,
     annotations: {

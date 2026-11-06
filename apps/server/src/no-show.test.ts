@@ -54,7 +54,16 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: true, principal: caller, setCookie: [] }),
       routes: [bookingRoutes(deps)],
-      mcp: mcpEndpoint({ tools: bookingTools(deps) }),
+      mcp: mcpEndpoint({
+        tools: bookingTools(deps),
+        oauth: {
+          resolve: async () =>
+            caller.kind === 'oauth'
+              ? { ok: true, principal: caller }
+              : { ok: false, error: 'invalid_token' },
+          handler: async () => new Response(null, { status: 404 }),
+        },
+      }),
     })
   })
   afterAll(async () => {
@@ -81,7 +90,10 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
       stderr = ''
     const code = await runCli({
       argv: ['set-no-show', '--input', '-'],
-      env: { HOURMERE_URL: 'http://localhost:4186', HOURMERE_API_KEY: 'hm_synthetic' },
+      env: {
+        HOURMERE_URL: 'http://localhost:4186',
+        HOURMERE_API_KEY: 'hm_synthetic',
+      },
       stdin: (async function* () {
         yield JSON.stringify({ bookingId, attendeeId, noShow: false })
       })(),
@@ -91,7 +103,14 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
       stderr: (text) => {
         stderr += text
       },
-      fetch: async (input, init) => app.request(input, init),
+      fetch: async (input, init) => {
+        if (caller.kind === 'oauth') {
+          const headers = new Headers(init?.headers)
+          headers.set('authorization', 'Bearer synthetic.oauth.token')
+          return app.request(input, { ...init, headers })
+        }
+        return app.request(input, init)
+      },
     })
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' })
     expect(JSON.parse(stdout)).toEqual({ attendeeId, noShowMarkedAt: null, noShowMarkedBy: null })
@@ -162,55 +181,112 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
       caller = original
     }
   })
-  it('lets a non-host team admin discover attendee IDs through REST and CLI/MCP', async () => {
-    const f = createFixtures(db)
-    const admin = await f.host()
-    const host = await f.host()
-    const teamId = randomUUID()
-    await db
-      .insertInto('auth.organization')
-      .values({ id: teamId, name: 'Team', slug: `team-${teamId}`, createdAt: new Date() })
-      .execute()
-    await db
-      .insertInto('auth.member')
-      .values({
-        organizationId: teamId,
-        userId: admin.userId,
-        role: 'admin',
-        createdAt: new Date(),
-      })
-      .execute()
-    const id = await f.booking(teamId, [host.userId], '2026-11-03T09:00Z', '2026-11-03T09:30Z')
+  it('enforces session-only team administration across REST, MCP and CLI', async () => {
+    const { createTestUser, createTestTeam } = await import('@hourmere/scheduling/testing')
+    const host = await createTestUser(db)
+    const admin = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: host, role: 'member' },
+      { user: admin, role: 'admin' },
+    ])
+    const id = await createFixtures(db).booking(
+      team.id,
+      [host.id],
+      '2026-11-01T09:00Z',
+      '2026-11-01T09:30Z',
+    )
+    const attendee = await db
+      .selectFrom('booking_attendees')
+      .select('id')
+      .where('booking_id', '=', id)
+      .executeTakeFirstOrThrow()
     const original = caller
-    caller = {
-      ...caller,
-      user: { ...caller.user, id: admin.userId },
-      organization: { ...caller.organization, id: teamId, personal: false },
-    }
-    try {
-      const response = await app.request(`/api/v1/bookings/${id}/attendees`, {
-        headers: { authorization: 'Bearer synthetic' },
-      })
-      expect(response.status).toBe(200)
-      const attendees = await response.json()
-      expect(attendees).toMatchObject({
-        data: [{ id: expect.any(String), noShowMarkedAt: null, noShowMarkedBy: null }],
-      })
-      let stdout = ''
+    const cli = async (command: string, input: unknown) => {
+      let stdout = '',
+        stderr = ''
       const code = await runCli({
-        argv: ['booking-attendees', '--input', '-'],
-        env: { HOURMERE_URL: 'http://localhost:4186', HOURMERE_API_KEY: 'hm_synthetic' },
+        argv: [command, '--input', '-'],
+        env: {
+          HOURMERE_URL: 'http://localhost:4186',
+          HOURMERE_API_KEY: 'hm_synthetic',
+        },
         stdin: (async function* () {
-          yield JSON.stringify({ bookingId: id })
+          yield JSON.stringify(input)
         })(),
         stdout: (text) => {
           stdout += text
         },
-        stderr: () => {},
-        fetch: async (input, init) => app.request(input, init),
+        stderr: (text) => {
+          stderr += text
+        },
+        fetch: async (input, init) => {
+          if (caller.kind === 'oauth') {
+            const headers = new Headers(init?.headers)
+            headers.set('authorization', 'Bearer synthetic.oauth.token')
+            return app.request(input, { ...init, headers })
+          }
+          return app.request(input, init)
+        },
       })
-      expect(code).toBe(0)
-      expect(JSON.parse(stdout)).toEqual(attendees)
+      return { code, stdout, stderr }
+    }
+    try {
+      for (const role of ['owner', 'admin', 'member']) {
+        await db
+          .updateTable('auth.member')
+          .set({ role })
+          .where('organizationId', '=', team.id)
+          .where('userId', '=', admin.id)
+          .execute()
+        for (const actor of [host, admin]) {
+          for (const credential of [
+            { kind: 'session', sessionId: 'test' },
+            ...(['read', 'bookings', 'full'] as const).map((apiKeyScope) => ({
+              kind: 'api_key' as const,
+              apiKeyScope,
+              apiKeyId: 'test',
+            })),
+            { kind: 'oauth', oauthConsentId: 'test', clientId: 'test', scopes: ['mcp:tools'] },
+          ] as const) {
+            caller = { ...team.as(actor), ...credential }
+            const allowed = actor === host || (credential.kind === 'session' && role !== 'member')
+            const headers =
+              credential.kind === 'session'
+                ? { origin: 'http://localhost:4186', 'content-type': 'application/json' }
+                : { authorization: 'Bearer synthetic', 'content-type': 'application/json' }
+            // OAuth credentials authenticate MCP only; the shared service matrix covers their reads/writes.
+            if (credential.kind !== 'oauth') {
+              const read = await app.request(`/api/v1/bookings/${id}/attendees`, { headers })
+              expect(read.status).toBe(allowed ? 200 : 404)
+              if (!allowed) expect(await read.json()).toMatchObject({ error: 'booking_not_found' })
+              const write = await app.request(
+                `/api/v1/bookings/${id}/attendees/${attendee.id}/no-show`,
+                { method: 'PATCH', headers, body: JSON.stringify({ noShow: true }) },
+              )
+              expect(write.status).toBe(
+                credential.kind === 'api_key' && credential.apiKeyScope === 'read'
+                  ? 403
+                  : allowed
+                    ? 200
+                    : 404,
+              )
+            }
+            if (credential.kind !== 'session') {
+              const read = await cli('booking-attendees', { bookingId: id })
+              expect(read.code).toBe(actor === host ? 0 : 1)
+              if (actor !== host) expect(read.stderr).toContain('booking_not_found')
+              const write = await cli('set-no-show', {
+                bookingId: id,
+                attendeeId: attendee.id,
+                noShow: true,
+              })
+              const readOnly = credential.kind === 'api_key' && credential.apiKeyScope === 'read'
+              expect(write.code).toBe(actor === host && !readOnly ? 0 : 1)
+              if (!readOnly && actor !== host) expect(write.stderr).toContain('booking_not_found')
+            }
+          }
+        }
+      }
     } finally {
       caller = original
     }

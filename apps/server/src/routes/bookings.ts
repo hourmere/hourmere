@@ -398,7 +398,7 @@ export function bookingRoutes({
         tags: ['Bookings'],
         summary: 'Read attendees and no-show markers for a booking',
         description:
-          'Booked hosts and team owners/admins only. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.',
+          'Booked hosts and browser-session team owners/admins only. API keys of every scope and MCP OAuth may read only bookings they host; other bookings return booking_not_found. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.',
         request: { params: z.object({ id: z.uuid() }) },
         responses: {
           200: {
@@ -433,7 +433,7 @@ export function bookingRoutes({
         tags: ['Bookings'],
         summary: 'Mark or unmark one attendee as a no-show',
         description:
-          'Only booked hosts and team owners/admins, after the scheduled start. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.',
+          'Only booked hosts and browser-session team owners/admins, after the scheduled start. API keys of every scope and MCP OAuth are host-only; other bookings return booking_not_found. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.',
         request: {
           params: z.object({ id: z.uuid(), attendeeId: z.uuid() }),
           headers: ExpectedOrganizationHeaders,
@@ -446,8 +446,8 @@ export function bookingRoutes({
           },
           400: invalidId,
           401: unauthorized,
-          403: error('Forbidden, insufficient_scope or insufficient_role'),
-          404: error('booking_not_found or attendee_not_found'),
+          403: error('Forbidden or insufficient_scope'),
+          404: error('booking_not_found (also used for an unknown attendee)'),
           409: error(
             'booking_not_started, booking_cancelled, imported_booking_read_only or organization_context_changed',
           ),

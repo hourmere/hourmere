@@ -12,6 +12,10 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Private per-attendee no-show marking after the scheduled start, with dashboard, REST,
+  MCP and CLI access for hosts and browser-session access for team owners/admins. Optional
+  `booking.attendee_no_show_changed` webhooks report actual changes without attendee contacts.
+
 - `security.txt` on hourmere.com and www.hourmere.com lists Hourmere's private vulnerability
   reporting channels.
 - Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges
@@ -177,6 +181,12 @@ must approve publication through the [release workflow](https://github.com/hourm
   and [calendar-email upgrade notes](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/notifications.md#identity-and-recipients).
 
 ### Upgrade notes
+
+- Migration 0062 is not rolling-safe. Stop every old web/all/worker process, apply the
+  migration, then start all roles together with the new code. The migration replaces the
+  webhook lifecycle uniqueness constraint with a partial index; old webhook writes fail
+  with PostgreSQL `42P10` after migration and can roll back booking changes. See the
+  [data model](docs/data-model.md#private-attendee-no-show-markers).
 
 These notes apply to existing installations of the development source tree. Back up the
 full database (`auth`, `public` and `pgboss`), deployment configuration and original secrets

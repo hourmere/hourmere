@@ -258,20 +258,22 @@ for argument tables, private results, pagination and recovery, and the
 [MCP guide](https://hourmere.com/docs/mcp) for tool semantics.
 Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 
-## License
-
-GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
-
 ### Mark attendee no-shows
 
 `set-no-show` uses JSON input with `bookingId`, `attendeeId` and `noShow` (`true`
 to mark, `false` to unmark). Read attendee IDs from authenticated booking lists.
-It requires `bookings` or `full` scope and booked-host or team owner/admin authority.
+It requires `bookings` or `full` scope and booked-host authority in the current organization.
 Only bookings whose scheduled start has passed can be changed; cancelled and imported
 records refuse changes. Repeating the same state preserves its timestamp and actor.
 No invitee email or manage-page indicator is added, and existing follow-ups remain scheduled.
 
 `booking-attendees` takes `{ "bookingId": "…" }` and returns attendee IDs and
-markers. It accepts `read`, `bookings` or `full` keys with the same host/team-admin
-permission. Team admins can obtain a booking ID from the team dashboard; ordinary
-`list` visibility is unchanged. Reads are available before the start and after cancellation.
+markers. It accepts `read`, `bookings` or `full` keys with the same booked-host
+permission. Team owner/admin status does not grant CLI access to bookings hosted by
+other members: these return `booking_not_found`, just as missing bookings do. Non-host
+team administration requires a browser session. Reads are available before the start
+and after cancellation.
+
+## License
+
+GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).

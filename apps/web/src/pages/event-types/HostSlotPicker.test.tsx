@@ -3,7 +3,7 @@ import * as snippet from '@hourmere/core/slot-snippet'
 import { formatSlotLabel } from '@hourmere/core/slot-snippet'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import * as zonePicker from '../../components/TimeZonePicker.tsx'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
@@ -175,41 +175,37 @@ describe('host open-time picker', () => {
     ).toBe('60')
   })
 
-  it.each(['2026-11-06T14:59:59Z', '2026-11-06T15:00:00Z'])(
-    'keeps selected instants and URLs when display settings change across Tokyo midnight at %s',
-    async (now) => {
-      vi.spyOn(Date, 'now').mockReturnValue(Date.parse(now))
-      const tokyoDay = dateKeyIn(Date.parse(now), 'Asia/Tokyo')
-      const offered = [0, 1].map((index) => {
-        const start = Date.parse(`${tokyoDay}T09:00:00Z`) + index * 30 * 60_000
-        return {
-          start: new Date(start).toISOString(),
-          end: new Date(start + 30 * 60_000).toISOString(),
-        }
-      })
-      const client = server(offered)
-      renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
-      expect(
-        screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value,
-      ).toBe('fr')
-      await choose([1, 0])
-      await preview()
-      const urls = textPreview().value.match(/https:\/\/\S+/g)
-      fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
-        target: { value: 'zh-CN' },
-      })
-      fireEvent.change(screen.getByRole('combobox', { name: 'Display time zone' }), {
-        target: { value: 'America/New_York' },
-      })
-      expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
-      expect(textPreview().value).toContain('America/New_York')
-      expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
-      await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
-      expect(
-        screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
-      ).toHaveLength(6)
-    },
-  )
+  it('keeps selected instants and URLs when display settings change and reloads the new zone day', async () => {
+    // The fixture slots sit on the Berlin date. Pin the clock to 08:00 UTC on that date so
+    // Tokyo, Berlin and New York all show the same calendar day; between 15:00 UTC and Berlin
+    // midnight Tokyo is already on the next day and the slots would be filtered out.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.parse(`${DAY}T08:00:00.000Z`))
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    const client = server()
+    renderPicker(props({ profile: { ...PROFILE, locale: 'fr-CA', timeZone: 'Asia/Tokyo' } }))
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Email language' }).value).toBe(
+      'fr',
+    )
+    await choose([1, 0])
+    await preview()
+    const urls = textPreview().value.match(/https:\/\/\S+/g)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Email language' }), {
+      target: { value: 'zh-CN' },
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Display time zone' }), {
+      target: { value: 'America/New_York' },
+    })
+    expect(textPreview().value.match(/https:\/\/\S+/g)).toEqual(urls)
+    expect(textPreview().value).toContain('America/New_York')
+    expect(screen.getByText('Selected times: 2 (maximum 10)')).toBeDefined()
+    await waitFor(() => expect(client.to(ROUTE)).toHaveLength(2))
+    expect(
+      screen.getByRole('combobox', { name: 'Email language' }).querySelectorAll('option'),
+    ).toHaveLength(6)
+  })
 
   it('uses English and UTC without a supported profile and warns before sharing hidden event types', async () => {
     server()

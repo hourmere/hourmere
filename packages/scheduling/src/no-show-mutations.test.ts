@@ -21,8 +21,9 @@ function sourceCopy(
   expect(source.includes(from)).toBe(true)
   if (barrier)
     source = source
+      .replace('.$if(lock, (query) => query.forUpdate())', '')
       .replaceAll('.forUpdate()', '')
-      .replace('await lockOrganization(trx, ctx.principal.organization.id)', '')
+      .replace('if (lock) await lockOrganization(trx, ctx.principal.organization.id)', '')
       .replace('    const current:', '    await barrier(); const current:')
   source = stripTypeScriptTypes(source.replace(from, to)).replace(/\bexport /g, '')
   const bindings = {
@@ -56,6 +57,7 @@ describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
       '',
       'organization',
     ],
+    ['session-only managers', "ctx.principal.kind === 'session' &&", '', 'agent_admin'],
     ['host authorization', 'if (!isHost && !manager) throw missing()', '', 'member'],
     ['cancelled refusal', "if (booking.status !== 'confirmed')", 'if (false)', 'cancelled'],
     ['import read-only', 'await assertBookingLocallyManaged(trx, bookingId)', '', 'import'],
@@ -79,7 +81,7 @@ describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
       const other = await createTestUser(db)
       const team = await createTestTeam(db, [
         { user: host, role: 'member' },
-        { user: other, role: 'member' },
+        { user: other, role: scenario === 'agent_admin' ? 'admin' : 'member' },
       ])
       const start = Temporal.Instant.from('2026-11-01T09:30:00Z')
       const booking = await createFixtures(db).booking(
@@ -130,7 +132,7 @@ describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
         db,
         scenario === 'organization'
           ? host.principal
-          : team.as(scenario === 'member' ? other : host),
+          : team.as(scenario === 'member' || scenario === 'agent_admin' ? other : host),
         () => (scenario === 'boundary' ? start : start.add({ minutes: 1 })),
       )
       let captures = 0

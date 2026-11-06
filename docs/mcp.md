@@ -163,3 +163,12 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 `[durationMinutes]`. Updates take a flat object with `id` beside the changed fields.
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
+
+## Attendee attendance access
+
+`get_booking_attendees` and `set_attendee_no_show` require the caller to host the booking
+in the current organization, for API keys of every scope and MCP OAuth alike. Team
+owner/admin status does not grant access to bookings hosted by other members through
+MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
+Non-host team administrators must use a browser session. See the
+[no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.

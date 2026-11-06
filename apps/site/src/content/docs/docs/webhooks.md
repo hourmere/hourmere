@@ -149,7 +149,9 @@ The JSON is an immutable snapshot captured inside the booking's transaction:
 For `booking.attendee_no_show_changed`, `data` additionally contains `attendeeId`,
 `noShowMarkedAt` and `noShowMarkedBy`. Unmarking sets both marker fields to null. Each
 actual transition has a new event ID; repeating the same state emits no event. Existing
-subscriptions are not expanded automatically. See [no-shows](/docs/no-shows).
+subscriptions are not expanded automatically. This extends the subscription and delivery
+response event enums: consumers must ignore unknown event types and update closed
+validators when upgrading. See [no-shows](/docs/no-shows).
 
 Only these bounded identifiers, timestamps and status/source values are included. Invitee
 and host names/emails, attendee contact details, answers, locations, management capabilities, API keys and

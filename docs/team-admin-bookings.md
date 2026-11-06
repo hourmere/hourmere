@@ -17,6 +17,13 @@ header, so a page opened in another still-authorized team receives context-chang
 before any booking data. Email deep links can use this limited detail after the server
 resolves that the caller is a current owner/admin of the booking's team.
 
+`GET /api/v1/bookings/{id}/attendees` and attendance marking follow the same
+browser-session-only boundary for team owners/admins who do not host the booking. API
+keys of any scope and MCP OAuth may read or change attendees only on bookings the caller
+hosts in the current organization. For a non-host booking they receive the same
+`booking_not_found` response as for a missing booking, without disclosing its existence.
+This also applies to MCP attendance tools and the CLI attendance commands.
+
 The scheduling service exports `listTeamAdminBookings`, `getTeamAdminBooking`,
 `TeamAdminBookingListItemSchema` and `TeamAdminBookingListPageSchema` for these reads.
 The base `TeamAdminBookingSchema`,
@@ -34,7 +41,8 @@ List items use this explicit whitelist:
 | `cancelledAt` | Cancellation instant, or null. |
 | `eventType` | `{ id, title, publicBookingPath }` for the activity; title is null for a deleted activity, and the object is null when no association remains. The additive, nullable path is present only while the activity exists, is enabled and resolves through its public booking endpoint. |
 | `hosts` | Saved booking hosts as `{ userId, name, timeZone, isCurrentMember }`, preserving the actual assignment rather than exposing the current event host pool. The two additive fields are nullable. The zone comes only from the host's public profile; membership refers to this booking's team. |
-| `attendees` | `{ name, email, timeZone, isBooker }` for the invitee and guests: contact, scheduling and booker identification needed for coordination. |
+| `canManageNoShow` | Additive boolean indicating whether attendance can currently be changed: after the scheduled start, while confirmed and not imported read-only. |
+| `attendees` | `{ id, name, email, timeZone, isBooker, noShowMarkedAt, noShowMarkedBy }` for the invitee and guests. Each row has its own attendee ID, even when emails match. The nullable marker fields record the marking instant and account ID; both are null when unmarked. IDs and marker fields are additive. |
 
 The list envelope contains only `data` and opaque `nextCursor` (null on the last page).
 The additional fields are read-only and limited to these list/detail reads. A missing public profile
@@ -65,7 +73,7 @@ All custom answers are excluded: no question has been classified as essential fo
 administration. Management tokens and hashes, personal calendar copies, calendar names,
 private events and busy-time contents, credentials, conference organizer identity and
 owner-only retry/start capabilities are excluded. Free-text booking titles and cancellation
-reasons, attribution identifiers and reschedule-chain identifiers are also outside this
+reasons, source attribution identifiers and reschedule-chain identifiers are also outside this
 minimum whitelist.
 
 No location or conference URL is returned, including an otherwise ready participant URL.

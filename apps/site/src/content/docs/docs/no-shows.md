@@ -15,7 +15,9 @@ attendees at once. Group seats remain independent; guests on bookings that allow
 also have separate marks. Group bookings currently do not accept guests. For a collective
 meeting, all actual booking hosts see and can change the same attendee marks. For a
 round-robin booking, only the assigned booking host has host authority; other pool
-members do not. Current team owners and admins can manage either kind of team booking.
+members do not. Current team owners and admins can manage either kind of team booking through a browser
+session. API keys of any scope and MCP OAuth grant attendance access only to actual
+booking hosts in the current organization.
 Being an event type's creator, an ordinary team member, or the holder of an invitee's
 management link does not grant attendance management permission.
 
@@ -37,8 +39,10 @@ Authenticated booking reads include attendee IDs and optional `noShowMarkedAt` a
 fields from older servers. Use the attendee ID, not an email address or display name. For a known booking ID,
 `GET /api/v1/bookings/{id}/attendees`, MCP `get_booking_attendees` and CLI
 `booking-attendees` return the authorized attendee list and current markers. These
-reads also work for team owners/admins who are not booked hosts; the existing general
-booking list remains host-scoped. Obtain a team booking ID from the team dashboard.
+reads also work for team owners/admins who are not booked hosts only through a browser
+session. API keys and MCP OAuth receive the same `booking_not_found` response as for a
+missing booking when the caller is not a host, for both reads and marking. The existing
+general booking list remains host-scoped.
 
 ```http
 PATCH /api/v1/bookings/{bookingId}/attendees/{attendeeId}/no-show

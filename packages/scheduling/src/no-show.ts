@@ -62,23 +62,28 @@ export async function setAttendeeNoShow(
   })
 }
 
-export async function authorizeBookingNoShow(trx: Db, ctx: ServiceContext, bookingId: string) {
+export async function authorizeBookingNoShow(
+  trx: Db,
+  ctx: ServiceContext,
+  bookingId: string,
+  lock = true,
+) {
   const missing = () => new DomainError('not_found', 'booking_not_found')
   // User deletion takes the user row before cascading through organizations.
   const actor = await trx
     .selectFrom('auth.user')
     .select('emailVerified')
     .where('id', '=', ctx.principal.user.id)
-    .forShare()
+    .$if(lock, (query) => query.forShare())
     .executeTakeFirst()
   if (!actor?.emailVerified) throw missing()
-  await lockOrganization(trx, ctx.principal.organization.id)
+  if (lock) await lockOrganization(trx, ctx.principal.organization.id)
   const member = await trx
     .selectFrom('auth.member as member')
     .select(['member.role'])
     .where('member.organizationId', '=', ctx.principal.organization.id)
     .where('member.userId', '=', ctx.principal.user.id)
-    .forShare('member')
+    .$if(lock, (query) => query.forShare('member'))
     .executeTakeFirst()
   if (!member) throw missing()
   const booking = await trx
@@ -86,7 +91,7 @@ export async function authorizeBookingNoShow(trx: Db, ctx: ServiceContext, booki
     .select(['id', 'status', 'start_at'])
     .where('id', '=', bookingId)
     .where('organization_id', '=', ctx.principal.organization.id)
-    .forUpdate()
+    .$if(lock, (query) => query.forUpdate())
     .executeTakeFirst()
   if (!booking) throw missing()
   const host = resolvedBookingHosts(trx).as('host')
@@ -97,6 +102,7 @@ export async function authorizeBookingNoShow(trx: Db, ctx: ServiceContext, booki
     .where('user_id', '=', ctx.principal.user.id)
     .executeTakeFirst()
   const manager =
+    ctx.principal.kind === 'session' &&
     !ctx.principal.organization.personal &&
     member.role.split(',').some((role) => ['owner', 'admin'].includes(role.trim()))
   if (!isHost && !manager) throw missing()
@@ -106,7 +112,7 @@ export async function authorizeBookingNoShow(trx: Db, ctx: ServiceContext, booki
 export async function listBookingAttendeeNoShows(ctx: ServiceContext, bookingId: string) {
   if (!isUuid(bookingId)) throw new DomainError('not_found', 'booking_not_found')
   return ctx.db.transaction().execute(async (trx) => {
-    await authorizeBookingNoShow(trx, ctx, bookingId)
+    await authorizeBookingNoShow(trx, ctx, bookingId, false)
     const rows = await trx
       .selectFrom('booking_attendees')
       .select(['id', 'name', 'email', 'is_booker', 'no_show_marked_at', 'no_show_marked_by'])

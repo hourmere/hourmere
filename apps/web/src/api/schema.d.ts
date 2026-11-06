@@ -498,7 +498,7 @@ export interface paths {
         };
         /**
          * Read attendees and no-show markers for a booking
-         * @description Booked hosts and team owners/admins only. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.
+         * @description Booked hosts and browser-session team owners/admins only. API keys of every scope and MCP OAuth may read only bookings they host; other bookings return booking_not_found. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.
          */
         get: operations["getBookingAttendees"];
         put?: never;
@@ -524,7 +524,7 @@ export interface paths {
         head?: never;
         /**
          * Mark or unmark one attendee as a no-show
-         * @description Only booked hosts and team owners/admins, after the scheduled start. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.
+         * @description Only booked hosts and browser-session team owners/admins, after the scheduled start. API keys of every scope and MCP OAuth are host-only; other bookings return booking_not_found. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.
          */
         patch: operations["setAttendeeNoShow"];
         trace?: never;
@@ -6099,7 +6099,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Forbidden, insufficient_scope or insufficient_role. insufficient_scope: This API key does not allow this operation. */
+            /** @description Forbidden or insufficient_scope. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6108,7 +6108,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description booking_not_found or attendee_not_found */
+            /** @description booking_not_found (also used for an unknown attendee) */
             404: {
                 headers: {
                     [name: string]: unknown;

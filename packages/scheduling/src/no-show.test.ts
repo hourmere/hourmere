@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
 import {
@@ -10,7 +11,7 @@ import {
   listHostBookings,
   rescheduleHostBooking,
 } from './bookings.ts'
-import { setAttendeeNoShow } from './no-show.ts'
+import { listBookingAttendeeNoShows, setAttendeeNoShow } from './no-show.ts'
 import { createFixtures, createTestTeam, createTestUser, testContext } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -75,7 +76,10 @@ describe.skipIf(!serverUrl)('private attendee no-show', () => {
       noShowMarkedAt: '2026-11-01T09:30:00.000Z',
       noShowMarkedBy: s.host.id,
     })
-    const adminCtx = { ...s.ctx, principal: s.team.as(s.admin) }
+    const adminCtx = {
+      ...s.ctx,
+      principal: { ...s.team.as(s.admin), kind: 'session' as const, sessionId: 'test' },
+    }
     expect(await setAttendeeNoShow(adminCtx, s.bookingId, s.attendeeId, true)).toEqual(mark)
     expect(changed).toHaveBeenCalledTimes(1)
     const guest = await db
@@ -114,6 +118,81 @@ describe.skipIf(!serverUrl)('private attendee no-show', () => {
     await expect(setAttendeeNoShow(s.ctx, s.bookingId, s.attendeeId, true)).rejects.toMatchObject({
       code: 'booking_not_found',
     })
+  })
+  it('limits non-host manager access to sessions for reads and writes across the credential matrix', async () => {
+    const s = await setup()
+    for (const role of ['owner', 'admin', 'member']) {
+      await db
+        .updateTable('auth.member')
+        .set({ role })
+        .where('organizationId', '=', s.team.id)
+        .where('userId', '=', s.admin.id)
+        .execute()
+      for (const actor of [s.host, s.admin]) {
+        for (const credential of [
+          { kind: 'session', sessionId: 'test' },
+          ...(['read', 'bookings', 'full'] as const).map((apiKeyScope) => ({
+            kind: 'api_key' as const,
+            apiKeyScope,
+            apiKeyId: 'test',
+          })),
+          { kind: 'oauth', oauthConsentId: 'test', clientId: 'test', scopes: ['mcp:tools'] },
+        ] as const) {
+          const ctx = { ...s.ctx, principal: { ...s.team.as(actor), ...credential } }
+          const allowed = actor === s.host || (credential.kind === 'session' && role !== 'member')
+          if (allowed) {
+            expect(await listBookingAttendeeNoShows(ctx, s.bookingId)).toHaveLength(2)
+            expect(await setAttendeeNoShow(ctx, s.bookingId, s.attendeeId, true)).toMatchObject({
+              attendeeId: s.attendeeId,
+            })
+          } else {
+            await expect(listBookingAttendeeNoShows(ctx, s.bookingId)).rejects.toMatchObject({
+              code: 'booking_not_found',
+            })
+            await expect(
+              setAttendeeNoShow(ctx, s.bookingId, s.attendeeId, true),
+            ).rejects.toMatchObject({ code: 'booking_not_found' })
+          }
+        }
+      }
+    }
+  })
+  it('hides bookings in another organization from its non-personal team administrator', async () => {
+    const s = await setup()
+    const unrelated = await createTestTeam(db, [{ user: s.admin, role: 'admin' }])
+    const ctx = {
+      ...s.ctx,
+      principal: { ...unrelated.as(s.admin), kind: 'session' as const, sessionId: 'test' },
+    }
+    await expect(listBookingAttendeeNoShows(ctx, s.bookingId)).rejects.toMatchObject({
+      code: 'booking_not_found',
+    })
+    await expect(setAttendeeNoShow(ctx, s.bookingId, s.attendeeId, true)).rejects.toMatchObject({
+      code: 'booking_not_found',
+    })
+  })
+  it('reads attendees without waiting for a booking write lock', async () => {
+    const s = await setup()
+    const blocker = await owned.pool.connect()
+    await blocker.query('BEGIN')
+    await blocker.query('SELECT id FROM bookings WHERE id=$1 FOR UPDATE', [s.bookingId])
+    try {
+      const reader = new pg.Pool({
+        connectionString: owned.url,
+        max: 1,
+        options: '-c lock_timeout=300ms',
+      })
+      try {
+        await expect(
+          listBookingAttendeeNoShows({ ...s.ctx, db: createDb(reader) }, s.bookingId),
+        ).resolves.toHaveLength(2)
+      } finally {
+        await reader.end()
+      }
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
   })
   it('uses instant boundaries across the repeated DST hour', async () => {
     const s = await setup()
@@ -320,7 +399,10 @@ describe.skipIf(!serverUrl)('private attendee no-show', () => {
           [s.bookingId],
         )
       const pending = setAttendeeNoShow(
-        { ...s.ctx, principal: s.team.as(s.admin) },
+        {
+          ...s.ctx,
+          principal: { ...s.team.as(s.admin), kind: 'session' as const, sessionId: 'test' },
+        },
         s.bookingId,
         s.attendeeId,
         true,

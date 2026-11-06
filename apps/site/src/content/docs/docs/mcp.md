@@ -679,3 +679,12 @@ a known meeting ID without selecting another account or creating a replacement. 
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
 ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.
+
+## Attendee attendance access
+
+`get_booking_attendees` and `set_attendee_no_show` require the caller to host the booking
+in the current organization, for API keys of every scope and MCP OAuth alike. Team
+owner/admin status does not grant access to bookings hosted by other members through
+MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
+Non-host team administrators must use a browser session. See the
+[no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.

@@ -1475,8 +1475,10 @@ Attribution is the acting account UUID, retained as history rather than a cascad
 foreign key. Unmarking clears both fields. Booking/attendee deletion retains its existing
 retention behavior. No invitee projection includes this metadata.
 
-Actual booking hosts and current team owners/admins may change each attendee independently
-strictly after the scheduled start, never on cancelled or imported read-only bookings.
+Actual booking hosts may change each attendee independently. Current team owners/admins
+may manage bookings they do not host only through a browser session; API keys of any scope
+and MCP OAuth retain host-only read and write access. Changes are allowed strictly after
+the scheduled start, never on cancelled or imported read-only bookings.
 Collective hosts share the attendee state; round-robin authority belongs to the assigned
 host, not every pool member. Serialized changes preserve idempotent replay attribution.
 Rescheduling creates fresh attendee rows; cancellation retains historical marks.
@@ -1485,8 +1487,11 @@ Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com
 The migration adds `booking.attendee_no_show_changed` to webhook subscriptions and delivery
 types. The old booking/event deduplication remains for lifecycle events; attendance changes
 can emit multiple transitions for the same booking. Existing subscription arrays and
-delivery snapshots are preserved. Stop old web/worker processes before applying the migration
-and restart with upgraded code; old webhook capture uses the previous unique constraint.
+delivery snapshots are preserved. This upgrade is not rolling-safe: stop every old
+web/all/worker process, apply migration 0062, then start all roles together with upgraded
+code. Old webhook capture uses the previous unique constraint and fails with PostgreSQL
+`42P10` after migration, potentially rolling back booking changes.
+
 ## Group slots and independent seats
 
 A group event is a single-host event with `booking_mode = 'group'` and a capacity
