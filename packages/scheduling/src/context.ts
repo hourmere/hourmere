@@ -12,6 +12,8 @@ export type BookingEvent =
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string }
+  | { type: 'reschedule_requested'; bookingId: string; requestId: string }
+  | { type: 'reschedule_request_expired'; bookingId: string; requestId: string }
 
 /**
  * Called by the booking services inside the transaction that makes the change, with that
@@ -47,6 +49,8 @@ export interface ServiceContext {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
+  smtpConfigured?: boolean | undefined
   db: Db
   /** Shared waitlist attribution and enrollment secret, supplied only by trusted transports. */
   waitlistSecret?: string | undefined

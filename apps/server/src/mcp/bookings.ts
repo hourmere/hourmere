@@ -19,6 +19,7 @@ import {
   listPublicTeamSlots,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  requestReschedule,
   rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
@@ -32,7 +33,9 @@ import {
   CancelBody,
   Instant,
   ListBookingsQuery,
+  RequestRescheduleBody,
   RescheduleBody,
+  RescheduleRequestId,
   SelectedDurationMinutes,
 } from '../routes/bookings.ts'
 import { CreateBooking, PageParams, PublicEventType, Slot } from '../routes/public.ts'
@@ -168,6 +171,7 @@ const RescheduleInput = z
       .optional()
       .openapi({ description: 'Move a booking you host, by its id (see list_bookings)' }),
     manageToken: manageToken.optional(),
+    rescheduleRequestId: RescheduleRequestId,
     durationMinutes: SelectedDurationMinutes.optional().openapi({
       description:
         'Optional new length in minutes from the event type’s current allowedDurationsMinutes. Omitted preserves the booking’s original elapsed length, even if that option was removed.',
@@ -181,8 +185,12 @@ const RescheduleInput = z
     message:
       'Give exactly one of bookingId (to move as the host) or manageToken (to move as the invitee)',
   })
+  .refine((v) => v.rescheduleRequestId === undefined || v.manageToken !== undefined, {
+    message: 'rescheduleRequestId requires manageToken',
+  })
 
 const CancelInput = CancelBody.extend({
+  rescheduleRequestId: RescheduleRequestId,
   bookingId: z.uuid().optional().openapi({
     description: 'Cancel as the host: the id of a booking you host (see list_bookings)',
   }),
@@ -190,16 +198,21 @@ const CancelInput = CancelBody.extend({
   reason: CancelBody.shape.reason.openapi({
     description: 'Why the booking is cancelled, kept with it; at most 1000 characters',
   }),
-}).refine((v) => (v.bookingId === undefined) !== (v.manageToken === undefined), {
-  message:
-    'Give exactly one of bookingId (to cancel as the host) or manageToken (to cancel as the invitee)',
 })
+  .refine((v) => (v.bookingId === undefined) !== (v.manageToken === undefined), {
+    message:
+      'Give exactly one of bookingId (to cancel as the host) or manageToken (to cancel as the invitee)',
+  })
+  .refine((v) => v.rescheduleRequestId === undefined || v.manageToken !== undefined, {
+    message: 'rescheduleRequestId requires manageToken',
+  })
 
 const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 
 export interface BookingToolsDeps {
   db: Db
   waitlistSecret?: string | undefined
+  smtpConfigured?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
@@ -223,6 +236,7 @@ export interface BookingToolsDeps {
 export function bookingTools({
   db,
   waitlistSecret,
+  smtpConfigured,
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
@@ -233,6 +247,7 @@ export function bookingTools({
   const pub: PublicContext = {
     db,
     waitlistSecret,
+    smtpConfigured,
     now,
     notify,
     automaticMeet,
@@ -385,6 +400,28 @@ export function bookingTools({
     },
   })
 
+  const requestRescheduleTool = defineTool({
+    name: 'request_reschedule',
+    title: 'Ask the invitee to choose another time',
+    description:
+      'Requests a new time for a confirmed future booking you host. The original slot remains booked until the invitee reschedules through the normal manage link or cancels. Expiry keeps the original booking and notifies the host. Supply a random UUID idempotencyKey; repeat the same input to replay safely, or use a new key to replace the request. Optional plain-text note appears only in the email body. Imported and group-seat bookings are refused.',
+    input: RequestRescheduleBody.extend({ bookingId: z.uuid() }),
+    output: Booking,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async run(args, call) {
+      call.rateLimit(manageLimit)
+      return requestReschedule(context(call.caller), args.bookingId, {
+        idempotencyKey: args.idempotencyKey,
+        note: args.note,
+      })
+    },
+  })
+
   const rescheduleBooking = defineTool({
     name: 'reschedule_booking',
     scopeModes: ['host', 'manageToken'],
@@ -392,7 +429,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Imported records fail with imported_booking_read_only and remain managed in the original system. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. When answering a host request, pass its pendingReschedule.id as rescheduleRequestId with manageToken to fence replacements and safely replay the same pick. Without that request ID, not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Imported records fail with imported_booking_read_only and remain managed in the original system. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {
@@ -414,7 +451,11 @@ export function bookingTools({
       return rescheduleManagedBooking(
         pub,
         args.manageToken,
-        { start: Temporal.Instant.from(args.start), durationMinutes: args.durationMinutes },
+        {
+          start: Temporal.Instant.from(args.start),
+          durationMinutes: args.durationMinutes,
+          rescheduleRequestId: args.rescheduleRequestId,
+        },
         origin(call.caller),
       )
     },
@@ -427,7 +468,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Cancel a booking',
     description:
-      "Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Imported records fail with imported_booking_read_only and remain managed in the original system. Returns the cancelled booking. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past (and booking_changed, try again, if with an email's token the meeting kept being rescheduled while the call waited).",
+      "Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Imported records fail with imported_booking_read_only and remain managed in the original system. Returns the cancelled booking. When answering a host request, pass pendingReschedule.id as rescheduleRequestId with manageToken for safe replay and replacement fencing. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past (and booking_changed, try again, if with an email's token the meeting kept being rescheduled while the call waited).",
     input: CancelInput,
     output: Booking,
     annotations: {
@@ -449,7 +490,7 @@ export function bookingTools({
       return cancelManagedBooking(
         pub,
         args.manageToken,
-        { reason: args.reason },
+        { reason: args.reason, rescheduleRequestId: args.rescheduleRequestId },
         origin(call.caller),
       )
     },
@@ -520,6 +561,7 @@ export function bookingTools({
     findAvailableSlots,
     createBooking,
     rescheduleBooking,
+    requestRescheduleTool,
     cancelBooking,
     listBookings,
     retryConference,

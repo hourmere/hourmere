@@ -1,5 +1,12 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This request has expired or changed. Reload your booking to choose what to do next.':
+    '此请求已过期或发生变更。请重新加载预约，再选择下一步操作。',
+  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
+    '主持人请你选择新时间。在你改期或取消前，原预约仍然有效。',
+  'This waitlist is full (100 entries). Please check available times later.':
+    '此候补名单已满（100 人）。请稍后查看可预约时间。',
+  'Waitlist email is unavailable. Please contact the host.': '候补邮件暂不可用。请联系主持人。',
   'This imported booking is read-only and managed in the original system.':
     '此导入预约为只读记录，请在原系统中管理。',
   'This location is unavailable. Contact the host to book.':

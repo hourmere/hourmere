@@ -13,7 +13,10 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-slot-resource-predecessor-'))
     let old: TestDatabase | undefined, fresh: TestDatabase | undefined
     try {
-      for (const name of await readdir(migrationsDir))
+      const migrations = (await readdir(migrationsDir))
+        .filter((name) => name.endsWith('.sql'))
+        .sort()
+      for (const name of migrations)
         if (name.endsWith('.sql') && name < '0061')
           await copyFile(join(migrationsDir, name), join(directory, name))
       old = await createTestDatabase(serverUrl as string, directory)
@@ -49,11 +52,13 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const slots = (
         await old.pool.query('SELECT to_jsonb(s)::text AS row FROM group_slots s ORDER BY id')
       ).rows
-      expect(await runMigrations(old.pool)).toEqual(
-        (await readdir(migrationsDir))
-          .filter((name) => name.endsWith('.sql') && name >= '0061')
-          .sort(),
+      // This checkpoint verifies 0061's exact backfills; later migrations have their own
+      // populated predecessor tests and may add booking columns.
+      await copyFile(
+        join(migrationsDir, '0061_group_slot_resources.sql'),
+        join(directory, '0061_group_slot_resources.sql'),
       )
+      expect(await runMigrations(old.pool, directory)).toEqual(['0061_group_slot_resources.sql'])
       expect(
         (
           await old.pool.query(
@@ -86,9 +91,9 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
         insertSeat(client, f, ids.slot, 'third@example.test', { location }),
       )
       const after = await snapshotSchema(old.pool)
-      await runMigrations(old.pool)
+      await runMigrations(old.pool, directory)
       expect(await snapshotSchema(old.pool)).toEqual(after)
-      fresh = await createTestDatabase(serverUrl as string)
+      fresh = await createTestDatabase(serverUrl as string, directory)
       expect(await snapshotSchema(fresh.pool)).toEqual(after)
     } finally {
       await old?.drop()

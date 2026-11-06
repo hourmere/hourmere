@@ -64,6 +64,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |
@@ -179,3 +180,13 @@ returned reference, not binary image data or remote URLs. Uploads are limited to
 512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
 the current organization. SVG and animated images are rejected. This stores branding;
 public page and email theme application is not included yet.
+
+## Configure booking limits
+
+`create_event_type` and `update_event_type` accept nullable `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns the settings.
+Each ceiling is a whole number from 1 to 1000. Updates preserve omitted fields, and
+explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month apply
+whenever each pair is configured. The same REST permissions and validation apply.
+See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
+time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.

@@ -33,6 +33,7 @@ export const COMMANDS = {
   book: 'create_booking',
   list: 'list_bookings',
   reschedule: 'reschedule_booking',
+  'request-reschedule': 'request_reschedule',
   cancel: 'cancel_booking',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
@@ -52,13 +53,15 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
-          book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
+          book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
+                integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-parameters NAME,... (empty string clears the list),
                --success-redirect-include-invitee-personal-data true|false,
@@ -70,6 +73,8 @@ Secrets are never accepted as command-line flags. No .env or credential store is
 stdout is JSON with management capabilities redacted (--json makes this explicit). --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
+request-reschedule requires bookingId, an explicit idempotencyKey and optional plain-text note.
+The original slot remains booked until the invitee moves or cancels; expiry keeps it booked.
 Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
 Cancel, reschedule and retry commands refuse them with imported_booking_read_only.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.

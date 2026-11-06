@@ -33,6 +33,27 @@ export const admin = {
   White: 'White',
   'Branding saved. Booking pages and emails are unchanged.':
     'Branding saved. Booking pages and emails are unchanged.',
+  'Group-seat bookings do not support reschedule requests.':
+    'Group-seat bookings do not support reschedule requests.',
+  'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
+    'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.',
+
+  'Waiting for the invitee to choose a new time.': 'Waiting for the invitee to choose a new time.',
+  'Ask the invitee to choose a new time': 'Ask the invitee to choose a new time',
+  'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.':
+    'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.',
+  'The request is saved. The invitee will receive an email, subject to delivery limits.':
+    'The request is saved. The invitee will receive an email, subject to delivery limits.',
+  'Request reschedule': 'Request reschedule',
+  'A new request replaces any previous request for this booking.':
+    'A new request replaces any previous request for this booking.',
+  'Note to the invitee': 'Note to the invitee',
+  'Plain text, up to 2000 characters. Included only in the email body.':
+    'Plain text, up to 2000 characters. Included only in the email body.',
+  'Use at most 2000 characters for your note.': 'Use at most 2000 characters for your note.',
+  'Could not request a new time. {0}': 'Could not request a new time. {0}',
+  'Retry the same request': 'Retry the same request',
+  'Send request': 'Send request',
 
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
@@ -1128,6 +1149,18 @@ export const admin = {
   Created: 'Created',
   'Created “{0}”.': 'Created “{0}”.',
   'Creating…': 'Creating…',
+  'Weekly limit': 'Weekly limit',
+  'Monthly limit': 'Monthly limit',
+  'Bookings per week, {0}–{1}. Empty: no limit.': 'Bookings per week, {0}–{1}. Empty: no limit.',
+  'Bookings per month, {0}–{1}. Empty: no limit.': 'Bookings per month, {0}–{1}. Empty: no limit.',
+  'Weekly limit must be at least the daily limit.':
+    'Weekly limit must be at least the daily limit.',
+  'Monthly limit must be at least the weekly limit.':
+    'Monthly limit must be at least the weekly limit.',
+  'Monthly limit must be at least the daily limit.':
+    'Monthly limit must be at least the daily limit.',
+  'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.':
+    'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
   'Daily limit': 'Daily limit',
   Date: 'Date',
   'Date overrides': 'Date overrides',

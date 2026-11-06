@@ -56,7 +56,9 @@ describe.skipIf(!serverUrl)('branding migration', () => {
       expect(await runMigrations(pool, directory)).toEqual([migration])
       expect(await records()).toEqual(before)
       expect((await pool.query('SELECT * FROM organization_branding')).rows).toEqual([])
-      fresh = await createTestDatabase(serverUrl as string)
+      // Compare against a fresh install of the same migration set: later migrations on main
+      // (for example 0064 and 0065) change other tables and have their own tests.
+      fresh = await createTestDatabase(serverUrl as string, directory)
       expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
       expect(await runMigrations(pool, directory)).toEqual([])
       expect(await records()).toEqual(before)

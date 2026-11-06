@@ -52,7 +52,10 @@ stored organization. See [browser organization context](/docs/api-conventions#br
 | `GET /webhooks/{id}/deliveries?after=…` | At most fifty delivery metadata rows, newest first |
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
-`booking.rescheduled`, `booking.cancelled`. There are at most ten endpoints per organization.
+`booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested` and
+`booking.reschedule_request_expired`. Request events add `data.requestId`, keep
+`data.status` as `confirmed`, and omit notes and management links. Each replacement
+request has its own delivery identity. There are at most ten endpoints per organization.
 The URL is immutable: create a replacement endpoint to change the destination. By default,
 URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user information
 or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations

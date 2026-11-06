@@ -31,6 +31,10 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
+The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
+occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
+available in this foundation release.
+
 ## Principles
 
 - **Two schemas.** `auth` belongs to [Better Auth](https://www.better-auth.com) and keeps
@@ -185,8 +189,9 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   are allowed (ranges are half-open). `period` and `active` are never trusted from the
   application: a `BEFORE INSERT OR UPDATE` trigger derives them from the booking (locking
   it `FOR SHARE` against a concurrent reschedule), and a trigger on `bookings` re-derives
-  them when the time or status changes. Every status except `cancelled` occupies the
-  host. A multi-host booking is inserted in one transaction, so one taken host rolls back
+  them when the time or status changes. `confirmed` and `pending_payment` occupy the
+  host; `cancelled` and `expired` do not. The slot engine ignores holds past their deadline,
+  and booking admission releases due holds before checking the exclusion constraint. A multi-host booking is inserted in one transaction, so one taken host rolls back
   the whole booking. Buffers are enforced by the availability engine, not the constraint.
 - **Rescheduling** cancels the booking and inserts a new one with `rescheduled_from_id`,
   in one transaction (cancel first, so the new time may overlap the old one).
@@ -218,6 +223,8 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   commit (deferred), so the open transaction never locks the booking against a cancel.
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
+  The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
+  discovery foundation; CalDAV is not yet enabled in the product.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
   `event_type_id`. A rescheduled booking is a new row linked by `rescheduled_from_id`.
 - **Deleting an account** cascades to the user's own data (profile, schedules,
@@ -417,9 +424,10 @@ members receive a null label, rendered as a neutral unknown member in the editor
 `event_types.max_bookings_per_day`, `max_bookings_per_week` and
 `max_bookings_per_month` are independent optional integer ceilings from 1 to 1000;
 NULL means that period has no limit. Migration 0057 adds the weekly and monthly
-columns as NULL without changing existing event types or bookings. Weekly and monthly
-writes are internal service configuration in this slice; REST, MCP, CLI and editor
-controls follow separately.
+columns as NULL without changing existing event types or bookings. The editor, REST,
+MCP and CLI expose all three ceilings as `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`. Omitted update fields preserve saved values; explicit null
+removes a ceiling. See [booking limits](https://hourmere.com/docs/booking-limits).
 
 Configured ceilings must not descend as periods get longer: day ≤ week, week ≤ month,
 and day ≤ month whenever each pair is set. The last rule also applies when week is
@@ -1494,6 +1502,79 @@ always read the reschedule-chain root's fields. A new root atomically pins its c
 sending mailbox before its first SMTP invitation; later versions reuse that identity.
 See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
 legacy compatibility, recipient policy and reply limitations.
+
+## Host requests for another time
+
+Migration 0064 adds `booking_reschedule_requests`. A host of a confirmed future booking
+may ask its booker to choose another time, optionally including a plain-text note.
+Imported read-only records and group-seat bookings refuse this action. Authorization is
+identical to host rescheduling; being a team administrator alone does not grant it.
+
+Pending reschedule is an overlay (`Booking.pendingReschedule`), not a new booking status:
+the booking remains `confirmed`, its original time remains blocked, and calendar entries,
+conferences and reminders remain in force. Releasing the slot immediately would silently
+remove an agreed meeting before the invitee accepts a replacement. A request therefore
+never promises that any alternative slot is reserved.
+
+`RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48` bounds a request's life to the earlier of 48 elapsed
+hours after creation and the original booking's start. Elapsed time makes the timeout
+unambiguous across DST changes. Expiry leaves the original booking intact and queues a host
+notice; it never cancels or moves the booking. Workers may deliver the notice later. A
+second request replaces the first; superseded jobs cannot send a new obsolete invitation.
+
+The invitee uses the ordinary private management link to select an available time or
+cancel. Picks use the existing transactional reschedule path and all its current rules:
+notice, window, limits, buffers, calendar conflicts and required collective/round-robin
+hosts. Calendar writeback, conferences, reminders and host pick confirmations consequently
+follow the same path as any invitee reschedule. Requests add no exception to reschedule
+limits. A host can still cancel or move the original booking while a request is pending.
+
+Request rows record `pending`, `replaced`, `picked`, `cancelled` or `expired`; terminal
+states retain their identity for replay. Requests serialize with booking mutations. A
+request's UUID idempotency key is scoped to its booking: the same normalized input returns
+the current booking without another email; changed input fails with
+`idempotency_key_reused`. Replaying an old key never replaces a newer request.
+The optional `rescheduleRequestId` on managed pick/cancel identifies the displayed request.
+The web interface submits it. A matching pick replay returns its saved successor without a
+new token; a matching cancellation replay returns the cancelled booking. A replaced,
+expired or differently answered request fails with `reschedule_request_changed`. Keep the
+existing private email link when replay returns `manageToken: null`.
+
+Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
+controls are removed, other controls (including tabs) are rejected, and the result must be
+well-formed Unicode of at most 2000 UTF-16 code units. The sender defensively normalizes
+stored text and HTML-escapes it. Notes appear only in the request email body, never its
+subject, headers or webhook payload. Request mail uses existing invitee mail budgets and
+bounded retry/deduplication rules. The follow-up-note feature switch does not disable this
+separate request capability. Self-hosting includes the complete feature.
+
+Webhook subscriptions add `booking.reschedule_requested` and
+`booking.reschedule_request_expired`. Their payload retains `status: confirmed` and includes
+`requestId`; delivery uniqueness includes this identity so replacing a request can produce
+another event. Existing subscriptions and retained deliveries are preserved by migration.
+Deploy web and worker code together after applying the migration; old writers use the
+previous delivery uniqueness constraint.
+
+## Pending-payment foundation
+
+Migration `0065_payment_holds.sql` adds `pending_payment` and `expired` booking states,
+nullable `payment_hold_expires_at`, `payment_reference`, `payment_confirmed_at`,
+`payment_idempotency_key`, `payment_pii_erased_at`, and a default-false
+`payment_refund_required` marker. Existing bookings retain their state and data. The
+PaymentIntent reference is unique when present; credentials and card data are never stored.
+An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy atomically;
+confirmation after the deadline records refund intent without reviving the booking.
+The transition guard prevents changing retained deadlines/references or resurrecting terminal
+holds. Group seats and imported bookings cannot carry payment holds. See the
+[paid-booking design](payments.md) for the internal-only rollout boundary, future refund
+ledger/retention and operator responsibilities. Stop old app and worker processes before
+migration and restart all roles together.
+
+Paid hold confirmation records an immutable `payment_confirmed_at` timestamp through a database
+trigger. Booking lists, details and activity include hold-backed rows only after this marker
+is present, including paid bookings later cancelled. Unconfirmed terminal holds remain hidden.
+Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
+unique index, so they cannot collide with ordinary booking idempotency keys.
 
 ## Group slots and independent seats
 

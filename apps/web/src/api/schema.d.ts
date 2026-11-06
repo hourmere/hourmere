@@ -625,6 +625,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/request-reschedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask the invitee to choose another time
+         * @description For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused.
+         */
+        post: operations["requestReschedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/{id}/reschedule": {
         parameters: {
             query?: never;
@@ -2639,7 +2659,7 @@ export interface paths {
         put?: never;
         /**
          * Request to join a booking waitlist
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["joinPersonalWaitlist"];
         delete?: never;
@@ -2659,7 +2679,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly request another verification email
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendPersonalWaitlist"];
         delete?: never;
@@ -2874,7 +2894,7 @@ export interface paths {
         put?: never;
         /**
          * Request to join a booking waitlist
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["joinTeamWaitlist"];
         delete?: never;
@@ -2894,7 +2914,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly request another verification email
-         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendTeamWaitlist"];
         delete?: never;
@@ -4239,12 +4259,26 @@ export interface components {
             eventTypeTitle?: string | null;
             /** Format: uuid */
             id: string;
+            /** @description True for a group-seat booking, which does not support host reschedule requests. */
+            isGroupSeat?: boolean;
             location: components["schemas"]["BookingLocation"];
             /**
              * @description Present for imported busy records: managed in the original system, without Hourmere management links, changes, retries, calendar writes or notifications.
              * @enum {string}
              */
             managementPolicy?: "local_only_read_only";
+            /** @description An outstanding host request to choose another time. The original booking stays confirmed and blocks its slot; expiry keeps the original time. */
+            pendingReschedule?: {
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                expiresAt: string;
+                /** Format: uuid */
+                id: string;
+                note: string | null;
+            };
             /** @description Authenticated host reads only: the imported booking’s original question definitions, including preserved notes. */
             questions?: components["schemas"]["Question"][];
             /**
@@ -4512,6 +4546,10 @@ export interface components {
             } | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek: number | null;
             /** @description How far ahead a meeting must be booked */
             minimumNoticeMinutes: number;
             notifications: components["schemas"]["EventTypeNotifications"];
@@ -4632,6 +4670,10 @@ export interface components {
             } | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth?: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek?: number | null;
             /**
              * @description How far ahead a meeting must be booked
              * @default 0
@@ -4804,6 +4846,10 @@ export interface components {
             } | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
+            /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
+            maxBookingsPerMonth?: number | null;
+            /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
+            maxBookingsPerWeek?: number | null;
             /** @description How far ahead a meeting must be booked */
             minimumNoticeMinutes?: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
@@ -5353,6 +5399,15 @@ export interface components {
             /** @enum {string} */
             type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
         };
+        RequestReschedule: {
+            /**
+             * Format: uuid
+             * @description Retain this random UUID for retries. A new key replaces the current request; changed input with an existing key is refused.
+             */
+            idempotencyKey: string;
+            /** @description Optional plain text, at most 2000 UTF-16 code units, normalized like follow-up host notes. Included only in the email body. */
+            note?: string;
+        };
         Reschedule: {
             /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
             durationMinutes?: number;
@@ -5766,7 +5821,7 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled")[];
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -5787,7 +5842,7 @@ export interface components {
             /** Format: uuid */
             eventId: string;
             /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled";
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -6171,6 +6226,89 @@ export interface operations {
             };
         };
     };
+    requestReschedule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestReschedule"];
+            };
+        };
+        responses: {
+            /** @description Booking with its outstanding request, or the current booking on replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Booking"];
+                };
+            };
+            /** @description Invalid input or note (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Booking cancelled, already started, imported read-only, group-seat unsupported, idempotency key reused or organization context changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     rescheduleHostBooking: {
         parameters: {
             query?: never;
@@ -6266,7 +6404,14 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["CancelBooking"];
+                "application/json": {
+                    reason?: string;
+                    /**
+                     * Format: uuid
+                     * @description The pendingReschedule.id being answered. Fences replaced requests and makes a matching pick or cancellation safe to replay.
+                     */
+                    rescheduleRequestId?: string;
+                };
             };
         };
         responses: {
@@ -6347,7 +6492,21 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Reschedule"];
+                "application/json": {
+                    /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+                    durationMinutes?: number;
+                    /**
+                     * Format: uuid
+                     * @description The pendingReschedule.id being answered. Fences replaced requests and makes a matching pick or cancellation safe to replay.
+                     */
+                    rescheduleRequestId?: string;
+                    /**
+                     * Format: date-time
+                     * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                     * @example 2026-11-02T09:00:00.000Z
+                     */
+                    start: string;
+                };
             };
         };
         responses: {
@@ -9250,7 +9409,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9331,7 +9490,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9506,7 +9665,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9587,7 +9746,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10411,7 +10570,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -10579,7 +10738,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
                     isActive?: boolean;
                 };
             };
