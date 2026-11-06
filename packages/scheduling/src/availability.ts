@@ -747,13 +747,17 @@ export function selectBookableLocationOption(
   return chosen
 }
 
+/**
+ * Checks that the option a query would book is usable and returns the round-robin pool that
+ * can host it; Meet narrows that pool to hosts with a Meet-capable destination.
+ */
 async function requireLocationAvailability(
   ctx: PublicContext,
   et: PublicEventTypeRecord,
   optionId?: string,
-) {
+): Promise<string[]> {
   const chosenOption = selectBookableLocationOption(et, optionId)
-  await withLocationAvailability(et.locations, optionId, async () => {
+  return withLocationAvailability(et.locations, optionId, async () => {
     if (automaticZoom(chosenOption)) {
       if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
         throw new DomainError('conflict', 'automatic_zoom_host_policy')
@@ -767,20 +771,15 @@ async function requireLocationAvailability(
     }
     if (automaticMeet(chosenOption)) {
       if (et.schedulingType === 'round_robin')
-        et.eligibleHostUserIds = await eligibleMeetHosts(
-          ctx.db,
-          et.eligibleHostUserIds,
-          et.id,
-          ctx.automaticMeet,
-        )
-      else
-        await requireMeetDestination(
-          ctx.db,
-          meetOrganizer(et.schedulingType, et.hostUserIds, et.conferenceOrganizerUserId) as string,
-          et.id,
-          ctx.automaticMeet,
-        )
+        return eligibleMeetHosts(ctx.db, et.eligibleHostUserIds, et.id, ctx.automaticMeet)
+      await requireMeetDestination(
+        ctx.db,
+        meetOrganizer(et.schedulingType, et.hostUserIds, et.conferenceOrganizerUserId) as string,
+        et.id,
+        ctx.automaticMeet,
+      )
     }
+    return et.eligibleHostUserIds
   })
 }
 
@@ -796,7 +795,7 @@ async function eventSlots(
 ): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
-  await requireLocationAvailability(ctx, et, input.locationOptionId)
+  const eligibleHostUserIds = await requireLocationAvailability(ctx, et, input.locationOptionId)
   // Without an explicit step, each selected duration supplies its own start grid.
   const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
   if (!hasBookablePart(rules, input.start, input.end, now, et.hostUserIds.length)) return []
@@ -804,7 +803,7 @@ async function eventSlots(
     return unionRoundRobinSlots(
       ctx.db,
       et.id,
-      et.eligibleHostUserIds,
+      eligibleHostUserIds,
       input.start,
       input.end,
       now,
@@ -1459,10 +1458,10 @@ export async function explainEventAvailability(
   )
     throw new DomainError('invalid', 'range_too_long', 'Ask for a shorter explanation range')
   const now = ctx.now()
-  // Diagnostics describe the same default option used when public queries omit a choice.
-  await requireLocationAvailability(ctx, et)
+  // Diagnostics describe the same default option and host pool as an omitted-choice query.
+  const eligibleHostUserIds = await requireLocationAvailability(ctx, et)
   const discloseHosts = et.team !== undefined
-  const hosts = et.schedulingType === 'round_robin' ? et.eligibleHostUserIds : et.hostUserIds
+  const hosts = et.schedulingType === 'round_robin' ? eligibleHostUserIds : et.hostUserIds
   const maximumCandidates = Math.floor(MAX_SLOT_CANDIDATES / Math.max(1, hosts.length))
   const inputs: { hostUserId: string; input: ExplainAvailabilityInput; slots: ExplainedSlot[] }[] =
     []

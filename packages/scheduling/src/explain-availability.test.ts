@@ -180,14 +180,114 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       await expect(
         verify(
           sourceCopy([
-            '  await requireLocationAvailability(ctx, et)\n',
-            '  // Mutation: skip the default location readiness check.\n',
+            '  const eligibleHostUserIds = await requireLocationAvailability(ctx, et)\n',
+            '  const eligibleHostUserIds = et.eligibleHostUserIds // Mutation: skip readiness.\n',
           ]).explainEventAvailability,
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
       await verify(explainEventAvailability)
     },
   )
+
+  /** A Meet-capable owned Google destination; its calendar is not used for conflicts. */
+  async function meetDestination(userId: string) {
+    const connection = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: userId,
+        provider: 'google',
+        external_account_id: crypto.randomUUID(),
+        credentials: Buffer.from('synthetic-never-used-credential'),
+        status: 'active',
+        scopes: [
+          'https://www.googleapis.com/auth/calendar.events.owned',
+          'https://www.googleapis.com/auth/calendar.events.readonly',
+        ],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const calendar = await db
+      .insertInto('calendars')
+      .values({
+        connection_id: connection.id,
+        external_id: crypto.randomUUID(),
+        name: 'Meet destination',
+        access_role: 'owner',
+        supports_google_meet: true,
+        check_conflicts: false,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: userId,
+        handle: `meet-${userId.replaceAll('-', '').slice(0, 32)}`,
+        time_zone: 'UTC',
+        destination_calendar_id: calendar.id,
+      })
+      .onConflict((oc) =>
+        oc.column('user_id').doUpdateSet({ destination_calendar_id: calendar.id }),
+      )
+      .execute()
+  }
+
+  it('explains only the Meet-ready round-robin hosts that omitted-choice public slots use', async () => {
+    const s = await team('round_robin')
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify([
+          { id: 'video', kind: 'google_meet', autoCreate: true, isDefault: true },
+          { id: 'office', kind: 'in_person', address: 'Private office' },
+        ]),
+      })
+      .where('id', '=', s.event.id)
+      .execute()
+    // Only the owner can host Meet, and is busy after 10:00; the member is free all morning.
+    await meetDestination(s.owner.id)
+    await f.calendarBusy(s.owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']])
+    const meet = { db, now, automaticMeet: true }
+    const ctx = { ...s.ctx, automaticMeet: true }
+    const publicQuery = {
+      handle: s.ctx.principal.organization.slug,
+      slug: s.event.slug,
+      start: range.rangeStart,
+      end: range.rangeEnd,
+    }
+    const listed = (slots: readonly { start: string; end: string }[]) =>
+      slots.map((slot) => ({
+        start: instant(slot.start).toString(),
+        end: instant(slot.end).toString(),
+      }))
+    const omitted = listed(await listPublicTeamSlots(meet, publicQuery))
+    expect(omitted.map((slot) => slot.start)).toEqual([
+      '2026-11-02T09:00:00Z',
+      '2026-11-02T09:30:00Z',
+    ])
+    // The member still offers the later morning for the office, so the filter is what hides it.
+    expect(
+      listed(await listPublicTeamSlots(meet, { ...publicQuery, locationOptionId: 'office' })).map(
+        (slot) => slot.start,
+      ),
+    ).toContain('2026-11-02T10:00:00Z')
+    const verify = async (read: Explain) => {
+      const explained = await read(ctx, s.query)
+      expect(views(explained.filter((slot) => slot.status === 'available'))).toEqual(omitted)
+      expect(at(explained, '10:00')?.status).not.toBe('available')
+    }
+    await verify(explainEventAvailability)
+    await verify(sourceCopy().explainEventAvailability)
+    await expect(
+      verify(
+        sourceCopy([
+          "  const hosts = et.schedulingType === 'round_robin' ? eligibleHostUserIds : et.hostUserIds\n",
+          "  const hosts = et.schedulingType === 'round_robin' ? et.eligibleHostUserIds : et.hostUserIds\n",
+        ]).explainEventAvailability,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(explainEventAvailability)
+  })
 
   it('keeps cross-event bookings distinct from calendars and excludes them from this event daily count', async () => {
     const s = await personal({ maxBookingsPerDay: 1 })
