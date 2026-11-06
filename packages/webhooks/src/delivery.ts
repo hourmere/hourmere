@@ -6,6 +6,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { decryptWebhookSecret, webhookSignature } from './crypto.ts'
 import type { WebhookEventType, WebhookSettings } from './service.ts'
+import { slackPayload, slackUrl } from './slack-format.ts'
 import { sendWebhook, type WebhookTransport } from './transport.ts'
 
 export const WEBHOOK_DELIVERY_JOB = 'webhook-delivery'
@@ -24,13 +25,13 @@ export interface WebhookDeps extends WebhookSettings {
   transport?: WebhookTransport | undefined
 }
 
-/** Capture only changes made while globally enabled; enabling never backfills old bookings. */
+/** Capture current changes only; Slack needs a key, signed webhooks also need opt-in. */
 export function webhookBookingNotifier(
   queue: WebhookQueue,
   settings: WebhookSettings,
 ): BookingNotifier {
   return async (trx, event, now) => {
-    if (!settings.enabled) return
+    if (!settings.enabled && !settings.encryptionKey) return
     if (!trx.isTransaction) throw new Error('Webhook capture requires the booking transaction')
     if (await isImportedBooking(trx, event.bookingId)) return
     const booking = await trx
@@ -56,12 +57,21 @@ export function webhookBookingNotifier(
     // Share locks serialize opt-out/deletion with capture, and are always taken by ID.
     const endpoints = await trx
       .selectFrom('webhooks')
-      .select('id')
+      .select(['id', 'destination_kind'])
+      .where((eb) =>
+        eb.or([
+          ...(settings.enabled ? [eb('destination_kind', '=', 'webhook')] : []),
+          ...(settings.encryptionKey ? [eb('destination_kind', '=', 'slack')] : []),
+        ]),
+      )
+      .where((eb) =>
+        eb.or([eb('event_type_id', 'is', null), eb('event_type_id', '=', booking.event_type_id)]),
+      )
       .where('organization_id', '=', booking.organization_id)
       .where('is_active', '=', true)
       .where(sql<boolean>`${eventType} = ANY(events)`)
       .orderBy('id')
-      .limit(10)
+      .limit(11)
       .forShare()
       .execute()
     if (!endpoints.length) return
@@ -90,7 +100,16 @@ export function webhookBookingNotifier(
           booking_id: booking.id,
           event_id: eventId,
           event_type: eventType,
-          payload,
+          payload:
+            endpoint.destination_kind === 'slack'
+              ? slackPayload({
+                  type: eventType,
+                  bookingId: booking.id,
+                  start: booking.start_at.toISOString(),
+                  end: booking.end_at.toISOString(),
+                  status: booking.status,
+                })
+              : payload,
           created_at: new Date(now.epochMilliseconds),
         })
         .onConflict((oc) => oc.columns(['webhook_id', 'booking_id', 'event_type']).doNothing())
@@ -154,10 +173,21 @@ export async function deliverWebhook(
       .executeTakeFirst()
     if (delivery?.status !== 'pending') return false
     if (delivery.booking_id && (await isImportedBooking(trx, delivery.booking_id))) return false
+    const filterMismatch =
+      endpoint.destination_kind === 'slack' &&
+      endpoint.event_type_id !== null &&
+      delivery.booking_id !== null &&
+      !(await trx
+        .selectFrom('bookings')
+        .select('id')
+        .where('id', '=', delivery.booking_id)
+        .where('event_type_id', '=', endpoint.event_type_id)
+        .executeTakeFirst())
     const now = (deps.now ?? (() => Temporal.Now.instant()))()
     if (
-      !deps.enabled ||
+      (!deps.enabled && endpoint.destination_kind !== 'slack') ||
       !endpoint.is_active ||
+      filterMismatch ||
       !endpoint.events.includes(delivery.event_type) ||
       delivery.created_at.getTime() < now.subtract({ hours: 24 * 30 }).epochMilliseconds
     ) {
@@ -166,7 +196,10 @@ export async function deliverWebhook(
         .set({
           status: 'skipped',
           last_error:
-            deps.enabled && endpoint.is_active && endpoint.events.includes(delivery.event_type)
+            (deps.enabled || endpoint.destination_kind === 'slack') &&
+            endpoint.is_active &&
+            !filterMismatch &&
+            endpoint.events.includes(delivery.event_type)
               ? 'expired'
               : 'disabled',
         })
@@ -180,13 +213,25 @@ export async function deliverWebhook(
     let status: number | null = null
     let error: 'secret_unavailable' | 'transport_error' | 'http_error' | 'interrupted' | null = null
     let secret: string
+    let destination = endpoint.url
+    const isSlack = endpoint.destination_kind === 'slack'
     try {
-      secret = decryptWebhookSecret(
-        endpoint.secret_ciphertext,
-        deps.encryptionKey ?? '',
-        endpoint.id,
-        endpoint.organization_id,
-      )
+      if (isSlack) {
+        destination = decryptWebhookSecret(
+          endpoint.url_ciphertext ?? Buffer.alloc(0),
+          deps.encryptionKey ?? '',
+          `${endpoint.id}:url`,
+          endpoint.organization_id,
+        )
+        if (!slackUrl(destination)) throw new Error('Invalid Slack destination')
+        secret = ''
+      } else
+        secret = decryptWebhookSecret(
+          endpoint.secret_ciphertext,
+          deps.encryptionKey ?? '',
+          endpoint.id,
+          endpoint.organization_id,
+        )
     } catch {
       error = 'secret_unavailable'
       secret = ''
@@ -194,16 +239,18 @@ export async function deliverWebhook(
     if (!error && !signal.aborted) {
       try {
         status = await (deps.transport ?? sendWebhook)({
-          url: endpoint.url,
-          privateTargets: deps.privateTargets,
+          url: destination,
+          privateTargets: isSlack ? [] : deps.privateTargets,
           body: delivery.payload,
           signal,
-          headers: {
-            'webhook-id': delivery.id,
-            'webhook-event-id': delivery.event_id,
-            'webhook-timestamp': timestamp,
-            'webhook-signature': webhookSignature(secret, timestamp, delivery.payload),
-          },
+          headers: isSlack
+            ? {}
+            : {
+                'webhook-id': delivery.id,
+                'webhook-event-id': delivery.event_id,
+                'webhook-timestamp': timestamp,
+                'webhook-signature': webhookSignature(secret, timestamp, delivery.payload),
+              },
         })
         if (!Number.isInteger(status) || status < 100 || status > 599) {
           status = null

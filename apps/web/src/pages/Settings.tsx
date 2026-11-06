@@ -18,6 +18,7 @@ import { ACCOUNT, PROFILE } from '../limits.ts'
 import { PATHS } from '../paths.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
+import { SlackIntegrations } from './SlackIntegrations.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -112,6 +113,7 @@ export function SettingsPage() {
         </p>
         <p className="hint">{t('Your email comes from how you sign in.')}</p>
       </section>
+      <SlackIntegrations key={organizationId} organizationId={organizationId} />
       {!personal && (
         <TeamMembers
           key={organizationId}

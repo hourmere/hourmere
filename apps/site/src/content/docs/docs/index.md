@@ -38,6 +38,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
+  minimal booking data and at-least-once delivery; duplicate messages are possible.
+
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

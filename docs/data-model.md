@@ -1311,6 +1311,25 @@ index pg-boss's retained job history. The migration uses ordinary `CREATE INDEX`
 Retention has no status filter and uses the existing `created_at` index; delivery metadata
 pages use the existing `(webhook_id,id)` index in reverse order.
 
+
+Migration 0068 adds first-class Slack destinations to `webhooks`: `destination_kind`
+(default `webhook`), `url_ciphertext` and optional `event_type_id`. A partial unique index
+allows one Slack destination per organization without consuming the ten signed-webhook
+slots. The URL field contains only a masked Slack address; AES-256-GCM ciphertext uses
+the webhook encryption key with organization, destination ID and URL-specific associated
+data. A composite event-type foreign key enforces the same organization; hard deletion of
+a filtered event type removes the destination rather than broadening its subscription.
+Generic webhook management excludes Slack rows.
+
+Slack captures immutable Block Kit payloads in the booking transaction and reuses bounded
+outbox retries and terminal state tracking. The minimum projection contains booking ID,
+event kind, UTC start/end and status; team-wide payloads exclude free-text titles, answers,
+attendee details, links and reschedule-chain identifiers. Both capture and delivery check the
+current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
+only that filter; active/subscribed checks still apply. Slack is available independently of
+`WEBHOOKS_ENABLED` but requires `WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
+processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and

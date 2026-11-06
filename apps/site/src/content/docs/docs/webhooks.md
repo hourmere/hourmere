@@ -6,7 +6,8 @@ description: Configure signed outbound booking webhooks and their delivery limit
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
 cancellation. They use the same booking services for public pages, REST and MCP. They do
 not depend on Google, Microsoft, mail or a billing account. This first version is API-only;
-there is no webhook settings page or third-party integration template.
+there is no generic webhook settings page. [Slack notifications](/docs/slack) provide a
+separate incoming-webhook destination in Settings → Integrations, reusing this delivery machinery.
 
 ## Enable and configure
 

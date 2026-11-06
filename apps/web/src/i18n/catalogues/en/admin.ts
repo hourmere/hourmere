@@ -1,5 +1,44 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Event type filter': 'Event type filter',
+  'All event types': 'All event types',
+  'Saved event type — details unavailable': 'Saved event type — details unavailable',
+  'Loading event type choices…': 'Loading event type choices…',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    'Could not load event type choices. Your saved filter is unchanged.',
+
+  Integrations: 'Integrations',
+  'Slack booking notifications': 'Slack booking notifications',
+  'Booking created': 'Booking created',
+  'Booking cancelled': 'Booking cancelled',
+  'Booking rescheduled': 'Booking rescheduled',
+  'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.':
+    'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.',
+  'Loading Slack notifications…': 'Loading Slack notifications…',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    'Could not load Slack notifications. Only organization owners and admins can manage them.',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    'Could not update Slack notifications. Check your access and settings, then try again.',
+  'No Slack destination yet.': 'No Slack destination yet.',
+  'Slack destination saved.': 'Slack destination saved.',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack test message queued. This does not confirm delivery.',
+  'Send test message': 'Send test message',
+  'Delete this Slack destination and its delivery history?':
+    'Delete this Slack destination and its delivery history?',
+  'Delete Slack destination': 'Delete Slack destination',
+  'Slack destination deleted.': 'Slack destination deleted.',
+  'Configure Slack notifications': 'Configure Slack notifications',
+  'Enter a Slack webhook URL and choose at least one event.':
+    'Enter a Slack webhook URL and choose at least one event.',
+  'Replacement Slack webhook URL': 'Replacement Slack webhook URL',
+  'Slack incoming-webhook URL': 'Slack incoming-webhook URL',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.',
+  'Events to post': 'Events to post',
+  'Enable Slack notifications': 'Enable Slack notifications',
+  'Save Slack destination': 'Save Slack destination',
+
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 

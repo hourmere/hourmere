@@ -18,7 +18,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
-import { createWebhook } from '@hourmere/webhooks'
+import { createSlackDestination, createWebhook } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../../packages/calendars/src/google.ts'
 import {
@@ -70,6 +70,7 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/slack-destinations',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
@@ -85,6 +86,10 @@ const classes = {
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   other_write: [
+    'POST /api/v1/slack-destinations',
+    'PATCH /api/v1/slack-destinations/{id}',
+    'DELETE /api/v1/slack-destinations/{id}',
+    'POST /api/v1/slack-destinations/{id}/test',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -279,6 +284,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           waitlistSecret: secret,
           smtpConfigured: true,
           webhooks: webhookSettings,
+          webhookQueue: { enqueue: async () => randomUUID() },
         }),
       })
     }, 30_000)
@@ -558,6 +564,29 @@ describe.skipIf(!process.env.DATABASE_URL)(
           path = path.replace('{entryId}', entry.id)
           expectedStatus = 200
         }
+      } else if (template.startsWith('/api/v1/slack-destinations')) {
+        if (template.includes('{id}')) {
+          const destination = await createSlackDestination(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            webhookSettings,
+            {
+              url: 'https://hooks.slack.com/services/Tfixture/Bfixture/matrix-secret',
+              events: ['booking.created'],
+            },
+          )
+          id = destination.id
+          cleanupWebhook = id
+        }
+        if (operation === 'POST /api/v1/slack-destinations') {
+          payload = {
+            url: 'https://hooks.slack.com/services/Tfixture/Bfixture/matrix-secret',
+            events: ['booking.created'],
+          }
+          expectedStatus = 201
+        }
+        if (method === 'PATCH') payload = { isActive: false }
+        if (method === 'DELETE') expectedStatus = 204
+        if (operation === 'POST /api/v1/slack-destinations/{id}/test') expectedStatus = 202
       } else if (template.startsWith('/api/v1/webhooks')) {
         id = mainWebhook
         if (method !== 'GET' && template.includes('{id}'))
@@ -615,14 +644,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 100-operation contract and all 300 scope combinations', () => {
+    it('covers the exact 105-operation contract and all 315 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(100)
-      expect(new Set(ids).size).toBe(100)
+      expect(ids).toHaveLength(105)
+      expect(new Set(ids).size).toBe(105)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(300)
+      expect(cases).toHaveLength(315)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -665,6 +694,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
             if (operation === 'POST /api/v1/schedules')
               await db
                 .deleteFrom('schedules')
+                .where('id', '=', (data as { id: string }).id)
+                .execute()
+            if (
+              operation.startsWith('POST /api/v1/slack-destinations') ||
+              operation === 'GET /api/v1/slack-destinations' ||
+              operation === 'PATCH /api/v1/slack-destinations/{id}'
+            )
+              expect(JSON.stringify(data)).not.toContain('matrix-secret')
+            if (operation === 'POST /api/v1/slack-destinations')
+              await db
+                .deleteFrom('webhooks')
                 .where('id', '=', (data as { id: string }).id)
                 .execute()
             if (operation === 'POST /api/v1/webhooks')

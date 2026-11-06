@@ -1,5 +1,43 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Event type filter': '按活动类型筛选',
+  'All event types': '所有活动类型',
+  'Saved event type — details unavailable': '已保存的活动类型（详情暂不可用）',
+  'Loading event type choices…': '正在加载活动类型选项……',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    '无法加载活动类型选项。已保存的筛选条件保持不变。',
+
+  Integrations: '集成',
+  'Slack booking notifications': 'Slack 预约通知',
+  'Booking created': '预约已创建',
+  'Booking cancelled': '预约已取消',
+  'Booking rescheduled': '预约已改期',
+  'Send booking IDs, times and status to Slack. Names, email addresses, custom answers and meeting links are never included.':
+    '将预约编号、时间和状态发送到 Slack。通知不包含姓名、邮箱地址、自定义问题回答或会议链接。',
+  'Loading Slack notifications…': '正在加载 Slack 通知……',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    '无法加载 Slack 通知。只有组织所有者和管理员可以管理通知。',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    '无法更新 Slack 通知。请检查权限和设置，然后重试。',
+  'No Slack destination yet.': '尚未设置 Slack 接收地址。',
+  'Slack destination saved.': '已保存 Slack 接收地址。',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack 测试消息已加入发送队列。这不代表消息已送达。',
+  'Send test message': '发送测试消息',
+  'Delete this Slack destination and its delivery history?': '删除此 Slack 接收地址及其发送记录？',
+  'Delete Slack destination': '删除 Slack 接收地址',
+  'Slack destination deleted.': '已删除 Slack 接收地址。',
+  'Configure Slack notifications': '配置 Slack 通知',
+  'Enter a Slack webhook URL and choose at least one event.':
+    '请输入 Slack Webhook 地址，并至少选择一种事件。',
+  'Replacement Slack webhook URL': '新的 Slack Webhook 地址',
+  'Slack incoming-webhook URL': 'Slack 传入 Webhook 地址',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    '请使用 hooks.slack.com 或 hooks.slack-gov.com 的 HTTPS 传入 Webhook 地址，并妥善保密。无需更换时，请将新地址留空。',
+  'Events to post': '要发送的事件',
+  'Enable Slack notifications': '启用 Slack 通知',
+  'Save Slack destination': '保存 Slack 接收地址',
+
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
 

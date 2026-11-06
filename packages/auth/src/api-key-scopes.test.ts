@@ -19,6 +19,7 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/slack-destinations',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -102,6 +103,10 @@ const restContract = {
     'GET /api/v1/teams/{teamId}/readiness',
   ],
   other_write: [
+    'POST /api/v1/slack-destinations',
+    'PATCH /api/v1/slack-destinations/{id}',
+    'DELETE /api/v1/slack-destinations/{id}',
+    'POST /api/v1/slack-destinations/{id}/test',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -340,6 +345,11 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'list_slack_destinations',
+        'create_slack_destination',
+        'update_slack_destination',
+        'delete_slack_destination',
+        'test_slack_destination',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -370,6 +380,7 @@ describe('shared API-key scope policy', () => {
         'resend_waitlist_verification',
       ],
       read: [
+        'list_slack_destinations',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',

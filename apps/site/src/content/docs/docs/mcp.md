@@ -76,6 +76,11 @@ notifications and trigger configured integrations.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_slack_destinations` | — | `slack list` | `full, read` |
+| `create_slack_destination` | — | `slack create` | `full` |
+| `update_slack_destination` | — | `slack update` | `full` |
+| `delete_slack_destination` | — | `slack delete` | `full` |
+| `test_slack_destination` | — | `slack test` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |

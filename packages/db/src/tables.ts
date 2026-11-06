@@ -984,7 +984,7 @@ export interface WaitlistVerificationRequests {
 
 export interface WebhookDeliveries {
   attempts: Generated<number>;
-  booking_id: string;
+  booking_id: string | null;
   created_at: Generated<Timestamp>;
   delivered_at: Timestamp | null;
   event_id: string;
@@ -1001,6 +1001,8 @@ export interface WebhookDeliveries {
 
 export interface Webhooks {
   created_at: Generated<Timestamp>;
+  destination_kind: Generated<string>;
+  event_type_id: string | null;
   events: string[];
   id: Generated<string>;
   is_active: Generated<boolean>;
@@ -1008,6 +1010,7 @@ export interface Webhooks {
   secret_ciphertext: Buffer;
   updated_at: Generated<Timestamp>;
   url: string;
+  url_ciphertext: Buffer | null;
 }
 
 export interface DB {
