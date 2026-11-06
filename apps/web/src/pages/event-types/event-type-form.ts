@@ -85,6 +85,8 @@ export interface EventTypeDraft {
   autoCreateMeet: boolean
   conferenceOrganizerUserId: string
   phone: string
+  /** Preserve an invitee-phone compatibility value until the host enters a number. */
+  phoneAskInvitee: boolean
   address: string
   url: string
   questions: QuestionDraft[]
@@ -99,6 +101,7 @@ export interface EventTypeDraft {
   isActive: boolean
   isHidden: boolean
   allowGuests: boolean
+  waitlistEnabled: boolean
   successRedirectUrl: string
   successRedirectParameters: SuccessRedirectParameter[]
   includeInviteePersonalData: boolean
@@ -137,6 +140,7 @@ export function emptyDraft(): EventTypeDraft {
     autoCreateMeet: false,
     conferenceOrganizerUserId: '',
     phone: '',
+    phoneAskInvitee: false,
     address: '',
     url: '',
     questions: [],
@@ -150,6 +154,7 @@ export function emptyDraft(): EventTypeDraft {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    waitlistEnabled: false,
     successRedirectUrl: '',
     successRedirectParameters: [],
     includeInviteePersonalData: false,
@@ -176,7 +181,8 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     zoomConnectionId: e.zoomConnectionId ?? '',
     autoCreateMeet: location?.kind === 'google_meet' && location.autoCreate === true,
     conferenceOrganizerUserId: e.conferenceOrganizer?.userId ?? '',
-    phone: location?.kind === 'phone' ? location.number : '',
+    phone: location?.kind === 'phone' ? (location.number ?? '') : '',
+    phoneAskInvitee: location?.kind === 'phone' && location.askInvitee === true,
     address: location?.kind === 'in_person' ? location.address : '',
     url: location?.kind === 'link' ? location.url : '',
     questions: e.questions.map((q) => ({
@@ -197,6 +203,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     isActive: e.isActive,
     isHidden: e.isHidden,
     allowGuests: e.allowGuests,
+    waitlistEnabled: e.waitlist?.enabled ?? false,
     successRedirectUrl: e.successRedirect?.url ?? '',
     successRedirectParameters: [...(e.successRedirect?.parameters ?? [])],
     includeInviteePersonalData: e.successRedirect?.includeInviteePersonalData ?? false,
@@ -286,6 +293,13 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (
+    draft.waitlistEnabled &&
+    draft.waitlistEnabled !== baseline?.waitlistEnabled &&
+    (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
+  )
+    errors.waitlist =
+      'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).'
   // Untouched stored notes may predate tighter write rules; omission preserves them.
   if (
     comparableNotifications(draft.notifications) !==
@@ -365,7 +379,10 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
 
   switch (draft.locationKind) {
     case 'phone':
-      if (!EVENT_TYPE.phonePattern.test(draft.phone.trim())) {
+      if (
+        !(draft.phoneAskInvitee && draft.phone.trim() === '') &&
+        !EVENT_TYPE.phonePattern.test(draft.phone.trim())
+      ) {
         add('location-phone', 'Enter the number in international format, e.g. +14155550123.')
       }
       break
@@ -437,7 +454,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
       case '':
         return null
       case 'phone':
-        return { kind: 'phone', number: draft.phone.trim() }
+        return draft.phoneAskInvitee && draft.phone.trim() === ''
+          ? { kind: 'phone', askInvitee: true }
+          : { kind: 'phone', number: draft.phone.trim() }
       case 'in_person':
         return { kind: 'in_person', address: draft.address.trim() }
       case 'link':
@@ -489,6 +508,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     isActive: draft.isActive,
     isHidden: draft.isHidden,
     allowGuests: draft.allowGuests,
+    ...(draft.waitlistEnabled && { waitlist: { enabled: true } }),
     ...(draft.successRedirectUrl !== '' && { successRedirect: redirectInput(draft) }),
     ...(comparableNotifications(draft.notifications) !==
       comparableNotifications(defaultNotificationsDraft()) && {
@@ -500,6 +520,13 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // The compatibility field cannot represent a complete option list. Leave it out when
+  // untouched, so metadata saves also preserve options configured by a newer client.
+  if (JSON.stringify(body.location) === JSON.stringify(toInput(baseline).location))
+    delete body.location
+  // A metadata save must preserve waitlist changes made outside this editor session.
+  if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
+  else body.waitlist = { enabled: draft.waitlistEnabled }
   // Saved targets can stop meeting instance policy. Do not re-submit an untouched target,
   // or overwrite another client's redirect edit with this editor session's older copy.
   if (JSON.stringify(redirectInput(draft)) === JSON.stringify(redirectInput(baseline)))
@@ -566,6 +593,7 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     maxBookingsPerDay: 'Daily limit',
     bookingWindowDays: 'Booking window',
     position: 'Position',
+    waitlist: 'Booking waitlist',
     successRedirect: 'After booking',
     'successRedirect.url': 'Continue to URL',
     'successRedirect.parameters': 'URL parameters',
@@ -637,6 +665,18 @@ export function serverErrors(
     if (message) return field(err.field, message)
   }
   switch (err.code) {
+    case 'location_options_conflict':
+      return {
+        fields: {},
+        message: msg(
+          'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+        ),
+      }
+    case 'waitlist_unsupported':
+      return field(
+        'waitlist',
+        'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).',
+      )
     case 'automatic_zoom_disabled':
       return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
     case 'automatic_zoom_unavailable':

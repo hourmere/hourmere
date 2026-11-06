@@ -2,6 +2,42 @@
 export const common = {
   'This imported booking is read-only and managed in the original system.':
     'This imported booking is read-only and managed in the original system.',
+  'This location is unavailable. Contact the host to book.':
+    'This location is unavailable. Contact the host to book.',
+  'The host or the team’s owners and admins can see your email, name and requested period.':
+    'The host or the team’s owners and admins can see your email, name and requested period.',
+  '{count} second': '{count} second',
+  '{count} seconds': '{count} seconds',
+  '{count} minute': '{count} minute',
+  '{count} minutes': '{count} minutes',
+  '{count} hour': '{count} hour',
+  '{count} hours': '{count} hours',
+
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'To join the waitlist, choose the default meeting length ({duration}).',
+  'Join the waitlist': 'Join the waitlist',
+  'No available times in this period.': 'No available times in this period.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.',
+  'From {start} to {end} ({timeZone})': 'From {start} to {end} ({timeZone})',
+  'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.':
+    'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.',
+  'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.':
+    'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.',
+  'Check your email to confirm': 'Check your email to confirm',
+  'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.':
+    'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.',
+  'Resend confirmation email': 'Resend confirmation email',
+  'Confirmation email requested. Check your email; sending limits may prevent delivery.':
+    'Confirmation email requested. Check your email; sending limits may prevent delivery.',
+  'Agree to receive waitlist emails before joining.':
+    'Agree to receive waitlist emails before joining.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'The waitlist is unavailable for this period. Check available times and try again.',
+  'Joining…': 'Joining…',
+  'Sending…': 'Sending…',
   'We could not use the time details in this link. Please choose a time.':
     'We could not use the time details in this link. Please choose a time.',
   'This meeting length is no longer offered. Please choose a time again.':
@@ -301,8 +337,8 @@ export const common = {
   'To be confirmed by the host': 'To be confirmed by the host',
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.',
-  'Too many requests from your network. Try again in {0} seconds.':
-    'Too many requests from your network. Try again in {0} seconds.',
+  'Too many requests from your network. Try again in {duration}.':
+    'Too many requests from your network. Try again in {duration}.',
   'Too many requests from your network. Wait a minute and try again.':
     'Too many requests from your network. Wait a minute and try again.',
   'Too many requests. Wait a minute and try again.':

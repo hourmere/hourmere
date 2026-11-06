@@ -42,6 +42,7 @@ describe('event type routes in the OpenAPI document', () => {
         '$.notifications.reminders[].recipients',
         '$.notifications.followUps[]',
         '$.notifications.followUps[].recipients',
+        '$.waitlist',
         '$.successRedirect',
         '$.hosts[]',
       ])
@@ -270,6 +271,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       notifications: DEFAULT_NOTIFICATIONS,
+      waitlist: { enabled: false },
       successRedirect: null,
       isActive: true,
       isHidden: false,

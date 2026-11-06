@@ -170,12 +170,17 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `DELETE /api/v1/event-types/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/event-types/{id}` | Session or API key | `full` |
 | `PUT /api/v1/event-types/{id}/notifications` | Session or API key | `full` |
+| `GET /api/v1/event-types/{id}/waitlist` | Session or API key | `full, read` |
+| `PUT /api/v1/event-types/{id}/waitlist` | Session or API key | `full` |
+| `GET /api/v1/event-types/{id}/waitlist/entries` | Session or API key | `full, read` |
+| `DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}` | Session or API key | `full` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, read` |
 | `POST /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, bookings` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, read` |
 | `DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, bookings` |
 | `POST /api/v1/event-types/{id}/round-robin/activate` | Session or API key | `full` |
 | `GET /api/v1/instance` | Public; no key needed | `full, read, bookings` |
+| `GET /api/v1/instance/embed` | Browser session only | — |
 | `GET /api/v1/mcp-oauth/connections` | Browser session only | — |
 | `DELETE /api/v1/mcp-oauth/connections/{id}` | Browser session only | — |
 | `POST /api/v1/mcp-oauth/consent` | Browser session only | — |
@@ -192,6 +197,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/teams/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/public/{handle}/{slug}/waitlist` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/{handle}/{slug}/waitlist/resend` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/teams/{handle}/{slug}/waitlist` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/readiness/self` | Browser session only | — |
 | `GET /api/v1/schedules` | Session or API key | `full, read` |
 | `POST /api/v1/schedules` | Session or API key | `full` |
@@ -257,6 +266,16 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
 | `list_calendar_connections` | — | — | `full, read` |
 | `list_conference_connections` | — | — | `full, read` |
+| `get_event_type_waitlist` | — | `event-waitlist` | `full, read` |
+| `set_event_type_waitlist` | — | `set-event-waitlist` | `full` |
+| `list_waitlist_entries` | — | `waitlist-entries` | `full, read` |
+| `remove_waitlist_entry` | — | `remove-waitlist-entry` | `full` |
+| `join_waitlist` | — | `join-waitlist` | `full, bookings` |
+| `join_waitlist` | `personal` | `join-waitlist` | `full, bookings` |
+| `join_waitlist` | `team` | `join-waitlist` | `full, bookings` |
+| `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
+| `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
+| `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 
 ### Native protocol boundaries
 

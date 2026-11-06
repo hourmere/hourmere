@@ -465,7 +465,7 @@ describe('release publication checklist', () => {
       'gh attestation verify oci://ghcr.io/hourmere/hourmere:1.0.0-rc.1 -R hourmere/hourmere',
     )
     expect(rehearsal).toContain(
-      './scripts/setup.sh --image --version 1.0.0-rc.1 docker compose pull docker compose up -d --wait',
+      './scripts/setup.sh --image --version 1.0.0-rc.1 docker compose pull ./scripts/compose-up.sh -d --wait',
     )
     expect(rehearsal).toContain('never `latest` or `1.0`')
     expect(rehearsal).toContain(

@@ -108,7 +108,7 @@ async function pageParticipants(db: Db, teamId: string, bookingIds: string[]) {
       .selectFrom('booking_hosts as host')
       .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
       .innerJoin('auth.user as user', 'user.id', 'host.user_id')
-      .select(['host.booking_id', 'host.user_id', 'user.name'])
+      .select(['booking.id as booking_id', 'host.user_id', 'user.name'])
       .where('booking.organization_id', '=', teamId)
       .where('host.booking_id', 'in', bookingIds)
       .orderBy('host.user_id')

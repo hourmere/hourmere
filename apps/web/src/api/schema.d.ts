@@ -1763,7 +1763,10 @@ export interface paths {
         delete: operations["deleteEventType"];
         options?: never;
         head?: never;
-        /** Change an event type */
+        /**
+         * Change an event type
+         * @description An unchanged legacy location preserves the complete option list. A changed legacy location edits a single unlabelled option in place; changing its kind allocates a new option id. Multiple or labelled options require an option-aware locations write and return location_options_conflict.
+         */
         patch: operations["updateEventType"];
         trace?: never;
     };
@@ -1807,6 +1810,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/event-types/{id}/waitlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read waitlist settings as an event manager */
+        get: operations["getEventTypeWaitlist"];
+        /** Enable or disable an event waitlist */
+        put: operations["setEventTypeWaitlist"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/event-types/{id}/waitlist/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List waitlist entries as an event manager
+         * @description Personal owners and team owners/admins only. Ordinary team members cannot read contacts or entry preferences. Read API-key scope is required.
+         */
+        get: operations["listWaitlistEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/event-types/{id}/waitlist/entries/{entryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an entry as an event manager
+         * @description Idempotent while the entry is retained. Immediately erases contact data and cancels pending mail. Sends no removal email and never changes a terminal entry back to waiting.
+         */
+        delete: operations["removeWaitlistEntry"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -1831,6 +1892,72 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Instance"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instance/embed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the embed configuration for the signed-in host interface
+         * @description Requires a verified web session and current organization membership. Returns the operator-approved website origins to hosts generating booking widgets; these origins are never included in public instance discovery. API keys and MCP OAuth tokens cannot read this browser-session-only configuration. An absent origin list means unknown configuration; an empty list means embedding is disabled.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Private host embed configuration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EmbedConfiguration"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description embed_configuration_access_denied: requires a verified web session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -2426,6 +2553,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/{handle}/{slug}/waitlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request to join a booking waitlist
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         */
+        post: operations["joinPersonalWaitlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/{handle}/{slug}/waitlist/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly request another verification email
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         */
+        post: operations["resendPersonalWaitlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/teams/{handle}/{slug}": {
         parameters: {
             query?: never;
@@ -2615,6 +2782,46 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/teams/{handle}/{slug}/waitlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request to join a booking waitlist
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         */
+        post: operations["joinTeamWaitlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/teams/{handle}/{slug}/waitlist/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly request another verification email
+         * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. The same accepted response covers new, existing and suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
+         */
+        post: operations["resendTeamWaitlist"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4133,6 +4340,15 @@ export interface components {
             /** @description Trimmed, well-formed Unicode on one line */
             name: string;
         };
+        EmbedConfiguration: {
+            /** @description Exact website origins approved for embedding; empty when disabled, absent when unknown */
+            embedAllowedOrigins?: string[];
+            /**
+             * Format: uri
+             * @description The public origin of this instance, configured by its operator
+             */
+            publicUrl: string;
+        };
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
@@ -4177,7 +4393,7 @@ export interface components {
             isActive: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4189,13 +4405,15 @@ export interface components {
                 /** @enum {string} */
                 kind: "zoom";
             } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
                 /** @enum {string} */
                 kind: "phone";
                 /**
                  * @description The host's number in E.164
                  * @example +14155550123
                  */
-                number: string;
+                number?: string;
             } | {
                 address: string;
                 /** @enum {string} */
@@ -4252,6 +4470,7 @@ export interface components {
             title: string;
             /** Format: date-time */
             updatedAt: string;
+            waitlist: components["schemas"]["WaitlistSettings"];
             /** Format: uuid */
             zoomConnectionId?: string | null;
         };
@@ -4294,7 +4513,7 @@ export interface components {
              * @default false
              */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4306,13 +4525,15 @@ export interface components {
                 /** @enum {string} */
                 kind: "zoom";
             } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
                 /** @enum {string} */
                 kind: "phone";
                 /**
                  * @description The host's number in E.164
                  * @example +14155550123
                  */
-                number: string;
+                number?: string;
             } | {
                 address: string;
                 /** @enum {string} */
@@ -4377,6 +4598,7 @@ export interface components {
             } | null;
             /** @example Intro call */
             title: string;
+            waitlist?: components["schemas"]["WaitlistSettingsInput"];
             zoomConnectionId?: string | null;
         };
         EventTypeList: {
@@ -4463,7 +4685,7 @@ export interface components {
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden?: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4475,13 +4697,15 @@ export interface components {
                 /** @enum {string} */
                 kind: "zoom";
             } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
                 /** @enum {string} */
                 kind: "phone";
                 /**
                  * @description The host's number in E.164
                  * @example +14155550123
                  */
-                number: string;
+                number?: string;
             } | {
                 address: string;
                 /** @enum {string} */
@@ -4540,6 +4764,7 @@ export interface components {
             } | null;
             /** @example Intro call */
             title?: string;
+            waitlist?: components["schemas"]["WaitlistSettingsInput"];
             zoomConnectionId?: string | null;
         };
         Health: {
@@ -4551,6 +4776,8 @@ export interface components {
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
+            /** @description Whether embedding is enabled; absent when unknown */
+            embedEnabled?: boolean;
             /** @description Whether hosts may add plain-text notes to follow-up emails */
             followUpHostNotesEnabled?: boolean;
             /**
@@ -4582,6 +4809,31 @@ export interface components {
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
+        };
+        /** @description Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. The personal event owner or authorized team owners/admins can see the submitted email, optional name and requested period. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention. */
+        JoinWaitlist: {
+            /** @enum {boolean} */
+            consent: true;
+            /** Format: email */
+            email: string;
+            /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+            locale?: string;
+            name?: string;
+            preferredWindow: {
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                end: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                start: string;
+                timeZone: string;
+            };
         };
         ManagedBooking: components["schemas"]["Booking"] & {
             /** @description The event type as it is now; null once it is deleted. The booking start and end retain its actual length even if the default changes. */
@@ -4839,6 +5091,11 @@ export interface components {
                 name: string;
             };
             title: string;
+            /** @description Present only when a supported event offers a waitlist. Join only after a successful empty availability query. */
+            waitlist?: {
+                /** @enum {boolean} */
+                enabled: true;
+            };
         };
         Profile: {
             /** Format: date-time */
@@ -4921,6 +5178,11 @@ export interface components {
                 slug: string;
             };
             title: string;
+            /** @description Present only when a supported event offers a waitlist. Join only after a successful empty availability query. */
+            waitlist?: {
+                /** @enum {boolean} */
+                enabled: true;
+            };
         };
         PublicHost: {
             /** @description Bookable event types, in the order the host arranged them */
@@ -4978,6 +5240,10 @@ export interface components {
              * @example 2026-11-02T09:00:00.000Z
              */
             start: string;
+        };
+        ResendWaitlistVerification: {
+            /** Format: email */
+            email: string;
         };
         /** @description Answers to the event type's questions, keyed by question id: text for short_text, long_text and phone; one option for select; a list of options for multi_select; true or false for checkbox */
         Responses: {
@@ -5314,6 +5580,40 @@ export interface components {
             };
             /** Format: uuid */
             organizationId: string;
+        };
+        WaitlistAccepted: {
+            /** @enum {boolean} */
+            accepted: true;
+        };
+        /** @description Manager-only page. Erased contact fields stay null; no verification or management capabilities are returned. */
+        WaitlistEntryPage: {
+            data: {
+                /** Format: date-time */
+                createdAt: string;
+                email: string | null;
+                /** Format: uuid */
+                id: string;
+                /** Format: date-time */
+                lastNotifiedAt: string | null;
+                name: string | null;
+                preferredWindow: {
+                    /** Format: date-time */
+                    end: string;
+                    /** Format: date-time */
+                    start: string;
+                    timeZone: string;
+                } | null;
+                /** @enum {string} */
+                state: "pending_verification" | "active" | "notified" | "booked" | "removed" | "expired";
+            }[];
+            nextAfter: string | null;
+        };
+        WaitlistSettings: {
+            enabled: boolean;
+        };
+        /** @description Off by default. Supported only for personal and team individual events with one current verified host. Disabling removes waiting entries; enabling again never restores them. */
+        WaitlistSettingsInput: {
+            enabled: boolean;
         };
         /** @description Intervals of one day must not overlap; touching ones are joined */
         WallClockInterval: {
@@ -7325,7 +7625,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7485,6 +7785,291 @@ export interface operations {
                 };
             };
             /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getEventTypeWaitlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistSettings"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setEventTypeWaitlist: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaitlistSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description Saved settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistSettings"];
+                };
+            };
+            /** @description invalid_request, waitlist_unsupported */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listWaitlistEntries: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded entry page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistEntryPage"];
+                };
+            };
+            /** @description invalid_limit, invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeWaitlistEntry: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                entryId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed or already terminal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        removed: true;
+                    };
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found, waitlist_entry_not_found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8072,6 +8657,168 @@ export interface operations {
             };
         };
     };
+    joinPersonalWaitlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinWaitlist"];
+            };
+        };
+        responses: {
+            /** @description Accepted; check email to confirm. Does not reveal membership or mail delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistAccepted"];
+                };
+            };
+            /** @description invalid_request, invalid_waitlist_input, waitlist_unsupported, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resendPersonalWaitlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendWaitlistVerification"];
+            };
+        };
+        responses: {
+            /** @description Accepted; check email to confirm. Does not reveal membership or mail delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistAccepted"];
+                };
+            };
+            /** @description invalid_request, invalid_waitlist_input, waitlist_unsupported, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createPublicTeamBooking: {
         parameters: {
             query?: never;
@@ -8147,6 +8894,168 @@ export interface operations {
                 };
             };
             /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    joinTeamWaitlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinWaitlist"];
+            };
+        };
+        responses: {
+            /** @description Accepted; check email to confirm. Does not reveal membership or mail delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistAccepted"];
+                };
+            };
+            /** @description invalid_request, invalid_waitlist_input, waitlist_unsupported, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resendTeamWaitlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendWaitlistVerification"];
+            };
+        };
+        responses: {
+            /** @description Accepted; check email to confirm. Does not reveal membership or mail delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitlistAccepted"];
+                };
+            };
+            /** @description invalid_request, invalid_waitlist_input, waitlist_unsupported, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
                 headers: {
                     [name: string]: unknown;

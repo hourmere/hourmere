@@ -50,7 +50,8 @@ const existingLanguages = ['en', 'zh-CN', 'de', 'fr', 'es'] as const
 
 describe('existing language output before Brazilian Portuguese registration', () => {
   // The digest covers complete subject/text/HTML messages, including inline styles.
-  // Earlier goldens are retained; Spanish was captured from immutable main sources before pt-BR.
+  // Invitation expiry dates intentionally changed to readable minute precision. Other output
+  // remains as captured before Brazilian Portuguese, with Spanish captured from immutable main.
   it.each(existingLanguages)('preserves every rendered %s message byte', (locale) => {
     const messages = kinds.flatMap((kind) =>
       recipients.map((recipient) =>

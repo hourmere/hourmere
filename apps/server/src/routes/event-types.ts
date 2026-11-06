@@ -7,8 +7,11 @@ import {
   deleteEventType,
   EVENT_TYPE_LIMITS,
   getEventType,
+  getEventTypeWaitlist,
+  type LocationSettings,
   listEventTypeHosts,
   listEventTypes,
+  listEventTypeWaitlistEntries,
   MAX_OPTION_LENGTH,
   MAX_OPTIONS,
   MAX_QUESTION_LABEL,
@@ -16,10 +19,13 @@ import {
   NotificationSettingsSchema,
   PHONE_NUMBER_PATTERN,
   QuestionSchema,
+  removeEventTypeWaitlistEntry,
+  type EventType as ServiceEventType,
   SLUG_PATTERN,
   SUCCESS_REDIRECT_MAX_LENGTH,
   SUCCESS_REDIRECT_PARAMETERS,
   type SuccessRedirectParameter,
+  setEventTypeWaitlist,
   updateEventType,
 } from '@hourmere/scheduling'
 import {
@@ -48,6 +54,9 @@ import {
 
 const L = EVENT_TYPE_LIMITS
 
+// Location options remain service-only until their REST/MCP/CLI contracts are introduced.
+const eventTypeResponse = ({ locations: _locations, ...eventType }: ServiceEventType) => eventType
+
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
   zoom: { kind: z.literal('zoom'), autoCreate: z.literal(true).optional() },
@@ -74,7 +83,7 @@ const locationKinds = {
 }
 const locationDoc = {
   description:
-    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set.',
+    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
 }
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
@@ -82,7 +91,11 @@ const Location = z
   .discriminatedUnion('kind', [
     z.object(locationKinds.googleMeet),
     z.object(locationKinds.zoom),
-    z.object(locationKinds.phone),
+    z.object({
+      ...locationKinds.phone,
+      number: locationKinds.phone.number.optional(),
+      askInvitee: z.literal(true).optional(),
+    }),
     z.object(locationKinds.inPerson),
     z.object(locationKinds.link),
   ])
@@ -92,7 +105,17 @@ const LocationInput = z
   .discriminatedUnion('kind', [
     z.strictObject(locationKinds.googleMeet),
     z.strictObject(locationKinds.zoom),
-    z.strictObject(locationKinds.phone),
+    z
+      .strictObject({
+        ...locationKinds.phone,
+        number: locationKinds.phone.number.optional(),
+        askInvitee: z.literal(true).optional(),
+      })
+      .refine(
+        (phone): phone is Extract<LocationSettings, { kind: 'phone' }> =>
+          (phone.number !== undefined) !== (phone.askInvitee === true),
+        { message: 'Phone requires exactly one of number or askInvitee: true' },
+      ),
     z.strictObject(locationKinds.inPerson),
     z.strictObject(locationKinds.link),
   ])
@@ -221,6 +244,42 @@ const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
 const minMax = ({ min, max }: { min: number; max: number }) => ({ minimum: min, maximum: max })
 
+export const WaitlistSettings = z.object({ enabled: z.boolean() }).openapi('WaitlistSettings')
+const WaitlistSettingsInput = z
+  .strictObject({ enabled: z.boolean() })
+  .openapi('WaitlistSettingsInput', {
+    description:
+      'Off by default. Supported only for personal and team individual events with one current verified host. Disabling removes waiting entries; enabling again never restores them.',
+  })
+export const WaitlistEntryPage = z
+  .object({
+    data: z.array(
+      z.object({
+        id: z.uuid(),
+        state: z.enum([
+          'pending_verification',
+          'active',
+          'notified',
+          'booked',
+          'removed',
+          'expired',
+        ]),
+        email: z.string().nullable(),
+        name: z.string().nullable(),
+        preferredWindow: z
+          .object({ start: z.iso.datetime(), end: z.iso.datetime(), timeZone: z.string() })
+          .nullable(),
+        createdAt: z.iso.datetime(),
+        lastNotifiedAt: z.iso.datetime().nullable(),
+      }),
+    ),
+    nextAfter: z.string().nullable(),
+  })
+  .openapi('WaitlistEntryPage', {
+    description:
+      'Manager-only page. Erased contact fields stay null; no verification or management capabilities are returned.',
+  })
+
 const fields = {
   slug: z.string().openapi({
     description:
@@ -291,6 +350,7 @@ export const EventType = z
     zoomConnectionId: z.uuid().nullable().optional(),
     questions: z.array(Question),
     notifications: NotificationSettings,
+    waitlist: WaitlistSettings,
     successRedirect: SuccessRedirect.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -319,6 +379,7 @@ export const EventTypeInput = z
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
+    waitlist: WaitlistSettingsInput.optional(),
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
@@ -351,6 +412,7 @@ export const EventTypeUpdate = z
     zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
+    waitlist: WaitlistSettingsInput.optional(),
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
@@ -395,6 +457,8 @@ const invalid =
   'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
+const locationOptionsConflict =
+  'location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
@@ -403,6 +467,132 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   })
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/event-types/{id}/waitlist',
+        operationId: 'getEventTypeWaitlist',
+        summary: 'Read waitlist settings as an event manager',
+        request: { params: IdParams },
+        responses: {
+          200: { description: 'Current settings', content: json(WaitlistSettings) },
+          ...errorResponses({ 403: forbidden, 404: notFound }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getEventTypeWaitlist(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').id,
+          ),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, 1024),
+        method: 'put',
+        path: '/api/v1/event-types/{id}/waitlist',
+        operationId: 'setEventTypeWaitlist',
+        summary: 'Enable or disable an event waitlist',
+        request: {
+          params: IdParams,
+          headers: ExpectedOrganizationHeaders,
+          body: { content: json(WaitlistSettingsInput), required: true },
+        },
+        responses: {
+          200: { description: 'Saved settings', content: json(WaitlistSettings) },
+          ...errorResponses({
+            400: 'invalid_request, waitlist_unsupported',
+            403: forbidden,
+            404: notFound,
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await setEventTypeWaitlist(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/event-types/{id}/waitlist/entries',
+        operationId: 'listWaitlistEntries',
+        summary: 'List waitlist entries as an event manager',
+        description:
+          'Personal owners and team owners/admins only. Ordinary team members cannot read contacts or entry preferences. Read API-key scope is required.',
+        request: {
+          params: IdParams,
+          query: z.object({
+            after: z.uuid().optional(),
+            limit: z.coerce.number().int().min(1).max(100).optional(),
+          }),
+        },
+        responses: {
+          200: { description: 'Bounded entry page', content: json(WaitlistEntryPage) },
+          ...errorResponses({
+            400: 'invalid_limit, invalid_cursor',
+            403: forbidden,
+            404: notFound,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await listEventTypeWaitlistEntries(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').id,
+            c.req.valid('query'),
+          ),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'delete',
+        path: '/api/v1/event-types/{id}/waitlist/entries/{entryId}',
+        operationId: 'removeWaitlistEntry',
+        summary: 'Remove an entry as an event manager',
+        description:
+          'Idempotent while the entry is retained. Immediately erases contact data and cancels pending mail. Sends no removal email and never changes a terminal entry back to waiting.',
+        request: {
+          params: IdParams.extend({ entryId: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+        },
+        responses: {
+          200: {
+            description: 'Removed or already terminal',
+            content: json(z.object({ removed: z.literal(true) })),
+          },
+          ...errorResponses({
+            403: forbidden,
+            404: 'event_type_not_found, waitlist_entry_not_found',
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await removeEventTypeWaitlistEntry(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('param').entryId,
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({
@@ -434,10 +624,12 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await updateEventType(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('param').id,
-            c.req.valid('json'),
+          eventTypeResponse(
+            await updateEventType(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('param').id,
+              c.req.valid('json'),
+            ),
           ),
           200,
         ),
@@ -491,7 +683,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       async (c) =>
         c.json(
           {
-            data: await listEventTypes(serviceContext(deps, c.var.principal)),
+            data: (await listEventTypes(serviceContext(deps, c.var.principal))).map(
+              eventTypeResponse,
+            ),
           },
           200,
         ),
@@ -522,9 +716,11 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await createEventType(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('json'),
+          eventTypeResponse(
+            await createEventType(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('json'),
+            ),
           ),
           201,
         ),
@@ -544,7 +740,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await getEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          eventTypeResponse(
+            await getEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          ),
           200,
         ),
     )
@@ -557,6 +755,8 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/event-types/{id}',
         operationId: 'updateEventType',
         summary: 'Change an event type',
+        description:
+          'An unchanged legacy location preserves the complete option list. A changed legacy location edits a single unlabelled option in place; changing its kind allocates a new option id. Multiple or labelled options require an option-aware locations write and return location_options_conflict.',
         request: {
           params: IdParams,
           headers: ExpectedOrganizationHeaders,
@@ -568,16 +768,18 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
             400: invalid,
             403: forbidden,
             404: notFound,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${locationOptionsConflict}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
       async (c) =>
         c.json(
-          await updateEventType(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('param').id,
-            c.req.valid('json'),
+          eventTypeResponse(
+            await updateEventType(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('param').id,
+              c.req.valid('json'),
+            ),
           ),
           200,
         ),
@@ -610,9 +812,11 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await activateRoundRobin(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            c.req.valid('param').id,
+          eventTypeResponse(
+            await activateRoundRobin(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              c.req.valid('param').id,
+            ),
           ),
           200,
         ),

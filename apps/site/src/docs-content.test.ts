@@ -358,7 +358,7 @@ describe('Google self-hosting guidance', () => {
       '`GOOGLE_CLIENT_ID`',
       '`GOOGLE_CLIENT_SECRET`',
       '`PUBLIC_URL`',
-      'docker compose up -d --wait',
+      './scripts/compose-up.sh -d --wait',
     ]) {
       expect(source).toContain(value)
     }

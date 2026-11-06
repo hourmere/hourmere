@@ -3,6 +3,80 @@ export const admin = {
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+  'Checking waitlist management access…': 'Checking waitlist management access…',
+  'Could not check waitlist management access. Try again.':
+    'Could not check waitlist management access. Try again.',
+  'Not notified yet': 'Not notified yet',
+
+  'Booking waitlist': 'Booking waitlist',
+  'Only team owners and admins can manage the waitlist.':
+    'Only team owners and admins can manage the waitlist.',
+  'Waitlist management is unavailable for this account.':
+    'Waitlist management is unavailable for this account.',
+  'Let invitees join a waitlist when no times are available':
+    'Let invitees join a waitlist when no times are available',
+  'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
+    'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.',
+  'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).':
+    'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).',
+  'View waitlist entries': 'View waitlist entries',
+  'Pending verification': 'Pending verification',
+  'Waiting for a time': 'Waiting for a time',
+  Notified: 'Notified',
+  Removed: 'Removed',
+  'Waitlist entries': 'Waitlist entries',
+  'Loading waitlist entries…': 'Loading waitlist entries…',
+  'Could not load waitlist entries.': 'Could not load waitlist entries.',
+  '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.':
+    '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.',
+  'No waitlist entries.': 'No waitlist entries.',
+  'Contact details cleared': 'Contact details cleared',
+  'Requested period': 'Requested period',
+  'Last notified': 'Last notified',
+  'Notification time unavailable': 'Notification time unavailable',
+  'Remove entry': 'Remove entry',
+  'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.':
+    'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.',
+  'Could not remove the waitlist entry.': 'Could not remove the waitlist entry.',
+  'Back to first page': 'Back to first page',
+  'Next page': 'Next page',
+  Refresh: 'Refresh',
+
+  'Enter button text so visitors can identify the button.':
+    'Enter button text so visitors can identify the button.',
+  Embed: 'Embed',
+  'More actions for {0}': 'More actions for {0}',
+  'Embed {0}': 'Embed {0}',
+  'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
+    'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.',
+  'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:':
+    'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:',
+  'Allowed website origins': 'Allowed website origins',
+  'Loading instance settings…': 'Loading instance settings…',
+  'This event type is inactive. Enable it and save before generating embed code.':
+    'This event type is inactive. Enable it and save before generating embed code.',
+  'Complete the saved event setup before generating embed code.':
+    'Complete the saved event setup before generating embed code.',
+  'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.':
+    'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.',
+  'Embed mode': 'Embed mode',
+  Inline: 'Inline',
+  'Popup button': 'Popup button',
+  'Initial height (pixels)': 'Initial height (pixels)',
+  'Use a whole number from 240 to 2000. The widget resizes automatically.':
+    'Use a whole number from 240 to 2000. The widget resizes automatically.',
+  'Button text': 'Button text',
+  'Embed code': 'Embed code',
+  'Copy embed code': 'Copy embed code',
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.',
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.':
+    'This saved booking address cannot be embedded. Use a saved personal or team booking link.',
+  'Could not generate embed code. Check the embed settings and try again.':
+    'Could not generate embed code. Check the embed settings and try again.',
+  'Book a meeting': 'Book a meeting',
   'After booking': 'After booking',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
     'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.',
@@ -680,8 +754,8 @@ export const admin = {
     'Review meeting details and manage this booking.',
   'Notification language': 'Notification language',
   'Choose a supported notification language.': 'Choose a supported notification language.',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
-    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
+    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
   'Connect a calendar account to get started.': 'Connect a calendar account to get started.',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',

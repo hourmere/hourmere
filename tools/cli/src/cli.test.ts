@@ -93,6 +93,40 @@ function clientSourceCopy(change?: readonly [string, string]): typeof callTool {
 }
 
 describe('CLI transport and arguments', () => {
+  const waitlistToken =
+    '12345678-1234-4123-8123-123456789abc.synthetic_waitlist_capability_sentinel_123456'
+  async function verifyWaitlistPrivacy(runner = runCli, privateFile = false) {
+    const outputPath = privateFile ? join(await dir(), 'waitlist-result.json') : undefined
+    const result = await run(
+      ['book', '--input', '-', ...(outputPath ? ['--output', outputPath] : [])],
+      { handle: 'host', slug: 'intro', waitlistToken, idempotencyKey: 'waitlist-test-key' },
+      { runner, fetch: async () => response({ nested: { message: `echo ${waitlistToken}` } }) },
+    )
+    expect(result.code).toBe(0)
+    const printed = outputPath ? await readFile(outputPath, 'utf8') : result.stdout
+    expect(printed.includes(waitlistToken)).toBe(false)
+    expect(JSON.parse(printed).nested.message).toBe('echo [redacted]')
+  }
+  it('accepts waitlist attribution only through JSON and redacts echoed capabilities', async () => {
+    await verifyWaitlistPrivacy()
+    await verifyWaitlistPrivacy(runCli, true)
+    const result = await run(['book', '--waitlist-token', waitlistToken])
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+    expect(result.stderr.includes(waitlistToken)).toBe(false)
+  })
+  it.each([false, true])(
+    'kills removed waitlist capability privacy in privateFile=%s',
+    async (privateFile) => {
+      const change: readonly [string, string] = privateFile
+        ? ['[key, oneTimeToken, waitlistToken]', '[key, oneTimeToken]']
+        : ['secrets.push(input.waitlistToken)', '']
+      await verifyWaitlistPrivacy(sourceCopy(), privateFile)
+      await expect(verifyWaitlistPrivacy(sourceCopy(change), privateFile)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
   const oneTimeToken = 'synthetic_one_time_capability_sentinel_1234'
   async function verifyOneTimePrivacy(runner = runCli, privateFile = false) {
     const outputPath = privateFile ? join(await dir(), 'one-time-result.json') : undefined
@@ -157,7 +191,7 @@ describe('CLI transport and arguments', () => {
     ['stdout capability redaction', ['secrets.push(input.oneTimeToken)', ''], verifyOneTimePrivacy],
     [
       'private file capability redaction',
-      ['[key, oneTimeToken]', '[key]'],
+      ['[key, oneTimeToken, waitlistToken]', '[key, waitlistToken]'],
       (runner) => verifyOneTimePrivacy(runner, true),
     ],
     [

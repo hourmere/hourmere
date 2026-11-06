@@ -208,6 +208,22 @@ describe('public direct slot links', () => {
     expect(screen.getByRole('button', { name: 'Confirm booking' })).toBeDefined()
   })
 
+  it('keeps the unavailable direct-slot status and waitlist offer for the requested empty day', async () => {
+    const api = fakeApi(eventRoutes({ ...EVENT, waitlist: { enabled: true } }, []))
+    renderApp(`/ada/intro${hint()}`)
+    const notice = await screen.findByText(UNAVAILABLE)
+    expect(notice.getAttribute('role')).toBe('status')
+    await picker()
+    expect(await screen.findByRole('button', { name: 'Join the waitlist' })).toBeDefined()
+    expect(
+      document
+        .querySelector('[data-day="2026-11-02"]')
+        ?.parentElement?.getAttribute('aria-selected'),
+    ).toBe('true')
+    expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+    expect(api.calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+
   it('uses the safe specific duration fallback without substituting the default', async () => {
     const api = fakeApi(
       eventRoutes({ ...EVENT, durationMinutes: 60, allowedDurationsMinutes: [60] }, [START]),

@@ -1,6 +1,42 @@
 export const common = {
   'This imported booking is read-only and managed in the original system.':
     'Cette réservation importée est en lecture seule et reste gérée dans le système d’origine.',
+  'This location is unavailable. Contact the host to book.':
+    'Ce lieu de rendez-vous est indisponible. Contactez l’hôte pour réserver.',
+  'The host or the team’s owners and admins can see your email, name and requested period.':
+    'L’hôte ou les propriétaires et les administrateurs de l’équipe peuvent voir votre adresse e-mail, votre nom et la période demandée.',
+  '{count} second': '{count} seconde',
+  '{count} seconds': '{count} secondes',
+  '{count} minute': '{count} minute',
+  '{count} minutes': '{count} minutes',
+  '{count} hour': '{count} heure',
+  '{count} hours': '{count} heures',
+
+  'To join the waitlist, choose the default meeting length ({duration}).':
+    'Pour rejoindre la liste d’attente, choisissez la durée par défaut ({duration}).',
+  'Join the waitlist': 'Rejoindre la liste d’attente',
+  'No available times in this period.': 'Aucun créneau n’est disponible sur cette période.',
+  'If a time opens, everyone eligible may be notified. Nothing is reserved; the first successful booking wins.':
+    'Si un créneau se libère, toutes les personnes remplissant les conditions requises peuvent être prévenues. Rien n’est réservé ; le créneau revient à la première personne qui réussit à le réserver.',
+  'From {start} to {end} ({timeZone})': 'Du {start} au {end} ({timeZone})',
+  'You can stay on the waitlist until {date}. Unconfirmed requests expire after 24 hours.':
+    'L’attente prend fin le {date}. Les demandes non confirmées expirent après 24 heures.',
+  'I agree to receive waitlist emails for this period. I can leave using the link in any waitlist email.':
+    'J’accepte de recevoir des e-mails de la liste d’attente pour cette période. Je peux quitter la liste en utilisant le lien présent dans n’importe lequel de ces e-mails.',
+  'Leaving clears your contact details. We keep hashed (non-readable) records for 2 days to prevent abuse and for up to 64 days to avoid repeat notifications.':
+    'Quitter la liste efface vos coordonnées. Nous conservons des enregistrements hachés (non lisibles) pendant 2 jours pour prévenir les abus et jusqu’à 64 jours pour éviter les notifications répétées.',
+  'Check your email to confirm': 'Consultez vos e-mails pour confirmer',
+  'If your request can be accepted, we will send a confirmation link. Sending limits may prevent delivery. Submitting the join form again does not resend the confirmation email.':
+    'Si votre demande peut être acceptée, nous enverrons un lien de confirmation. Des limites d’envoi peuvent empêcher l’e-mail de vous parvenir. Envoyer à nouveau le formulaire ne déclenche pas de nouvel envoi de l’e-mail de confirmation.',
+  'Resend confirmation email': 'Renvoyer l’e-mail de confirmation',
+  'Confirmation email requested. Check your email; sending limits may prevent delivery.':
+    'E-mail de confirmation demandé. Consultez votre messagerie ; l’envoi est soumis à des limites.',
+  'Agree to receive waitlist emails before joining.':
+    'Acceptez de recevoir les e-mails de la liste d’attente avant de vous inscrire.',
+  'The waitlist is unavailable for this period. Check available times and try again.':
+    'La liste d’attente n’est pas disponible pour cette période. Consultez les créneaux disponibles et réessayez.',
+  'Joining…': 'Inscription en cours…',
+  'Sending…': 'Envoi en cours…',
   'We could not use the time details in this link. Please choose a time.':
     'Nous n’avons pas pu utiliser les informations de date et d’heure de ce lien. Veuillez choisir un créneau.',
   'This meeting length is no longer offered. Please choose a time again.':
@@ -301,8 +337,8 @@ export const common = {
   'To be confirmed by the host': 'À confirmer par l’hôte',
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     'Pour consulter, replanifier ou annuler une réservation, ouvrez le lien de votre e-mail de confirmation ou celui que vous avez conservé lors de la réservation. Pour votre sécurité, il est retiré de la barre d’adresse après ouverture ; vous devrez donc utiliser à nouveau le lien pour recharger cette page.',
-  'Too many requests from your network. Try again in {0} seconds.':
-    'Trop de requêtes depuis votre réseau. Réessayez dans {0} s.',
+  'Too many requests from your network. Try again in {duration}.':
+    'Trop de requêtes depuis votre réseau. Réessayez dans {duration}.',
   'Too many requests from your network. Wait a minute and try again.':
     'Trop de requêtes depuis votre réseau. Attendez une minute et réessayez.',
   'Too many requests. Wait a minute and try again.':

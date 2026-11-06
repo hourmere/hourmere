@@ -423,6 +423,131 @@ Hosts can configure the list and default in the personal or team event editor, R
 require `full` scope. See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations)
 for host steps, invitee selection and the shared-rule limitations.
 
+## Event location options contract
+
+`event_types.locations` / internal service `locations` is an ordered list of 1–5
+location options, or SQL/service null for no location. An empty list is invalid.
+Each option has a stable `id` (1–64 ASCII letters, digits, `_` or `-`, excluding
+`__proto__`, as for question and reminder rule IDs), a `kind`,
+optional public single-line `label` (1–100 characters), optional `isDefault: true`,
+and the settings below. IDs and kinds must each be distinct within a list: this
+version offers at most one option of each kind, rather than several addresses or
+phone numbers. Order is preserved. At most one option may be explicitly default;
+otherwise the first is the effective default. A single option uses the existing
+booking flow without showing a choice.
+
+| Kind | Settings |
+|---|---|
+| `google_meet`, `zoom` | Optional `autoCreate: true`, preserving today's explicit conference opt-in. Without it, retain today's passive kind-only behavior. Generated URLs are never event-type settings. |
+| `phone` | Exactly one of `number` (the host's E.164 number, `+` and 7–15 digits, first digit nonzero) or `askInvitee: true` (collect the invitee's E.164 number at booking). |
+| `in_person` | Required single-line `address`, 1–500 characters. |
+| `link` | Required absolute HTTP(S) `url`, at most 2000 characters before and after normalization. |
+
+Unknown keys, false default/opt-in flags, malformed Unicode and control characters
+in text are rejected. Labels and addresses are trimmed; link URLs are normalized
+using the URL parser. Validation belongs to the shared scheduling service; database
+constraints also enforce the list envelope, identities, kinds and default count.
+Option IDs survive settings edits within the same kind and reordering. A kind change
+replaces the option identity. Removing and recreating an option must allocate a new ID
+so a stale page cannot accidentally select a different option under the old ID.
+Internal complete-list writers are responsible for these identity rules.
+
+`event_types.location` and service `location` remain compatibility fields derived
+from the explicit default, or first/only option, with `id`, `label` and `isDefault`
+removed. Legacy updates supplying a value exactly equal to this compatibility projection
+(object key order does not matter) are a no-op for the complete list, preserving IDs,
+labels, the default marker, settings and order without normalization. A different legacy
+value may edit a single unlabelled option: settings change in place and retain its ID
+and default marker; a kind change allocates a new ID. Null clears a single unlabelled
+option; a later recreation gets a new ID. Creating an event through the legacy field
+initially uses `legacy`, as does historical backfill.
+A different value, including null, for several options or an option with a label returns
+conflict `location_options_conflict` (REST 409; MCP tool error), instructing the client to
+use `locations`. Rejecting the ambiguous edit avoids guessing a target or dropping data.
+Internal writes supply `locations` as a complete replacement; specifying both fields in
+one service write is invalid. Unrelated edits preserve the list and its order. Migration 0056 wraps every existing non-null
+event location in `{ id: "legacy", ...location }` without normalizing its settings
+or changing timestamps; existing nulls stay null. A compatibility trigger also
+supports old direct inserts and location-only updates with the same identity and conflict
+rules (SQLSTATE `P0001`, message prefixed `location_options_conflict`). Explicit changed
+lists take precedence in SQL. Later data migrations that echo `location` are harmless;
+ones that intentionally change a multi-option or labelled configuration must update
+`locations` explicitly instead.
+
+The additive transport contract for later work is `locations` beside the existing
+`location`; configuration REST, MCP and CLI must introduce writes together. Future
+booking requests use `locationOptionId` and, only for `askInvitee`, `inviteePhone`.
+Omitting the option chooses the effective default; an unknown/removed ID returns
+`invalid_location_choice`, never silently falls back. Invalid or missing collected
+phone data returns `invalid_invitee_phone`. The pure `resolveLocationChoice` helper
+performs this resolution without database or provider I/O. This migration/model
+slice does not expose `locations` through REST/OpenAPI, MCP or CLI, add booking
+request fields, or enable public choice or per-choice conference creation.
+The existing protected event-type response's `location` schema additionally accepts
+`{ kind: "phone", askInvitee: true }` so reads of internal configuration remain
+well-typed. Legacy service, REST, MCP and CLI writes accept this phone value only as
+an unchanged echo of an existing saved location. Creating or changing to it returns
+`invalid_location` until public booking can collect the invitee’s phone number. New phone
+configuration requires the host’s number; a host number and `askInvitee` together remain
+invalid. The published `EventType.location` retains its discriminated `oneOf` shape, with optional
+`number`/`askInvitee` fields on its single phone branch. The current editor preserves this
+configuration and omits an unchanged location when saving unrelated settings.
+Until the booking follow-up adds phone collection, existing personal, team and one-time
+booking paths reject an effective default `askInvitee` location with
+`invalid_invitee_phone` before persistence, rechecking under the booking locks. They
+cannot create a phone booking without a number from this configuration; exact replays
+of existing bookings retain their previous result.
+
+A new booking will store its chosen configuration snapshot in
+`bookings.location_option`, including its ID, kind, label/default marker and settings.
+`bookings.location` remains the resolved values used by current protected booking
+reads, notifications and calendars: host or collected invitee phone, saved address
+or link, or the conference kind/opt-in until its ready join URL is added by existing
+conference reconciliation. The resolver returns both `locationOption` and `location`;
+for invitee phone, the configuration snapshot retains `askInvitee: true` and the
+resolved location contains the supplied number. Neither configuration edits nor
+conference URL updates rewrite the chosen snapshot. Snapshot storage is private,
+just like resolved contact details, and follows the booking's retention policy.
+Migration 0056 backfills each existing non-null resolved booking location as
+`{ id: "legacy", ...location }`, including any historical ready URL; null remains
+null. These historical snapshots cannot recover the original option settings or
+labels. Compatibility inserts that omit a snapshot similarly capture their resolved
+location; the next booking task will explicitly persist the resolver's snapshot.
+Historical resolved booking payloads with custom kinds remain intact in snapshots;
+this storage compatibility does not admit those kinds into new event options.
+
+Rescheduling keeps the original option snapshot and resolved phone/address/link,
+even if the host removes or edits that option. Automatic conferences retain existing
+same-conference reschedule behavior and pinned organizer/destination identities.
+Changing the location on reschedule is outside this contract. The booking follow-up
+must copy `location_option` to successors, including a legacy snapshot, and include
+explicit choice and collected phone in the existing idempotency fingerprint; exact
+replays must return the original snapshot and resolved result without reevaluation.
+
+Public option discovery is a whitelist of `id`, `kind`, optional public `label` and
+default marker, plus `askInvitee: true` when a phone must be collected. It never
+exposes host numbers, addresses, saved link URLs, connection IDs, organizer account
+details, credentials or generated URLs. Existing public catalog projections remain
+kind-only in this slice. Hosts must treat option labels as public text. Protected
+booking results reveal resolved location details under today's access rules; raw
+configuration snapshots are not added to public responses.
+
+All options share the event's hosts, durations and booking rules. Team ownership and
+write permissions stay unchanged. Every automatic option is checked on configuration
+writes, including non-default options. Booking-time readiness must be checked again
+under the existing booking locks: individual Meet uses that host's capable destination;
+collective Meet uses an explicitly selected required host as organizer; round-robin
+Meet uses the actually assigned host and its own capable destination. Do not borrow
+another host's account. Automatic Zoom remains limited to individual scheduling with
+one explicitly authorized host and that host's pinned meeting-mode connection;
+collective and round-robin Zoom are rejected even as non-default choices. The pure
+resolver consumes a trusted readiness snapshot rather than querying accounts. If the
+chosen automatic option cannot be honored for the actual assigned host/organizer,
+return conflict `location_unavailable`, without provider or private account details;
+do not substitute a location or a different host after assignment. Existing service
+configuration errors and conference readiness rules remain in force. No readiness
+failure is presented as proof that the host has not configured an account.
+
 ## JSON columns
 
 Validated by the application (zod), not by the database:
@@ -431,7 +556,10 @@ Validated by the application (zod), not by the database:
   `[{ "start": "09:00", "end": "17:00" }]`; `"end"` may be `"24:00"`. Missing or empty
   day = unavailable. This is `@hourmere/core`'s `WeeklyHours` type.
 - `schedule_overrides.intervals`: `[]` (unavailable) or the same interval list.
-- `event_types.location` / `bookings.location`: `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
+- `event_types.locations`: ordered nullable option list, as specified above;
+  `event_types.location` is its default/only compatibility projection.
+- `bookings.location_option`: chosen option snapshot; `bookings.location` is the
+  resolved `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions`: booking-form fields beyond name and email, at most 20:
   `[{ "id": "company", "label": "Company", "type": "short_text", "required": true }]`.
   `id` is 1–64 letters, digits, `_` or `-`, unique within the event type, and not
@@ -1000,9 +1128,14 @@ stored settings or changing default reminders.
 ## Internal full-booking waitlists
 
 Migration 0051 adds an opt-in `waitlist_enabled` flag, defaulting to false without importing
-historical booking contacts. The internal services support personal and team individual
-event types with exactly one eligible host. Public join UI, administration summaries and general REST/MCP/CLI operations
-are separate work. The delivery layer sends encrypted verification intents and availability
+historical booking contacts. The services support personal and team individual
+event types with exactly one eligible host. Hosts opt in from the event-type editor,
+REST, MCP or CLI. Public pages offer enrollment after a successful empty availability
+query for the selected date or visible range, including direct hidden links and approved
+embeds. The initial bounded automatic month advance still looks for free times before
+offering a waitlist for the final visible empty range; selected dates and manually browsed
+months stay in place. Waitlists use the event's default meeting length; invitees choosing another length
+must switch to that default to join. The delivery layer sends encrypted verification intents and availability
 candidates through the shared mail pipeline, without a new schema migration.
 
 `waitlist_entries` keeps fixed UTC preference windows and consent, with pending verification,
@@ -1020,6 +1153,13 @@ well as the fifteen-minute resend cooldown and one hundred pending/live entries 
 mailbox/IP HMACs for two elapsed days. IPv4-mapped socket addresses normalize to IPv4;
 IPv6 zone identifiers are stripped and other IPv6 addresses share their /64 bucket. The
 service accepts only an IP resolved by a trusted transport and stores no raw address.
+Every well-formed, publicly eligible join or resend records an IP/event request before
+mailbox-state decisions, including duplicates, cooldowns and suppressed admissions.
+A request-only row uses a separate per-request digest in the required email-hash column;
+only an admitted verification generation replaces that digest with the mailbox HMAC.
+Mailbox budgets therefore count generations, while IP and event budgets count requests
+regardless of whether the address is listed. IP refusals remain 429; event refusals remain
+the same generic 202. The shared ledger survives removal and retains no readable contacts.
 Admission holds the accounting-key fence, then an event share lock compatible with ordinary
 bookings. Availability computation precedes the instance-wide admission fence, which covers
 only expiry, rolling budgets, duplicate/capacity checks and the bounded write. Database time
@@ -1064,6 +1204,27 @@ minimal terminal metadata within seven days. Rotating the accounting secret reti
 erases old entries/ciphertext/capabilities before admission or workers resume. Old secrets
 are not retained; mailbox limits and slot dedupe cannot span that explicit key-rotation
 exception. Existing global send accounting remains unchanged.
+
+Waitlist settings contain only `enabled`, default false. Omitted PATCH settings preserve
+the current value; the editor sends them only when they differ from its session baseline.
+Protected event-type configuration includes the setting. The narrow settings endpoint and
+paginated entries list require the personal owner or a current team owner/admin.
+Ordinary team configuration visibility does not authorize access to contacts. The public
+form discloses before consent that authorized managers can see the submitted email, name
+and requested period. This approved contact-list scope supersedes the design contract’s
+earlier aggregate-only host-view proposal; it adds no export or manual enrollment. Entries
+include retained email/name, state, UTC preference window and display zone, creation time
+and the latest SMTP-accepted notification time. Cleanup preserves exactly the newest
+non-null acceptance receipt per retained entry; older receipts still use bounded cleanup,
+and the final receipt cascades with the entry at terminal state plus seven elapsed days.
+A null value means no retained accepted notice. Pending and active entries show
+“Not notified yet”; notified or booked entries with no retained timestamp show the
+unknown-time wording because historical receipts may have been purged. Cleared contact data stays null; no token,
+digest or encrypted payload is returned. Host removal is idempotent for retained entries,
+immediately erases live contacts and pending work, and sends no removal email. Existing
+retention and terminal-state cleanup remain unchanged. API keys need `read` or `full` for
+settings/list reads and `full` for settings/removal writes; public join and explicit resend
+retain the same admission limits through REST, MCP and CLI.
 
 The populated 0049 predecessor test verifies historical contacts, management hashes,
 reschedule chains, calendars, conferences, mail ledgers and retained jobs byte-for-byte,

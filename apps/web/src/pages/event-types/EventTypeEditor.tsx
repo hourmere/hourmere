@@ -61,6 +61,7 @@ import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
 import { SuccessRedirectEditor } from './SuccessRedirectEditor.tsx'
+import { WaitlistEditor } from './WaitlistEditor.tsx'
 import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
 interface Loaded {
@@ -775,6 +776,21 @@ function EventTypeForm({
               </div>
             )}
           </section>
+
+          <WaitlistEditor
+            enabled={draft.waitlistEnabled}
+            supported={
+              draft.schedulingType === 'individual' &&
+              (me.organization.personal
+                ? draft.hostUserIds.length <= 1
+                : draft.hostUserIds.length === 1)
+            }
+            eventTypeId={saved?.id}
+            savedVersion={shareFocusVersion}
+            errors={errors}
+            disabled={contextChanged}
+            onChange={(enabled) => set('waitlistEnabled', enabled)}
+          />
 
           <NotificationsEditor
             notifications={draft.notifications}

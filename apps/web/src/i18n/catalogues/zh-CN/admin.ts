@@ -3,6 +3,78 @@ export const admin = {
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
 
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    '无法在此处更改已保存的地点选项。请保留原地点后重试。',
+  'Checking waitlist management access…': '正在检查候补名单管理权限……',
+  'Could not check waitlist management access. Try again.': '无法检查候补名单管理权限，请重试。',
+  'Not notified yet': '尚未通知',
+
+  'Booking waitlist': '预约候补',
+  'Only team owners and admins can manage the waitlist.':
+    '只有团队所有者和管理员可以管理候补名单。',
+  'Waitlist management is unavailable for this account.': '此账户目前无法使用候补管理。',
+  'Let invitees join a waitlist when no times are available':
+    '没有可预约时间时，允许受邀人加入候补名单',
+  'Eligible invitees are notified together. Nothing is reserved; the first successful booking wins. Turning this off removes the current entries without sending an email.':
+    '系统会统一向符合条件的受邀人发送通知。不会预留任何时段，最先成功预约的人获得该时段。关闭此功能会移除现有候补条目，且不会发送邮件。',
+  'Waitlists are available only for one-on-one event types with a single host (not round-robin or collective).':
+    '候补名单仅适用于只有一位主持人的一对一活动类型（不含轮询和集体活动）。',
+  'View waitlist entries': '查看候补名单',
+  'Pending verification': '等待邮箱验证',
+  'Waiting for a time': '等待空闲时段',
+  Notified: '已通知',
+  Removed: '已移除',
+  'Waitlist entries': '候补名单',
+  'Loading waitlist entries…': '正在加载候补名单……',
+  'Could not load waitlist entries.': '无法加载候补名单。',
+  '“Last notified” shows the latest time a mail server accepted a notification email, based on the records still retained. This does not confirm inbox delivery. Older notification records may have been cleared.':
+    '“最近通知”显示现有记录中邮件服务器最近一次接受通知邮件的时间，并不代表邮件已送达收件箱。较早的通知记录可能已被清除。',
+  'No waitlist entries.': '暂无候补条目。',
+  'Contact details cleared': '联系信息已清除',
+  'Requested period': '期望时段',
+  'Last notified': '最近通知',
+  'Notification time unavailable': '通知时间未知',
+  'Remove entry': '移除条目',
+  'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.':
+    '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
+  'Could not remove the waitlist entry.': '无法移除此候补条目。',
+  'Back to first page': '返回第一页',
+  'Next page': '下一页',
+  Refresh: '刷新',
+
+  'Enter button text so visitors can identify the button.':
+    '请输入按钮文字，以便访客了解按钮的用途。',
+  Embed: '嵌入',
+  'More actions for {0}': '{0}的更多操作',
+  'Embed {0}': '嵌入{0}',
+  'Embedding configuration is unavailable. Ask the instance operator to confirm allowed website origins.':
+    '暂时无法获取嵌入配置。请联系实例运维人员确认允许的网站来源。',
+  'Embedding is disabled. The instance operator must set EMBED_ALLOWED_ORIGINS and restart the web process. For example:':
+    '嵌入功能已停用。实例运维人员需要设置 EMBED_ALLOWED_ORIGINS 并重启网页服务。例如：',
+  'Allowed website origins': '允许的网站来源',
+  'Loading instance settings…': '正在加载实例设置……',
+  'This event type is inactive. Enable it and save before generating embed code.':
+    '此活动类型已停用。请先启用并保存，再生成嵌入代码。',
+  'Complete the saved event setup before generating embed code.':
+    '请先完善已保存活动的设置，再生成嵌入代码。',
+  'This event type is unlisted. The embed still works; anyone with the code or direct link can book it.':
+    '此活动类型未公开列出，但仍可嵌入。任何获得代码或直接链接的人都可以预约。',
+  'Embed mode': '嵌入方式',
+  Inline: '内嵌',
+  'Popup button': '弹窗按钮',
+  'Initial height (pixels)': '初始高度（像素）',
+  'Use a whole number from 240 to 2000. The widget resizes automatically.':
+    '请输入 240 到 2000 之间的整数。嵌入组件会自动调整高度。',
+  'Button text': '按钮文字',
+  'Embed code': '嵌入代码',
+  'Copy embed code': '复制嵌入代码',
+  'The instance public URL is unavailable for embedding. Ask the instance operator to check PUBLIC_URL.':
+    '实例的公开网址暂时无法用于嵌入。请联系实例运维人员检查 PUBLIC_URL。',
+  'This saved booking address cannot be embedded. Use a saved personal or team booking link.':
+    '此已保存的预约地址无法嵌入。请使用已保存的个人或团队预约链接。',
+  'Could not generate embed code. Check the embed settings and try again.':
+    '无法生成嵌入代码。请检查嵌入设置，然后重试。',
+  'Book a meeting': '预约会议',
   'After booking': '预约完成后',
   'Offer a Continue link after the booking confirmation. Invitees can review their calendar and manage link before leaving. Clear the URL to turn this off.':
     '在预约确认信息后提供继续访问链接。受邀人离开前可以查看日历信息和管理链接。清空网址即可关闭此功能。',
@@ -645,8 +717,8 @@ export const admin = {
   'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
   'Notification language': '通知语言',
   'Choose a supported notification language.': '请选择支持的通知语言。',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
-    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。在顶栏选择界面语言之前，管理界面也使用此语言；选择后，两种语言互不影响。',
   'Connect a calendar account to get started.': '连接日历账号以开始使用。',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     '此 Google 日历使用{calendarZone}时区；你的可预约时段使用{scheduleZone}时区。预约对应同一时刻；Google 日历通常以{calendarZone}时间显示。',

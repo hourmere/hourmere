@@ -36,11 +36,19 @@ const all = [
   'revoke_one_time_link',
   'list_calendar_connections',
   'list_conference_connections',
+  'get_event_type_waitlist',
+  'set_event_type_waitlist',
+  'list_waitlist_entries',
+  'remove_waitlist_entry',
+  'join_waitlist',
+  'resend_waitlist_verification',
 ]
 const configurationWrites = new Set([
   'create_event_type',
   'update_event_type',
   'set_event_type_notifications',
+  'set_event_type_waitlist',
+  'remove_waitlist_entry',
 ])
 const writes = new Set([
   ...configurationWrites,
@@ -52,12 +60,16 @@ const writes = new Set([
   'create_one_time_link',
   'revoke_one_time_link',
   'set_event_type_notifications',
+  'join_waitlist',
+  'resend_waitlist_verification',
 ])
 const otherReads = new Set([
   'list_schedules',
   'get_schedule',
   'list_calendar_connections',
   'list_conference_connections',
+  'get_event_type_waitlist',
+  'list_waitlist_entries',
   'list_one_time_links',
 ])
 const expected = (scope: ApiKeyScope) =>
@@ -374,6 +386,12 @@ describe('CLI scope parity', () => {
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
+    ['event-waitlist', 'get_event_type_waitlist'],
+    ['set-event-waitlist', 'set_event_type_waitlist'],
+    ['waitlist-entries', 'list_waitlist_entries'],
+    ['remove-waitlist-entry', 'remove_waitlist_entry'],
+    ['join-waitlist', 'join_waitlist'],
+    ['resend-waitlist-verification', 'resend_waitlist_verification'],
     ['one-time-links create', 'create_one_time_link'],
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],

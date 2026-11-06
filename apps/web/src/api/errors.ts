@@ -148,6 +148,9 @@ export function errorMessage(err: unknown): UiText {
   const known: Readonly<Record<string, MessageKey>> = {
     imported_booking_read_only:
       'This imported booking is read-only and managed in the original system.',
+    location_options_conflict:
+      'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+    invalid_invitee_phone: 'This location is unavailable. Contact the host to book.',
     insufficient_scope: 'This API key does not allow this operation.',
     API_KEY_SCOPE_IMMUTABLE: 'API key scope cannot be changed; create a replacement key.',
     SESSION_REQUIRED: 'Use a browser session without an Authorization header.',

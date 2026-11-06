@@ -199,6 +199,7 @@ const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 
 export interface BookingToolsDeps {
   db: Db
+  waitlistSecret?: string | undefined
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
@@ -221,6 +222,7 @@ export interface BookingToolsDeps {
  */
 export function bookingTools({
   db,
+  waitlistSecret,
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
@@ -230,6 +232,7 @@ export function bookingTools({
 }: BookingToolsDeps): Tool[] {
   const pub: PublicContext = {
     db,
+    waitlistSecret,
     now,
     notify,
     automaticMeet,
@@ -323,7 +326,10 @@ export function bookingTools({
   const createBooking = defineTool({
     name: 'create_booking',
     scopeModes: ['personal', 'team', 'oneTimeLink'],
-    privateInput: (args) => typeof args === 'object' && args !== null && 'oneTimeToken' in args,
+    privateInput: (args) =>
+      typeof args === 'object' &&
+      args !== null &&
+      ('oneTimeToken' in args || 'waitlistToken' in args),
     scopeMode: (args) =>
       typeof args === 'object' && args !== null && 'oneTimeToken' in args
         ? 'oneTimeLink'
@@ -370,6 +376,7 @@ export function bookingTools({
           invitee: args.invitee,
           guests: args.guests,
           responses: args.responses,
+          waitlistToken: args.waitlistToken,
           idempotencyKey: args.idempotencyKey,
         },
         origin(call.caller),

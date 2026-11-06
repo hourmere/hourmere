@@ -28,6 +28,7 @@ import {
 import { type Me, useMe } from '../../session.tsx'
 import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
+import { EventEmbedAction } from './EventEmbedAction.tsx'
 import { teamReadinessBlocksSharing, useEventReadiness } from './event-readiness.ts'
 import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
 
@@ -327,13 +328,26 @@ function EventTypeTable({
                   </td>
                 )}
                 <td className="actions">
-                  <Link
-                    to={eventTypePath(e.id)}
-                    className="button button-small"
-                    aria-label={t('Edit {0}', { '0': e.title })}
-                  >
-                    {t('Edit')}
-                  </Link>
+                  <span className="event-row-actions">
+                    <Link
+                      to={eventTypePath(e.id)}
+                      className="button button-small"
+                      aria-label={t('Edit {0}', { '0': e.title })}
+                    >
+                      {t('Edit')}
+                    </Link>
+                    <EventEmbedAction
+                      inMenu
+                      event={{ ...e, isActive }}
+                      bookingPath={
+                        e.schedulingType === 'round_robin' && !roundRobinActive
+                          ? null
+                          : url
+                            ? new URL(url).pathname
+                            : null
+                      }
+                    />
+                  </span>
                 </td>
               </tr>
             )

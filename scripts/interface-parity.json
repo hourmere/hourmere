@@ -67,6 +67,14 @@
     "exemption": "browser-session-only",
     "reason": "Disconnecting Zoom credentials requires a live browser session."
   },
+  "joinPersonalWaitlist": {
+    "mcp": "join_waitlist",
+    "cli": "join-waitlist"
+  },
+  "joinTeamWaitlist": {
+    "mcp": "join_waitlist",
+    "cli": "join-waitlist"
+  },
   "leaveTeam": {
     "exemption": "browser-session-only",
     "reason": "Leaving a team and resolving its scheduling dependencies requires a verified browser session."
@@ -83,6 +91,10 @@
     "exemption": "browser-session-only",
     "reason": "Revoking team membership requires a verified owner/admin browser session and departure handling."
   },
+  "removeWaitlistEntry": {
+    "mcp": "remove_waitlist_entry",
+    "cli": "remove-waitlist-entry"
+  },
   "rescheduleHostBooking": {
     "mcp": "reschedule_booking",
     "cli": "reschedule"
@@ -90,6 +102,14 @@
   "rescheduleManagedBooking": {
     "mcp": "reschedule_booking",
     "cli": "reschedule"
+  },
+  "resendPersonalWaitlist": {
+    "mcp": "resend_waitlist_verification",
+    "cli": "resend-waitlist-verification"
+  },
+  "resendTeamWaitlist": {
+    "mcp": "resend_waitlist_verification",
+    "cli": "resend-waitlist-verification"
   },
   "retryBookingCalendarCopy": {
     "mcp": "retry_calendar_copy",
@@ -114,6 +134,10 @@
   "setEventTypeNotifications": {
     "mcp": "set_event_type_notifications",
     "cli": "set-event-notifications"
+  },
+  "setEventTypeWaitlist": {
+    "mcp": "set_event_type_waitlist",
+    "cli": "set-event-waitlist"
   },
   "submitMcpOAuthConsent": {
     "exemption": "browser-session-only",

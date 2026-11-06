@@ -8,6 +8,7 @@ import {
   interfaceLanguage,
 } from '@hourmere/core/language'
 import { type MailKey, mailMessage as message } from './catalogue.ts'
+import { formatMailDateTime } from './date-time.ts'
 import type { MailAttachment, MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
@@ -156,18 +157,16 @@ const CHINESE_TIME: Intl.DateTimeFormatOptions = {
   hourCycle: 'h23',
 }
 
-// ICU puts a narrow no-break space before AM/PM; a plain space reads the same everywhere.
 const format = (
   time: Temporal.ZonedDateTime,
   options: Intl.DateTimeFormatOptions,
   language: InterfaceLanguage,
 ) =>
-  new Intl.DateTimeFormat(formattingLocale(language), {
-    ...(language === 'zh-CN' && options === TIME ? CHINESE_TIME : options),
-    timeZone: time.timeZoneId,
-  })
-    .format(time.epochMilliseconds)
-    .replace(/[\u00a0\u202f]/g, ' ')
+  formatMailDateTime(
+    time,
+    language === 'zh-CN' && options === TIME ? CHINESE_TIME : options,
+    language,
+  )
 
 /** The same readable zone and date-specific GMT offset used on booking pages. */
 function zoneLabel(time: Temporal.ZonedDateTime, language: InterfaceLanguage): string {

@@ -12,6 +12,9 @@ services:
 
   proxy:
     image: caddy:2.11-alpine
+    # compose-up.sh refreshes this digest so up remounts even an atomically replaced file.
+    labels:
+      io.hourmere.caddyfile-sha256: ${CADDYFILE_SHA256:-}
     environment:
       PUBLIC_URL: ${PUBLIC_URL:?set an https PUBLIC_URL in .env}
     ports:

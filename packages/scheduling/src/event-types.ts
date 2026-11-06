@@ -35,6 +35,16 @@ import {
   timestamp,
 } from './internal.ts'
 import {
+  applyLegacyLocation,
+  compatLocation,
+  type EventTypeLocation,
+  isLegacyLocationEcho,
+  type LocationOption,
+  type LocationSettings,
+  locationOptionsFromLegacy,
+  validateLocationOptions,
+} from './location-options.ts'
+import {
   type NotificationSettings,
   parseNotifications,
   validateNotifications,
@@ -48,15 +58,7 @@ import {
 } from './success-redirect.ts'
 import { cleanText } from './text.ts'
 
-/** Where the meeting happens. Meet and Zoom links are generated per booking. */
-export type EventTypeLocation =
-  | { kind: 'google_meet'; autoCreate?: true }
-  | { kind: 'zoom'; autoCreate?: true }
-  /** The host's number, in E.164 (`+14155550123`). */
-  | { kind: 'phone'; number: string }
-  | { kind: 'in_person'; address: string }
-  /** Any other video or meeting link (http or https). */
-  | { kind: 'link'; url: string }
+export type { EventTypeLocation } from './location-options.ts'
 
 /** A question as written by the caller (see questions.ts); `required` defaults to false. */
 export type QuestionInput = Omit<Question, 'required'> & { required?: boolean | undefined }
@@ -90,10 +92,14 @@ export interface EventType {
   hosts: { userId: string }[]
   zoomConnectionId?: string | null | undefined
   conferenceOrganizer: { userId: string } | null
-  location: EventTypeLocation | null
+  /** Read compatibility projection of the default (or first) location option. */
+  location: LocationSettings | null
+  /** Internal configuration; transport writes are introduced with the editor. */
+  locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
   questions: Question[]
   notifications: NotificationSettings
+  waitlist: WaitlistSettings
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
   isHidden: boolean
@@ -123,10 +129,13 @@ export interface EventTypeInput {
   minimumNoticeMinutes?: number | undefined
   bookingWindowDays?: number | null | undefined
   maxBookingsPerDay?: number | null | undefined
-  location?: EventTypeLocation | null | undefined
+  location?: LocationSettings | null | undefined
+  /** Replaces the ordered list. Cannot be combined with a legacy location write. */
+  locations?: LocationOption[] | null | undefined
   successRedirect?: SuccessRedirectInput | null | undefined
   questions?: QuestionInput[] | undefined
   notifications?: NotificationSettings | undefined
+  waitlist?: WaitlistSettings | undefined
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
   allowGuests?: boolean | undefined
@@ -171,7 +180,8 @@ interface Fields {
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   maxBookingsPerDay: number | null
-  location: EventTypeLocation | null
+  location: LocationSettings | null
+  locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
   questions: Question[]
   isActive: boolean
@@ -195,6 +205,7 @@ const FIELD_NAMES = [
   'bookingWindowDays',
   'maxBookingsPerDay',
   'location',
+  'locations',
   'successRedirect',
   'questions',
   'isActive',
@@ -212,6 +223,7 @@ const DEFAULTS = {
   bookingWindowDays: null,
   maxBookingsPerDay: null,
   location: null,
+  locations: null,
   successRedirect: null,
   questions: [],
   isActive: true,
@@ -290,7 +302,7 @@ async function waitlistManager(db: Db, ctx: ServiceContext, row: { owner_user_id
   } else if (!current.canManageTeam) throw insufficientRole()
 }
 
-/** Internal only: the same role boundary protects settings and contact-free summaries. */
+/** Only personal owners and team owners/admins can manage waitlist settings. */
 export async function getEventTypeWaitlist(
   ctx: ServiceContext,
   id: string,
@@ -315,38 +327,158 @@ export async function setEventTypeWaitlist(
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await waitlistManager(trx, ctx, row)
-    if (settings.enabled) {
-      const hosts = await trx
-        .selectFrom('event_type_hosts')
-        .select('user_id')
-        .where('event_type_id', '=', row.id)
-        .execute()
-      if (
-        row.scheduling_type !== 'individual' ||
-        hosts.length !== 1 ||
-        (row.owner_user_id !== null && hosts[0]?.user_id !== row.owner_user_id)
-      ) {
-        throw new DomainError('invalid', 'waitlist_unsupported')
-      }
-      try {
-        await assertHosts(
-          trx,
-          row.organization_id,
-          hosts.map((host) => host.user_id),
-          true,
-        )
-      } catch (error) {
-        if (error instanceof DomainError) throw new DomainError('invalid', 'waitlist_unsupported')
-        throw error
-      }
-    }
-    if (row.waitlist_enabled !== settings.enabled)
-      await trx
-        .updateTable('event_types')
-        .set({ waitlist_enabled: settings.enabled })
-        .where('id', '=', row.id)
-        .execute()
+    await writeWaitlistSettings(trx, row, settings)
     return settings
+  })
+}
+
+/** Used after host writes so one save validates and commits its complete configuration. */
+async function writeWaitlistSettings(
+  db: Db,
+  row: Pick<
+    EventTypeRow,
+    'id' | 'scheduling_type' | 'organization_id' | 'owner_user_id' | 'waitlist_enabled'
+  >,
+  settings: WaitlistSettings,
+) {
+  if (settings.enabled) {
+    const hosts = await db
+      .selectFrom('event_type_hosts')
+      .select('user_id')
+      .where('event_type_id', '=', row.id)
+      .execute()
+    if (
+      row.scheduling_type !== 'individual' ||
+      hosts.length !== 1 ||
+      (row.owner_user_id !== null && hosts[0]?.user_id !== row.owner_user_id)
+    )
+      throw new DomainError('invalid', 'waitlist_unsupported')
+    try {
+      await assertHosts(
+        db,
+        row.organization_id,
+        hosts.map((host) => host.user_id),
+        true,
+      )
+    } catch (error) {
+      if (error instanceof DomainError) throw new DomainError('invalid', 'waitlist_unsupported')
+      throw error
+    }
+  }
+  if (row.waitlist_enabled !== settings.enabled)
+    await db
+      .updateTable('event_types')
+      .set({ waitlist_enabled: settings.enabled })
+      .where('id', '=', row.id)
+      .execute()
+}
+
+export type WaitlistEntryState =
+  | 'pending_verification'
+  | 'active'
+  | 'notified'
+  | 'booked'
+  | 'removed'
+  | 'expired'
+export interface ManagedWaitlistEntry {
+  id: string
+  state: WaitlistEntryState
+  email: string | null
+  name: string | null
+  preferredWindow: { start: string; end: string; timeZone: string } | null
+  createdAt: string
+  lastNotifiedAt: string | null
+}
+
+/** Contacts are restricted separately from the team-readable event configuration. */
+export async function listEventTypeWaitlistEntries(
+  ctx: ServiceContext,
+  id: string,
+  input: CatalogPageInput = {},
+): Promise<CatalogPage<ManagedWaitlistEntry>> {
+  const { limit, after } = checkedCatalogPage(input)
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id)
+    await waitlistManager(trx, ctx, row)
+    let query = trx
+      .selectFrom('waitlist_entries as e')
+      .select([
+        'e.id',
+        'e.email',
+        'e.name',
+        'e.window_start',
+        'e.window_end',
+        'e.time_zone',
+        'e.created_at',
+        sql<WaitlistEntryState>`CASE WHEN e.status IN ('pending_verification','active','notified')
+        AND (e.expires_at <= clock_timestamp() OR (e.status='pending_verification' AND e.pending_expires_at <= clock_timestamp()))
+        THEN 'expired' ELSE e.status END`.as('state'),
+        sql<Date | null>`(SELECT max(c.accepted_at) FROM waitlist_candidates c WHERE c.entry_id=e.id)`.as(
+          'last_notified_at',
+        ),
+      ])
+      .where('e.event_type_id', '=', row.id)
+      .where('e.organization_id', '=', row.organization_id)
+    if (after !== undefined) query = query.where('e.id', '>', after)
+    const entries = await query
+      .orderBy('e.id')
+      .limit(limit + 1)
+      .execute()
+    return catalogPage(
+      entries.map((entry) => ({
+        id: entry.id,
+        state: entry.state,
+        email: entry.email,
+        name: entry.name,
+        preferredWindow:
+          entry.window_start && entry.window_end && entry.time_zone
+            ? {
+                start: timestamp(entry.window_start),
+                end: timestamp(entry.window_end),
+                timeZone: entry.time_zone,
+              }
+            : null,
+        createdAt: timestamp(entry.created_at),
+        lastNotifiedAt: entry.last_notified_at ? timestamp(entry.last_notified_at) : null,
+      })),
+      limit,
+    )
+  })
+}
+
+/** Removal sends no email; the database erases contacts and revokes all pending work. */
+export async function removeEventTypeWaitlistEntry(
+  ctx: ServiceContext,
+  id: string,
+  entryId: string,
+) {
+  if (!isUuid(entryId)) throw new DomainError('not_found', 'waitlist_entry_not_found')
+  return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id, { lock: true })
+    await waitlistManager(trx, ctx, row)
+    const entry = await trx
+      .selectFrom('waitlist_entries')
+      .select(['id', 'status'])
+      .where('id', '=', entryId)
+      .where('event_type_id', '=', row.id)
+      .where('organization_id', '=', row.organization_id)
+      .forUpdate()
+      .executeTakeFirst()
+    if (!entry) throw new DomainError('not_found', 'waitlist_entry_not_found')
+    if (['pending_verification', 'active', 'notified'].includes(entry.status))
+      await trx
+        .updateTable('waitlist_entries')
+        .set({
+          status: 'removed',
+          terminal_reason: 'host_removed',
+          terminal_at: sql<Date>`clock_timestamp()`,
+        })
+        .where('id', '=', entry.id)
+        .execute()
+    return { removed: true as const }
   })
 }
 
@@ -457,6 +589,8 @@ export async function createEventType(
   const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
   const notifications =
     input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
+  const waitlist =
+    input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
@@ -476,12 +610,12 @@ export async function createEventType(
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
       const organizer = validOrganizer(input.conferenceOrganizer) ?? null,
         zoomConnection = validZoomConnection(input.zoomConnectionId) ?? null
-      if (zoomConnection && !automaticZoom(fields.location))
+      if (zoomConnection && !fields.locations?.some(automaticZoom))
         throw new DomainError('invalid', 'invalid_zoom_connection')
       await validateConference(
         trx,
         ctx,
-        fields.location,
+        fields.locations,
         schedulingType,
         hostIds,
         organizer,
@@ -512,6 +646,7 @@ export async function createEventType(
           })),
         )
         .execute()
+      if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)
       return toEventType(await loadEventType(trx, id))
     }),
   )
@@ -523,9 +658,10 @@ export async function updateEventType(
   id: string,
   input: EventTypeUpdate,
 ): Promise<EventType> {
-  const changes = defined(input)
   const notifications =
     input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
+  const waitlist =
+    input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
@@ -533,6 +669,7 @@ export async function updateEventType(
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
       await assertCanWrite(trx, ctx, row, true)
+      const changes = defined(input, fieldsOf(row).locations)
       const notificationsChanged =
         notifications !== undefined &&
         JSON.stringify(parseNotifications(row.notifications)) !== JSON.stringify(notifications)
@@ -585,15 +722,16 @@ export async function updateEventType(
           },
           ctx.successRedirectPolicy,
           input.successRedirect !== undefined,
+          changes.locations !== undefined,
         )
         if (
           zoomConnection &&
           zoomConnection !== row.zoom_connection_id &&
-          !automaticZoom(fields.location)
+          !fields.locations?.some(automaticZoom)
         )
           throw new DomainError('invalid', 'invalid_zoom_connection')
         if (
-          input.location !== undefined ||
+          changes.locations !== undefined ||
           changingHosts ||
           scheduleId !== undefined ||
           organizer !== undefined ||
@@ -605,13 +743,13 @@ export async function updateEventType(
           await validateConference(
             trx,
             ctx,
-            fields.location,
+            fields.locations,
             schedulingType,
             configuredHosts,
             organizer === undefined ? row.conference_organizer_user_id : organizer,
             row.id,
             zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
-            !automaticZoom(row.location) ||
+            !fieldsOf(row).locations?.some(automaticZoom) ||
               schedulingType !== row.scheduling_type ||
               [...configuredHosts].sort().join() !==
                 existing
@@ -678,6 +816,7 @@ export async function updateEventType(
           .where('event_type_id', '=', row.id)
           .execute()
       }
+      if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)
       return toEventType(await loadEventType(trx, row.id))
     }),
   )
@@ -827,9 +966,26 @@ async function withWriteErrors<T>(write: () => Promise<T>): Promise<T> {
 }
 
 /** The fields of `input` that are set, so they can be laid over defaults or current values. */
-function defined(input: EventTypeUpdate): Partial<Record<keyof Fields, unknown>> {
+function defined(
+  input: EventTypeUpdate,
+  currentLocations?: LocationOption[] | null,
+): Partial<Record<keyof Fields, unknown>> {
+  if (input.location !== undefined && input.locations !== undefined) {
+    throw new DomainError('invalid', 'invalid_locations', 'Specify location or locations, not both')
+  }
   const result: Partial<Record<keyof Fields, unknown>> = {}
-  for (const name of FIELD_NAMES) if (input[name] !== undefined) result[name] = input[name]
+  for (const name of FIELD_NAMES)
+    if (name !== 'location' && input[name] !== undefined) result[name] = input[name]
+  if (input.location !== undefined) {
+    if (currentLocations !== undefined && isLegacyLocationEcho(currentLocations, input.location))
+      return result
+    const location = validLocation(input.location)
+    result.locations =
+      currentLocations === undefined
+        ? locationOptionsFromLegacy(location)
+        : applyLegacyLocation(currentLocations, location)
+    if (result.locations === currentLocations) delete result.locations
+  }
   return result
 }
 
@@ -839,8 +995,12 @@ function validFields(
   candidate: Partial<Record<keyof Fields, unknown>>,
   policy?: SuccessRedirectPolicy,
   validateRedirect = true,
+  validateLocations = true,
 ): Fields {
   const c = candidate
+  const locations = validateLocations
+    ? validateLocationOptions(c.locations)
+    : (c.locations as LocationOption[] | null)
   const allowedDurationsMinutes =
     c.allowedDurationsMinutes === undefined ? [c.durationMinutes] : c.allowedDurationsMinutes
   // The engine's own check, so a stored event type can never make availability fail.
@@ -882,7 +1042,8 @@ function validFields(
     minimumNoticeMinutes: c.minimumNoticeMinutes as number,
     bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
-    location: validLocation(c.location),
+    location: compatLocation(locations),
+    locations,
     // A policy change must not block unrelated edits. Only an explicitly supplied
     // redirect needs current-policy validation; otherwise preserve the saved value.
     successRedirect: validateRedirect
@@ -956,7 +1117,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).every((key) => keys.includes(key))
 
-function validLocation(value: unknown): EventTypeLocation | null {
+function validLocation(value: unknown): LocationSettings | null {
   if (value === null) return null
   const fail = (message: string): never => {
     throw new DomainError('invalid', 'invalid_location', message)
@@ -978,7 +1139,9 @@ function validLocation(value: unknown): EventTypeLocation | null {
         return fail('autoCreate must be true when specified')
       return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
     case 'phone': {
-      expect(['number'])
+      expect(['number', 'askInvitee'])
+      if (value.askInvitee !== undefined)
+        return fail('Invitee phone collection is not available yet')
       const { number } = value
       if (typeof number !== 'string' || !PHONE_NUMBER_PATTERN.test(number)) {
         return fail('location.number must be a phone number in E.164 format, e.g. +14155550123')
@@ -1028,6 +1191,7 @@ function fieldsOf(row: {
   booking_window_days: number | null
   max_bookings_per_day: number | null
   location: Json | null
+  locations: Json | null
   success_redirect: Json | null
   questions: Json
   is_active: boolean
@@ -1035,6 +1199,9 @@ function fieldsOf(row: {
   allow_guests: boolean
   position: number
 }): Fields {
+  const locations =
+    (row.locations as LocationOption[] | null) ??
+    locationOptionsFromLegacy(row.location as EventTypeLocation | null)
   return {
     slug: row.slug,
     title: row.title,
@@ -1047,7 +1214,8 @@ function fieldsOf(row: {
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     maxBookingsPerDay: row.max_bookings_per_day,
-    location: row.location as EventTypeLocation | null,
+    location: compatLocation(locations),
+    locations,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     questions: parseQuestions(row.questions),
     isActive: row.is_active,
@@ -1071,6 +1239,7 @@ function columns(fields: Fields) {
     booking_window_days: fields.bookingWindowDays,
     max_bookings_per_day: fields.maxBookingsPerDay,
     location: fields.location === null ? null : jsonb(fields.location),
+    locations: fields.locations === null ? null : jsonb(fields.locations),
     success_redirect: fields.successRedirect === null ? null : jsonb(fields.successRedirect),
     questions: jsonb(fields.questions),
     is_active: fields.isActive,
@@ -1087,6 +1256,7 @@ function toEventType(row: EventTypeRow): EventType {
     ownerUserId: row.owner_user_id,
     ...fieldsOf(row),
     notifications: parseNotifications(row.notifications),
+    waitlist: { enabled: row.waitlist_enabled },
     schedulingType: row.scheduling_type as SchedulingType,
     roundRobinActive: row.scheduling_type === 'round_robin' && row.round_robin_active,
     hosts: row.hosts,
@@ -1195,7 +1365,7 @@ function validZoomConnection(value: unknown): string | null | undefined {
 async function validateConference(
   db: Db,
   ctx: ServiceContext,
-  location: unknown,
+  locations: LocationOption[] | null,
   mode: string,
   hosts: string[],
   selected: string | null,
@@ -1209,7 +1379,7 @@ async function validateConference(
       'invalid_conference_organizer',
       'Choose an organizer from the required hosts.',
     )
-  if (automaticZoom(location)) {
+  if (locations?.some(automaticZoom)) {
     if (mode !== 'individual' || hosts.length !== 1)
       throw new DomainError(
         'invalid',
@@ -1243,9 +1413,8 @@ async function validateConference(
         await requireActiveApiKey(db, ctx.principal, () => ctx.now().epochMilliseconds)
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)
     }
-    return
   }
-  if (!automaticMeet(location)) return
+  if (!locations?.some(automaticMeet)) return
   if (mode === 'round_robin') await eligibleMeetHosts(db, hosts, eventTypeId, ctx.automaticMeet)
   else
     await requireMeetDestination(
