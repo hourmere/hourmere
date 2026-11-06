@@ -146,7 +146,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     ['individual', 'google_meet'],
     ['round_robin', 'google_meet'],
   ] as const)(
-    'keeps %s explanation aligned when an unavailable default %s has an office alternative',
+    'keeps general %s explanation aligned with the office choice when default %s is unavailable',
     async (mode, kind) => {
       const s = await team(mode)
       await db
@@ -166,6 +166,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
           slug: s.event.slug,
           start: range.rangeStart,
           end: range.rangeEnd,
+          locationOptionId: 'office',
         },
       )
       expect(ordinary.length).toBeGreaterThan(0)
