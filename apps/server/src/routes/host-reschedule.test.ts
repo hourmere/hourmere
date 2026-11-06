@@ -413,6 +413,7 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
       cancel_booking: ['/api/v1/bookings/{id}/cancel', '/api/v1/bookings/manage/cancel'],
       retry_conference: ['/api/v1/bookings/{id}/conference/retry'],
       retry_calendar_copy: ['/api/v1/bookings/{id}/calendar-copy/retry'],
+      set_attendee_no_show: ['/api/v1/bookings/{id}/attendees/{attendeeId}/no-show'],
     }
     expect(
       bookingTools({ db })
@@ -422,7 +423,10 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
     ).toEqual(Object.keys(equivalents).sort())
     for (const [tool, paths] of Object.entries(equivalents)) {
       for (const path of paths)
-        expect(document.paths[path]?.post, `${tool} requires POST ${path}`).toBeDefined()
+        expect(
+          document.paths[path]?.[tool === 'set_attendee_no_show' ? 'patch' : 'post'],
+          `${tool} requires ${path}`,
+        ).toBeDefined()
     }
   })
 })

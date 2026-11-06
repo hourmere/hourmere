@@ -231,3 +231,11 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus host or team administrator authority.
+Invitee pages and messages are unchanged, including scheduled follow-ups.

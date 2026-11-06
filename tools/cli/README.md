@@ -231,3 +231,17 @@ Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 ## License
 
 GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
+
+### Mark attendee no-shows
+
+`set-no-show` uses JSON input with `bookingId`, `attendeeId` and `noShow` (`true`
+to mark, `false` to unmark). Read attendee IDs from authenticated booking lists.
+It requires `bookings` or `full` scope and booked-host or team owner/admin authority.
+Only bookings whose scheduled start has passed can be changed; cancelled and imported
+records refuse changes. Repeating the same state preserves its timestamp and actor.
+No invitee email or manage-page indicator is added, and existing follow-ups remain scheduled.
+
+`booking-attendees` takes `{ "bookingId": "…" }` and returns attendee IDs and
+markers. It accepts `read`, `bookings` or `full` keys with the same host/team-admin
+permission. Team admins can obtain a booking ID from the team dashboard; ordinary
+`list` visibility is unchanged. Reads are available before the start and after cancellation.

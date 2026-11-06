@@ -1456,3 +1456,24 @@ always read the reschedule-chain root's fields. A new root atomically pins its c
 sending mailbox before its first SMTP invitation; later versions reuse that identity.
 See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
 legacy compatibility, recipient policy and reply limitations.
+
+## Private attendee no-show markers
+
+Migration 0062 adds nullable `booking_attendees.no_show_marked_at` and
+`no_show_marked_by` as a paired current-state marker. Existing attendees remain unmarked.
+Attribution is the acting account UUID, retained as history rather than a cascading account
+foreign key. Unmarking clears both fields. Booking/attendee deletion retains its existing
+retention behavior. No invitee projection includes this metadata.
+
+Actual booking hosts and current team owners/admins may change each attendee independently
+strictly after the scheduled start, never on cancelled or imported read-only bookings.
+Collective hosts share the attendee state; round-robin authority belongs to the assigned
+host, not every pool member. Serialized changes preserve idempotent replay attribution.
+Rescheduling creates fresh attendee rows; cancellation retains historical marks.
+Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com/docs/no-shows).
+
+The migration adds `booking.attendee_no_show_changed` to webhook subscriptions and delivery
+types. The old booking/event deduplication remains for lifecycle events; attendance changes
+can emit multiple transitions for the same booking. Existing subscription arrays and
+delivery snapshots are preserved. Stop old web/worker processes before applying the migration
+and restart with upgraded code; old webhook capture uses the previous unique constraint.

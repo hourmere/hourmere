@@ -53,6 +53,7 @@ import {
 } from '@hourmere/notifications'
 import type { ServiceContext } from '@hourmere/scheduling'
 import {
+  type AttendeeNoShowNotifier,
   type BookingNotifier,
   cleanupWaitlist,
   ensureWaitlistKey,
@@ -61,7 +62,12 @@ import {
   scanWaitlists,
   verifyWaitlist,
 } from '@hourmere/scheduling'
-import { webhookBookingNotifier, webhookCleanupJob, webhookDeliveryJob } from '@hourmere/webhooks'
+import {
+  webhookAttendeeNoShowNotifier,
+  webhookBookingNotifier,
+  webhookCleanupJob,
+  webhookDeliveryJob,
+} from '@hourmere/webhooks'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -110,6 +116,7 @@ export function productRoutes({
   db,
   socialProviders,
   notify,
+  notifyAttendeeNoShow,
   googleCalendar,
   microsoftCalendar,
   zoomConference,
@@ -152,6 +159,7 @@ export function productRoutes({
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
   socialProviders: Config['socialProviders']
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
   googleCalendar?: CalendarDeps['google']
@@ -216,7 +224,14 @@ export function productRoutes({
       successRedirectPolicy,
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
-    bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
+    bookingRoutes({
+      db,
+      notify,
+      notifyAttendeeNoShow,
+      automaticMeet,
+      automaticZoom,
+      bookingMaxInviteeReschedules,
+    }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
@@ -235,6 +250,7 @@ export function productTools({
   followUpHostNotesEnabled,
   successRedirectPolicy,
   notify,
+  notifyAttendeeNoShow,
   automaticMeet,
   automaticZoom,
   bookingMaxInviteeReschedules,
@@ -246,6 +262,7 @@ export function productTools({
   publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -259,6 +276,7 @@ export function productTools({
       db,
       waitlistSecret,
       notify,
+      notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
       bookingMaxInviteeReschedules,
@@ -593,6 +611,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     const emailNotifier = bookingNotifier(jobs)
     const calendarNotifier = calendarBookingNotifier(jobs)
     const conferenceNotifier = conferenceBookingNotifier(jobs)
+    const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
     const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
     const notify: BookingNotifier = async (trx, event, now) => {
       await conferenceNotifier(trx, event)
@@ -656,6 +675,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         termsUrl: config.TERMS_URL,
         webhooks: webhookSettings,
         notify,
+        notifyAttendeeNoShow,
         googleCalendar,
         microsoftCalendar,
         zoomConference,
@@ -686,6 +706,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
           successRedirectPolicy,
           notify,
+          notifyAttendeeNoShow,
           automaticMeet: config.GOOGLE_MEET_ENABLED,
           automaticZoom: config.ZOOM_MEETINGS_ENABLED,
           bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,

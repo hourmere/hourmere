@@ -4,6 +4,7 @@ import { z } from '@hono/zod-openapi'
 import { retryBookingConference, retryConferenceMirror } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
 import {
+  type AttendeeNoShowNotifier,
   type BookingNotifier,
   type BookingOrigin,
   cancelHostBooking,
@@ -14,6 +15,7 @@ import {
   DomainError,
   getPublicEventType,
   getPublicTeamEventType,
+  listBookingAttendeeNoShows,
   listHostBookings,
   listPublicSlots,
   listPublicTeamSlots,
@@ -22,11 +24,14 @@ import {
   rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
+  setAttendeeNoShow,
   validTimeZone,
 } from '@hourmere/scheduling'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit } from '../rate-limit.ts'
 import {
+  AttendeeNoShow,
   Booking,
+  BookingAttendees,
   BookingPage,
   BookingWithToken,
   CancelBody,
@@ -203,6 +208,7 @@ export interface BookingToolsDeps {
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -226,6 +232,7 @@ export function bookingTools({
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
+  notifyAttendeeNoShow,
   automaticMeet,
   automaticZoom,
   rateLimits = {},
@@ -242,6 +249,7 @@ export function bookingTools({
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
+    notifyAttendeeNoShow,
     now,
     notify,
     automaticMeet,
@@ -482,6 +490,41 @@ export function bookingTools({
     },
   })
 
+  const getAttendees = defineTool({
+    name: 'get_booking_attendees',
+    title: 'Read booking attendees',
+    description:
+      'Read attendee identifiers and no-show markers for a known booking ID. Only booked hosts and team owners/admins. Team administrators can obtain booking IDs from the team dashboard; this does not expand list_bookings visibility.',
+    input: z.strictObject({ bookingId: z.uuid() }),
+    output: BookingAttendees,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return { data: await listBookingAttendeeNoShows(context(call.caller), args.bookingId) }
+    },
+  })
+  const setNoShow = defineTool({
+    name: 'set_attendee_no_show',
+    title: 'Mark or unmark an attendee no-show',
+    description:
+      'Set noShow true to mark or false to unmark one attendee after the scheduled start. Only booked hosts and team owners/admins may act. Imported and cancelled bookings refuse changes. Replays preserve the original marker. Invitee pages, email and scheduled follow-ups are unchanged. Get attendeeId from authenticated booking reads.',
+    input: z.strictObject({ bookingId: z.uuid(), attendeeId: z.uuid(), noShow: z.boolean() }),
+    output: AttendeeNoShow,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return setAttendeeNoShow(context(call.caller), args.bookingId, args.attendeeId, args.noShow)
+    },
+  })
+
   const retryInput = z.strictObject({ bookingId: z.uuid() })
   const retryOutput = z.object({ accepted: z.literal(true) })
   const retryAnnotations = {
@@ -524,5 +567,7 @@ export function bookingTools({
     listBookings,
     retryConference,
     retryCalendarCopy,
+    setNoShow,
+    getAttendees,
   ]
 }

@@ -1,3 +1,4 @@
+import { NoShowAttendees } from '../bookings/NoShowAttendees.tsx'
 import './team-bookings.css'
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
@@ -906,6 +907,11 @@ export function BookingDetail({
             )}
           </p>
         ))}
+      <NoShowAttendees
+        booking={booking}
+        expectedOrganizationId={expectedOrganizationId}
+        disabled={!!conflict}
+      />
       <ManualRebooking booking={booking} expectedOrganizationId={expectedOrganizationId} />
     </section>
   )

@@ -1,5 +1,16 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'No-shows': 'No-shows',
+  'No-show': 'No-show',
+  'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
+    'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.',
+  'Clear no-show for {name}': 'Clear no-show for {name}',
+  'Mark {name} as a no-show': 'Mark {name} as a no-show',
+  'Clear no-show': 'Clear no-show',
+  'Mark no-show': 'Mark no-show',
+  'Could not update the no-show mark. Refresh the booking and try again.':
+    'Could not update the no-show mark. Refresh the booking and try again.',
+  'No-show mark updated.': 'No-show mark updated.',
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 

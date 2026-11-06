@@ -302,3 +302,11 @@ with no validated ID remains ambiguous: retry does not issue another POST or ado
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
 requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus host or team administrator authority.
+Invitee pages and messages are unchanged, including scheduled follow-ups.

@@ -1,10 +1,11 @@
-import type { Database, Db } from '@hourmere/db'
+import { type Database, type Db, importedBookingIds } from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
 import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import { cancelTeamBookingInTransaction } from './bookings.ts'
 import type { BookingNotifier, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
 import {
   type TeamAdminBookingListPage,
@@ -105,7 +106,7 @@ async function teamManager(ctx: ServiceContext): Promise<string> {
 async function pageParticipants(db: Db, teamId: string, bookingIds: string[]) {
   const [hosts, attendees] = await Promise.all([
     db
-      .selectFrom('booking_hosts as host')
+      .selectFrom(resolvedBookingHosts(db).as('host'))
       .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
       .innerJoin('auth.user as user', 'user.id', 'host.user_id')
       .select(['booking.id as booking_id', 'host.user_id', 'user.name'])
@@ -172,9 +173,15 @@ async function enrichTeamBookings(
 ): Promise<TeamAdminBookingListPage> {
   if (!data.length) return { data: [], nextCursor }
   const ids = data.map((booking) => booking.id)
+  const imported = await importedBookingIds(ctx.db, ids)
+  const attendance = await ctx.db
+    .selectFrom('booking_attendees')
+    .select(['booking_id', 'id', 'email', 'no_show_marked_at', 'no_show_marked_by'])
+    .where('booking_id', 'in', ids)
+    .execute()
   const [hosts, events, replacements] = await Promise.all([
     ctx.db
-      .selectFrom('booking_hosts as host')
+      .selectFrom(resolvedBookingHosts(ctx.db).as('host'))
       .innerJoin('bookings as booking', 'booking.id', 'host.booking_id')
       .leftJoin('profiles as profile', 'profile.user_id', 'host.user_id')
       .select(['host.booking_id', 'host.user_id', 'profile.time_zone'])
@@ -256,6 +263,25 @@ async function enrichTeamBookings(
   return {
     data: data.map((booking) => ({
       ...booking,
+      canManageNoShow:
+        booking.status === 'confirmed' &&
+        !imported.has(booking.id) &&
+        Temporal.Instant.compare(ctx.now(), Temporal.Instant.from(booking.start)) > 0,
+      attendees: booking.attendees.map((attendee) => {
+        const saved = attendance.find(
+          (row) => row.booking_id === booking.id && row.email === attendee.email,
+        )
+        return {
+          ...attendee,
+          ...(saved
+            ? {
+                id: saved.id,
+                noShowMarkedAt: saved.no_show_marked_at?.toISOString() ?? null,
+                noShowMarkedBy: saved.no_show_marked_by,
+              }
+            : {}),
+        }
+      }),
       isRescheduled: booking.status === 'cancelled' && rescheduledIds.has(booking.id),
       eventType:
         booking.eventType === null

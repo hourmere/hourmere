@@ -37,6 +37,7 @@ const classes = {
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
+    'GET /api/v1/bookings/{id}/attendees',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
     'GET /api/v1/bookings/manage',
@@ -57,6 +58,7 @@ const classes = {
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
+    'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/manage/cancel',
@@ -348,6 +350,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('id', '=', id)
           .execute()
         headers['x-manage-token'] = token
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (template.endsWith('/reschedule')) payload = { start: `${date}T10:00:00Z` }
         if (template.endsWith('/retry')) {
@@ -391,6 +407,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         cleanupOneTimeLink = link.id
         path = path.replace('{token}', link.token)
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (method === 'POST') {
           payload = {
@@ -404,6 +434,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
         path = path
           .replace('{handle}', team ? 'rest-scoped-team' : 'rest-scoped-host')
           .replace('{slug}', 'intro')
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (method === 'POST') {
           cleanupEvent = await f.eventType(
@@ -610,14 +654,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 99-operation contract and all 297 scope combinations', () => {
+    it('covers the exact 101-operation contract and all 303 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(99)
-      expect(new Set(ids).size).toBe(99)
+      expect(ids).toHaveLength(101)
+      expect(new Set(ids).size).toBe(101)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(297)
+      expect(cases).toHaveLength(303)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
