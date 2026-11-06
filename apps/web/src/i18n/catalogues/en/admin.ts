@@ -20,6 +20,8 @@ export const admin = {
   'Could not update Slack notifications. Check your access and settings, then try again.':
     'Could not update Slack notifications. Check your access and settings, then try again.',
   'No Slack destination yet.': 'No Slack destination yet.',
+  'Slack destination paused. Check or replace the webhook URL before enabling it.':
+    'Slack destination paused. Check or replace the webhook URL before enabling it.',
   'Slack destination saved.': 'Slack destination saved.',
   'Slack test message queued. This does not confirm delivery.':
     'Slack test message queued. This does not confirm delivery.',
@@ -33,8 +35,8 @@ export const admin = {
     'Enter a Slack webhook URL and choose at least one event.',
   'Replacement Slack webhook URL': 'Replacement Slack webhook URL',
   'Slack incoming-webhook URL': 'Slack incoming-webhook URL',
-  'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.':
-    'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.',
   'Events to post': 'Events to post',
   'Enable Slack notifications': 'Enable Slack notifications',
   'Save Slack destination': 'Save Slack destination',

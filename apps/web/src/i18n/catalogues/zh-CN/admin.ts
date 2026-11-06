@@ -20,6 +20,8 @@ export const admin = {
   'Could not update Slack notifications. Check your access and settings, then try again.':
     '无法更新 Slack 通知。请检查权限和设置，然后重试。',
   'No Slack destination yet.': '尚未设置 Slack 接收地址。',
+  'Slack destination paused. Check or replace the webhook URL before enabling it.':
+    'Slack 接收地址已暂停。启用前请检查或更换 Webhook 地址。',
   'Slack destination saved.': '已保存 Slack 接收地址。',
   'Slack test message queued. This does not confirm delivery.':
     'Slack 测试消息已加入发送队列。这不代表消息已送达。',
@@ -32,8 +34,8 @@ export const admin = {
     '请输入 Slack Webhook 地址，并至少选择一种事件。',
   'Replacement Slack webhook URL': '新的 Slack Webhook 地址',
   'Slack incoming-webhook URL': 'Slack 传入 Webhook 地址',
-  'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.':
-    '请使用 hooks.slack.com 或 hooks.slack-gov.com 的 HTTPS 传入 Webhook 地址，并妥善保密。无需更换时，请将新地址留空。',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    '请使用 hooks.slack.com 的 HTTPS 传入 Webhook 地址，并妥善保密。无需更换时，请将新地址留空。',
   'Events to post': '要发送的事件',
   'Enable Slack notifications': '启用 Slack 通知',
   'Save Slack destination': '保存 Slack 接收地址',

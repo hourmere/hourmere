@@ -77,7 +77,8 @@ async function authorize(trx: Db, ctx: WebhookServiceContext, deferFinal = false
   await ctx.prepareOrganizationWrite?.(trx)
   if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
     await requireAdmin(trx, ctx)
-  await lockAuthorizationParents(trx, ctx, true)
+  // Only creation needs to serialize the organization-wide destination limit.
+  await lockAuthorizationParents(trx, ctx, !deferFinal)
   if (!deferFinal) {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
     await requireAdmin(trx, ctx, true)
@@ -226,7 +227,7 @@ export async function testSlackDestination(
   queue?: WebhookQueue,
 ) {
   key(settings)
-  if (!queue)
+  if (!settings.enabled || !queue)
     throw new DomainError('conflict', 'slack_unavailable', 'Slack delivery is unavailable')
   return ctx.db.transaction().execute(async (trx) => {
     const row = await locked(trx, ctx, id)
@@ -235,6 +236,21 @@ export async function testSlackDestination(
         'conflict',
         'slack_destination_disabled',
         'Enable the Slack destination before testing',
+      )
+    // The destination lock serializes samples across processes, including retries.
+    if (
+      await trx
+        .selectFrom('webhook_deliveries')
+        .select('id')
+        .where('webhook_id', '=', row.id)
+        .where('booking_id', 'is', null)
+        .where('status', '=', 'pending')
+        .executeTakeFirst()
+    )
+      throw new DomainError(
+        'conflict',
+        'slack_test_pending',
+        'A Slack test message is already pending for this destination',
       )
     const eventType = row.events[0] as string
     const delivery = await trx

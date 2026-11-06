@@ -42,6 +42,18 @@ async function open() {
 }
 
 describe('Slack settings', () => {
+  it('shows a paused destination and prevents sending a sample until enabled', async () => {
+    server({ [`GET ${base}`]: () => json(200, [{ ...destination, isActive: false }]) })
+    await open()
+    expect(
+      await screen.findByText(
+        'Slack destination paused. Check or replace the webhook URL before enabling it.',
+      ),
+    ).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Send test message' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
   it('wraps the integration toggle and expanded actions within narrow panel content', async () => {
     server({ [`GET ${base}`]: () => json(200, [destination]) })
     const user = await open()

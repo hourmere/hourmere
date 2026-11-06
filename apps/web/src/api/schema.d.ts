@@ -3255,7 +3255,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Queue one sample notification through the delivery outbox */
+        /**
+         * Queue one sample notification through the delivery outbox
+         * @description At most five attempts per organization per minute, shared with MCP on this server. Returns 409 slack_test_pending while a sample is pending.
+         */
         post: operations["testSlackDestination"];
         delete?: never;
         options?: never;
@@ -9790,7 +9793,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled or organization_context_changed */
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9877,7 +9880,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled or organization_context_changed */
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9954,7 +9957,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled or organization_context_changed */
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10043,7 +10046,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled or organization_context_changed */
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10125,7 +10128,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled or organization_context_changed */
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10134,7 +10137,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The API key's rate limit is used up */
+            /** @description rate_limited; Retry-After gives seconds to wait */
             429: {
                 headers: {
                     [name: string]: unknown;

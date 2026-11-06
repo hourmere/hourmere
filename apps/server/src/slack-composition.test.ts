@@ -9,7 +9,7 @@ import { type RunningServer, startServer } from './server.ts'
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
-  it('captures lifecycle and sample jobs with webhooks disabled, preserving DST instants and replay', async () => {
+  it('captures lifecycle and sample jobs with webhooks enabled, preserving DST instants and replay', async () => {
     const owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'slack_roles' })
     const db = createDb(owned.pool)
     const spies = (['log', 'info', 'warn', 'error'] as const).map((method) =>
@@ -54,7 +54,7 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
         DATABASE_URL: owned.url,
         BETTER_AUTH_SECRET: secret,
         SIGNUP: 'closed',
-        WEBHOOKS_ENABLED: 'false',
+        WEBHOOKS_ENABLED: 'true',
         WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
         PORT: '0',
         PUBLIC_URL: 'http://localhost',
@@ -138,15 +138,11 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
       ).toEqual(['booking.cancelled', 'booking.created', 'booking.rescheduled'])
       expect(deliveries.every((row) => row.status === 'pending' && row.attempts === 0)).toBe(true)
       const payloads = deliveries.map((row) => row.payload).join('\n')
-      for (const value of [
-        'Private',
-        '@here',
-        '@channel',
-        'private-slack@example.com',
-        syntheticUrl,
-      ])
+      for (const value of ['@here', '@channel', 'private-slack@example.com', syntheticUrl])
         expect(payloads.includes(value)).toBe(false)
-      expect(payloads.includes(start.toString().replace('Z', '.000Z'))).toBe(true)
+      expect(payloads).toContain(
+        start.toZonedDateTimeISO('America/New_York').toString({ smallestUnit: 'minute' }),
+      )
       const jobs = await owned.pool.query<{ n: number }>(
         "SELECT count(*)::int AS n FROM pgboss.job WHERE name='webhook-delivery'",
       )

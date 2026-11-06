@@ -1331,11 +1331,13 @@ Generic webhook management excludes Slack rows.
 
 Slack captures immutable Block Kit payloads in the booking transaction and reuses bounded
 outbox retries and terminal state tracking. The minimum projection contains booking ID,
-event kind, UTC start/end and status; team-wide payloads exclude free-text titles, answers,
-attendee details, links and reschedule-chain identifiers. Both capture and delivery check the
+event kind, event-type title, zoned start/end with UTC offset, status and an authenticated
+admin booking link; personal payloads add the invitee name. Team-wide payloads exclude
+free-text booking titles, answers, attendee details, meeting links and reschedule-chain identifiers. Both capture and delivery check the
 current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
-only that filter; active/subscribed checks still apply. Slack is available independently of
-`WEBHOOKS_ENABLED` but requires `WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
+only that filter; active/subscribed checks still apply. One pending test per destination
+is enforced under its row lock. Slack requires `WEBHOOKS_ENABLED=true` and
+`WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
 processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
 
 ## Independent conference identities

@@ -136,6 +136,13 @@ function SlackSettings({
               <p className="mono">
                 <BreakableText>{destination.url}</BreakableText>
               </p>
+              {!destination.isActive && (
+                <p role="status">
+                  {t(
+                    'Slack destination paused. Check or replace the webhook URL before enabling it.',
+                  )}
+                </p>
+              )}
               <SlackForm
                 key={destination.updatedAt}
                 destination={destination}
@@ -301,7 +308,7 @@ function SlackForm({
         </label>
         <p className="hint">
           {t(
-            'Use an HTTPS incoming-webhook URL from hooks.slack.com or hooks.slack-gov.com. Keep it private. Leave replacement blank to keep the saved URL.',
+            'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.',
           )}
         </p>
         <fieldset className="form-fieldset">

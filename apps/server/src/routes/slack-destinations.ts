@@ -16,12 +16,14 @@ import {
 import {
   authenticated,
   CROSS_ORIGIN_WRITE,
+  ErrorBody,
   errorResponses,
   json,
   type RouteModule,
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
+import { slackTestLimiter } from '../slack-test-limit.ts'
 import {
   EXPECTED_ORGANIZATION_HEADER,
   organizationContextAccess,
@@ -57,7 +59,7 @@ const errors = errorResponses({
   400: 'invalid_slack_destination or invalid_request',
   403: `insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; ${CROSS_ORIGIN_WRITE}`,
   404: 'slack_destination_not_found',
-  409: 'slack_unavailable, slack_destination_exists, slack_destination_disabled or organization_context_changed',
+  409: 'slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed',
 })
 
 /** Organization-wide outbound booking events; ordinary hosts have no administrative access. */
@@ -213,6 +215,8 @@ export function slackDestinationRoutes(
         tags: ['Slack'],
         operationId: 'testSlackDestination',
         summary: 'Queue one sample notification through the delivery outbox',
+        description:
+          'At most five attempts per organization per minute, shared with MCP on this server. Returns 409 slack_test_pending while a sample is pending.',
         security: authenticated,
         middleware: caller,
         request: { params: Params, headers: ExpectedWriteHeaders },
@@ -222,10 +226,19 @@ export function slackDestinationRoutes(
             content: json(z.object({ deliveryId: z.uuid() })),
           },
           ...errors,
+          429: {
+            description: 'rate_limited; Retry-After gives seconds to wait',
+            content: json(ErrorBody),
+          },
         },
       }),
-      async (c) =>
-        c.json(
+      async (c) => {
+        const retryAfter = slackTestLimiter.hit(c.var.principal.organization.id)
+        if (retryAfter !== undefined) {
+          c.header('Retry-After', String(retryAfter))
+          return c.json({ error: 'rate_limited' }, 429)
+        }
+        return c.json(
           await testSlackDestination(
             writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
             deps,
@@ -233,7 +246,8 @@ export function slackDestinationRoutes(
             deps.queue,
           ),
           202,
-        ),
+        )
+      },
     )
   }
 }

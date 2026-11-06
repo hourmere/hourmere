@@ -29,6 +29,7 @@ export const WebhookUpdateInput = z.strictObject({
 })
 export interface WebhookSettings {
   enabled: boolean
+  publicUrl?: string | undefined
   encryptionKey?: string | undefined
   privateTargets?: readonly WebhookPrivateTarget[] | undefined
 }

@@ -82,6 +82,8 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   scopeMode?(args: unknown): string
   /** Capability-bearing requests must not repeat validation input or unsanitized errors. */
   privateInput?(args: unknown): boolean
+  /** Static validation wording for private configuration inputs. */
+  privateValidationMessage?: string
   /** Omit arbitrary exception details for requests containing private contact information. */
   privateDiagnostics?: boolean
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
@@ -110,7 +112,7 @@ function errorResult(body: ToolErrorBody): CallToolResult {
 const UNSAFE_TEXT = 'Text in the request must not contain NUL characters or malformed Unicode'
 
 /** Thrown by ToolCall.rateLimit; never leaves runTool. */
-class RateLimited extends Error {
+export class RateLimited extends Error {
   readonly retryAfterSeconds: number
   constructor(retryAfterSeconds: number) {
     super('rate limited')
@@ -190,7 +192,9 @@ export async function runTool(
           successRedirectIssueField(parsed.error.issues) && {
             field: successRedirectIssueField(parsed.error.issues),
           }),
-        message: privateInput ? 'Invalid booking request' : describeIssues(parsed.error.issues),
+        message: privateInput
+          ? (tool.privateValidationMessage ?? 'Invalid booking request')
+          : describeIssues(parsed.error.issues),
       })
     }
     const result = tool.output.safeParse(await tool.run(parsed.data, call))

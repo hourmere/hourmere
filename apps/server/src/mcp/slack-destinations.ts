@@ -12,7 +12,8 @@ import {
 } from '@hourmere/webhooks'
 import { type ServiceDeps, serviceContext } from '../openapi.ts'
 import { SlackDestination } from '../routes/slack-destinations.ts'
-import { defineTool, type Tool } from './tools.ts'
+import { slackTestLimiter } from '../slack-test-limit.ts'
+import { defineTool, RateLimited, type Tool } from './tools.ts'
 
 export function slackDestinationTools(
   deps: ServiceDeps & WebhookSettings & { queue?: WebhookQueue },
@@ -33,6 +34,7 @@ export function slackDestinationTools(
       output: z.object({ data: z.array(SlackDestination) }),
       privateInput: () => true,
       privateDiagnostics: true,
+      privateValidationMessage: 'Invalid Slack configuration',
       annotations: { ...annotations, readOnlyHint: true, idempotentHint: true },
       async run(_args, call) {
         return {
@@ -51,6 +53,7 @@ export function slackDestinationTools(
       output: SlackDestination,
       privateInput: () => true,
       privateDiagnostics: true,
+      privateValidationMessage: 'Invalid Slack configuration',
       annotations,
       async run(args, call) {
         return SlackDestination.parse(
@@ -67,6 +70,7 @@ export function slackDestinationTools(
       output: SlackDestination,
       privateInput: () => true,
       privateDiagnostics: true,
+      privateValidationMessage: 'Invalid Slack configuration',
       annotations: { ...annotations, idempotentHint: true },
       async run({ id, ...args }, call) {
         return SlackDestination.parse(
@@ -83,6 +87,7 @@ export function slackDestinationTools(
       output: z.object({ deleted: z.boolean() }),
       privateInput: () => true,
       privateDiagnostics: true,
+      privateValidationMessage: 'Invalid Slack configuration',
       annotations: { ...annotations, destructiveHint: true, idempotentHint: true },
       async run({ id }, call) {
         await deleteSlackDestination(serviceContext(deps, call.caller), id)
@@ -93,13 +98,16 @@ export function slackDestinationTools(
       name: 'test_slack_destination',
       title: 'Test Slack destination',
       description:
-        'Queue one synthetic sample notification for this enabled Slack destination as an owner/admin. Requires full API key scope. Delivery is asynchronous with bounded retries; this does not confirm Slack received it. Repeated calls queue additional samples.',
+        'Queue one synthetic sample notification for this enabled Slack destination as an owner/admin. Requires full API key scope. Delivery is asynchronous with bounded retries; this does not confirm Slack received it. At most five attempts per organization per minute, shared with REST on this server. Returns slack_test_pending while a sample is pending.',
       input: z.strictObject({ id: z.uuid() }),
       output: z.object({ deliveryId: z.uuid() }),
       privateInput: () => true,
       privateDiagnostics: true,
+      privateValidationMessage: 'Invalid Slack configuration',
       annotations: { ...annotations, openWorldHint: true },
       async run({ id }, call) {
+        const retryAfter = slackTestLimiter.hit(call.caller.organization.id)
+        if (retryAfter !== undefined) throw new RateLimited(retryAfter)
         return testSlackDestination(serviceContext(deps, call.caller), deps, id, deps.queue)
       },
     }),

@@ -438,6 +438,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         }
       : undefined
   const webhookSettings = {
+    publicUrl: config.PUBLIC_URL,
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,

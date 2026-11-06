@@ -1,0 +1,245 @@
+import { createDb, type Db } from '@hourmere/db'
+import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import {
+  createFixtures,
+  createTestTeam,
+  createTestUser,
+  testContext,
+} from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { deliverWebhook, webhookBookingNotifier } from './delivery.ts'
+import { createSlackDestination, listSlackDestinations, testSlackDestination } from './slack.ts'
+import { slackPayload } from './slack-format.ts'
+
+const now = Temporal.Instant.from('2026-11-01T12:00Z')
+const settings = {
+  enabled: true,
+  encryptionKey: Buffer.alloc(32, 8).toString('base64'),
+  publicUrl: 'https://calendar.example.com',
+}
+const queue = { enqueue: async () => null }
+const signal = () => new AbortController().signal
+it('bounds escaped untrusted fields below Slack and outbox limits', () => {
+  for (const attack of ['😀'.repeat(10000), '<!channel> & @here\n'.repeat(10000)]) {
+    const payload = slackPayload({
+      type: 'booking.created',
+      bookingId: '00000000-0000-7000-8000-000000000001',
+      start: '2026-11-01T08:30Z',
+      end: '2026-11-01T09:30Z',
+      status: 'confirmed',
+      eventTypeTitle: attack,
+      inviteeName: attack,
+      timeZone: 'America/Los_Angeles',
+      bookingUrl: `${settings.publicUrl}/app/bookings/00000000-0000-7000-8000-000000000001`,
+    })
+    const parsed = JSON.parse(payload)
+    expect(Buffer.byteLength(payload)).toBeLessThan(8192)
+    expect(parsed.text.length).toBeLessThan(3000)
+    expect(parsed.text).not.toMatch(/[<>@]/)
+    expect(parsed.blocks[0].text).toEqual({ type: 'plain_text', text: parsed.text, emoji: false })
+    expect(parsed.text).toContain('2026-11-01T01:30-07:00[America/Los_Angeles]')
+    expect(parsed.text).toContain('2026-11-01T01:30-08:00[America/Los_Angeles]')
+  }
+})
+
+it('omits an oversized escaped operator link without overflowing the snapshot', () => {
+  const payload = slackPayload({
+    type: 'booking.created',
+    bookingId: 'safe-id',
+    eventTypeTitle: '&'.repeat(1000),
+    inviteeName: '&'.repeat(1000),
+    bookingUrl: `https://${'&'.repeat(500)}.example.com/app/bookings/safe-id`,
+  })
+  const parsed = JSON.parse(payload)
+  expect(parsed.text).not.toContain('https://')
+  expect(parsed.text.length).toBeLessThan(3000)
+  expect(Buffer.byteLength(payload)).toBeLessThan(8192)
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('Slack operational safeguards', () => {
+  let owned: TestDatabase
+  let db: Db
+  beforeAll(async () => {
+    owned = await createTestDatabase(process.env.DATABASE_URL as string)
+    db = createDb(owned.pool)
+  })
+  afterAll(async () => {
+    await owned?.drop()
+  })
+  async function fixture(team = false) {
+    const owner = await createTestUser(db)
+    const org = team
+      ? (await createTestTeam(db, [{ user: owner, role: 'owner' }])).as(owner)
+      : owner.principal
+    const ctx = testContext(db, org, () => now)
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: owner.id,
+        handle: `slack-${owner.id.slice(0, 8)}`,
+        time_zone: 'America/Los_Angeles',
+      })
+      .execute()
+    const destination = await createSlackDestination(ctx, settings, {
+      url: 'https://hooks.slack.com/services/TTEST/BTEST/synthetic',
+      events: ['booking.created', 'booking.cancelled'],
+    })
+    const activity = await createFixtures(db).eventType(org.organization.id, owner.id, {
+      title: 'Activity <!channel> @here',
+    })
+    const bookingId = await createFixtures(db).booking(
+      org.organization.id,
+      [owner.id],
+      '2026-11-01T08:30Z',
+      '2026-11-01T09:30Z',
+      {
+        eventTypeId: activity,
+        attendee: { name: 'Invitee <!here>', email: 'private@example.com' },
+      },
+    )
+    await db
+      .updateTable('bookings')
+      .set({
+        title: 'PRIVATE_BOOKING_TITLE',
+        responses: JSON.stringify({ answer: 'PRIVATE_ANSWER' }),
+        cancel_reason: 'PRIVATE_REASON',
+      })
+      .where('id', '=', bookingId)
+      .execute()
+    const capture = (enabled = true, type: 'created' | 'cancelled' = 'created') =>
+      db
+        .transaction()
+        .execute((trx) =>
+          webhookBookingNotifier(queue, { ...settings, enabled })(
+            trx,
+            { type, bookingId, start: now },
+            now,
+          ),
+        )
+    const rows = () =>
+      db
+        .selectFrom('webhook_deliveries')
+        .selectAll()
+        .where('webhook_id', '=', destination.id)
+        .orderBy('id')
+        .execute()
+    return { ctx, destination, bookingId, activity, capture, rows }
+  }
+  it.each([false, true])('projects useful bounded booking fields for team=%s', async (team) => {
+    const f = await fixture(team)
+    await f.capture()
+    const payload = (await f.rows())[0]?.payload ?? ''
+    const text = JSON.parse(payload).text
+    expect(text).toContain('Activity &lt;!channel&gt; ＠here')
+    expect(text).toContain('Status: confirmed')
+    expect(text).toContain(`${settings.publicUrl}/app/bookings/${f.bookingId}`)
+    expect(text).toContain(
+      team ? '2026-11-01T08:30+00:00[UTC]' : '2026-11-01T01:30-07:00[America/Los_Angeles]',
+    )
+    if (team) expect(text).not.toContain('Invitee')
+    else expect(text).toContain('Invitee: Invitee &lt;!here&gt;')
+    for (const value of [
+      'PRIVATE_BOOKING_TITLE',
+      'PRIVATE_ANSWER',
+      'PRIVATE_REASON',
+      'private@example.com',
+    ])
+      expect(payload).not.toContain(value)
+    await db
+      .updateTable('event_types')
+      .set({ deleted_at: new Date() })
+      .where('id', '=', f.activity)
+      .execute()
+    await f.capture(true, 'cancelled')
+    expect((await f.rows())[1]?.payload).not.toContain('Activity')
+  })
+  it('honors the operator switch at capture and delivery', async () => {
+    const f = await fixture()
+    await f.capture(false)
+    expect(await f.rows()).toHaveLength(0)
+    await f.capture()
+    const transport = vi.fn(async () => 200)
+    await deliverWebhook(
+      { db, ...settings, enabled: false, transport, now: () => now },
+      (await f.rows())[0]?.id as string,
+      signal(),
+    )
+    expect(transport).not.toHaveBeenCalled()
+    expect((await f.rows())[0]).toMatchObject({
+      status: 'skipped',
+      last_error: 'disabled',
+      attempts: 0,
+    })
+  })
+  it.each([404, 410])(
+    'atomically pauses revoked HTTP %s destinations after one attempt',
+    async (status) => {
+      const f = await fixture()
+      await f.capture()
+      const sample = await testSlackDestination(f.ctx, settings, f.destination.id, queue)
+      const transport = vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        return status
+      })
+      await expect(
+        Promise.all(
+          (await f.rows()).map((row) =>
+            deliverWebhook({ db, ...settings, transport, now: () => now }, row.id, signal()),
+          ),
+        ),
+      ).resolves.toEqual([undefined, undefined])
+      expect(transport).toHaveBeenCalledTimes(1)
+      expect((await listSlackDestinations(f.ctx))[0]?.isActive).toBe(false)
+      const rows = await f.rows()
+      expect(rows.filter((row) => row.status === 'failed')).toHaveLength(1)
+      expect(rows.find((row) => row.status === 'failed')).toMatchObject({
+        attempts: 1,
+        http_status: status,
+      })
+      expect(rows.filter((row) => row.status === 'skipped')).toHaveLength(1)
+      await deliverWebhook(
+        { db, ...settings, transport, now: () => now },
+        sample.deliveryId,
+        signal(),
+      )
+      expect(transport).toHaveBeenCalledTimes(1)
+    },
+  )
+  it('does not block booking capture during an in-flight Slack network request', async () => {
+    const f = await fixture()
+    const sample = await testSlackDestination(f.ctx, settings, f.destination.id, queue)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const transport = vi.fn(async () => {
+      await held
+      return 200
+    })
+    const send = deliverWebhook(
+      { db, ...settings, transport, now: () => now },
+      sample.deliveryId,
+      signal(),
+    )
+    try {
+      await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1))
+      await expect(
+        db.transaction().execute(async (trx) => {
+          // A database deadline gives a real assertion failure if the network-time lock
+          // is strengthened to an exclusive destination lock.
+          await sql`SET LOCAL lock_timeout = '500ms'`.execute(trx)
+          await webhookBookingNotifier(queue, settings)(
+            trx,
+            { type: 'created', bookingId: f.bookingId, start: now },
+            now,
+          )
+        }),
+      ).resolves.toBeUndefined()
+      expect(await f.rows()).toHaveLength(2)
+    } finally {
+      release()
+      await send
+    }
+  })
+})

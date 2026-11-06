@@ -25,13 +25,13 @@ export interface WebhookDeps extends WebhookSettings {
   transport?: WebhookTransport | undefined
 }
 
-/** Capture current changes only; Slack needs a key, signed webhooks also need opt-in. */
+/** Capture current changes only; the operator switch controls every destination kind. */
 export function webhookBookingNotifier(
   queue: WebhookQueue,
   settings: WebhookSettings,
 ): BookingNotifier {
   return async (trx, event, now) => {
-    if (!settings.enabled && !settings.encryptionKey) return
+    if (!settings.enabled) return
     if (!trx.isTransaction) throw new Error('Webhook capture requires the booking transaction')
     if (await isImportedBooking(trx, event.bookingId)) return
     const booking = await trx
@@ -75,6 +75,39 @@ export function webhookBookingNotifier(
       .forShare()
       .execute()
     if (!endpoints.length) return
+    // Organization records have no zone setting. Personal destinations use their
+    // owner's public profile zone; team destinations explicitly use UTC.
+    const hasSlack = endpoints.some((endpoint) => endpoint.destination_kind === 'slack')
+    const personal = hasSlack
+      ? await trx
+          .selectFrom('personal_organizations')
+          .leftJoin('profiles', 'profiles.user_id', 'personal_organizations.user_id')
+          .select(['personal_organizations.user_id', 'profiles.time_zone'])
+          .where('personal_organizations.organization_id', '=', booking.organization_id)
+          .executeTakeFirst()
+      : undefined
+    const activity =
+      hasSlack && booking.event_type_id
+        ? await trx
+            .selectFrom('event_types')
+            .select('title')
+            .where('id', '=', booking.event_type_id)
+            .where('organization_id', '=', booking.organization_id)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst()
+        : undefined
+    const invitee = personal
+      ? await trx
+          .selectFrom('booking_attendees')
+          .select('name')
+          .where('booking_id', '=', booking.id)
+          .where('is_booker', '=', true)
+          .executeTakeFirst()
+      : undefined
+    const origin = hasSlack && settings.publicUrl ? new URL(settings.publicUrl).origin : undefined
+    // An invalid oversized operator origin must not abort an otherwise valid booking.
+    const bookingUrl =
+      origin && origin.length <= 512 ? `${origin}/app/bookings/${booking.id}` : undefined
     const eventId = randomUUID()
     const payload = JSON.stringify({
       id: eventId,
@@ -108,6 +141,10 @@ export function webhookBookingNotifier(
                   start: booking.start_at.toISOString(),
                   end: booking.end_at.toISOString(),
                   status: booking.status,
+                  eventTypeTitle: activity?.title,
+                  timeZone: personal?.time_zone ?? 'UTC',
+                  ...(invitee ? { inviteeName: invitee.name } : {}),
+                  ...(bookingUrl ? { bookingUrl } : {}),
                 })
               : payload,
           created_at: new Date(now.epochMilliseconds),
@@ -151,13 +188,20 @@ export async function deliverWebhook(
 ) {
   const found = await deps.db
     .selectFrom('webhook_deliveries')
-    .select('webhook_id')
-    .where('id', '=', deliveryId)
+    .innerJoin('webhooks', 'webhooks.id', 'webhook_deliveries.webhook_id')
+    .select(['webhook_id', 'destination_kind'])
+    .where('webhook_deliveries.id', '=', deliveryId)
     .executeTakeFirst()
   if (!found) return
   const retry = await deps.db.transaction().execute(async (trx) => {
-    // Endpoint first, then delivery: deletion cascades in that order too. Keep the share
-    // lock through acknowledgement, so successful disable/delete/rotation waits for sends.
+    // Serialize only Slack workers before taking SHARE: booking capture never takes
+    // this advisory lock and stays unblocked during the network call. A revoked send
+    // can then upgrade its row lock after the call without another sender upgrading.
+    if (found.destination_kind === 'slack')
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${found.webhook_id}, 578231))`.execute(
+        trx,
+      )
+    // Endpoint first, then delivery: deletion cascades in that order too.
     const endpoint = await trx
       .selectFrom('webhooks')
       .selectAll()
@@ -185,7 +229,7 @@ export async function deliverWebhook(
         .executeTakeFirst())
     const now = (deps.now ?? (() => Temporal.Now.instant()))()
     if (
-      (!deps.enabled && endpoint.destination_kind !== 'slack') ||
+      !deps.enabled ||
       !endpoint.is_active ||
       filterMismatch ||
       !endpoint.events.includes(delivery.event_type) ||
@@ -196,7 +240,7 @@ export async function deliverWebhook(
         .set({
           status: 'skipped',
           last_error:
-            (deps.enabled || endpoint.destination_kind === 'slack') &&
+            deps.enabled &&
             endpoint.is_active &&
             !filterMismatch &&
             endpoint.events.includes(delivery.event_type)
@@ -267,6 +311,13 @@ export async function deliverWebhook(
       error = 'interrupted'
       status = null
     }
+    const slackRevoked = isSlack && (status === 404 || status === 410)
+    if (slackRevoked)
+      await trx
+        .updateTable('webhooks')
+        .set({ is_active: false, updated_at: new Date(now.epochMilliseconds) })
+        .where('id', '=', endpoint.id)
+        .execute()
     await trx
       .updateTable('webhook_deliveries')
       .set({
@@ -274,12 +325,12 @@ export async function deliverWebhook(
         last_attempt_at: new Date(now.epochMilliseconds),
         http_status: status,
         last_error: error,
-        status: error ? (attempt === 13 ? 'failed' : 'pending') : 'delivered',
+        status: error ? (slackRevoked || attempt === 13 ? 'failed' : 'pending') : 'delivered',
         delivered_at: error ? null : new Date(now.epochMilliseconds),
       })
       .where('id', '=', deliveryId)
       .execute()
-    return error !== null
+    return error !== null && !slackRevoked
   })
   // Safe even when a request failed with a body, query credential, headers or secret.
   if (retry)

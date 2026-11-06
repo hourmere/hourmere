@@ -16,7 +16,8 @@ Set `WEBHOOKS_ENABLED=true` and an independent `WEBHOOK_ENCRYPTION_KEY` containi
 processes, keep the encryption key stable and back it up securely. Do not reuse calendar or
 authentication keys. The default is disabled: no events or snapshots are captured, and
 enabling does not backfill past bookings. Turning the global switch off also skips queued
-deliveries when a worker sees them. Keep a worker running for delivery and retention cleanup.
+deliveries when a worker sees them. This switch also controls Slack capture, test enqueue
+and delivery. Keep a worker running for delivery and retention cleanup.
 
 Organization owners and admins may use these endpoints with a session or API key acting in
 that organization. Ordinary members/hosts cannot configure or inspect webhooks, since each

@@ -30,9 +30,9 @@ including immediately after saving. Keep the original in a secure secret store i
 The browser clears the URL after submission, including a failed submission; enter it again
 to retry. Never paste it into logs, source control, shell history or support messages.
 
-Only HTTPS URLs under `https://hooks.slack.com/services/` and
-`https://hooks.slack-gov.com/services/` are accepted. Slack documents the `slack-gov.com`
-domain for GovSlack in the linked official guide. Regional hosts are not supported.
+Only HTTPS URLs under `https://hooks.slack.com/services/` are accepted. Slack documents
+the `slack-gov.com` domain for GovSlack, but its guides do not name the exact incoming-webhook
+host. GovSlack and regional hosts are currently unsupported.
 User information, query parameters, fragments and alternate ports are refused. Each
 attempt rechecks the URL and public DNS addresses through the outbound guard, pins the
 validated address to the socket and does not follow redirects. Private-webhook target
@@ -40,13 +40,20 @@ exceptions do not apply to Slack.
 
 ## What is sent
 
-Messages use Block Kit and a plain-text fallback. They contain booking identifiers,
-UTC start/end times and status. They contain no invitee or host names, email addresses,
+Messages use Block Kit and a plain-text fallback. They contain the booking ID, event-type
+title, start/end times with UTC offset, status, and an authenticated admin booking link.
+Personal destinations also include the invitee name. Team destinations send only the
+listed booking fields and omit attendee and host details. Neither sends email addresses,
 custom answers, free-text booking titles, cancellation reasons, management tokens,
-conference URLs or calendar credentials. Team destinations use the same minimal data
-boundary; team administration does not authorize broader booking content in Slack.
+conference URLs or calendar credentials.
 Text is escaped and rendered without mention/link parsing, preventing user-controlled
 content from pinging a channel or injecting links.
+
+Times use the personal organization owner’s public profile time zone, including the UTC
+offset at the booking instant. There is no team organization time-zone setting; team
+destinations use UTC (`+00:00`) explicitly. A missing personal profile also falls back to
+UTC. Event titles and personal invitee names are truncated before escaping to keep both
+Slack blocks and the stored payload within their size limits.
 
 Rescheduling emits a reschedule notification, without an additional cancellation for the
 old booking. A later cancellation emits its own event. The saved snapshot is immutable;
@@ -75,7 +82,10 @@ duplicate-free selection of `booking.created`, `booking.cancelled`, `booking.res
 `eventTypeId` is a UUID belonging to this organization or null. Update accepts the same
 fields optionally; omitting a field preserves it, and null clears the event-type filter.
 Responses contain only destination metadata and a masked URL. Test returns a `deliveryId`
-and HTTP 202, which acknowledges queueing rather than Slack acceptance.
+and HTTP 202, which acknowledges queueing rather than Slack acceptance. While a sample is
+pending (including retries), another test receives HTTP 409 `slack_test_pending`. REST and
+MCP share a limit of five test requests per minute per organization in each server process
+(HTTP 429 on REST). The pending-sample guard applies across all server instances.
 
 API keys need `read` or `full` to list and `full` to create, update, delete or test;
 organization ownership/admin permission still applies. Browser-session writes require
@@ -88,13 +98,17 @@ URL directly in a shell command. Consult `hourmere --help` (or `npm run --silent
 The complete feature is available to self-hosters. Configure a stable, independent
 `WEBHOOK_ENCRYPTION_KEY` (32 random bytes in base64) on both web and worker processes,
 and keep a worker running. Back up the key securely; losing it makes saved URLs
-unreadable. Slack does not require the generic `WEBHOOKS_ENABLED` switch.
+unreadable. Set `WEBHOOKS_ENABLED=true` on both web and worker. Setting it to `false`
+stops new Slack capture and outbound delivery as well as generic webhooks; queued work
+processed while disabled is skipped.
 
 Slack reuses Hourmere's webhook transactional outbox, durable delivery IDs, bounded retry
 schedule and failure tracking. Booking changes and notification enqueue commit or roll
 back together. Replaying a successful booking request does not enqueue another event.
 The existing retry budget is thirteen total attempts, starting at one minute and doubling
-with jitter up to one hour. See [webhook delivery limits](/docs/webhooks#delivery-and-operational-limits).
+with jitter up to one hour. A Slack 404/410 instead stops after one attempt and pauses
+the destination. Settings shows its paused state; replace the revoked URL and enable
+notifications before testing again. See [webhook delivery limits](/docs/webhooks#delivery-and-operational-limits).
 
 Slack incoming webhooks do **not** verify Hourmere's outbound webhook signature, and
 Slack request signing is for requests sent by Slack, not incoming-webhook delivery.
@@ -104,11 +118,11 @@ validates an Hourmere HMAC signature.
 
 ## Known limitations
 
-- Slack messages currently use English and UTC times. The settings interface supports
+- Slack messages currently use English. The settings interface supports
   English and Simplified Chinese.
 - One destination per organization; the channel is determined by its webhook URL.
 - Notifications are minimal operational updates, not full booking summaries. No custom
-  message template, invitee data, interactive actions or channel selection is supported.
+  message template, interactive actions or channel selection is supported.
 - Delivery is at least once. A worker interrupted after Slack accepts a message can retry
   it, and Slack incoming webhooks do not deduplicate Hourmere delivery IDs. Duplicate
   messages are possible. There is no exactly-once or ordering guarantee.

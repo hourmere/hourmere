@@ -20,11 +20,11 @@ import {
 import { escapeSlackText, slackPayload, slackUrl } from './slack-format.ts'
 
 const url = 'https://hooks.slack.com/services/TTEST/BTEST/synthetic-secret'
-const settings = { enabled: false, encryptionKey: Buffer.alloc(32, 8).toString('base64') }
+const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 8).toString('base64') }
 const now = Temporal.Instant.from('2026-11-01T12:00Z')
 it('accepts only documented incoming webhook hosts and exact credential paths', () => {
   expect(slackUrl(url)).toBe(url)
-  expect(slackUrl(url.replace('slack.com', 'slack-gov.com'))).toBeDefined()
+  expect(slackUrl(url.replace('slack.com', 'slack-gov.com'))).toBeUndefined()
   for (const bad of [
     url.replace('https:', 'http:'),
     `${url}?x=y`,
@@ -125,7 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack durable destinations', () => {
     expect(results.filter((v) => v.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter((v) => v.status === 'rejected')).toHaveLength(1)
   })
-  it('captures transactionally without feature gating, deduplicates replay, and respects filters and disable', async () => {
+  it('captures transactionally with the operator switch enabled, deduplicates replay, and respects filters and disable', async () => {
     const { ctx, destination, bookingId } = await fixture()
     const notify = webhookBookingNotifier(queue, settings)
     const event = { type: 'created' as const, bookingId, start: now }
@@ -315,8 +315,8 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack durable destinations', () => {
       'rescheduledFromId',
     ])
       expect(row.payload).not.toContain(privateText)
-    expect(row.payload).toContain('2026-11-01T08:30:00.000Z')
-    expect(row.payload).toContain('2026-11-01T09:30:00.000Z')
+    expect(row.payload).toContain('2026-11-01T08:30+00:00[UTC]')
+    expect(row.payload).toContain('2026-11-01T09:30+00:00[UTC]')
   })
   it('rechecks session authorization after waiting for an endpoint lock', async () => {
     const { ctx, destination } = await fixture()
