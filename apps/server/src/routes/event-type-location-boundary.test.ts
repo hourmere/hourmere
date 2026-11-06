@@ -497,6 +497,11 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     },
   )
 
+  // The documented response fields; anything else in a response is a leak, whatever its name.
+  // team-dto-security-audit.test.ts pins the same set for team event types.
+  const declared = Object.keys(routes.EventType.shape)
+  const undeclared = (body: unknown) =>
+    Object.keys(body as object).filter((key) => !declared.includes(key))
   async function verifyBoundary(schemas: Schemas = routes) {
     const s = await setup(schemas)
     const created = await s.create(options)
@@ -504,6 +509,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     expect(schemas.EventType.parse({ ...created, deleted_at: null })).not.toHaveProperty(
       'deleted_at',
     )
+    expect(declared).toEqual(expect.arrayContaining(['locations', 'maxBookingsPerMonth']))
     const notifications = { reminders: [], followUps: [] }
     const restCreated = await s.rest('POST', '/api/v1/event-types', {
       ...base,
@@ -534,9 +540,13 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
       expect(response.body).toHaveProperty('maxBookingsPerWeek', null)
       expect(response.body).toHaveProperty('maxBookingsPerMonth', null)
       expect(response.body).not.toHaveProperty('deleted_at')
+      expect(undeclared(response.body)).toEqual([])
       expect(response.body).toHaveProperty('successRedirect', null)
     }
-    for (const item of list.body.data as unknown[]) expect(item).toHaveProperty('locations')
+    for (const item of list.body.data as unknown[]) {
+      expect(item).toHaveProperty('locations')
+      expect(undeclared(item)).toEqual([])
+    }
     expect(await s.stored(created.id)).toEqual({ locations: options })
   }
   it('exposes options in REST and MCP responses and public limits without exposing internal metadata', () =>
@@ -550,15 +560,26 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())
   })
-  it('detects a REST response leak introduced after its projection', async () => {
-    await verifyBoundary(await sourceCopy())
-    const mutant = await sourceCopy([
-      'return ({ app, caller }) => {',
-      `return ({ app, caller }) => {
+  it.each(['deleted_at', 'zoomCredentialCiphertext'])(
+    'detects a REST response leak of %s introduced after its projection',
+    async (field) => {
+      await verifyBoundary(await sourceCopy())
+      const mutant = await sourceCopy([
+        'return ({ app, caller }) => {',
+        `return ({ app, caller }) => {
       app.use('/api/v1/event-types*', async (c, next) => {
         await next()
-        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), deleted_at: null })
+        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), ${field}: null })
       })`,
+      ])
+      await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
+      await verifyBoundary(await sourceCopy())
+    },
+  )
+  it('detects an undeclared field added to the REST projection', async () => {
+    const mutant = await sourceCopy([
+      '(eventType: ServiceEventType) => eventType',
+      '(eventType: ServiceEventType) => ({ ...eventType, zoomCredentialCiphertext: null })',
     ])
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())
