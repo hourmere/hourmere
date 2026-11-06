@@ -233,6 +233,15 @@ export async function applyExtractedImport(
     )
     if (fresh.plan.bookings.some((b) => Temporal.Instant.compare(b.start, now) <= 0))
       throw new TargetRefusal('IMPORT_PLAN_EXPIRED')
+    // The write barrier already locks bookings and host occupancy. Release due holds
+    // before imported hosts hit the same overlap constraint as ordinary bookings.
+    await client.query(
+      `UPDATE bookings b SET status='expired'
+       WHERE b.status='pending_payment' AND b.payment_hold_expires_at<=clock_timestamp()
+         AND EXISTS (SELECT FROM booking_hosts h WHERE h.booking_id=b.id
+           AND h.user_id=ANY($1::uuid[]))`,
+      [input.authorization.owners.map((o) => o.targetUserId)],
+    )
     stage = 'write_entities'
     const ids = new Map<string, string>()
     const remember = (kind: string, key: number, id: string, owner: number) => {

@@ -11,19 +11,19 @@
   },
   "devDependencies": {
     "@types/pg": "8.23.1",
-    "auth": "1.7.12"
+    "auth": "1.7.16"
   },
   "dependencies": {
-    "@better-auth/api-key": "1.7.12",
-    "@better-auth/cimd": "1.7.12",
-    "@better-auth/core": "1.7.12",
-    "@better-auth/kysely-adapter": "1.7.12",
-    "@better-auth/mcp": "1.7.12",
-    "@better-auth/oauth-provider": "1.7.12",
+    "@better-auth/api-key": "1.7.16",
+    "@better-auth/cimd": "1.7.16",
+    "@better-auth/core": "1.7.16",
+    "@better-auth/kysely-adapter": "1.7.16",
+    "@better-auth/mcp": "1.7.16",
+    "@better-auth/oauth-provider": "1.7.16",
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/mail": "*",
-    "better-auth": "1.7.12",
+    "better-auth": "1.7.16",
     "kysely": "0.29.7",
     "pg": "8.23.1",
     "pg-connection-string": "2.14.1",

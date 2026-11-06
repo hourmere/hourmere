@@ -428,3 +428,10 @@ for public apps; its private/development apps do not trigger those notifications
 ## Automatic Google Meet
 
 `GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See [automatic Google Meet](/docs/automatic-google-meet) for pending/failure and notification semantics.
+
+## Paid-booking foundation
+
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
+adapter. It has no runtime effect in this release: setting it to `true` does not permit
+hold creation or enable payment collection. Existing holds expire regardless of this
+setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).

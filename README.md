@@ -35,6 +35,10 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 
+CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
+iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
+available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
+
 ## Development
 
 Requires Node.js 26 and Docker.
