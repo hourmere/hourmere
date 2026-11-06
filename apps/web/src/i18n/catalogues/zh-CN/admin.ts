@@ -5,7 +5,7 @@ export const admin = {
     '请选择不超过 366 天的预约开始时间范围。当前预约筛选条件也会应用。',
   'This file contains personal data. Store and share it carefully.':
     '此文件包含个人数据。请妥善保存并谨慎分享。',
-  'CSV times use {zone} and UTC.': 'CSV 中的时间使用 {zone} 和 UTC。',
+  'CSV times use {zone} and UTC.': 'CSV 中的时间使用{zone}和 UTC。',
   'Export starts at or after (UTC)': '导出开始时间不早于（UTC）',
   'Export starts before (UTC)': '导出开始时间早于（UTC）',
   'Include UTF-8 BOM for Excel': '包含 UTF-8 BOM，便于 Excel 读取',
