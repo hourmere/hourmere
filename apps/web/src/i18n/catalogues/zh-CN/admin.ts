@@ -1,5 +1,7 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    '无法在此处更改已保存的地点选项。请保留原地点后重试。',
   'Checking waitlist management access…': '正在检查候补名单管理权限……',
   'Could not check waitlist management access. Try again.': '无法检查候补名单管理权限，请重试。',
   'Not notified yet': '尚未通知',

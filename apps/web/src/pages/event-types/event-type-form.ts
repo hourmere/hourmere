@@ -85,6 +85,8 @@ export interface EventTypeDraft {
   autoCreateMeet: boolean
   conferenceOrganizerUserId: string
   phone: string
+  /** Preserve an invitee-phone compatibility value until the host enters a number. */
+  phoneAskInvitee: boolean
   address: string
   url: string
   questions: QuestionDraft[]
@@ -138,6 +140,7 @@ export function emptyDraft(): EventTypeDraft {
     autoCreateMeet: false,
     conferenceOrganizerUserId: '',
     phone: '',
+    phoneAskInvitee: false,
     address: '',
     url: '',
     questions: [],
@@ -178,7 +181,8 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     zoomConnectionId: e.zoomConnectionId ?? '',
     autoCreateMeet: location?.kind === 'google_meet' && location.autoCreate === true,
     conferenceOrganizerUserId: e.conferenceOrganizer?.userId ?? '',
-    phone: location?.kind === 'phone' ? location.number : '',
+    phone: location?.kind === 'phone' ? (location.number ?? '') : '',
+    phoneAskInvitee: location?.kind === 'phone' && location.askInvitee === true,
     address: location?.kind === 'in_person' ? location.address : '',
     url: location?.kind === 'link' ? location.url : '',
     questions: e.questions.map((q) => ({
@@ -375,7 +379,10 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
 
   switch (draft.locationKind) {
     case 'phone':
-      if (!EVENT_TYPE.phonePattern.test(draft.phone.trim())) {
+      if (
+        !(draft.phoneAskInvitee && draft.phone.trim() === '') &&
+        !EVENT_TYPE.phonePattern.test(draft.phone.trim())
+      ) {
         add('location-phone', 'Enter the number in international format, e.g. +14155550123.')
       }
       break
@@ -447,7 +454,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
       case '':
         return null
       case 'phone':
-        return { kind: 'phone', number: draft.phone.trim() }
+        return draft.phoneAskInvitee && draft.phone.trim() === ''
+          ? { kind: 'phone', askInvitee: true }
+          : { kind: 'phone', number: draft.phone.trim() }
       case 'in_person':
         return { kind: 'in_person', address: draft.address.trim() }
       case 'link':
@@ -511,6 +520,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  // The compatibility field cannot represent a complete option list. Leave it out when
+  // untouched, so metadata saves also preserve options configured by a newer client.
+  if (JSON.stringify(body.location) === JSON.stringify(toInput(baseline).location))
+    delete body.location
   // A metadata save must preserve waitlist changes made outside this editor session.
   if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
   else body.waitlist = { enabled: draft.waitlistEnabled }
@@ -652,6 +665,13 @@ export function serverErrors(
     if (message) return field(err.field, message)
   }
   switch (err.code) {
+    case 'location_options_conflict':
+      return {
+        fields: {},
+        message: msg(
+          'The saved location options cannot be changed here. Keep the location unchanged and try again.',
+        ),
+      }
     case 'waitlist_unsupported':
       return field(
         'waitlist',

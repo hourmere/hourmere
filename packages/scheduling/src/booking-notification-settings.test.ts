@@ -1009,8 +1009,8 @@ describe.skipIf(!serverUrl)('booking notification settings storage', () => {
       'input.notifications === undefined ? undefined : validateNotifications(input.notifications)',
     ],
     [
-      'const changes = defined(input)\n  const notifications =\n    input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)',
-      'const changes = defined(input)\n  const notifications =\n    input.notifications === undefined ? undefined : validateNotifications(input.notifications)',
+      'input: EventTypeUpdate,\n): Promise<EventType> {\n  const notifications =\n    input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)',
+      'input: EventTypeUpdate,\n): Promise<EventType> {\n  const notifications =\n    input.notifications === undefined ? undefined : validateNotifications(input.notifications)',
     ],
   ])(
     'detects removing operator policy from a write path with a real assertion failure',

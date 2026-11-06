@@ -1,4 +1,6 @@
 export const common = {
+  'This location is unavailable. Contact the host to book.':
+    'Dieser Treffpunkt ist nicht verfügbar. Wenden Sie sich für die Buchung an die gastgebende Person.',
   'The host or the team’s owners and admins can see your email, name and requested period.':
     'Die gastgebende Person oder die Inhaber und Administratoren des Teams können Ihre E-Mail-Adresse, Ihren Namen und den gewünschten Zeitraum sehen.',
   '{count} second': '{count} Sekunde',

@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This location is unavailable. Contact the host to book.':
+    '此地点暂时无法预约。请联系主持人安排预约。',
   'The host or the team’s owners and admins can see your email, name and requested period.':
     '主持人或团队所有者和管理员可以查看你的邮箱、姓名和期望时段。',
   '{count} second': '{count}秒',

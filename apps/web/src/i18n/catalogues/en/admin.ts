@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'The saved location options cannot be changed here. Keep the location unchanged and try again.':
+    'The saved location options cannot be changed here. Keep the location unchanged and try again.',
   'Checking waitlist management access…': 'Checking waitlist management access…',
   'Could not check waitlist management access. Try again.':
     'Could not check waitlist management access. Try again.',

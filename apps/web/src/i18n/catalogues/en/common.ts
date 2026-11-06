@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'This location is unavailable. Contact the host to book.':
+    'This location is unavailable. Contact the host to book.',
   'The host or the team’s owners and admins can see your email, name and requested period.':
     'The host or the team’s owners and admins can see your email, name and requested period.',
   '{count} second': '{count} second',

@@ -108,6 +108,20 @@ export {
 } from './event-types.ts'
 export { validTimeZone } from './internal.ts'
 export {
+  compatLocation,
+  LOCATION_OPTION_LIMITS,
+  type LocationChoiceContext,
+  type LocationChoiceInput,
+  type LocationOption,
+  type LocationSettings,
+  locationOptionsFromLegacy,
+  type PublicLocationOption,
+  publicLocationOptions,
+  type ResolvedLocationChoice,
+  resolveLocationChoice,
+  validateLocationOptions,
+} from './location-options.ts'
+export {
   getManagedBookingDetails,
   listHostBookingSlots,
   listManagedSlots,
