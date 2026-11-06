@@ -222,6 +222,7 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
     return {
       event,
       id: option.id,
+      hostUserId: host.userId,
       ctx: { db, now, automaticMeet: true, automaticZoom: true },
       slots: {
         handle: host.handle,
@@ -271,6 +272,37 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
       await verifySingleConference(Bookings, kind)
     },
   )
+  async function verifySingleConferenceIntent(module: typeof Bookings) {
+    const s = await single({ kind: 'google_meet', autoCreate: true })
+    await createFixtures(db).meetDestination(s.hostUserId)
+    // Readiness passes, but creating the conference intent needs a verified organizer address.
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', s.hostUserId)
+      .execute()
+    expect((await listPublicSlots(s.ctx, s.slots)).length).toBeGreaterThan(0)
+    await expect(module.createPublicBooking(s.ctx, s.input)).rejects.toMatchObject({
+      code: 'automatic_meet_unavailable',
+    })
+    await expect(
+      module.createPublicBooking(s.ctx, { ...s.input, locationOptionId: s.id }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect(
+      await db.selectFrom('bookings').select('id').where('event_type_id', '=', s.event).execute(),
+    ).toEqual([])
+  }
+  it('keeps the provider code when conference intent creation fails for a single option', async () => {
+    await verifySingleConferenceIntent(Bookings)
+    const copy = await sourceCopy(
+      '        isPreservedSingleton(current.locations, input.locationOptionId),\n',
+      "        current.locations?.[0]?.id === 'legacy' && input.locationOptionId === undefined,\n",
+    )
+    await expect(verifySingleConferenceIntent(copy)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await verifySingleConferenceIntent(Bookings)
+  })
   async function verifySingleSettings(module: typeof Bookings, explicit: boolean) {
     // A compatibility write may keep settings that the option-list contract would normalize.
     const stored = { kind: 'link', url: 'https://meet.example.test' }

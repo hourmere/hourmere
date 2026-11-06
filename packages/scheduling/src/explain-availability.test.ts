@@ -189,49 +189,6 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     },
   )
 
-  /** A Meet-capable owned Google destination; its calendar is not used for conflicts. */
-  async function meetDestination(userId: string) {
-    const connection = await db
-      .insertInto('calendar_connections')
-      .values({
-        user_id: userId,
-        provider: 'google',
-        external_account_id: crypto.randomUUID(),
-        credentials: Buffer.from('synthetic-never-used-credential'),
-        status: 'active',
-        scopes: [
-          'https://www.googleapis.com/auth/calendar.events.owned',
-          'https://www.googleapis.com/auth/calendar.events.readonly',
-        ],
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow()
-    const calendar = await db
-      .insertInto('calendars')
-      .values({
-        connection_id: connection.id,
-        external_id: crypto.randomUUID(),
-        name: 'Meet destination',
-        access_role: 'owner',
-        supports_google_meet: true,
-        check_conflicts: false,
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow()
-    await db
-      .insertInto('profiles')
-      .values({
-        user_id: userId,
-        handle: `meet-${userId.replaceAll('-', '').slice(0, 32)}`,
-        time_zone: 'UTC',
-        destination_calendar_id: calendar.id,
-      })
-      .onConflict((oc) =>
-        oc.column('user_id').doUpdateSet({ destination_calendar_id: calendar.id }),
-      )
-      .execute()
-  }
-
   it('explains only the Meet-ready round-robin hosts that omitted-choice public slots use', async () => {
     const s = await team('round_robin')
     await db
@@ -245,7 +202,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       .where('id', '=', s.event.id)
       .execute()
     // Only the owner can host Meet, and is busy after 10:00; the member is free all morning.
-    await meetDestination(s.owner.id)
+    await f.meetDestination(s.owner.id)
     await f.calendarBusy(s.owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']])
     const meet = { db, now, automaticMeet: true }
     const ctx = { ...s.ctx, automaticMeet: true }
