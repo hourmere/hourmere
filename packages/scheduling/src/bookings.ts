@@ -2123,7 +2123,11 @@ export async function cancelTeamBookingInTransaction(
   actor: { userId: string; organizationId: string },
   id: string,
   now: () => Temporal.Instant,
-  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+  options: {
+    reason?: string | undefined
+    notify?: BookingNotifier | undefined
+    sessionId?: string | undefined
+  } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
@@ -2142,7 +2146,13 @@ export async function cancelTeamBookingInTransaction(
     now(),
     normalizeReason(options.reason),
     options.notify,
-    BOOKING_PAGE,
+    {
+      ...BOOKING_PAGE,
+      audit: {
+        actor: { type: 'user', id: actor.userId },
+        credential: { type: 'session', ...(options.sessionId ? { id: options.sessionId } : {}) },
+      },
+    },
     actor.userId,
   )
 }
@@ -2154,14 +2164,15 @@ async function auditBooking(
   action: 'booking.created' | 'booking.rescheduled' | 'booking.cancelled',
   origin: BookingOrigin,
 ) {
-  const key =
-    !origin.audit && origin.apiKeyId
-      ? await trx
-          .selectFrom('auth.apikey')
-          .select('metadata')
-          .where('id', '=', origin.apiKeyId)
-          .executeTakeFirst()
-      : undefined
+  const auditKeyId =
+    origin.audit?.credential.type === 'api_key' ? origin.audit.credential.id : origin.apiKeyId
+  const key = auditKeyId
+    ? await trx
+        .selectFrom('auth.apikey')
+        .select(['metadata', 'referenceId'])
+        .where('id', '=', auditKeyId)
+        .executeTakeFirst()
+    : undefined
   const grant =
     !origin.audit && origin.oauthConsentId
       ? await trx
@@ -2172,37 +2183,52 @@ async function auditBooking(
       : undefined
   if (!origin.audit && origin.oauthConsentId && !grant)
     throw new Error('Missing OAuth audit identity')
+  const keyMetadata = parsePersistedApiKeyMetadata(key?.metadata ?? null)
+  const keyOrganizationId = auditKeyId
+    ? (keyMetadata?.organizationId ??
+      (key
+        ? (
+            await trx
+              .selectFrom('personal_organizations')
+              .select('organization_id')
+              .where('user_id', '=', key.referenceId)
+              .executeTakeFirst()
+          )?.organization_id
+        : undefined))
+    : undefined
   const identity =
-    origin.audit ??
-    (origin.apiKeyId
-      ? {
-          actor: { type: 'api_key' as const, id: origin.apiKeyId },
-          credential: {
-            type: 'api_key' as const,
-            id: origin.apiKeyId,
-            ...(parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope
-              ? { scope: parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope }
-              : {}),
-          },
-        }
-      : origin.oauthConsentId
-        ? {
-            actor: {
-              type: 'user' as const,
-              id: grant?.user_id as string,
-            },
-            credential: {
-              type: 'oauth' as const,
-              grantId: origin.oauthConsentId,
-              ...(grant ? { clientId: grant.client_id } : {}),
-            },
-          }
-        : origin.actorUserId
+    auditKeyId && keyOrganizationId !== organizationId
+      ? { actor: { type: 'external_api_key' as const }, credential: { type: 'none' as const } }
+      : (origin.audit ??
+        (origin.apiKeyId
           ? {
-              actor: { type: 'user' as const, id: origin.actorUserId },
-              credential: { type: 'session' as const },
+              actor: { type: 'api_key' as const, id: origin.apiKeyId },
+              credential: {
+                type: 'api_key' as const,
+                id: origin.apiKeyId,
+                ...(parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope
+                  ? { scope: parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope }
+                  : {}),
+              },
             }
-          : { actor: { type: 'anonymous' as const }, credential: { type: 'none' as const } })
+          : origin.oauthConsentId
+            ? {
+                actor: {
+                  type: 'user' as const,
+                  id: grant?.user_id as string,
+                },
+                credential: {
+                  type: 'oauth' as const,
+                  grantId: origin.oauthConsentId,
+                  ...(grant ? { clientId: grant.client_id } : {}),
+                },
+              }
+            : origin.actorUserId
+              ? {
+                  actor: { type: 'user' as const, id: origin.actorUserId },
+                  credential: { type: 'session' as const },
+                }
+              : { actor: { type: 'anonymous' as const }, credential: { type: 'none' as const } }))
   await writeAuditEvent(trx, {
     organizationId,
     ...identity,

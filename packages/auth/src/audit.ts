@@ -98,9 +98,17 @@ export function authAuditRecords(): BetterAuthPlugin {
           const wrapped = async (request: { model: string; [key: string]: unknown }) => {
             const endpoint = tryGetCurrentAuthEndpointContext()
             const path = endpoint?.path ?? ''
+            // Native key endpoints also bulk-delete expired keys across the instance.
+            // Expiry housekeeping is not a user management action; audit only the target.
             const relevant =
               (request.model === 'apikey' &&
-                ['/api-key/create', '/api-key/update', '/api-key/delete'].includes(path)) ||
+                ((path === '/api-key/create' && method === 'create') ||
+                  (['/api-key/update', '/api-key/delete'].includes(path) &&
+                    ['update', 'delete'].includes(method) &&
+                    (request.where as { field: string; value: unknown }[] | undefined)?.some(
+                      (condition) =>
+                        condition.field === 'id' && condition.value === endpoint?.body?.keyId,
+                    )))) ||
               (request.model === 'oauthClient' && method === 'create') ||
               (request.model === 'oauthConsent' && (method === 'create' || method === 'update')) ||
               (['oauthRefreshToken', 'oauthAccessToken'].includes(request.model) &&
@@ -176,6 +184,7 @@ export function authAuditRecords(): BetterAuthPlugin {
                 const userId = session?.user.id
                 let organizationId: string | null = null
                 let action: Parameters<typeof writeAuditEvent>[1]['action']
+                let details: Record<string, unknown> = {}
                 let targetType = request.model
                 let targetId = String(row.id)
                 if (request.model === 'apikey') {
@@ -196,7 +205,11 @@ export function authAuditRecords(): BetterAuthPlugin {
                       : method === 'delete' ||
                           (request.update as Row | undefined)?.enabled === false
                         ? 'api_key.revoked'
-                        : 'api_key.updated'
+                        : (request.update as Row | undefined)?.enabled === true &&
+                            row.enabled === false
+                          ? 'api_key.reenabled'
+                          : 'api_key.updated'
+                  if (method === 'create') details = { scope: metadata?.scope ?? 'full' }
                 } else if (request.model === 'oauthClient') {
                   action = 'oauth.client_registered'
                   targetId = String(row.clientId)
@@ -210,8 +223,11 @@ export function authAuditRecords(): BetterAuthPlugin {
                     .select('organization_id')
                     .where('id', '=', String(row.referenceId))
                     .executeTakeFirst()
-                  if (!grant) throw new Error('OAuth audit requires its organization grant')
-                  organizationId = grant.organization_id
+                  if (!grant && request.model === 'oauthConsent')
+                    throw new Error('OAuth consent audit requires its organization grant')
+                  // Browser disconnect deletes the grant before a client can revoke its
+                  // already revoked refresh token. Preserve native family invalidation.
+                  organizationId = grant?.organization_id ?? null
                   action =
                     request.model === 'oauthConsent'
                       ? 'oauth.consent_granted'
@@ -261,6 +277,7 @@ export function authAuditRecords(): BetterAuthPlugin {
                     action,
                     targetType,
                     targetId,
+                    details,
                   })
                 } catch (error) {
                   // Native sign-out catches database errors; never turn an audit failure into success.

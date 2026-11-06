@@ -17,7 +17,7 @@ describe.skipIf(!serverUrl)('audit migration', () => {
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
     try {
-      const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql') && f < '0063')
+      const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql') && f < '0067')
       for (const file of files) {
         await copyFile(join(migrationsDir, file), join(predecessor, file))
         if (file < '0013') await copyFile(join(migrationsDir, file), join(early, file))
@@ -48,7 +48,7 @@ describe.skipIf(!serverUrl)('audit migration', () => {
       expect(
         (await upgraded.pool.query('SELECT count(*)::int AS n FROM bookings')).rows[0].n,
       ).toBeGreaterThan(0)
-      expect(await runMigrations(upgraded.pool)).toEqual(['0063_audit_events.sql'])
+      expect(await runMigrations(upgraded.pool)).toEqual(['0067_audit_events.sql'])
       expect(await records()).toEqual(before)
       fresh = await createTestDatabase(serverUrl as string)
       expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))

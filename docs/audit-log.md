@@ -18,12 +18,14 @@ sequence gaps are normal after rollback and IDs do not promise commit ordering.
 Indexes cover organization plus time, actor, or action, with ID tie breakers.
 
 Actors form a database-checked closed set: `user`, `api_key`, `oauth_client`,
-`system` (job/service name as ID), and `anonymous` (no ID). Credentials are
+`system` (job/service name as ID), `external_api_key` and `anonymous` (both without IDs). Credentials are
 `session` (optional session ID), `api_key` (ID and actual scope), `oauth` (client
 and grant IDs), or `none`. Legacy internal calls without an authenticated
 principal may have a null API-key scope (unknown); HTTP and MCP authenticated
 requests preserve the actual scope. Unknown scope is never recorded as full. OAuth authorized actions retain the consenting user
-and client/grant; API-key actions retain the exact key used by the agent.
+and client/grant; same-organization API-key actions retain the exact key used by the agent.
+A foreign organization key booking uses `external_api_key` with credential `none`,
+without the key ID, user ID or scope in the booked organization’s journal.
 Unauthenticated OAuth client registration has no organization and is instance-wide;
 a future organization reader must not infer access to these rows.
 
@@ -38,15 +40,18 @@ therefore incur these snapshot reads and one audit INSERT per affected entity.
 
 ## Stable actions and detail allow-lists
 
-Every action below has the explicit empty detail-key allow-list (`{}`). The
-application rejects extra keys; the database also requires an empty JSON object.
-New detail keys require deliberate schema and documentation review.
+The application and database reject extra detail keys. Role changes allow only
+`oldRole` and `newRole`; API key creation and the reserved rotation action allow
+only `scope`; all webhook actions allow only `events` (the subscribed event list).
+Every other action requires an empty object. No key names, webhook URLs or secrets
+are recorded. New detail keys require deliberate schema and documentation review.
 
 | Area | Actions |
 | --- | --- |
-| Membership | `membership.invited`, `membership.accepted`, `membership.removed`, `membership.left`, `membership.role_changed` |
-| Organization | `organization.updated` |
-| API keys | `api_key.created`, `api_key.updated`, `api_key.revoked` |
+| Membership | `membership.invited`, `membership.accepted`, `membership.removed`, `membership.left`, `membership.role_changed`, `membership.invitation_cancelled` |
+| Organization | `organization.created`, `organization.updated` |
+| API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
+| Webhooks | `webhook.created`, `webhook.updated`, `webhook.deleted`, `webhook.secret_rotated` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled` |
@@ -64,7 +69,9 @@ provider callback supplies identity proof without an existing app session, its
 credential is `none` rather than retaining a provider token. Initial signup before
 a personal organization exists is not a sign-in-method change. Native OAuth token
 revocation identifies the OAuth client and grant; browser disconnection identifies
-the user and app session.
+the user and app session. Revoking a refresh family after its grant was already
+disconnected keeps native invalidation and response behavior; absent grants do not
+cause audit failure.
 
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity; removal events preserve
@@ -84,6 +91,21 @@ have no cascading foreign keys, preserving history when a subject is removed.
 A later retention worker will delete bounded batches by organization and age
 using the organization/time index, outside request transactions, with an explicit
 operator policy. There is currently no automatic retention cleanup.
+
+## Not recorded
+
+Management operations not recorded are host removal of waitlist entries; one-time
+link creation and revocation; schedules and date overrides; profile edits; calendar
+and conference connections, calendar selection and resource retry operations;
+OAuth old-grant revocation during re-consent; and event-type deactivation as a
+side effect of member removal (the membership removal itself is recorded).
+Initial personal-organization provisioning and trusted server-side
+`auth.api.createOrganization` provisioning without an HTTP request are not
+recorded; interactive team creation is recorded. Invitation delivery resends and
+automatic expiry/replacement cancellation are not separate management events
+(new replacement invitations retain their invitation event).
+Automatic API-key expiry cleanup is not a user management action and is not
+recorded, including cleanup triggered by another user’s key endpoint.
 
 This is a management journal, not an access log: reads, failed attempts, ordinary
 sign-ins and session refreshes, third-party provider internals, email contents,

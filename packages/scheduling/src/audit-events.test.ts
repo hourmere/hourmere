@@ -84,7 +84,7 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
         await setEventTypeNotifications(ctx, event.id, DEFAULT_NOTIFICATIONS)
       if (action === 'waitlist_updated')
         await setEventTypeWaitlist(ctx, event.id, { enabled: true })
-      if (action === 'deleted') await deleteEventType(ctx, event.id)
+      if (action === 'deleted') await deleteEventType(ctx, event.id.toUpperCase())
       if (action === 'round_robin_activated') await activateRoundRobin(ctx, event.id)
       const rows = await events(event.id)
       expect(rows.map((r) => r.action)).toEqual(
@@ -152,6 +152,7 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
     'group_reschedule',
     'group_cancel',
     'explicit_origin',
+    'external_key',
   ] as const)('records booking %s and preserves agent credentials on replay', async (operation) => {
     const f = createFixtures(db)
     const host = await f.host()
@@ -176,12 +177,13 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
       apiKeyId: principal.apiKeyId,
       audit: auditActor(principal),
     }
+    const keyOwner = operation === 'external_key' ? await f.host() : host
     // Attribution FKs require a real key row.
     await db
       .insertInto('auth.apikey')
       .values({
         id: principal.apiKeyId,
-        referenceId: host.userId,
+        referenceId: keyOwner.userId,
         configId: 'default',
         key: randomUUID(),
         createdAt: new Date(),
@@ -195,8 +197,21 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
       invitee: { name: 'Secret name', email: 'secret@example.com', timeZone: 'UTC' },
       idempotencyKey: randomUUID(),
     }
-    const created = await createPublicBooking(ctx, input, origin)
-    await createPublicBooking(ctx, input, origin)
+    const actualOrigin = operation === 'external_key' ? { ...origin, apiKeyId: null } : origin
+    const created = await createPublicBooking(ctx, input, actualOrigin)
+    await createPublicBooking(ctx, input, actualOrigin)
+    if (operation === 'external_key') {
+      expect(await events(created.booking.id)).toEqual([
+        expect.objectContaining({
+          actor_type: 'external_api_key',
+          actor_id: null,
+          credential_type: 'none',
+          credential_id: null,
+          credential_scope: null,
+        }),
+      ])
+      return
+    }
     expect((await events(created.booking.id)).map((r) => r.action)).toEqual(['booking.created'])
     if (operation === 'create') {
       expect(await events(created.booking.id)).toEqual([
@@ -210,6 +225,7 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
       return
     }
     if (operation === 'team_cancel') {
+      const sessionId = randomUUID()
       await db
         .transaction()
         .execute((trx) =>
@@ -218,6 +234,7 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
             { userId: host.userId, organizationId: host.organizationId },
             created.booking.id,
             now,
+            { sessionId },
           ),
         )
       expect((await events(created.booking.id)).at(-1)).toMatchObject({
@@ -225,6 +242,7 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
         actor_type: 'user',
         actor_id: host.userId,
         credential_type: 'session',
+        credential_id: sessionId,
         details: {},
       })
       return
@@ -280,6 +298,88 @@ describe.skipIf(!serverUrl)('scheduling audit events', () => {
         details: {},
       })
   })
+
+  it.each(['create', 'reschedule', 'cancel'] as const)(
+    'rolls back booking %s and its journal on audit or commit failure',
+    async (operation) => {
+      for (const failure of ['audit', 'commit']) {
+        const f = createFixtures(db)
+        const host = await f.host()
+        await f.schedule(host.userId)
+        await f.eventType(host.organizationId, host.userId, { slug: 'rollback' })
+        const principal: Principal = {
+          kind: 'session',
+          sessionId: randomUUID(),
+          user: { id: host.userId, name: 'Host', email: 'host@example.com' },
+          organization: { id: host.organizationId, name: 'Space', slug: 'space', personal: true },
+        }
+        const ctx = { db, now, principal }
+        const input = {
+          handle: host.handle,
+          slug: 'rollback',
+          start: Temporal.Instant.from('2026-11-02T09:00:00Z'),
+          invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+          idempotencyKey: randomUUID(),
+        }
+        const original = operation === 'create' ? undefined : await createPublicBooking(ctx, input)
+        const beforeBookings = await db
+          .selectFrom('bookings')
+          .selectAll()
+          .where('organization_id', '=', host.organizationId)
+          .execute()
+        const beforeEvents = await db
+          .selectFrom('audit_events')
+          .selectAll()
+          .where('organization_id', '=', host.organizationId)
+          .execute()
+        await sql`CREATE FUNCTION reject_booking_audit_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced rollback'; END $$`.execute(
+          db,
+        )
+        if (failure === 'audit') {
+          await sql`CREATE TRIGGER reject_booking_audit_test BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_booking_audit_test()`.execute(
+            db,
+          )
+        } else {
+          // A deferred failure occurs after the audit INSERT. A separate audit transaction
+          // would commit an orphan event and therefore fail the unchanged-journal assertion.
+          await sql`CREATE CONSTRAINT TRIGGER reject_booking_audit_test AFTER INSERT OR UPDATE ON bookings DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_booking_audit_test()`.execute(
+            db,
+          )
+        }
+        try {
+          await expect(
+            operation === 'create'
+              ? createPublicBooking(ctx, input)
+              : operation === 'reschedule'
+                ? rescheduleHostBooking(ctx, original?.booking.id ?? '', {
+                    start: Temporal.Instant.from('2026-11-02T10:00:00Z'),
+                    idempotencyKey: randomUUID(),
+                  })
+                : cancelHostBooking(ctx, original?.booking.id ?? ''),
+          ).rejects.toThrow('forced rollback')
+        } finally {
+          await sql`DROP TRIGGER reject_booking_audit_test ON ${sql.table(failure === 'audit' ? 'audit_events' : 'bookings')}`.execute(
+            db,
+          )
+          await sql`DROP FUNCTION reject_booking_audit_test()`.execute(db)
+        }
+        expect(
+          await db
+            .selectFrom('bookings')
+            .selectAll()
+            .where('organization_id', '=', host.organizationId)
+            .execute(),
+        ).toEqual(beforeBookings)
+        expect(
+          await db
+            .selectFrom('audit_events')
+            .selectAll()
+            .where('organization_id', '=', host.organizationId)
+            .execute(),
+        ).toEqual(beforeEvents)
+      }
+    },
+  )
 
   it('rolls back changes when the audit INSERT fails, and isolates organizations', async () => {
     const a = await createTestUser(db),

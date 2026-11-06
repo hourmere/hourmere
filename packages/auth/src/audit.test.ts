@@ -96,6 +96,7 @@ describe.skipIf(!serverUrl)('auth audit persistence', () => {
     action: string,
     actor: Awaited<ReturnType<typeof account>>,
     targetId: string,
+    details: Record<string, unknown> = {},
   ) {
     expect(row).toMatchObject({
       action,
@@ -105,7 +106,7 @@ describe.skipIf(!serverUrl)('auth audit persistence', () => {
       credential_type: 'session',
       credential_id: actor.sessionId,
       target_id: targetId,
-      details: {},
+      details,
     })
   }
   async function teamFixture() {
@@ -193,7 +194,11 @@ describe.skipIf(!serverUrl)('auth audit persistence', () => {
     expect(responses.map((r) => r.status)).toEqual([200, 200])
     const rows = await events(actor.organizationId)
     expect(rows).toHaveLength(2)
-    for (const row of rows) event(row, 'membership.role_changed', actor, String(row.target_id))
+    for (const row of rows)
+      event(row, 'membership.role_changed', actor, String(row.target_id), {
+        oldRole: 'member',
+        newRole: 'admin',
+      })
     expect(new Date(String(rows[1]?.occurred_at)).getTime()).toBeGreaterThanOrEqual(
       new Date(String(rows[0]?.occurred_at)).getTime(),
     )
@@ -224,7 +229,9 @@ describe.skipIf(!serverUrl)('auth audit persistence', () => {
     )
     expect(created.status).toBe(200)
     const key = (await created.json()) as { id: string; key: string }
-    event((await events(actor.organizationId))[0], 'api_key.created', actor, key.id)
+    event((await events(actor.organizationId))[0], 'api_key.created', actor, key.id, {
+      scope: 'bookings',
+    })
     expect(JSON.stringify(await events(actor.organizationId))).not.toContain(key.key)
     expect(
       (await post('/api-key/update', { keyId: key.id, name: 'Renamed private label' }, actor))

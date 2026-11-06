@@ -2,19 +2,26 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { sql } from 'kysely'
 import type { Db } from './index.ts'
 
-/** Stable names. Every action currently permits no detail keys: identifiers suffice. */
+/** Stable names. Detail keys are explicitly allow-listed per action. */
 export const auditDetails = {
   'membership.invited': [],
   'membership.accepted': [],
   'membership.removed': [],
   'membership.left': [],
-  'membership.role_changed': [],
+  'membership.role_changed': ['oldRole', 'newRole'],
   'organization.ownership_transferred': [],
   'organization.updated': [],
-  'api_key.created': [],
+  'organization.created': [],
+  'membership.invitation_cancelled': [],
+  'api_key.created': ['scope'],
   'api_key.updated': [],
-  'api_key.rotated': [],
+  'api_key.rotated': ['scope'],
   'api_key.revoked': [],
+  'api_key.reenabled': [],
+  'webhook.created': ['events'],
+  'webhook.updated': ['events'],
+  'webhook.deleted': ['events'],
+  'webhook.secret_rotated': ['events'],
   'oauth.client_registered': [],
   'oauth.consent_granted': [],
   'oauth.token_revoked': [],
@@ -33,7 +40,7 @@ export const auditDetails = {
 } as const
 export type AuditAction = keyof typeof auditDetails
 export interface AuditActor {
-  type: 'user' | 'api_key' | 'oauth_client' | 'system' | 'anonymous'
+  type: 'user' | 'api_key' | 'oauth_client' | 'system' | 'anonymous' | 'external_api_key'
   id?: string
 }
 export interface AuditCredential {

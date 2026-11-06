@@ -852,7 +852,7 @@ export async function deleteEventType(ctx: ServiceContext, id: string): Promise<
       .where('id', '=', row.id)
       .where('deleted_at', 'is', null)
       .execute()
-    await auditEventType(ctx, trx, id, 'event_type.deleted')
+    await auditEventType(ctx, trx, row.id, 'event_type.deleted')
   })
 }
 

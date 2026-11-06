@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { type AuditEvent, auditActor, withAuditRequest, writeAuditEvent } from './audit.ts'
+import {
+  type AuditEvent,
+  auditActor,
+  auditDetails,
+  withAuditRequest,
+  writeAuditEvent,
+} from './audit.ts'
 import { createDb, type Db } from './index.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
@@ -61,6 +67,56 @@ describe.skipIf(!serverUrl)('audit journal', () => {
           .transaction()
           .execute((trx) => writeAuditEvent(trx, { ...event, details: { [key]: 'private' } })),
       ).rejects.toThrow('allow-listed')
+    }
+  })
+  it('allows only action-specific details in both application and database', async () => {
+    const cases = [
+      ['membership.role_changed', { oldRole: 'member', newRole: 'admin' }],
+      ['api_key.created', { scope: 'bookings' }],
+      ['api_key.rotated', { scope: 'full' }],
+      ...['webhook.created', 'webhook.updated', 'webhook.deleted', 'webhook.secret_rotated'].map(
+        (action) => [action, { events: ['booking.created'] }],
+      ),
+    ] as [AuditEvent['action'], Record<string, unknown>][]
+    for (const [action, details] of cases) {
+      await db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, action, details }))
+      const row = await db
+        .selectFrom('audit_events')
+        .select('details')
+        .orderBy('id', 'desc')
+        .executeTakeFirstOrThrow()
+      expect(row.details).toEqual(details)
+    }
+    for (const action of Object.keys(auditDetails) as AuditEvent['action'][]) {
+      for (const key of [
+        'unexpected',
+        'email',
+        'name',
+        'secret',
+        'url',
+        'scope',
+        'events',
+        'oldRole',
+        'newRole',
+      ]) {
+        if ((auditDetails[action] as readonly string[]).includes(key)) continue
+        await expect(
+          db.transaction().execute((trx) =>
+            writeAuditEvent(trx, {
+              ...event,
+              action,
+              details: { [key]: 'private' },
+            }),
+          ),
+        ).rejects.toThrow('allow-listed')
+        await expect(
+          owned.pool.query(
+            `INSERT INTO audit_events (actor_type, actor_id, credential_type, action, target_type, target_id, details)
+           VALUES ('system', 'test', 'none', $1, 'test', 'test', $2::jsonb)`,
+            [action, JSON.stringify({ [key]: 'private' })],
+          ),
+        ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
+      }
     }
   })
   it('rolls back the change when audit fails and the event when the change fails', async () => {

@@ -301,11 +301,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .executeTakeFirstOrThrow()
         expect(audit).toMatchObject({
           organization_id: outsider.organizationId,
-          actor_type: 'api_key',
-          actor_id: keyFor('team', scope).id,
-          credential_type: 'api_key',
-          credential_id: keyFor('team', scope).id,
-          credential_scope: scope,
+          actor_type: 'external_api_key',
+          actor_id: null,
+          credential_type: 'none',
+          credential_id: null,
+          credential_scope: null,
           details: {},
         })
         expect(audit.request_id).toMatch(/^[0-9a-f-]{36}$/)
@@ -344,11 +344,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
         for (const event of events) {
           expect(event).toMatchObject({
             organization_id: outsider.organizationId,
-            actor_type: 'api_key',
-            actor_id: keyFor('team', scope).id,
-            credential_type: 'api_key',
-            credential_id: keyFor('team', scope).id,
-            credential_scope: scope,
+            actor_type: 'external_api_key',
+            actor_id: null,
+            credential_type: 'none',
+            credential_id: null,
+            credential_scope: null,
             details: {},
           })
           expect(event.request_id).toMatch(/^[0-9a-f-]{36}$/)

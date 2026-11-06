@@ -441,11 +441,19 @@ export function createTeamRolePolicy(
               )
             )
               throw teamRoleDenied()
-            return trx
+            const created = await trx
               .insertInto('auth.organization')
               .values(request.data as Insertable<Database['auth.organization']>)
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            await writeAuditEvent(trx, {
+              organizationId: created.id,
+              ...auditActor(actor),
+              action: 'organization.created',
+              targetType: 'organization',
+              targetId: created.id,
+            })
+            return created as never
           })
         }
         return create(request)
@@ -687,6 +695,7 @@ export function createTeamRolePolicy(
                 organizationId: facts.organizationId,
                 ...auditActor(actor),
                 action: 'membership.role_changed',
+                details: { oldRole: target.role, newRole: role },
                 targetType: 'user',
                 targetId: target.userId,
               })

@@ -80,6 +80,35 @@ describe.skipIf(!serverUrl)('audit source-copy mutations', () => {
     ).rejects.toMatchObject({ name: 'AssertionError' })
     await assertion(source)
   })
+  it('detects widened action-specific detail lists and passes restored source', async () => {
+    for (const action of [
+      'membership.role_changed',
+      'api_key.created',
+      'api_key.rotated',
+      'webhook.created',
+      'webhook.updated',
+      'webhook.deleted',
+      'webhook.secret_rotated',
+    ] as const) {
+      const assertion = async (text: string) => {
+        const module = await load(text)
+        await expect(
+          db.transaction().execute((trx) =>
+            module.writeAuditEvent(trx, {
+              ...event,
+              action,
+              details: { secret: 'private' },
+            }),
+          ),
+        ).rejects.toThrow('allow-listed')
+      }
+      await assertion(source)
+      const mutated = source.replace(`'${action}': [`, `'${action}': ['secret', `)
+      expect(mutated).not.toBe(source)
+      await expect(assertion(mutated)).rejects.toMatchObject({ name: 'AssertionError' })
+      await assertion(source)
+    }
+  })
   it('detects removed request context propagation and passes restored source', async () => {
     const assertion = async (text: string) => {
       const module = await load(text)

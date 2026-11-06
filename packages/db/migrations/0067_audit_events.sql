@@ -4,7 +4,7 @@ CREATE TABLE audit_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   organization_id uuid,
   occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  actor_type text NOT NULL CHECK (actor_type IN ('user','api_key','oauth_client','system','anonymous')),
+  actor_type text NOT NULL CHECK (actor_type IN ('user','api_key','oauth_client','system','anonymous','external_api_key')),
   actor_id text,
   credential_type text NOT NULL CHECK (credential_type IN ('session','api_key','oauth','none')),
   credential_id text,
@@ -14,11 +14,19 @@ CREATE TABLE audit_events (
   action text NOT NULL CHECK (action ~ '^[a-z_]+\.[a-z_]+$'),
   target_type text NOT NULL CHECK (length(target_type) BETWEEN 1 AND 80),
   target_id text NOT NULL CHECK (length(target_id) BETWEEN 1 AND 256),
-  details jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (details = '{}'::jsonb),
+  details jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT audit_events_details_check CHECK (
+    jsonb_typeof(details) = 'object' AND
+    CASE
+      WHEN action = 'membership.role_changed' THEN details - ARRAY['oldRole','newRole'] = '{}'::jsonb
+      WHEN action IN ('api_key.created','api_key.rotated') THEN details - 'scope' = '{}'::jsonb
+      WHEN action IN ('webhook.created','webhook.updated','webhook.deleted','webhook.secret_rotated') THEN details - 'events' = '{}'::jsonb
+      ELSE details = '{}'::jsonb
+    END
+  ),
   request_id text CHECK (request_id IS NULL OR length(request_id) BETWEEN 1 AND 128),
   CONSTRAINT audit_actor_identity CHECK (
-    (actor_type = 'anonymous' AND actor_id IS NULL) OR
-    (actor_type <> 'anonymous' AND actor_id IS NOT NULL AND length(actor_id) BETWEEN 1 AND 256)
+    (actor_type IN ('anonymous','external_api_key') AND actor_id IS NULL) OR
+    (actor_type NOT IN ('anonymous','external_api_key') AND actor_id IS NOT NULL AND length(actor_id) BETWEEN 1 AND 256)
   ),
   CONSTRAINT audit_credential_shape CHECK (
     (credential_type = 'none' AND credential_id IS NULL AND credential_scope IS NULL
