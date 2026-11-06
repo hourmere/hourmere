@@ -177,6 +177,15 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
     )
   }
   if (!booking) return null
+  if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only') {
+    return (
+      <PublicLayout>
+        <PublicStatus>
+          {t('This imported booking is read-only and managed in the original system.')}
+        </PublicStatus>
+      </PublicLayout>
+    )
+  }
   return (
     <ManageView
       booking={booking}
@@ -618,6 +627,7 @@ function BookingSummary({
       />
       {newToken && !cancelled && (
         <ManageLink
+          booking={booking}
           token={newToken}
           intro={t(
             'Moving the booking gave it a new link. Links in Hourmere’s emails keep working; the link shown when you first booked now shows the old, cancelled time.',

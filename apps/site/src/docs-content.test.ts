@@ -535,6 +535,10 @@ describe('complete public documentation', () => {
       )
     } else if (guide === 'api-conventions') {
       // Requested policy excerpts mirror the canonical guide rather than diverging.
+      const bookingSourcePolicy = source
+        .match(/^### Booking source compatibility\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
+        ?.trimEnd()
+      expect(bookingSourcePolicy).toBeDefined()
       const fieldPolicy = source.match(/An optional `field` string[\s\S]*?older servers\./)?.[0]
       const scopePolicy = source
         .match(/^### API key scopes\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
@@ -563,6 +567,8 @@ describe('complete public documentation', () => {
       expect(read(original)).toBe(
         [
           '[API conventions](https://hourmere.com/docs/api-conventions).',
+          '',
+          bookingSourcePolicy,
           '',
           '### Validation error fields',
           '',

@@ -1,4 +1,6 @@
 export const common = {
+  'This imported booking is read-only and managed in the original system.':
+    'Diese importierte Buchung ist schreibgeschützt und wird im ursprünglichen System verwaltet.',
   'This location is unavailable. Contact the host to book.':
     'Dieser Treffpunkt ist nicht verfügbar. Wenden Sie sich für die Buchung an die gastgebende Person.',
   'The host or the team’s owners and admins can see your email, name and requested period.':

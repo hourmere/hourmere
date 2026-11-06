@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "import-calcom": "node src/cli.ts",
     "typecheck": "tsc -p tsconfig.json",
     "dry-run": "node src/cli.ts"
   },
