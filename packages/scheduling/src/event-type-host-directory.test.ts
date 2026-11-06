@@ -362,8 +362,8 @@ describe.skipIf(!serverUrl)('team event host directory and assignment boundaries
     await expect(
       verify(
         sourceCopy([
-          'if (!(await access(db, ctx, lock)).canManageTeam) throw insufficientRole()',
-          'if (false) throw insufficientRole()',
+          'if (current.personalOwnerId !== null || !current.canManageTeam) throw insufficientRole()',
+          'if (current.personalOwnerId !== null) throw insufficientRole()',
         ]).write,
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
