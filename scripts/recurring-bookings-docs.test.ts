@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from '../apps/server/src/config.ts'
 import { PUBLIC_RATE_LIMITS } from '../apps/server/src/rate-limit.ts'
-import { notificationSuppressionReason } from '../packages/notifications/src/mail-limits.ts'
+import type { Db } from '../packages/db/src/index.ts'
+import {
+  notificationEmailBudget,
+  notificationSuppressionReason,
+} from '../packages/notifications/src/mail-limits.ts'
 import { MAX_SLOT_RANGE_DAYS } from '../packages/scheduling/src/availability.ts'
 import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
 import { hasValidHostShape } from '../packages/scheduling/src/hosts.ts'
@@ -23,6 +27,8 @@ const proposed = [
   ['Series admissions per rolling hour per actor and event', 2],
   ['Series confirmation conference wait in minutes', 30],
   ['Series confirmation lead before the first start in minutes', 15],
+  ['Imminent-start confirmation wait in minutes', 5],
+  ['Urgent link-update window before a start in minutes', 60],
   ['Minimum minutes between series link-update mails', 60],
   ['Maximum series link-update mails per rolling day', 3],
 ] as const
@@ -30,9 +36,12 @@ const proposed = [
 type ProposedLabel = (typeof proposed)[number][0]
 const design = (label: ProposedLabel) => proposed.find(([name]) => name === label)?.[1] as number
 
+// Weekly is the densest supported pattern, so members are at least this far apart.
+const MINIMUM_MEMBER_GAP_MINUTES = 7 * 24 * 60
+
 function largestHostCount(mode: string) {
   let largest = 0
-  for (let count = 1; count <= 32; count++)
+  for (let count = 1; count <= 64; count++)
     if (
       hasValidHostShape(
         mode,
@@ -42,6 +51,43 @@ function largestHostCount(mode: string) {
       largest = count
   return largest
 }
+
+/**
+ * Runs the real `notificationEmailBudget` against a recording query builder, so the ledger
+ * windows come from the code: every `sent_at` cutoff it applies, with its comparison.
+ */
+async function readLedgerWindows() {
+  const now = new Date('2027-01-04T12:00:00Z')
+  const cutoffs: { op: string; minutes: number }[] = []
+  const record = (column: unknown, op: unknown, value: unknown) => {
+    if (column === 'sent_at' && value instanceof Date)
+      cutoffs.push({ op: String(op), minutes: (now.getTime() - value.getTime()) / 60_000 })
+  }
+  const expression = {
+    as: () => expression,
+    filterWhere: (column: unknown, op: unknown, value: unknown) => {
+      record(column, op, value)
+      return expression
+    },
+  }
+  const builder = { fn: { countAll: () => expression } }
+  const query = {
+    selectFrom: () => query,
+    select: (fields: unknown) => {
+      if (typeof fields === 'function') fields(builder)
+      return query
+    },
+    where: (column: unknown, op: unknown, value: unknown) => {
+      record(column, op, value)
+      return query
+    },
+    executeTakeFirstOrThrow: async () => ({ count: '0', hour: '0', day: '0' }),
+  }
+  await notificationEmailBudget(query as unknown as Db, {}, Buffer.alloc(32), true, now)
+  return cutoffs
+}
+
+const ledger = await readLedgerWindows()
 
 /** Existing limits this design depends on, read from today's code and defaults. */
 function readCodeFacts() {
@@ -59,6 +105,8 @@ function readCodeFacts() {
     slots: PUBLIC_RATE_LIMITS.slots.limit,
     manage: PUBLIC_RATE_LIMITS.manage.limit,
     slotRangeDays: MAX_SLOT_RANGE_DAYS,
+    // The instance-wide and per-recipient rolling-hour cutoffs, then the rolling day.
+    ledgerHourMinutes: ledger[0]?.minutes ?? Number.NaN,
   }
 }
 
@@ -103,9 +151,40 @@ function verifyExisting(source: string, code: CodeFacts) {
   ).toEqual(existing.map(([label, key]) => [label, code[key]]))
 }
 
-// notificationEmailBudget (packages/notifications/src/mail-limits.ts) counts mail sent
-// strictly after now minus one hour.
-const LEDGER_WINDOW_MINUTES = 60
+/**
+ * Worst rolling hour for one invitee recipient when `seriesCount` series (at most the
+ * admission cap) each send a confirmation, one urgent link update and a whole-series cancel,
+ * over every interleaving. An urgent update goes out only while the count leaves room for
+ * one cancellation per series the cap allows (`roomCheck`); otherwise it waits and is later
+ * skipped by the cancellation.
+ */
+function simulateHour(code: CodeFacts, seriesCount: number, roomCheck = true) {
+  const cap = design('Series admissions per rolling hour per actor and event')
+  const threshold = roomCheck ? code.recipientHour - 1 - cap : Number.POSITIVE_INFINITY
+  const steps = ['confirmation', 'urgent', 'cancel'] as const
+  let worst = 0
+  let suppressed = false
+  const walk = (positions: readonly number[], count: number) => {
+    let finished = true
+    positions.forEach((position, index) => {
+      const step = steps[position]
+      if (step === undefined) return
+      finished = false
+      const next = positions.map((value, other) => (other === index ? value + 1 : value))
+      if (step === 'urgent') walk(next, count <= threshold ? count + 1 : count)
+      else {
+        if (count >= code.recipientHour) suppressed = true
+        walk(next, count + 1)
+      }
+    })
+    if (finished) worst = Math.max(worst, count)
+  }
+  walk(
+    Array.from({ length: seriesCount }, () => 0),
+    0,
+  )
+  return { worst, suppressed }
+}
 
 /** The mail proof, derived from the code limits and the proposed series rules. */
 function mailProof(
@@ -116,12 +195,19 @@ function mailProof(
   const cap = design('Series admissions per rolling hour per actor and event')
   const digests = design('Maximum series link-update mails per rolling day')
   const perMail = 1 + code.guests + code.hosts
-  // The confirmation and link updates share one slot per rolling hour only when spaced by at
-  // least the ledger window; a cancellation action adds one more.
-  const seriesMailPerHour = Math.ceil(
-    LEDGER_WINDOW_MINUTES / Math.min(spacing, LEDGER_WINDOW_MINUTES),
+  const window = code.ledgerHourMinutes
+  // Regular series mail (confirmation and regular link updates) shares one slot per rolling
+  // hour only when spaced by at least the ledger window.
+  const regularPerHour = Math.ceil(window / Math.min(spacing, window))
+  // Members are at least a week apart, so one series has at most one urgent member per hour.
+  const urgentPerHour = Math.ceil(
+    (design('Urgent link-update window before a start in minutes') + window) /
+      MINIMUM_MEMBER_GAP_MINUTES,
   )
-  const withCancel = seriesMailPerHour + 1
+  const oneSeries = regularPerHour + urgentPerHour + 1
+  // The simulation models one regular mail and one urgent update per series.
+  const simulated = simulateHour(code, cap)
+  const capHour = regularPerHour === 1 && urgentPerHour === 1 ? simulated.worst : Number.NaN
   const ruleMaxDay = 1 + digests + 1
   const accepted = [
     ['Create', 1, 1, perMail, perMail],
@@ -135,23 +221,37 @@ function mailProof(
     ],
     [
       `All ${occurrences} automatic conferences fail, the host repairs all, then whole-series cancel`,
-      withCancel,
+      regularPerHour + 1,
       3,
-      withCancel * perMail,
+      (regularPerHour + 1) * perMail,
       3 * perMail,
     ],
     [
+      'First start inside the lead, its link ready after the confirmation, then whole-series cancel',
+      oneSeries,
+      3,
+      oneSeries * perMail,
+      3 * perMail,
+    ],
+    [
+      'Two such imminent series in one hour (the admission cap)',
+      capHour,
+      capHour,
+      capHour * perMail,
+      capHour * perMail,
+    ],
+    [
       `Series-mail maximum for one series in a day: confirmation, ${digests} link updates, whole-series cancel`,
-      withCancel,
+      oneSeries,
       ruleMaxDay,
-      withCancel * perMail,
+      oneSeries * perMail,
       ruleMaxDay * perMail,
     ],
     [
       'Two series at the series-mail maximum',
-      cap * withCancel,
+      capHour,
       cap * ruleMaxDay,
-      cap * withCancel * perMail,
+      capHour * perMail,
       cap * ruleMaxDay * perMail,
     ],
   ] as const
@@ -166,7 +266,9 @@ function mailProof(
   return {
     occurrences,
     perMail,
-    seriesMailPerHour,
+    regularPerHour,
+    capHour,
+    simulated,
     accepted,
     rejected,
     suppressed: occurrences - code.recipientHour,
@@ -175,16 +277,18 @@ function mailProof(
 
 function verifyMailProof(source: string, code: CodeFacts, spacing?: number) {
   const proof = mailProof(code, spacing)
+  expect(proof.simulated.suppressed, 'the urgent room check prevents suppression').toBe(false)
   expect(
     numericRows(section(source, 'Mail budget proof'), 4),
     'mail budget rows match the code limits',
   ).toEqual([...proof.accepted, proof.rejected])
+  // A mail is suppressed only once the count before it reaches the limit.
   for (const [label, hour, day, instanceHour] of proof.accepted) {
-    expect(hour, `${label}: recipient hourly limit`).toBeLessThan(code.recipientHour)
-    expect(day, `${label}: recipient daily limit`).toBeLessThan(code.recipientDay)
-    expect(instanceHour, `${label}: instance hourly limit`).toBeLessThan(code.instanceHour)
+    expect(hour, `${label}: recipient hourly limit`).toBeLessThanOrEqual(code.recipientHour)
+    expect(day, `${label}: recipient daily limit`).toBeLessThanOrEqual(code.recipientDay)
+    expect(instanceHour, `${label}: instance hourly limit`).toBeLessThanOrEqual(code.instanceHour)
   }
-  expect(proof.rejected[1], 'the rejected alternative exceeds the limit').toBeGreaterThanOrEqual(
+  expect(proof.rejected[1], 'the rejected alternative exceeds the limit').toBeGreaterThan(
     code.recipientHour,
   )
   const { perMail, occurrences } = proof
@@ -192,7 +296,9 @@ function verifyMailProof(source: string, code: CodeFacts, spacing?: number) {
   const prose = source.replace(/\s+/g, ' ')
   for (const phrase of [
     `(${1 + code.guests} invitee recipients) and ${code.hosts} collective hosts`,
-    `the confirmation and link updates together cost at most ${proof.seriesMailPerHour} per recipient in any rolling hour`,
+    `the confirmation and regular link updates) costs at most ${proof.regularPerHour} per recipient in any rolling hour`,
+    `two series at the admission cap at most ${proof.capHour}, the hourly limit itself`,
+    `at most the recipient hourly limit minus 1 minus the admission cap (${code.recipientHour - 1 - cap} with defaults)`,
     `${occurrences}-occurrence/${code.guests}-guest/${code.hosts}-host`,
     `Keep ${occurrences} occurrences and ${code.guests} guests`,
     `defaults the maximum to ${occurrences}`,
@@ -203,9 +309,12 @@ function verifyMailProof(source: string, code: CodeFacts, spacing?: number) {
     `of which ${proof.suppressed} are suppressed, and attempt ${proof.rejected[3]}`,
     `produces exactly ${perMail} confirmations and then ${perMail} bulk-cancel mails`,
     `all ready gives ${perMail} confirmations with ${occurrences} entries`,
+    `gives ${perMail} confirmations that carry that first member's link`,
+    `deliver at most ${proof.capHour} per invitee recipient`,
     `exactly ${perMail} link-update mails`,
     `deliver exactly ${perMail} complete mails each`,
-    `${3 * perMail} in total and at most ${(proof.seriesMailPerHour + 1) * perMail} in any rolling hour`,
+    `${3 * perMail} in total and at most ${(proof.regularPerHour + 1) * perMail} in any rolling hour`,
+    `at most ${proof.capHour} per invitee recipient and ${proof.capHour * perMail} instance mails in the hour`,
   ])
     expect(prose, 'derived mail figures in the prose').toContain(phrase)
   expect(design('Maximum occurrence-host evaluations'), 'occurrences times hosts').toBe(
@@ -218,7 +327,10 @@ function verifyRuleProse(source: string) {
   for (const phrase of [
     `conference wait (${design('Series confirmation conference wait in minutes')} minutes)`,
     `lead (${design('Series confirmation lead before the first start in minutes')} minutes)`,
-    `no earlier than ${design('Minimum minutes between series link-update mails')} minutes after the last copy`,
+    `less than ${design('Series confirmation lead before the first start in minutes')} minutes away`,
+    `imminent-start wait (${design('Imminent-start confirmation wait in minutes')} minutes)`,
+    `starting within the next ${design('Urgent link-update window before a start in minutes')} minutes is urgent`,
+    `no earlier than ${design('Minimum minutes between series link-update mails')} minutes after the previous series mail`,
     `at most ${design('Maximum series link-update mails per rolling day')} per series in any`,
     `${design('Maximum occurrence-host evaluations')} evaluations, at most ${design('Maximum batch database read statements')} reads/${design('Maximum batch fact rows')} rows, abort at ${design('Batch deadline in milliseconds')} ms`,
   ])
@@ -266,6 +378,16 @@ describe('recurring booking design bounds', () => {
       expect(PUBLIC_RATE_LIMITS[group].windowSeconds, `${group} window`).toBe(60)
   })
 
+  it('reads the mail ledger windows from notificationEmailBudget', () => {
+    // Instance hour, recipient hour (the same cutoff), then recipient day; all strict.
+    expect(ledger, 'ledger cutoffs applied by the budget').toEqual([
+      { op: '>', minutes: 60 },
+      { op: '>', minutes: 60 },
+      { op: '>', minutes: 24 * 60 },
+    ])
+    expect(facts.ledgerHourMinutes).toBe(60)
+  })
+
   it.each(proposed)('detects a changed %s in an isolated document copy', (label, value) => {
     const anchor = `| ${label} | ${value} |`
     expect(document.split(anchor), 'exactly one mutation anchor').toHaveLength(2)
@@ -283,14 +405,27 @@ describe('recurring booking design bounds', () => {
     verify(document, facts)
   })
 
+  it('detects a longer ledger window, which would let series mail share an hour', () => {
+    expect(() => verifyMailProof(document, { ...facts, ledgerHourMinutes: 120 })).toThrow(
+      assertionFailure,
+    )
+    verifyMailProof(document, facts)
+  })
+
   it('derives the hourly series-mail figure from the link-update spacing', () => {
     const spacing = design('Minimum minutes between series link-update mails')
     expect(spacing, 'spacing covers the ledger window').toBeGreaterThanOrEqual(
-      LEDGER_WINDOW_MINUTES,
+      facts.ledgerHourMinutes,
     )
     // Half the spacing lets two series mails share a rolling hour; the table would be wrong.
     expect(() => verifyMailProof(document, facts, spacing / 2)).toThrow(assertionFailure)
     verifyMailProof(document, facts)
+  })
+
+  it('needs the urgent room check to avoid suppression with two imminent series', () => {
+    const cap = design('Series admissions per rolling hour per actor and event')
+    expect(simulateHour(facts, cap).suppressed).toBe(false)
+    expect(simulateHour(facts, cap, false).suppressed).toBe(true)
   })
 
   it('detects a changed derived mail figure in an isolated document copy', () => {

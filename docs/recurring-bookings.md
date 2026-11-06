@@ -76,6 +76,8 @@ to compare it. Raising a limit requires design review and new performance eviden
 | Series admissions per rolling hour per actor and event | 2 | Counts committed new series only; see [Performance and abuse controls](#performance-and-abuse-controls). |
 | Series confirmation conference wait in minutes | 30 | Longest wait for automatic meeting links before the confirmation is sent anyway. |
 | Series confirmation lead before the first start in minutes | 15 | The confirmation never waits past this point before the first not-started occurrence. |
+| Imminent-start confirmation wait in minutes | 5 | When the first start is closer than the lead at commit, the longest wait for that first meeting's link. |
+| Urgent link-update window before a start in minutes | 60 | A link update for a member starting this soon ignores the spacing below, within the daily cap. |
 | Minimum minutes between series link-update mails | 60 | Measured from the confirmation and from the previous link-update mail. |
 | Maximum series link-update mails per rolling day | 3 | Per series, so also per recipient; later changes wait or show only on the series pages. |
 
@@ -376,15 +378,15 @@ reading history after cancellation.
 
 ## Notifications and calendars
 
-Notifications are per series action. Creation sends one confirmation per recipient
-listing every occurrence, with one calendar attachment containing every occurrence whose
-meeting details are ready. Whole-series or this-and-following cancellation sends one email
-per recipient listing the affected and unchanged dates, with one attachment containing the
-affected events. A single-occurrence reschedule or cancel sends one email for that
-occurrence. Do not also queue the ordinary per-occurrence lifecycle messages for a series
-action. Reminders and follow-ups remain per occurrence with ordinary budgets and snapshotted
-due times. Refresh lifecycle/revision before send so an overtaken series mail cannot revive
-cancelled or moved events.
+Notifications are per series action. Creation sends one confirmation per recipient listing
+every occurrence, with one calendar attachment containing every confirmed, not-started
+occurrence. Whole-series or this-and-following cancellation sends one email per recipient
+listing the affected and unchanged dates, with one attachment containing CANCELLED entries
+only for affected occurrences previously delivered to that recipient. A single-occurrence
+reschedule or cancel sends one email for that occurrence. Do not also queue the ordinary
+per-occurrence lifecycle messages for a series action. Reminders and follow-ups remain per
+occurrence with ordinary budgets and snapshotted due times. Refresh lifecycle/revision
+before send so an overtaken series mail cannot revive cancelled or moved events.
 
 Every series mail picks its language as existing booking mail does: the booking language
 for the booker and guests, each host's own language for host copies. Templates exist in
@@ -408,35 +410,50 @@ reminder.
 The series confirmation becomes due at the first of these points, and is then sent with
 whatever is still pending:
 
-1. every member that has not started has a terminal conference state, `ready` or `failed`;
-   a member without an automatic conference counts as ready, so a series on an event
-   without automatic conferences is due at commit;
+1. every confirmed, not-started root member has a terminal conference state, `ready` or
+   `failed`; a member without an automatic conference counts as ready, so a series on an
+   event without automatic conferences is due at commit;
 2. the series confirmation conference wait (30 minutes) after commit;
-3. the series confirmation lead (15 minutes) before the first not-started member's start,
-   or immediately if that point has already passed at commit.
+3. the series confirmation lead (15 minutes) before the first not-started member's start.
+   If that point has already passed at commit, because the first start is less than 15
+   minutes away (the default minimum notice is 0), the confirmation instead waits for the
+   first of: that first member's terminal conference state, its start, or the imminent-start
+   wait (5 minutes) after commit.
 
 Started and cancelled members never delay it. Today's per-booking outbox skips a pending
 confirmation once its booking starts (`dispatchConferenceNotifications` in
 packages/notifications/src/index.ts); the series confirmation is skipped only when no member
-is still confirmed and not started. It lists every member: ready ones with their meeting
-link and a VEVENT in the attachment; pending ones marked “Meeting link pending” and failed
-ones “No automatic meeting link”, both without a VEVENT (a single booking likewise holds its
-calendar invitation until its link is ready); started and cancelled members labelled as
-such. With no ready member it has no attachment. Host copies name the failed dates and point
-to the existing per-occurrence repair (`retryBookingConference` POST
+is still confirmed and not started. It lists every member and always carries the calendar
+attachment, with one VEVENT for every confirmed, not-started member. Ready members carry
+their meeting link. Pending members are marked “Meeting link pending” and failed members “No
+automatic meeting link”, in the mail and in their VEVENT description, with no link. Started
+and cancelled members are labelled as such and get no VEVENT. Host copies name the failed
+dates and point to the existing per-occurrence repair (`retryBookingConference` POST
 `/bookings/{id}/conference/retry`, MCP `retry_conference`, CLI `retry-meeting`). Guest
 copies show the same markers without repair instructions, and guests never get a separate
 failure notice, matching today's exclusion of guests from `conference_failed`.
 
-After the confirmation, later readiness changes produce aggregated link-update mail: one
-per recipient per series at a time, due no earlier than 60 minutes after the last copy of
-the confirmation or previous link-update mail was sent, and at most 3 per series in any
-rolling day, so no recipient receives more than 3. Each carries only net changes since that
-recipient's last delivered report: newly ready members, each with a new VEVENT (never
-re-sending an entry already delivered), and for the booker and hosts, newly failed members.
-A guest gets one only when it contains a newly ready link. It is skipped when no member
-remains confirmed and not started. Changes beyond the daily cap wait until the rolling day
-allows another. The series manage page and host series detail always show each member's
+After the confirmation, later readiness changes produce aggregated link-update mail, one per
+recipient per series at a time. Each carries only net changes since that recipient's last
+delivered report. Newly ready members get a VEVENT with the same UID and SEQUENCE and a newer
+DTSTAMP, now with the link, which updates the entry already delivered. For the booker and
+hosts, newly failed members are reported too. A guest gets one only when it contains a newly
+ready link. A member that has started is never reported in a link update; its link is then
+shown only on the series manage page and host series detail. A link update is skipped when
+no member remains confirmed and not started.
+
+Regular link updates are due no earlier than 60 minutes after the previous series mail of
+this series, measured from the ledger `sent_at` of its last copy (written after SMTP
+accepts it). All link updates, regular or urgent, are limited to at most 3 per series in any
+rolling day, so no recipient receives more than 3. A link update that reports a member starting within the next 60
+minutes is urgent: it is due at once, ignoring the spacing, and still counts toward the
+daily cap. Members are at least 7 days apart, so a series has at most one urgent member in
+any hour. Before the first copy, under the existing mail-budget lock, the urgent update
+checks every invitee recipient's rolling-hour ledger count. It is sent only if each count is
+at most the recipient hourly limit minus 1 minus the admission cap (2 with defaults), which
+keeps room for one cancellation per series the cap allows. Otherwise the whole update waits
+for the regular spacing, and the series page shows the link. Changes beyond the daily cap
+wait until the rolling day allows another. The series pages always show each member's
 current state, so mail can lag them by up to an hour, or by up to a day once three link
 updates have been sent in a rolling day. Never send a per-occurrence `confirmed` or
 `conference_failed` mail for a series root.
@@ -447,7 +464,9 @@ Defaults from [Existing limits](#existing-limits), an initially empty ledger, 12
 occurrences, the booker plus 10 guests (11 invitee recipients) and 8 collective hosts. One
 series mail costs 1 per invitee recipient and 19 instance mails. Host mail skips the
 recipient windows; its larger instance allowance is not used here. The ledger counts
-`sent_at` strictly after now minus one hour, so mails 60 minutes apart never share a window.
+`sent_at` strictly after now minus one hour, so mails 60 minutes apart never share a window,
+and a mail is suppressed only when the count before it has reached the limit: as many mails
+as the limit fit in one window.
 
 | Case | Per invitee recipient, rolling hour | Per invitee recipient, rolling day | Instance mails, rolling hour | Instance mails, total |
 | --- | --- | --- | --- | --- |
@@ -455,33 +474,40 @@ recipient windows; its larger instance allowance is not used here. The ledger co
 | Create, then whole-series cancel in the same hour | 2 | 2 | 38 | 38 |
 | Two series created and cancelled in one hour (the admission cap) | 4 | 4 | 76 | 76 |
 | All 12 automatic conferences fail, the host repairs all, then whole-series cancel | 2 | 3 | 38 | 57 |
-| Series-mail maximum for one series in a day: confirmation, 3 link updates, whole-series cancel | 2 | 5 | 38 | 95 |
-| Two series at the series-mail maximum | 4 | 10 | 76 | 190 |
+| First start inside the lead, its link ready after the confirmation, then whole-series cancel | 3 | 3 | 57 | 57 |
+| Two such imminent series in one hour (the admission cap) | 5 | 5 | 95 | 95 |
+| Series-mail maximum for one series in a day: confirmation, 3 link updates, whole-series cancel | 3 | 5 | 57 | 95 |
+| Two series at the series-mail maximum | 5 | 10 | 95 | 190 |
 | Rejected alternative: one failure notice per occurrence (attempted) | 12 | 12 | 108 | 108 |
 
-Every accepted row stays below the recipient hourly and daily limits and the instance hourly
-limit, so nothing is suppressed. The bound is on series mail: the confirmation and link
-updates together cost at most 1 per recipient in any rolling hour, because the link-update
-spacing is at least the ledger's one-hour window, and each series cancellation action adds
-1. The conference worst case therefore raises no hourly figure. When all 12 fail within the
-wait, the confirmation reports all 12 failures, one link-update mail carries all 12 repaired
-links no earlier than an hour later, and the cancellation follows. The rejected
-per-occurrence alternative would send 12 failure notices to the booker within minutes,
-of which 7 are suppressed, and attempt 108 instance mails in total.
+Every accepted row stays within the recipient hourly and daily limits and the instance hourly
+limit, so nothing is suppressed. The bound is on series mail. Regular series mail (the
+confirmation and regular link updates) costs at most 1 per recipient in any rolling hour,
+because the spacing is at least the ledger's one-hour window. An urgent link update can add
+1 per series, and only while every invitee recipient keeps room for one cancellation per
+series the cap allows. Each series cancellation action adds 1. One series therefore costs
+at most 3 per invitee recipient in an hour, and two series at the admission cap at most 5,
+the hourly limit itself, with nothing suppressed: in the two imminent series, the second
+urgent update finds no room, waits, and is skipped once its series is cancelled. When all 12
+fail within the wait, the confirmation reports all 12 failures, one link-update mail carries
+all 12 repaired links no earlier than an hour later, and the cancellation follows. The
+rejected per-occurrence alternative would send 12 failure notices to the booker within
+minutes, of which 7 are suppressed, and attempt 108 instance mails in total.
 
 Each further this-and-following cancellation, single-occurrence change, reminder or
 follow-up costs one more mail per recipient, exactly as the same change does for separate
-single bookings, and is outside this bound; with two series at the cap in one hour, one
-such mail still fits and a further one is suppressed. Configurable reminder rules (up to
-five offsets per event) whose offsets differ by the series interval fire for several members
-at the same moment, as they would for the same bookings made separately; step 7 tells owners
-to avoid such offsets on recurring events. Previous traffic, unrelated sign-in/team mail or
-lower operator-configured limits can still exhaust the shared ledger; these figures prove
-bounded isolated series actions fit, not guaranteed global delivery. Keep 12 occurrences
-and 10 guests. Preserve ordinary suppression semantics and expose terminal per-recipient
-delivery outcomes in authorized series reads; never mark suppressed mail delivered or erase
-existing links. A suppressed link-update copy is not retried; the next link update to that
-recipient, if another change triggers one, repeats what that copy missed.
+single bookings, and is outside this bound. With two series at the cap in one hour, one such
+mail still fits unless an urgent update used the last slot; a further one is suppressed.
+Configurable reminder rules (up to five offsets per event) whose offsets differ by the
+series interval fire for several members at the same moment, as they would for the same
+bookings made separately; the step 7 owner guide tells owners to avoid such offsets on
+recurring events. Previous traffic, unrelated sign-in/team mail or lower operator-configured
+limits can still exhaust the shared ledger; these figures prove bounded isolated series
+actions fit, not guaranteed global delivery. Keep 12 occurrences and 10 guests. Preserve
+ordinary suppression semantics and expose terminal per-recipient delivery outcomes in
+authorized series reads; never mark suppressed mail delivered or erase existing links. A
+suppressed link-update copy is not retried; the next link update to that recipient, if
+another change triggers one, repeats what that copy missed.
 
 ### Calendar attachments
 
@@ -493,8 +519,14 @@ require a single UID). This fits the one-attachment decision while preserving ex
 independent booking/provider identities. RRULE+EXDATE would introduce a second master UID
 and RECURRENCE-ID exception model for independently moved bookings and pinned provider
 copies; that extra reconciliation is excluded. Ordinary single-occurrence messages keep
-the existing one-UID iTIP behavior. Do not promise automatic native series scheduling.
-List every cancelled date in the mail. See [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545)
+the existing one-UID iTIP behavior. A link update re-sends an entry with the same UID and
+SEQUENCE and a newer DTSTAMP, so a later single-occurrence move (higher SEQUENCE) still
+supersedes it. A recipient's cancellation attachment contains CANCELLED entries only for
+occurrences delivered to that recipient before, in a delivered series attachment or a
+delivered per-occurrence invitation; the per-recipient receipts record those. Every other
+affected date is listed in the mail body only, so no client gets a stray cancelled entry for
+a date it never had. Do not promise automatic native series scheduling. List every cancelled
+date in the mail. See [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545)
 and [iTIP restrictions](https://www.rfc-editor.org/rfc/rfc5546#section-3.2).
 
 Automate parser round trips, UID uniqueness/stability, all 12 entries, SEQUENCE/STATUS,
@@ -504,14 +536,17 @@ manual check is the calendar client check, run by the owner once at the end of s
 Calendar (web), Outlook (web) and Apple Calendar (macOS), an isolated test calendar and
 synthetic files from 4b.1 and 4b.4, with no real attendees or provider sends. Pass criteria:
 
-1. Import: the 12-occurrence confirmation attachment creates exactly 12 entries at the
-   stated UTC instants with no duplicates, and a link-update attachment adds exactly its
-   new entries.
+1. Import: the 12-occurrence confirmation attachment, with some entries still marked
+   “Meeting link pending”, creates exactly 12 entries at the stated UTC instants with no
+   duplicates; a later link-update attachment updates exactly its entries in place, adding
+   the link, with no duplicates.
 2. Single move: the existing one-UID REQUEST for one moved occurrence updates exactly that
    entry (same UID, higher SEQUENCE); the other 11 are unchanged and nothing is duplicated.
 3. Bulk cancel: after opening the cancellation attachment and taking at most the one action
    the mail documents (for example Import), every affected entry is removed or shown as
-   cancelled and every unchanged entry remains.
+   cancelled and every unchanged entry remains. The cancellation mail also lists, in its
+   body only, one affected date never delivered to that recipient; the attachment has no
+   entry for it and the client shows none.
 
 The check passes only when all three criteria hold in all three clients. Any stale active
 entry, duplicate or wrong time is a failure. A failure blocks step 5a and every later step
@@ -524,12 +559,18 @@ produces exactly 19 confirmations and then 19 bulk-cancel mails, zero suppressed
 12 calendar entries per creation attachment, and working links to all permitted ordinals.
 With automatic conferences on fake providers:
 all ready gives 19 confirmations with 12 entries each; 8 ready and 4 failed give 19
-confirmations with 8 entries and 4 “No automatic meeting link” markers; all failed give 19
-confirmations without attachment and zero per-occurrence failure notices, and repairing all
-12 gives exactly 19 link-update mails no earlier than 60 minutes after the confirmation; a
-provider still pending at the 30-minute wait gives “Meeting link pending”; a first start
-inside the wait sends the confirmation 15 minutes before it; a started or cancelled member
-never delays it. Repeat for following cancellation and one-occurrence move/cancel on fresh
+confirmations with 12 entries, 8 with links and 4 marked “No automatic meeting link”; all
+failed give 19 confirmations with 12 entries without links and zero per-occurrence failure
+notices, and repairing all 12 gives exactly 19 link-update mails no earlier than 60 minutes
+after the confirmation; a provider still pending at the 30-minute wait gives “Meeting link
+pending”; a first start inside the wait sends the confirmation 15 minutes before it; a
+started or cancelled member never delays it. A first start 10 minutes after commit with
+providers ready within seconds gives 19 confirmations that carry that first member's link,
+with the same counts and zero suppression; with its provider still pending at the 5-minute
+wait, the confirmation marks it “Meeting link pending” and one urgent link update brings
+its link before it starts. Two such imminent series at the cap deliver at most 5 per invitee
+recipient, with the second urgent update deferred, and a started member is never
+reported. Repeat for following cancellation and one-occurrence move/cancel on fresh
 fixtures. Fill the ledger to the default boundary in negative controls and assert explicit
 suppression, no retry, no false delivered state, preserved previously issued links and no
 capability recovery. Mutate series enqueueing back to per-occurrence confirmation or failure
@@ -563,7 +604,7 @@ mappings together, generate web API types, and preserve existing error shapes fr
 | Read host / booker | GET `/booking-series/{id}` for host; GET `/booking-series/manage` with `X-Series-Manage-Token` for booker or guest | `get_booking_series` host/seriesManageToken mode | `series get` |
 | Cancel tail/all | POST `/booking-series/{id}/cancel` for host; POST `/booking-series/manage/cancel` with `X-Series-Manage-Token` for booker | `cancel_booking_series` host/seriesManageToken mode | `series cancel` |
 | Move/cancel one | Existing host booking endpoints; series mode on the four existing `/bookings/manage` routes | Existing `reschedule_booking` / `cancel_booking` with a new seriesManageToken mode | Existing `reschedule` / `cancel` |
-| Series metadata on existing reads | Existing GET `/bookings`, GET `/bookings/{id}`, GET `/bookings/manage`, the booking CSV export and webhook payloads | Existing `list_bookings`, `export_bookings` | Existing `list`, `export` |
+| Series metadata on existing reads | Existing GET `/bookings`, GET `/bookings/{id}`, GET `/bookings/manage` and responses sharing the `Booking` schema, webhook payloads, and the CSV export GET `/bookings/export.csv` from PR #238 | Existing `list_bookings`; `export_bookings` from PR #238 | Existing `list`; `export` from PR #238 |
 
 Both preview POSTs are explicitly booking reads in the API-key scope registry and
 generated scope table even though they are POSTs. API key scope never substitutes for a
@@ -657,21 +698,22 @@ One transaction/connection per write, no occurrence pools, no connection retaine
 awaiting external I/O. Test pools must close in teardown and each file stay well under
 CI's 100-connection default.
 
-A series submission counts as one request against the existing public booking limit (the
-MCP tool applies the same `book` limit, as `create_booking` does), not one per occurrence.
+A series submission counts as one request against the existing public booking limit (the MCP
+tool applies the same `book` limit, as `create_booking` does), not one per occurrence.
 Preview keeps the slot limiter and the series manage routes keep the manage limiter. The
 series admission cap adds 2 committed new series per rolling hour per actor and event,
-shared across the personal and team create routes. The actor is the API key or OAuth
-consent when one is supplied, otherwise the client's existing rate-limit address key (an
-IPv4 address or IPv6 /64, honoring `TRUSTED_PROXIES`). Only admissions that commit count: an exact replay is answered from its
-receipt before the cap is checked, and a validation failure, 409 `series_unavailable` or
-`series_changed`, or a rolled-back transaction writes no admission row, so stale previews
-cannot lock an invitee out. Create checks the cap cheaply before expansion and again inside
-the transaction under the admission lock, rejecting excess with 429 `rate_limited` and
-Retry-After. The counter is the `booking_series_admissions` table, shared by every server
-process, unlike the in-memory per-process public limiter. Consequences: anonymous invitees
-behind one NAT address share the cap per event; one agent key gets 2 new series per event
-per hour regardless of how many clients it serves; other events and actors are unaffected.
+shared across the personal and team create routes. The actor is the API key or OAuth consent
+when one is supplied, otherwise the client's existing rate-limit address key (an IPv4
+address or IPv6 /64, honoring `TRUSTED_PROXIES`). Only admissions that commit count: an
+exact replay is answered from its receipt before the cap is checked, and a validation
+failure, 409 `series_unavailable` or `series_changed`, or a rolled-back transaction writes
+no admission row, so stale previews cannot lock an invitee out. Create checks the cap
+cheaply before expansion and again inside the transaction under the admission lock,
+rejecting excess with 429 `rate_limited` and Retry-After. The counter is the
+`booking_series_admissions` table, shared by every server process, unlike the in-memory
+per-process public limiter. Consequences: anonymous invitees behind one NAT address share
+the cap per event; one agent key gets 2 new series per event per hour regardless of how many
+clients it serves; other events and actors are unaffected.
 
 The cap bounds repeated series admission but cannot reserve the shared mail ledger against
 other IPs/events. Apply ordinary recipient and instance budgets per actual series email,
@@ -693,24 +735,29 @@ This includes public POSTs and read-style POSTs; no new write waits for a later 
 All web UI uses the generated `/api/v1` client and only endpoints completed in earlier rows.
 Each protection needs a source-copy mutation proving a real assertion fails without it.
 An implementer may split a row further when it does not fit a day (for example 5g into
-reads and export versus webhooks, or 6d into the page and then the setting), keeping the
-order, the interface gate and the rule that the setting arrives only with the last piece.
+reads and export versus webhooks, or 6d into member and tail/all controls), keeping the
+order, the interface gate and the rule that the setting arrives only with the guides.
 
 ### Admission switch
 
 Releases are tagged from any commit on main, so no operator setting may enable an
-unfinished feature. Through step 6c, series admission is **hard-off** in code: a constant in
+unfinished feature. Through step 6d, series admission is **hard-off** in code: a constant in
 the scheduling package, not an environment variable. `loadConfig` does not read
 `RECURRING_BOOKINGS_ENABLED`, and setting it changes nothing (a 1a config test). Unit tests
 enable unfinished paths through an injected service dependency, and the e2e fixture server
 (tools/e2e/fixture-server.ts) through a code-only `startServer` option in
 apps/server/src/server.ts, never through the environment. The production entry point
-(apps/server/src/index.ts) calls `startServer()` without that option. Step 6d
-adds the series manage page, the last missing piece once creation (5c, 6b), tail/all
-cancellation (5e) and single-occurrence move/cancel (5f.1–5f.3) exist. Only that step
-replaces the constant with the operator setting `RECURRING_BOOKINGS_ENABLED`, default
-`false`, in config, `.env.example` and GET `/instance`. Step 8, the final acceptance step,
-changes the default to `true`.
+(apps/server/src/index.ts) calls `startServer()` without that option. Step 6d adds the
+series manage page, the last missing interface once creation (5c, 6b), tail/all cancellation
+(5e) and single-occurrence move/cancel (5f.1–5f.3) exist. Step 7 then publishes the user,
+agent and owner guides, and only that step replaces the constant with the operator setting
+`RECURRING_BOOKINGS_ENABLED`, default `false`, in config and `.env.example`. So no operator
+can enable series before the guides and their owner limitations exist. GET `/instance`
+reports `recurringBookingsEnabled` from 5a, first from the constant and from step 7 from the
+setting. Step 8, the final acceptance step, changes the default to `true`. While hard-off,
+the new MCP tools and CLI commands exist; their descriptions say series booking is not
+enabled on the instance until the setting is on, and they return `recurrence_not_supported`,
+an empty list or 404.
 
 The switch gates admission only. While admission is off, hard-off or with the setting false:
 
@@ -742,14 +789,14 @@ restores admission with the retained event settings.
 | 2b. Atomic creation service | 1b, 2a.2 | Transaction-aware insertion, request fingerprint, replay receipts, admission lock and counter, and one existing booking.created webhook per occurrence; automatic-conference events refused with `recurrence_not_supported` until 4b.3; no REST routes, MCP tools or CLI commands. | Concurrent series/single admission; same/different-key replay; replay answered at the cap; conflicts, validation failures and rollbacks write no admission row; failure at first/middle/final insertion leaves zero rows/jobs/webhooks; one host for all round-robin dates and documented fairness update; no external I/O under locks. | Hard-off |
 | 3a. Capabilities and member integration | 2b | Series capability resolver and existing single-member read/move/cancel service integration; no REST routes, MCP tools or CLI commands. | Returned-token and send-time email-token hashes resolve safely; stable ordinal follows reschedule chain; cross-series/org/guest refusal; org → series → member → hosts order on host, invitee and team-admin (`cancelTeamBooking`) paths; every member change increments the series revision and sends the ordinary single-occurrence mail; single-member move/cancel races preserve existing protections. | Hard-off |
 | 3b. Tail/all cancellation service | 3a | Transactional tail/all cancellation and action dedupe, with one existing booking.cancelled webhook per affected occurrence; no REST routes, MCP tools or CLI commands. | One/following/all scopes, cutoff, expected revision, no-op/replay and deletion; cancel versus move/create races; exactly the affected local outboxes and webhooks; no deadlocks. | Hard-off |
-| 4a.1. Series mail content | 3b | Series confirmation, series cancellation and link-update templates (text and HTML, including “Meeting link pending”, “No automatic meeting link”, “Updated separately”, started and cancelled labels) in every booking-mail catalogue (today en, zh-CN, de, fr, es, pt-BR), choosing languages as existing booking mail does; no delivery, REST routes, MCP tools or CLI commands. | Catalogue key parity in every language with no English left in other catalogues; 12-member rendering snapshots; booker, guest and host variants, with no repair instructions or mutation link for guests; escaping; no capability in logs. | Hard-off |
+| 4a.1. Series mail content | 3b | Series confirmation, series cancellation and link-update templates (text and HTML, including “Meeting link pending”, “No automatic meeting link”, “Updated separately”, started and cancelled labels, also as VEVENT descriptions) in every booking-mail catalogue (today en, zh-CN, de, fr, es, pt-BR), choosing languages as existing booking mail does; no delivery, REST routes, MCP tools or CLI commands. | Catalogue key parity in every language with no English left in other catalogues; 12-member rendering snapshots; booker, guest and host variants, with no repair instructions or mutation link for guests; escaping; no capability in logs. | Hard-off |
 | 4a.2. Aggregate notification delivery | 4a.1 | One confirmation/cancellation per series action and recipient, durable dedupe, send-time capability hashing and suppression of member lifecycle fan-out for series actions; define the series-manage fragment URL contract consumed by 6d. No REST routes, MCP tools or CLI commands. | Default-budget 12-occurrence/10-guest/8-host create and tail/all cancel fixtures deliver exactly 19 complete mails each with zero suppressed rows; single-member moves/cancels send exactly the existing one per-booking mail; shared-budget exhaustion, SMTP retry and replay controls; no raw tokens in jobs/logs and no guest mutation capability; mutation back to occurrence fan-out fails the counts. | Hard-off |
-| 4b.1. Aggregate calendar attachment | 4a.2 | One METHOD-less VCALENDAR of independent VEVENTs for ready members, cancellation snapshots and the generator for the 4b.5 synthetic files; no REST routes, MCP tools or CLI commands. | Parse every VEVENT and compare UTC times, UIDs, SEQUENCE and STATUS; 12 entries in one attachment; one move affects one UID; tail cancel lists only its members; guest copies contain no other attendee data. | Hard-off |
+| 4b.1. Aggregate calendar attachment | 4a.2 | One METHOD-less VCALENDAR of independent VEVENTs for every confirmed, not-started member (links only for ready ones), link-update entries with the same UID and SEQUENCE and a newer DTSTAMP, per-recipient cancellation snapshots limited to previously delivered entries, and the generator for the 4b.5 synthetic files; no REST routes, MCP tools or CLI commands. | Parse every VEVENT and compare UTC times, UIDs, SEQUENCE, DTSTAMP and STATUS; 12 entries in one attachment, including pending ones; one move affects one UID; tail cancel lists only its members, and a recipient's cancellation carries no entry it was never sent; guest copies contain no other attendee data. | Hard-off |
 | 4b.2. Provider calendar jobs | 4b.1 | Existing per-booking provider writes, retries and cancellations for every member; no REST routes, MCP tools or CLI commands. | Fake Google writes one event per occurrence with the existing UID contract; tail cancel cancels exactly the affected provider events; Microsoft no-write behavior unchanged; partial provider failure keeps the local series and shows per-occurrence repair state; no provider recurring master. | Hard-off |
-| 4b.3. Conference-ready series confirmation | 4b.2 | Lift the 2b automatic-conference refusal; series roots feed series state instead of per-booking `confirmed`/`conference_failed` outbox rows; confirmation due at all-terminal, the 30-minute wait or 15 minutes before the first not-started start; per-member markers. No REST routes, MCP tools or CLI commands. | Fake providers: all ready, 8 ready with 4 failed, all failed, pending at the wait and first start inside the wait, each with the exact counts and markers in [Calendar attachments](#calendar-attachments); started/cancelled members never delay it; whole cancel before send skips the confirmation and still sends the cancellation; zero per-occurrence failure notices and zero suppressed receipts; mutation to per-occurrence `conference_failed` fan-out fails the counts. | Hard-off |
-| 4b.4. Link-update mail | 4b.3 | Series link-update outbox: net changes per recipient, at least 60 minutes after the previous series confirmation or link update, at most 3 per series per rolling day, guests only for newly ready links; no REST routes, MCP tools or CLI commands. | All 12 fail, the host repairs all 12 through the existing conference retry: exactly 19 link-update mails with 12 new entries no earlier than 60 minutes after the confirmation, then 19 cancellation mails; 57 in total and at most 38 in any rolling hour, zero suppressed; repeated repairs coalesce; a fourth link-update mail in a rolling day waits; skipped after whole cancellation; mutation removing the spacing fails. | Hard-off |
+| 4b.3. Conference-ready series confirmation | 4b.2 | Lift the 2b automatic-conference refusal; series roots feed series state instead of per-booking `confirmed`/`conference_failed` outbox rows; confirmation due at all-terminal, the 30-minute wait or 15 minutes before the first not-started start, and inside that lead at the first member's terminal state, its start or the 5-minute imminent-start wait; per-member markers. No REST routes, MCP tools or CLI commands. | Fake providers: all ready, 8 ready with 4 failed, all failed, pending at the wait, first start inside the wait, and first start 10 minutes after commit (link ready within seconds, and still pending at the 5-minute wait), each with the exact counts and markers in [Calendar attachments](#calendar-attachments); started/cancelled members never delay it; whole cancel before send skips the confirmation and still sends the cancellation; zero per-occurrence failure notices and zero suppressed receipts; mutation to per-occurrence `conference_failed` fan-out fails the counts. | Hard-off |
+| 4b.4. Link-update mail | 4b.3 | Series link-update outbox: net changes per recipient, at least 60 minutes after the previous series mail's ledger `sent_at`, urgent updates at once for a member starting within 60 minutes when every invitee recipient has room, at most 3 per series per rolling day, guests only for newly ready links, started members never reported; no REST routes, MCP tools or CLI commands. | All 12 fail, the host repairs all 12 through the existing conference retry: exactly 19 link-update mails with 12 updated entries no earlier than 60 minutes after the confirmation, then 19 cancellation mails; 57 in total and at most 38 in any rolling hour, zero suppressed; an imminent first member's urgent update goes out at once; two imminent series at the cap send one urgent update and defer the other, at most 5 per invitee recipient and 95 instance mails in the hour, zero suppressed; repeated repairs coalesce; a fourth link-update mail in a rolling day waits; skipped after whole cancellation; mutations removing the spacing or the room check fail. | Hard-off |
 | 4b.5. Calendar client check | 4b.4 | Owner-run import check with the 4b.1 and 4b.4 synthetic files; no code, REST routes, MCP tools or CLI commands. | Criteria 1–3 in [Calendar attachments](#calendar-attachments) pass in Google Calendar, Outlook and Apple Calendar; versions and results recorded; any failure blocks 5a and every later step. | Hard-off |
-| 5a. Event configuration interfaces | 2a.1, 4b.5 | Existing `createEventType` POST `/event-types` and `updateEventType` PATCH `/event-types/{id}` gain `recurrence` (also returned by the existing event-type GETs); existing MCP `create_event_type` / `update_event_type` arguments and CLI `create-event` / `update-event` JSON input; existing public metadata GET `/public/{handle}/{slug}` and GET `/public/teams/{handle}/{slug}` gain `recurrence`, so MCP `find_available_slots` returns it in `eventType` and CLI `slots` prints it; GET `/instance` gains `recurringBookingsEnabled`. | Interface gate; owner/admin and expected-organization checks; hard-off returns 400 `recurrence_not_supported` for a changed non-null `recurrence` while null, unchanged and other edits succeed; disabled recurrence compatibility and revision invalidation; metadata exposes only permitted choices and is absent while off. | Hard-off |
+| 5a. Event configuration interfaces | 2a.1, 4b.5 | Existing `createEventType` POST `/event-types` and `updateEventType` PATCH `/event-types/{id}` gain `recurrence` (also returned by the existing event-type GETs); existing MCP `create_event_type` / `update_event_type` arguments and CLI `create-event` / `update-event` JSON input; existing public metadata GET `/public/{handle}/{slug}` and GET `/public/teams/{handle}/{slug}` gain `recurrence`, so MCP `find_available_slots` returns it in `eventType` and CLI `slots` prints it; GET `/instance` gains `recurringBookingsEnabled`, reporting the hard-off constant until step 7. | Interface gate; owner/admin and expected-organization checks; hard-off returns 400 `recurrence_not_supported` for a changed non-null `recurrence` while null, unchanged and other edits succeed; disabled recurrence compatibility and revision invalidation; metadata exposes only permitted choices and is absent while off. | Hard-off |
 | 5b. Preview interfaces | 1b, 5a | `createPublicBookingSeriesPreview` POST `/public/{handle}/{slug}/series-preview`; `createPublicTeamBookingSeriesPreview` POST `/public/teams/{handle}/{slug}/series-preview`; MCP `preview_booking_series` personal/team modes; CLI `series preview`. | Interface gate with explicit read classification for both POSTs; all dates and safe errors, stale-calendar failure, hidden links, slot limiter and invalid bearer refusal; 400 `recurrence_not_supported` while off. | Hard-off |
 | 5c. Creation interfaces | 2b, 4b.5, 5b | `createPublicBookingSeries` POST `/public/{handle}/{slug}/booking-series`; `createPublicTeamBookingSeries` POST `/public/teams/{handle}/{slug}/booking-series`; MCP `create_booking_series` personal/team modes; CLI `series book`. | Interface gate; preview equality, safe 400/409/429/503 mapping and replay; one public booking charge plus the admission cap per actor and event, with replays and conflicts not counted; no partial booking/mail after failed admission; capability redaction; 400 `recurrence_not_supported` while off. | Hard-off |
 | 5d. Series read interfaces | 3a, 5c | `listBookingSeries` GET `/booking-series`; `getHostBookingSeries` GET `/booking-series/{id}`; `getManagedBookingSeries` GET `/booking-series/manage` with `X-Series-Manage-Token`; MCP `list_booking_series`, `get_booking_series` host/seriesManageToken modes; CLI `series list`, `series get`. | Interface gate; bounded pagination/detail, host visibility, token-only access with header redaction, supplied-key scope enforcement and uniform 404 `series_not_found`; per-member link state; reads unaffected by the switch. | Hard-off |
@@ -757,12 +804,12 @@ restores admission with the retained event settings.
 | 5f.1. Series-mode manage reads | 3a, 5e | Extend existing GET `/bookings/manage` and GET `/bookings/manage/slots` with `X-Series-Manage-Token` plus an `ordinal` query field, mutually exclusive with `X-Manage-Token`; OpenAPI and generated types for the new header and field. Reads, so no new MCP tool or CLI command. | Interface gate; selector cannot escape the authorized series and follows the current member chain; guest capability is read-only and sibling-redacted; both headers return 400 `invalid_request` and neither keeps the existing 404; unknown ordinal returns 404 `booking_not_found`; existing token behavior and the ordinary manage-slot range cap remain intact. | Hard-off |
 | 5f.2. Series-mode reschedule | 5f.1 | Extend `rescheduleManagedBooking` POST `/bookings/manage/reschedule` with `X-Series-Manage-Token` plus body `ordinal` and required `expectedRevision`, returning `manageToken: null`; existing MCP `reschedule_booking` gains the seriesManageToken mode and CLI `reschedule` the same input; `rescheduleHostBooking` POST `/bookings/{id}/reschedule` unchanged. | Interface gate including the new MCP mode scope row; stale `expectedRevision` returns 409 `series_changed`; one occurrence email; series revision increments; invitee move-count and cutoff rules; guest refusal; existing single-booking input/response behavior unchanged. | Hard-off |
 | 5f.3. Series-mode single cancel | 5f.2 | Extend `cancelManagedBooking` POST `/bookings/manage/cancel` with the same selector and required `expectedRevision`; existing MCP `cancel_booking` gains the seriesManageToken mode and CLI `cancel` the same input; `cancelHostBooking` POST `/bookings/{id}/cancel` unchanged. | Interface gate including the new MCP mode scope row; stale revision, cutoff, started member and guest refusal; one occurrence email and one booking.cancelled webhook; other members untouched; existing single-booking input/response behavior unchanged. | Hard-off |
-| 5g. Series metadata on existing reads, export and webhooks | 3b, 5f.3 | Additive nullable `series: {id, ordinal, count}` on the booking responses of existing GET `/bookings`, GET `/bookings/{id}` and GET `/bookings/manage`, so existing MCP `list_bookings` and CLI `list` return it; `series_id` and `series_ordinal` appended after the existing columns of the personal CSV export (`exportBookingsCsv` GET `/bookings/export.csv`, MCP `export_bookings`, CLI `export`, proposed in PR #238; if that export is not on main when 5g starts, whichever of the two merges second adds these columns and its acceptance check); additive nullable `seriesId` and `seriesOrdinal` in booking.created/rescheduled/cancelled webhook `data`; OpenAPI, generated types and the published REST, export and webhook field lists. No new operations; the team export and team-admin booking list keep their current whitelist. | Interface gate; null for ordinary and imported bookings; present for every member including rescheduled successors with the same ordinal; webhook snapshots captured in the booking transaction carry it; bulk cancel emits one webhook per affected member; existing CSV column order unchanged; additive-only OpenAPI diff. | Hard-off |
+| 5g. Series metadata on existing reads, export and webhooks | 3b, 5f.3 | Additive nullable `series: {id, ordinal, count}` on the shared `Booking` schema, so it appears on GET `/bookings`, GET `/bookings/{id}` and GET `/bookings/manage`, and also on every existing response embedding that schema (host and manage cancel responses, and `BookingWithToken.booking` on create and reschedule responses): null for ordinary bookings, the member's series otherwise. Existing MCP `list_bookings` and CLI `list` return it. `series_id` and `series_ordinal` are appended after the existing columns of the personal CSV export from PR #238 (`exportBookingsCsv` GET `/bookings/export.csv`, MCP `export_bookings`, CLI `export`, not yet on main); if that export is not on main when 5g starts, whichever of the two merges second adds these columns and their acceptance check. Additive nullable `seriesId` and `seriesOrdinal` in booking.created/rescheduled/cancelled webhook `data`. OpenAPI, generated types and the published REST, export and webhook field lists. No new operations; the team export and team-admin booking list keep their current whitelist. | Interface gate. REST: each named GET and the cancel/reschedule responses return null for ordinary and imported bookings and the member's id/ordinal/count for every member, including rescheduled successors with the same ordinal. MCP `list_bookings` and CLI `list --json` return the same object. CSV: a member row carries its series ID and ordinal, an ordinary row leaves both empty, and existing column order is unchanged. Webhooks: snapshots captured in the booking transaction carry both fields, bulk cancel emits one webhook per affected member, and a contract test pins the published webhook field list. Additive-only OpenAPI diff. | Hard-off |
 | 6a. Admin configuration UI | 5a | Event recurrence editor using completed configuration endpoints, shown only when GET `/instance` reports admission on; no REST routes, MCP tools or CLI commands. | jsdom enable/disable/validation and neutral loading/403/error states; hidden while off; en/zh-CN; preserve team weekly-hours hint; accessible controls and a CI browser flow through the injected test dependency. | Hard-off |
 | 6b. Public booking page | 5b, 5c, 6a | Rule/count selection, full preview and atomic submit using completed preview/create endpoints; no REST routes, MCP tools or CLI commands. | All public locales; full/partial/stale/unknown availability, first-fold selection, retained request-key replay and returned series manage link; no series controls when metadata omits `recurrence`; generated-client CI browser creation flow. | Hard-off |
 | 6c. Host series UI | 5d, 5e, 5f.3, 5g | Host series list/detail, member actions through existing host booking operations, tail/all cancel, series labels in booking lists from 5g metadata and per-member conference state with retry; no REST routes, MCP tools or CLI commands. | Host/cross-org visibility, en/zh-CN, current member after moves, cancellation summaries, pending/failed conference states with retry and neutral unknown readiness; generated-client CI browser flow. | Hard-off |
-| 6d. Series manage page and admission setting | 5d, 5e, 5f.3, 6b, 6c | Fragment-token page listing every member with its link state, move/cancel controls and tail/all cancel; replaces the hard-off constant with `RECURRING_BOOKINGS_ENABLED` (default `false`) in config, `.env.example`, GET `/instance` and the configuration docs. No REST routes, MCP tools or CLI commands. | Every member from the confirmation is reachable; fragment stripped safely, no capability leakage; guest read-only access and rejection of every mutation; chain follow, stale revision, cancel and failure UI; all public locales and CI browser flow; config tests for default false, true enabling admission, and turning it off keeping every behavior listed in [Admission switch](#admission-switch) working. | Setting, default false |
-| 7. Documentation | 1a–6d | User, agent and self-host guides (create, manage, cancel, limits, mail timing and lag, conference markers and the 4b.5 client results), upgrade and setting notes, reminder-offset guidance for recurring events, and the Cal.com importer activation blocker; documentation only, with no code, interface or configuration change. | Site build and link checks; every stated limit, error code and step behavior matches this design and the bound constants; known limitations listed. | Setting, default false |
+| 6d. Series manage page | 5d, 5e, 5f.3, 6b, 6c | Fragment-token page listing every member with its link state, move/cancel controls and tail/all cancel; no REST routes, MCP tools or CLI commands. | Every member from the confirmation is reachable; fragment stripped safely, no capability leakage; guest read-only access and rejection of every mutation; chain follow, stale revision, cancel and failure UI; current link or marker per member, including a started member's link, which no mail reports; all public locales and CI browser flow through the injected test dependency. | Hard-off |
+| 7. Guides and admission setting | 1a–6d | User, agent, owner and self-host guides (create, manage, cancel, limits, mail timing and lag, conference markers, the 4b.5 client results, reminder-offset guidance for recurring events, and the admission cap's NAT and agent consequences), upgrade notes and the Cal.com importer activation blocker; replaces the hard-off constant with `RECURRING_BOOKINGS_ENABLED` (default `false`) in config, `.env.example` and the configuration docs. No REST routes, MCP tools or CLI commands, and no other code. | Site build and link checks; every stated limit, error code and step behavior matches this design and the bound constants; known limitations listed; config tests for default false, true enabling admission, and turning it off keeping every behavior listed in [Admission switch](#admission-switch) working. | Setting, default false |
 | 8. Final acceptance and default on | 7 | Cross-DST end-to-end acceptance suite; changes the `RECURRING_BOOKINGS_ENABLED` default to `true` in config, `.env.example` and the configuration docs; no REST routes, MCP tools or CLI commands. | Cross-DST creation → one move → tail cancel → replay across host/invitee zones; compare DB instants, REST/MCP/CLI reads, export, webhooks and ICS; maximum-recipient default-budget acceptance including the all-fail conference case; self-host parity; default-on config test. | Default true |
 
 Calendar checks use parser/SMTP fixtures and fake provider adapters. Step 4b.5 is the only
