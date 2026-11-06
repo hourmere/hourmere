@@ -38,6 +38,10 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 | `tools/zapier-hourmere` | Private Zapier Platform CLI app using the existing REST API; deployed separately from Hourmere and excluded from its Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
+CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
+iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
+available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
+
 ## Development
 
 Requires Node.js 26 and Docker.

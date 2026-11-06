@@ -27,6 +27,7 @@ import * as groupSeatAdmission from './group-seat-admission.ts'
 import * as hosts from './hosts.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
 import * as notificationSettings from './notification-settings.ts'
+import { expirePaymentHolds } from './payment-expiry.ts'
 import { parseQuestions, validateResponses } from './questions.ts'
 import * as roundRobin from './round-robin.ts'
 import * as successRedirect from './success-redirect.ts'
@@ -106,6 +107,7 @@ function sourceCopy(change?: Change): Api {
     DomainError,
     ...hosts,
     ...notificationSettings,
+    expirePaymentHolds,
     parseQuestions,
     validateResponses,
     ...roundRobin,
