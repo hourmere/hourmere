@@ -87,6 +87,7 @@ describe.skipIf(!serverUrl)('imported bookings over REST, MCP and CLI', () => {
   it.each([
     ['cancel', {}],
     ['reschedule', { start: '2026-11-02T10:00:00Z' }],
+    ['request-reschedule', { idempotencyKey: crypto.randomUUID() }],
     ['conference/retry', {}],
     ['calendar-copy/retry', {}],
   ])('refuses REST %s without external work', async (suffix, body) => {
@@ -96,31 +97,35 @@ describe.skipIf(!serverUrl)('imported bookings over REST, MCP and CLI', () => {
     expect(notify).not.toHaveBeenCalled()
   })
 
-  it.each(['cancel_booking', 'reschedule_booking', 'retry_conference', 'retry_calendar_copy'])(
-    'refuses MCP %s with the same stable code',
-    async (name) => {
-      const tool = tools.find((tool) => tool.name === name)
-      if (!tool) throw new Error('Missing booking tool')
-      const result = await runTool(
-        tool,
-        {
-          bookingId,
-          ...(name === 'reschedule_booking' ? { start: '2026-11-02T10:00:00Z' } : {}),
-        },
-        { caller, rateLimit: () => {} },
-        () => {
-          throw new Error('Unexpected tool failure')
-        },
-      )
-      expect(result.isError).toBe(true)
-      expect(
-        JSON.parse((result.content?.[0] as { text: string } | undefined)?.text ?? 'null'),
-      ).toMatchObject({
-        error: 'imported_booking_read_only',
-      })
-      expect(notify).not.toHaveBeenCalled()
-    },
-  )
+  it.each([
+    'cancel_booking',
+    'reschedule_booking',
+    'request_reschedule',
+    'retry_conference',
+    'retry_calendar_copy',
+  ])('refuses MCP %s with the same stable code', async (name) => {
+    const tool = tools.find((tool) => tool.name === name)
+    if (!tool) throw new Error('Missing booking tool')
+    const result = await runTool(
+      tool,
+      {
+        bookingId,
+        ...(name === 'request_reschedule' ? { idempotencyKey: crypto.randomUUID() } : {}),
+        ...(name === 'reschedule_booking' ? { start: '2026-11-02T10:00:00Z' } : {}),
+      },
+      { caller, rateLimit: () => {} },
+      () => {
+        throw new Error('Unexpected tool failure')
+      },
+    )
+    expect(result.isError).toBe(true)
+    expect(
+      JSON.parse((result.content?.[0] as { text: string } | undefined)?.text ?? 'null'),
+    ).toMatchObject({
+      error: 'imported_booking_read_only',
+    })
+    expect(notify).not.toHaveBeenCalled()
+  })
 
   async function cli(command: string, input = {}) {
     let stdout = '',
