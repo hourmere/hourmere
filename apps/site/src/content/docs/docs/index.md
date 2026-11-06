@@ -17,6 +17,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
+  the editor, REST, MCP or CLI.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
@@ -40,14 +42,15 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
   minimal booking data and at-least-once delivery; duplicate messages are possible.
-
+- [Booking limits](/docs/booking-limits) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.
-
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

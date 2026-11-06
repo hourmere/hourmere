@@ -403,6 +403,142 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
     expect(invalid.error.error).toBe('invalid_event_type')
   })
 
+  const limits = { maxBookingsPerDay: 1, maxBookingsPerWeek: 2, maxBookingsPerMonth: 3 }
+
+  async function verifyLimits(factory: Factory, update: boolean) {
+    const s = await setup(factory)
+    const created = ok(await s.call('create_event_type', { ...createInput(), ...limits }))
+    expect(created).toMatchObject(limits)
+    if (update) {
+      const changed = { maxBookingsPerWeek: 4, maxBookingsPerMonth: 1000 }
+      expect(ok(await s.call('update_event_type', { id: created.id, ...changed }))).toMatchObject(
+        changed,
+      )
+    }
+  }
+
+  it.each(['maxBookingsPerWeek', 'maxBookingsPerMonth'])(
+    'detects source-copy removal of %s forwarding on both writes',
+    async (field) => {
+      for (const update of [false, true]) {
+        await verifyLimits(sourceCopy(), update)
+        const anchor = update
+          ? 'return updateEventType(context(call.caller), id, changes)'
+          : 'return createEventType(context(call.caller), args)'
+        const replacement = update
+          ? `return updateEventType(context(call.caller), id, { ...changes, ${field}: undefined })`
+          : `return createEventType(context(call.caller), { ...args, ${field}: undefined })`
+        await expect(verifyLimits(sourceCopy([anchor, replacement]), update)).rejects.toMatchObject(
+          { name: 'AssertionError' },
+        )
+      }
+    },
+  )
+
+  it('round-trips limits through REST, MCP and CLI, preserving omission and clearing with null', async () => {
+    const s = await setup(productTools)
+    const rest = async (method: string, path: string, body?: unknown) =>
+      s.app.request(`/api/v1/event-types${path}`, {
+        method,
+        headers: { authorization: 'Bearer hm_synthetic', 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    const cli = async (command: string, input: Record<string, unknown>) => {
+      let stdout = ''
+      let stderr = ''
+      const code = await runCli({
+        argv: [command, '--input', '-'],
+        env: { HOURMERE_URL: 'http://localhost:4189', HOURMERE_API_KEY: 'hm_synthetic' },
+        stdin: (async function* () {
+          yield JSON.stringify(input)
+        })(),
+        stdout: (text) => {
+          stdout += text
+        },
+        stderr: (text) => {
+          stderr += text
+        },
+        fetch: async (input, init) => s.app.request(input, init),
+      })
+      return {
+        code,
+        data: stdout ? JSON.parse(stdout) : null,
+        error: stderr ? JSON.parse(stderr) : null,
+      }
+    }
+    const response = await rest('POST', '', { ...createInput(), ...limits })
+    expect(response.status).toBe(201)
+    const created = (await response.json()) as { id: string }
+    expect(created).toMatchObject(limits)
+    expect(ok(await s.call('get_event_type', { id: created.id }))).toMatchObject(limits)
+    expect((await cli('event', { id: created.id })).data).toMatchObject(limits)
+    expect(
+      ok(await s.call('update_event_type', { id: created.id, title: 'Only metadata' })),
+    ).toMatchObject(limits)
+    const updated = await cli('update-event', {
+      id: created.id,
+      maxBookingsPerWeek: 10,
+      maxBookingsPerMonth: 1000,
+    })
+    expect(updated.code).toBe(0)
+    expect(await (await rest('GET', `/${created.id}`)).json()).toMatchObject({
+      ...limits,
+      maxBookingsPerWeek: 10,
+      maxBookingsPerMonth: 1000,
+    })
+    expect(
+      ok(
+        await s.call('update_event_type', {
+          id: created.id,
+          maxBookingsPerWeek: null,
+          maxBookingsPerMonth: null,
+        }),
+      ),
+    ).toMatchObject({ maxBookingsPerDay: 1, maxBookingsPerWeek: null, maxBookingsPerMonth: null })
+    const cliCreated = await cli('create-event', {
+      ...createInput(),
+      maxBookingsPerWeek: 1,
+      maxBookingsPerMonth: 1000,
+    })
+    expect(cliCreated.code).toBe(0)
+    expect(cliCreated.data).toMatchObject({ maxBookingsPerWeek: 1, maxBookingsPerMonth: 1000 })
+    const clear = await rest('PATCH', `/${cliCreated.data.id}`, {
+      maxBookingsPerWeek: null,
+      maxBookingsPerMonth: null,
+    })
+    expect(clear.status).toBe(200)
+    expect(await clear.json()).toMatchObject({
+      maxBookingsPerWeek: null,
+      maxBookingsPerMonth: null,
+    })
+    for (const changes of [
+      { maxBookingsPerWeek: 0 },
+      { maxBookingsPerMonth: 1001 },
+      { maxBookingsPerWeek: 1.5 },
+      { maxBookingsPerMonth: '2' },
+      { maxBookingsPerDay: 3, maxBookingsPerWeek: 2 },
+      { maxBookingsPerWeek: 3, maxBookingsPerMonth: 2 },
+      { maxBookingsPerDay: 3, maxBookingsPerWeek: null, maxBookingsPerMonth: 2 },
+    ]) {
+      for (const update of [false, true]) {
+        const input: Record<string, unknown> = update
+          ? { id: created.id, ...changes }
+          : { ...createInput(), ...changes }
+        const { id: _id, ...body } = input
+        const rejected = await rest(update ? 'PATCH' : 'POST', update ? `/${created.id}` : '', body)
+        expect(rejected.status).toBe(400)
+        const expected = await rejected.json()
+        expect(
+          error(await s.call(update ? 'update_event_type' : 'create_event_type', input)),
+        ).toEqual(expected)
+        const result = await cli(update ? 'update-event' : 'create-event', input)
+        expect(result.code).toBe(1)
+        // CLI intentionally suppresses arbitrary server messages and warns about write retries.
+        expect(result.error).toMatchObject({ error: (expected as { error: string }).error })
+      }
+    }
+  })
+
   it('exercises an unchanged source copy before the mutation controls', async () => {
     await verifyCreate(sourceCopy())
     await verifyUpdate(sourceCopy())

@@ -131,8 +131,8 @@ the reschedule request. The replacement booking stores its resulting start and e
 ## Current limits
 
 - All lengths share the event type's hosts, location, booking questions, buffers, minimum
-  notice, booking window and daily booking limit. There are no per-length overrides.
+  notice, booking window and daily, weekly and monthly booking limits. There are no per-length overrides.
 - A fixed slot step stays fixed for every length. With no explicit step, start times use
-  the selected length as their step. Daily limits count bookings across all lengths.
+  the selected length as their step. Daily, weekly and monthly limits count bookings across all lengths.
 - The web rescheduling flow keeps the original length; changing length during a move
   requires REST, MCP or CLI.
