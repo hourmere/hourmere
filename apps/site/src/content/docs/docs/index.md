@@ -40,6 +40,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
+  Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
@@ -102,6 +104,7 @@ Explore these detailed guides:
 
 - [CLI](/docs/cli): use the booking tools
   from a terminal with an API key.
+- [Make](/docs/make): connect booking webhooks to Sheets or Slack, or create bookings with HTTP.
 - [Booking webhooks](/docs/webhooks):
   configure signed delivery and retries.
 - Team scheduling: [collective meetings](/docs/collective-scheduling)
