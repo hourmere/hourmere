@@ -1,15 +1,5 @@
 [API conventions](https://hourmere.com/docs/api-conventions).
 
-### Organization branding
-
-The additive `/api/v1/branding` GET/PATCH resource stores current-space branding.
-`brandPrimaryColor` accepts six-digit hex or null; `brandLogo` accepts an uploaded
-current-space content hash or null. Omitted PATCH fields are preserved. Binary uploads
-use `POST /api/v1/branding/logo` and protected reads use its `/{hash}` suffix. Personal
-owners and team owners/admins are authorized; API-key reads require full/read and writes
-require full. Session writes require the expected-organization header. See
-[branding](https://hourmere.com/docs/branding) for image limits, contrast and replay semantics.
-
 ### Booking source compatibility
 
 `Booking.source` adds `"import"` to the response values `"web"`, `"embed"`, `"api"`
