@@ -15,6 +15,7 @@ import { TimeZonePicker } from '../../components/TimeZonePicker.tsx'
 import * as flash from '../../flash.ts'
 import * as hooks from '../../hooks.ts'
 import { InterfaceScope, useI18n } from '../../i18n/runtime.tsx'
+import { chooseLanguage } from '../../i18n/store.ts'
 import * as translate from '../../i18n/translate.ts'
 import * as paths from '../../paths.ts'
 import { fakeApi, json } from '../../test/fake-api.tsx'
@@ -210,4 +211,33 @@ describe('availability source-copy mutations', () => {
       expect(copy<typeof hours.toApiTime>(source, 'toApiTime')('00:00', true)).toBe('24:00')
     })
   })
+})
+
+describe('copy button visible label accessibility', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps the visible label in the accessible name in %s',
+    async (language) => {
+      chooseLanguage(language)
+      const source = readFileSync('apps/web/src/pages/availability/CopyDay.tsx', 'utf8')
+      const componentSource = source.slice(source.indexOf('export function CopyDay('))
+      await detects(
+        componentSource,
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: exact production source mutation
+        "aria-label={`${t('Copy to…')} ${t('Copy hours from {0}', { '0': ui(label) })}`}",
+        "aria-label={t('Copy hours from {0}', { '0': ui(label) })}",
+        (code) => {
+          const Button = copy<typeof CopyDay>(code, 'CopyDay')
+          render(
+            <InterfaceScope surface="admin">
+              <Button source="monday" onCopy={() => {}} />
+            </InterfaceScope>,
+          )
+          const button = screen.getByRole('button')
+          const visible = language === 'en' ? 'Copy to…' : '复制到…'
+          expect(button.textContent).toBe(visible)
+          expect(button.getAttribute('aria-label')).toContain(visible)
+        },
+      )
+    },
+  )
 })

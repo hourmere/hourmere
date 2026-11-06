@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright'
 import { openAuditPage } from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 
@@ -10,7 +11,7 @@ test('copies midnight hours and saves the week and date overrides together', asy
   await openAuditPage(page, app, 'availability-editor')
   await page.getByLabel('Monday, hours 1, from', { exact: true }).fill('18:00')
   await page.getByLabel('Monday, hours 1, until', { exact: true }).fill('00:00')
-  const copy = page.getByRole('button', { name: 'Copy hours from Monday', exact: true })
+  const copy = page.getByRole('button', { name: 'Copy to… Copy hours from Monday', exact: true })
   await copy.focus()
   await copy.press('Enter')
   const dialog = page.getByRole('dialog', { name: 'Copy hours from Monday' })
@@ -70,3 +71,27 @@ test('two tabs preserve the winner and retain the conflicting draft', async ({ p
     await second.close()
   }
 })
+
+for (const language of ['en', 'zh-CN'] as const) {
+  test(`copy controls retain their visible labels in accessible names (${language})`, async ({
+    page,
+    app,
+  }) => {
+    await openAuditPage(page, app, 'availability-editor')
+    await page
+      .getByRole('combobox', { name: 'Interface language', exact: true })
+      .selectOption(language)
+    const visible = language === 'en' ? 'Copy to…' : '复制到…'
+    const controls = page.locator('.weekday-copy')
+    await expect(controls).toHaveCount(7)
+    for (const control of await controls.all()) {
+      await expect(control).toHaveText(visible)
+      await expect(control).toHaveAccessibleName(new RegExp(visible))
+    }
+    const result = await new AxeBuilder({ page })
+      .include('.week')
+      .withRules(['label-content-name-mismatch'])
+      .analyze()
+    expect(result.violations.map(({ id, impact }) => ({ id, impact }))).toEqual([])
+  })
+}

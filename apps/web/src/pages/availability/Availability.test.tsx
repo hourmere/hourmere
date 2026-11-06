@@ -631,7 +631,7 @@ describe('copying weekday hours', () => {
     fireEvent.change(await screen.findByLabelText('Monday, hours 1, until'), {
       target: { value: '00:00' },
     })
-    const opener = screen.getByRole('button', { name: 'Copy hours from Monday' })
+    const opener = screen.getByRole('button', { name: 'Copy to… Copy hours from Monday' })
     await user.click(opener)
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).queryByRole('checkbox', { name: 'Monday' })).toBeNull()
@@ -641,7 +641,7 @@ describe('copying weekday hours', () => {
     expect(input('Tuesday, hours 1, until').value).toBe('00:00')
     fireEvent.change(input('Tuesday, hours 1, until'), { target: { value: '19:00' } })
     expect(input('Monday, hours 1, until').value).toBe('00:00')
-    await user.click(screen.getByRole('button', { name: 'Copy hours from Sunday' }))
+    await user.click(screen.getByRole('button', { name: 'Copy to… Copy hours from Sunday' }))
     await user.click(screen.getByRole('button', { name: 'Weekdays' }))
     await user.click(screen.getByRole('button', { name: 'Apply copy' }))
     expect(screen.getByRole('checkbox', { name: 'Monday' })).toHaveProperty('checked', false)
@@ -653,7 +653,7 @@ describe('copying weekday hours', () => {
     renderApp(`/app/availability/${SCHEDULE_ID}`)
     await user.click(await screen.findByRole('button', { name: 'Add hours on Monday' }))
     fireEvent.change(input('Monday, hours 2, from'), { target: { value: '16:00' } })
-    const opener = screen.getByRole('button', { name: 'Copy hours from Monday' })
+    const opener = screen.getByRole('button', { name: 'Copy to… Copy hours from Monday' })
     await user.click(opener)
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).toBeNull()

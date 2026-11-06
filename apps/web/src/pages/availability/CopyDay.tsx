@@ -19,7 +19,7 @@ export function CopyDay({
         ref={button}
         type="button"
         className="button button-small weekday-copy"
-        aria-label={t('Copy hours from {0}', { '0': ui(label) })}
+        aria-label={`${t('Copy to…')} ${t('Copy hours from {0}', { '0': ui(label) })}`}
         onClick={() => setOpen(true)}
       >
         {t('Copy to…')}
