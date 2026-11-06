@@ -259,8 +259,8 @@ describe.skipIf(!bootstrap)('MCP selected meeting lengths', () => {
     [
       'invitee reschedule forwarding',
       [
-        '        args.manageToken,\n        { start: Temporal.Instant.from(args.start), durationMinutes: args.durationMinutes },',
-        '        args.manageToken,\n        { start: Temporal.Instant.from(args.start) },',
+        '        args.manageToken,\n        {\n          start: Temporal.Instant.from(args.start),\n          durationMinutes: args.durationMinutes,',
+        '        args.manageToken,\n        {\n          start: Temporal.Instant.from(args.start),',
       ],
       verifyMove,
     ],

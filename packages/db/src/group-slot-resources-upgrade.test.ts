@@ -13,7 +13,10 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-slot-resource-predecessor-'))
     let old: TestDatabase | undefined, fresh: TestDatabase | undefined
     try {
-      for (const name of await readdir(migrationsDir))
+      const migrations = (await readdir(migrationsDir))
+        .filter((name) => name.endsWith('.sql'))
+        .sort()
+      for (const name of migrations)
         if (name.endsWith('.sql') && name < '0061')
           await copyFile(join(migrationsDir, name), join(directory, name))
       old = await createTestDatabase(serverUrl as string, directory)

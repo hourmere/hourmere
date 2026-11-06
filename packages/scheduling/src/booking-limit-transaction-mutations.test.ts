@@ -8,6 +8,7 @@ import * as Audit from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import * as Zod from 'zod'
 import * as Availability from './availability.ts'
 import * as BookingPage from './booking-page.ts'
 import * as Conferences from './conferences.ts'
@@ -34,6 +35,7 @@ type Change = readonly [string, string]
 const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
+  zod: Zod,
   '@hourmere/db': HourmereDb,
   '@hourmere/auth': HourmereAuth,
   '@hourmere/db/audit': Audit,

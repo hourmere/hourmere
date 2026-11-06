@@ -87,6 +87,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       importedBookingIds,
       isImportedBooking,
       sql,
+      z,
       ...availability,
       ...bookingPage,
       ...conferences,

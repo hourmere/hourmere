@@ -17,6 +17,8 @@ export const WEBHOOK_EVENTS = [
   'booking.created',
   'booking.rescheduled',
   'booking.cancelled',
+  'booking.reschedule_requested',
+  'booking.reschedule_request_expired',
 ] as const
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number]
 export const WebhookCreateInput = z.strictObject({
@@ -112,7 +114,7 @@ function requireEnabled(settings: WebhookSettings): string {
 }
 
 function eventsOf(events: unknown): WebhookEventType[] {
-  const parsed = z.array(z.enum(WEBHOOK_EVENTS)).min(1).max(3).safeParse(events)
+  const parsed = z.array(z.enum(WEBHOOK_EVENTS)).min(1).max(WEBHOOK_EVENTS.length).safeParse(events)
   if (!parsed.success || new Set(parsed.data).size !== parsed.data.length) throw invalid()
   return [...parsed.data].sort()
 }
