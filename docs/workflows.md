@@ -141,10 +141,10 @@ reschedule-trigger definitions. It does not capture new created-trigger definiti
 retired on reschedule rather than carried forward; see the explicit divergence below.
 Disable and delete always override snapshots and prevent dispatch, but at different times.
 Disabling one definition is lazy, like the operator switch below: it changes no execution
-row and stops new capture for that definition. A pending run that comes due while its
-definition is disabled ends permanently as `workflow_disabled`. Re-enabling never revives
-terminal or skipped work; runs that are not yet due stay eligible, so a brief toggle loses
-only the wakes that came due during it. The editor states this when disabling. Deletion is
+row and stops new capture for that definition. A pending run that the dispatcher claims
+while its definition is disabled ends permanently as `workflow_disabled`. Re-enabling never
+revives terminal or skipped work; runs not yet claimed stay eligible, so a brief toggle loses
+only the runs claimed during it. The editor states this when disabling. Deletion is
 eager: the deleting transaction retires every pending run of that definition. Imported
 bookings and their reschedule chains are excluded, matching existing import silence.
 
@@ -185,8 +185,9 @@ existing custom revision when it is off. Hourmere Cloud MUST keep it false until
 eligibility, recipient consent and complaint controls are reviewed and implemented.
 Self-hosted defaults retain the existing true host-notes default; open-signup operators
 should set it false. The final workflow default flip does not change this independent
-switch or relax the Cloud requirement. Step 11a owns validation and dispatch policy;
-step 11b owns safe built-in catalogs, and step 12b tests the live switch recheck.
+switch or relax the Cloud requirement. Step 11a owns validation and the renderer's
+built-in fallback that dispatch uses; step 11b owns safe built-in catalogs, and step 12b
+integrates and tests the live switch recheck at dispatch.
 
 Templates are plain text with a typed allowlist of variables. Built-in localized wrappers
 and templates cover every public locale in `packages/core/src/locales.ts`; administrator
@@ -243,8 +244,11 @@ a row carrying both `request_id` and `workflow_run_id`. No existing row is rewri
 backfilled: booking-origin rows (both columns NULL) and request-origin rows (`request_id`
 set) keep their uniqueness, payloads, signatures and receipts. The same migration extends
 the `webhook_deliveries.event_type` CHECK from the 5 current kinds to 6, before any workflow
-delivery can be inserted. Verify a populated predecessor that includes request-origin rows,
-fresh installation and a no-op rerun.
+delivery can be inserted. Postgres infers an `ON CONFLICT` arbiter only from the exact column
+set, so step 14a also moves the existing capture's conflict target in
+`packages/webhooks/src/delivery.ts` from the four columns to the five; booking and request
+duplicate capture must still coalesce. Verify a populated predecessor that includes
+request-origin rows, fresh installation and a no-op rerun.
 
 The endpoint must explicitly subscribe to this new event kind and remain active; removal,
 rotation, pause, global webhook disablement and private-target policy retain their existing
@@ -269,10 +273,11 @@ subscription expansion:
 
 While workflows are off, a create or update whose resulting event set adds
 `workflow.executed` to an endpoint not already subscribed returns `404 workflows_disabled`.
-Keeping or removing an existing subscription is allowed, and other kinds still work. The
-check runs with event validation, before the destination policy and the existing
-`409 webhooks_disabled` check of create, so `workflows_disabled` wins when both apply.
-Update has no `webhooks_disabled` check today and gains none.
+Keeping or removing an existing subscription is allowed, and other kinds still work. For
+create, the check runs with event validation, before the destination policy and the existing
+`409 webhooks_disabled` check, so `workflows_disabled` wins when both apply. For update, it
+compares the requested set with the row locked by `lockedWebhook()` and runs before the
+destination recheck. Update has no `webhooks_disabled` check today and gains none.
 
 The workflow payload has the existing bounded booking ID/time/status projection plus
 `workflowId`, `workflowRevision`, `trigger` and stable `workflowRunId`, never `requestId`;
@@ -539,7 +544,7 @@ Event ownership:
   paths inside the transactions named below and tests them with a recording fake port.
 - Step 16b binds the port to the accepted shared writer from #246, or whichever audit
   writer main has by then, for definition and preview events. Step 16c binds the execution
-  events and adds the opt-in gate.
+  events and closes the no-op path, so no production wiring can select it.
 
 If no accepted writer is on main when step 16b starts, stop there: keep hard-off and do not
 proceed to opt-in. The no-op port is safe only while hard-off and must not survive step 16c.
@@ -601,9 +606,9 @@ The web app learns availability from instance discovery. Step 4 adds an optional
 `followUpHostNotesEnabled` and `slotSnippetsEnabled`, and documents it as false until
 workflows are enabled. It reports the constant and the operator switch together: false
 while hard-off, then the value of `WORKFLOWS_ENABLED` from step 19b. Step 19a computes it
-from the injected operator state. Clients treat an absent field as false. Step 17's web
-app shows workflow navigation and the editor only when it is true. It hides custom
-subject/body fields when `followUpHostNotesEnabled` is false. Under operator-off, recovery
+from the injected operator state. Clients treat an absent field as false. The web app
+(steps 17a and 17b) shows workflow navigation and the editor only when it is true. Its
+editor hides custom subject/body fields when `followUpHostNotesEnabled` is false. Under operator-off, recovery
 reads, disable and delete stay available through REST, MCP and CLI; the web app offers no
 separate recovery view in v1.
 
@@ -671,8 +676,8 @@ creation, preview, enabling and all edits (including renames) with
 `404 workflows_disabled`, and stops new capture/dispatch. Definition/history reads,
 disable-only updates and deletion remain available for recovery. MCP discovery while off
 omits workflow tools; authorized direct recovery calls remain usable after step 19b only.
-Pending runs become terminally skipped as `instance_disabled` only when they wake due while
-off; future runs are not eagerly swept. Re-enabling never revives skipped work, but future
+Pending runs become terminally skipped as `instance_disabled` only when they are claimed
+while off; future runs are not eagerly swept. Re-enabling never revives skipped work, but future
 not-yet-due rows remain eligible. Disabling one definition is lazy in the same way, with
 `workflow_disabled`. Existing reminders continue. Step 19b rewrites the docs index
 known-limitation line to say workflows are available but off by default. Final acceptance
@@ -725,26 +730,27 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 8a. Timer calculations | 1 | None. Pure UTC due-time, minimum-gap, capture-time and expiration rules used by capture and dispatch. | Hard-off | Before/after start/end anchors; minimum_gap and offset_not_future equality; spring/fall DST and non-hour shifts; late-bound equality. |
 | 8b. Creation capture and intents | 3, 7, 8a | None. Native confirmed creation hooks on the `created` notifier event, immutable enrollments, due rows from 8a, and reminder/workflow intent ordering. | Hard-off | Rollback creates no run; duplicate capture coalesces; hold-confirm captures once; hold-expire/release creates nothing; imported/group bookings remain silent; minimum_gap and offset_not_future recorded at capture. |
 | 8c. Cancellation, reschedule and request-event capture | 8b | None. Cancellation and successor hooks with occurrence identities; `reschedule_requested` and `reschedule_request_expired` notifier events capture nothing. | Hard-off | Reschedule emits neither a second created nor an actual-cancel trigger; cancellation replay coalesces; successor retains timer revisions; delayed-created work retires and never transfers to the successor; request and request-expiry events create no occurrence and leave pending runs and wakes unchanged; a pick captures as an ordinary reschedule and a request cancellation as an ordinary cancellation. |
-| 9. Dispatcher and repair | 8c | None. Bounded due claims, fences, lazy definition-disable check at wake and missing-wake repair. | Hard-off | Cancel/reschedule/disable/delete while claim waits; a wake while its definition is disabled ends as workflow_disabled, and re-enabling before due dispatches; racing worker cannot reclaim retired work; a pending reschedule request neither delays nor skips a due run; repair preserves unique identity; no late first attempt. |
+| 9. Dispatcher and repair | 8c | None. Bounded due claims, fences, lazy definition-disable check at wake and missing-wake repair. | Hard-off | Cancel/reschedule/disable/delete while claim waits; a claim while its definition is disabled ends as workflow_disabled, and re-enabling before the claim dispatches within the late bound; racing worker cannot reclaim retired work; a pending reschedule request neither delays nor skips a due run; repair preserves unique identity; no late first attempt. |
 | 10. Shared mail admission and sub-caps | 3 | None. Shared global ledger/lock and workflow-purpose hash; admission inserts the workflow-linked `notification_email_sends` row and the reservation row in one transaction; retry re-admission restamps that row; instance/owner settings in loadConfig with Compose `${…:-}` forwards and no .env.example or configuration.md entry yet. | Hard-off | Unchanged core queries count workflow rows; last-slot races across core/workflow workers admit once; workflow flood leaves 80 core and 20 reserve slots; re-admission excludes its own row, adds none and suppresses when full; small/zero caps and sliding windows; deletion cannot reset budget; Compose forwards both with empty defaults; close pools below CI ceiling. |
-| 11a. Safe email renderer and text policy | 6 | None. Bounded escaped interpolation and FOLLOW_UP_HOST_NOTES_ENABLED policy in save/update and shared candidate validator (preview endpoint integrates in 15a). | Hard-off | Hostile HTML/header/control inputs inert; unauthorized variables rejected; switch off rejects custom subject/body in save/update and candidate-validator fixtures, including host recipients; built-ins remain valid. |
+| 11a. Safe email renderer and text policy | 6 | None. Bounded escaped interpolation and FOLLOW_UP_HOST_NOTES_ENABLED policy in save/update, the shared candidate validator and the renderer's built-in fallback used by dispatch (preview endpoint integrates in 15a). | Hard-off | Hostile HTML/header/control inputs inert; unauthorized variables rejected; switch off rejects custom subject/body in save/update and candidate-validator fixtures, including host recipients; the renderer falls back to built-in text for a stored custom revision when the switch is off; built-ins remain valid. |
 | 11b. Localized built-in catalogs | 11a | None. Templates for every shipped public locale and fixture snapshots. | Hard-off | Locale fallback is built-in; plain-text/HTML snapshots; no sibling contacts, capabilities or unauthorized team fields; self-hosted/Cloud defaults documented. |
 | 12a. Email attempt and retry state machine | 9, 10, 11b | None. Marker commit, fenced known-not-sent reversal with re-admission, and terminal ambiguity. | Hard-off | Connection/greeting/auth failure retries the same reservation/intent after re-admission, with one ledger row; stale token cannot reverse marker; post-DATA ambiguity and crash never create a second potentially accepted attempt; bounded backoff expires at due + 60 minutes during a longer outage. |
 | 12b. Email lifecycle race integration | 12a | None. Integrate live eligibility, policy and lifecycle rechecks with fake SMTP. | Hard-off | Overlapping reminder intent wins without duplicate send; cancel-before-marker sends nothing; marker-first permits only its authorized attempt; disable/delete races; live host-text switch falls back to built-ins; no shared budget lock across workflow SMTP. |
 | 13a. Webhook discovery and creation parity | 4 | Existing `GET /api/v1/webhooks` (`listWebhooks`) / `list_webhooks` / `webhooks list`; existing `POST /api/v1/webhooks` (`createWebhook`) / `create_webhook` / `webhooks create`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Full/read discovery, full-only create; current owner/admin checks; one-time secret returned only on creation; CLI JSON/help and parity mapping; existing event kinds unchanged. |
 | 13b. Webhook edit and retirement parity | 13a | Existing `PATCH /api/v1/webhooks/{id}` (`updateWebhook`) / `update_webhook` / `webhooks update`; existing `DELETE /api/v1/webhooks/{id}` (`deleteWebhook`) / `delete_webhook` / `webhooks delete`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Pause after URL policy removal; immutable URL and permission tests; deletion race; parity gaps removed without changing unrelated gaps. |
 | 13c. Webhook rotation and history parity | 13b | Existing `POST /api/v1/webhooks/{id}/rotate-secret` (`rotateWebhookSecret`) / `rotate_webhook_secret` / `webhooks rotate-secret`; existing `GET /api/v1/webhooks/{id}/deliveries` (`listWebhookDeliveries`) / `list_webhook_deliveries` / `webhooks deliveries`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Rotation exposes secret once with no CLI logging; current authorization and secret rotation races; safe paginated metadata; full/read read scope and full-only rotation. |
-| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (5 to 6 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0064 webhooks.events CHECK with cardinality BETWEEN 1 AND 6 over the extended set; regenerate OpenAPI and client. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request-kind subscriptions preserved, fresh install, no-op rerun and DB types; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected. |
+| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (5 to 6 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0064 webhooks.events CHECK with cardinality BETWEEN 1 AND 6 over the extended set; regenerate OpenAPI and client. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request-kind subscriptions preserved, fresh install, no-op rerun and DB types; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
 | 13e. Webhook subscription interfaces and guides | 13d | Existing listWebhooks/listWebhookDeliveries responses and the create_webhook/update_webhook and webhooks create/update interfaces carry the new kind; update MCP/CLI help, webhook/MCP/CLI guides, the payload field list and the open-enum compatibility note. | Hard-off for workflow event kind | MCP and CLI return the same 404 workflows_disabled for the new kind; list Webhook.events and delivery eventType documented as open enums; required bookingId remains UUID; guides name every kind and the disabled state. |
-| 14a. Webhook outbox extension | 9, 13e | None. Signed workflow delivery payload; new migration adds nullable webhook_deliveries.workflow_run_id, re-keys the 0064 NULLS NOT DISTINCT uniqueness with it, and extends the event_type CHECK from 5 to 6 kinds without changing booking or request deliveries. | Hard-off | Populated predecessor with booking- and request-origin rows preserved unchanged, fresh install and no-op rerun; two workflow runs targeting one endpoint retain distinct identities; duplicate capture coalesces; transactional rollback; signatures verified with fake receiver; payload contains no new booking personal fields and no requestId. |
+| 14a. Webhook outbox extension | 9, 13e | None. Signed workflow delivery payload; new migration adds nullable webhook_deliveries.workflow_run_id, re-keys the 0064 NULLS NOT DISTINCT uniqueness with it, and extends the event_type CHECK from 5 to 6 kinds without changing booking or request deliveries; move the existing ON CONFLICT target in delivery.ts to the new key. | Hard-off | Populated predecessor with booking- and request-origin rows preserved unchanged, fresh install and no-op rerun; the existing capture's conflict target moves to the five-column key and booking/request duplicate capture still coalesces; the docs/workflows.md baseline and its doc test are updated; two workflow runs targeting one endpoint retain distinct identities; duplicate capture coalesces; transactional rollback; signatures verified with fake receiver; payload contains no new booking personal fields and no requestId. |
 | 14b. Webhook delivery fences | 14a | None. Reuse guarded transport and bounded delivery repair; add workflow cancellation/disable and expiration checks. | Hard-off | DNS rebinding, redirects, forbidden/private targets and policy removal refused; endpoint pause/rotation race; first attempt expires at due+60min but timely-started delivery retries beyond that bound with same ID and receiver dedupe; no real outbound calls. |
 | 15a. Synthetic preview | 11b, 14b | `POST /api/v1/workflows/preview` (`previewWorkflow`) / `preview_workflow` / `workflows preview`. | Hard-off | Only synthetic examples; no booking lookup, mail, DNS or webhook call; same validation/rendering as execution; estimates reveal only static candidate limits, no instance usage; full scope and parity mapping. |
 | 15b. Execution audit wiring | 12b, 14b, 15a | None. Wire run_scheduled/run_cancelled (8b, 8c), run_skipped (9), the email events (12a, 12b), the webhook events (14a, 14b) and previewed (15a) into the audit port inside their transactions; production stays no-op until 16c. | Hard-off | A recording fake port sees each event once per transition; rollback records none; replay adds no terminal duplicate; background actors explicit; no bodies, answers, addresses, raw URLs or secrets. |
 | 16a. Workflow history interfaces | 12b, 14b | `GET /api/v1/workflows/{id}/runs` (`listWorkflowRuns`) / `list_workflow_runs` / `workflows runs`. | Hard-off | Stable cursor pages; safe codes including workflow_disabled; personal/team workflow history omit booking IDs and private details; existing webhook lists preserve required bookingId; retention never removes live dedupe. |
 | 16b. Audit writer binding for definition events | 15b, 16a | None. Bind the port to the accepted shared writer from #246, or main's audit writer, for definition and preview events; wait here if none is on main. | Hard-off | Created/updated/enabled/disabled/deleted/previewed reach the accepted writer inside their transactions; rollback and exact replay; redacted actor/scope metadata; retention and access follow the accepted policy without widening team access. |
 | 16c. Audit writer binding for execution events | 16b | None. Bind the execution events wired in 15b to the same writer and close the no-op path. | Hard-off | Every execution event recorded transactionally with exact replay; background actors explicit; production wiring cannot select the no-op port, and a test fails if any process builds workflows with it. |
-| 17. Configuration UI | 7, 15a | None; calls list/get/create/update/delete/preview from steps 4–7 and 15a through generated client; reads `workflowsEnabled` and `followUpHostNotesEnabled` from `/instance`. | Hard-off | jsdom create/edit/disable/delete and stale revision/context tests; navigation hidden when workflowsEnabled is false or absent; custom subject/body hidden when followUpHostNotesEnabled is false; disabling explains that runs due while disabled are skipped; English/zh-CN strings; loading/403/error are neutral; keyboard/mobile acceptance; no raw fetch or alternate server path. |
-| 18a. History UI | 16c, 17 | None; calls history from 16a through generated client. | Hard-off | jsdom pagination and suppression/unknown outcomes; neutral empty/loading/error states; no inbox-delivery claim; English/zh-CN strings and scoped data. |
+| 17a. Workflow list and lifecycle UI | 7 | None; calls list/get/update (enable and disable)/delete from steps 4, 6 and 7 through the generated client; reads `workflowsEnabled` from `/instance`. | Hard-off | jsdom list, enable, disable and delete with stale revision/context tests; navigation hidden when workflowsEnabled is false or absent; disabling explains that runs claimed while disabled are skipped; English/zh-CN strings; loading/403/error are neutral; keyboard/mobile acceptance; no raw fetch or alternate server path. |
+| 17b. Workflow editor and preview UI | 15a, 17a | None; calls create/update/preview from steps 5, 6 and 15a through the generated client; reads `followUpHostNotesEnabled` from `/instance`. | Hard-off | jsdom create and edit of scope, trigger, offset or delay, conditions, recipients, per-locale text and webhook endpoint; custom subject/body hidden when followUpHostNotesEnabled is false; preview shows rendered text, skip reasons and locale fallback; stale revision conflict; English/zh-CN strings; keyboard/mobile acceptance; no raw fetch or alternate server path. |
+| 18a. History UI | 16c, 17b | None; calls history from 16a through generated client. | Hard-off | jsdom pagination and suppression/unknown outcomes; neutral empty/loading/error states; no inbox-delivery claim; English/zh-CN strings and scoped data. |
 | 18b. Complete operating documentation | 18a | None. Consolidate workflow UI/REST/MCP/CLI guides, mail reserve, host-text policy, reschedule divergence, reschedule-request isolation, lazy disable and limitations; preserve earlier operation-level docs; operator settings wait for 19b. | Hard-off | Examples use published operations; SMTP sizing remains 1.2 × MAIL_MAX_PER_HOUR; Cloud host text stays off; owner/recipient limits and the 60-minute SMTP outage limitation explicit; all public template locales complete. |
 | 19a. Operator-off semantics | 18b | None. Implement operator-off behind the still-false constant through an injected setting: recovery reads, disable-only updates and deletion allowed; creation, preview, enabling and other edits refused; MCP discovery hidden; due wakes skip as instance_disabled; `/instance` workflowsEnabled follows the injected state. | Hard-off | Each operation under injected on/off states over REST, MCP and CLI; only due wakes skip while off and future rows survive a short stop; re-enabling never revives skipped work; workflow_disabled and instance_disabled stay distinct in history; the production constant still denies everything. |
 | 19b. Operator setting and opt-in | 19a | None. Set the constant true only after creation, edit, disable/delete, both execution paths, history and audit binding exist; add WORKFLOWS_ENABLED (default false) to loadConfig and Compose as `${WORKFLOWS_ENABLED:-}`; write empty .env.example entries for it and both mail sub-caps; add their configuration.md rows; rewrite the docs index known-limitation line. | Operator-off by default | Default release cannot capture/send and `/instance` reports false; explicit opt-in exercises full end-to-end fakes; Compose forwards all three settings with empty defaults; all roles agree on setting; no self-hosting paywall. |

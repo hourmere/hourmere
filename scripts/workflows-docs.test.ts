@@ -328,10 +328,11 @@ describe('workflow design numeric contracts', () => {
   it('splits dense steps and wires execution audit events before binding the writer', () => {
     const rows = planRows()
     const step = (id: string) => rows.find((entry) => entry[1] === id)
-    for (const id of ['13d', '13e', '15b', '16b', '16c', '19a', '19b'])
+    for (const id of ['13d', '13e', '15b', '16b', '16c', '17a', '17b', '19a', '19b'])
       expect(step(id), `step ${id} is in the plan`).toBeDefined()
     // Merged rows must not return: the old webhook outbox, audit and opt-in steps.
-    for (const id of ['13', '19', '9a', '9b']) expect(step(id), `no step ${id}`).toBeUndefined()
+    for (const id of ['13', '17', '19', '9a', '9b'])
+      expect(step(id), `no step ${id}`).toBeUndefined()
     // Pure timer rules precede capture, so capture can record minimum_gap/offset_not_future.
     expect(dependencies(step('8a'))).toEqual(['1'])
     expect(dependencies(step('8b'))).toContain('8a')
@@ -400,11 +401,11 @@ describe('workflow design numeric contracts', () => {
     )
     expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${current}\``)
     expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${extended}\``)
-    for (const [, upper] of document.matchAll(/BETWEEN 1 AND (\d+)/g))
+    for (const [, upper] of text.matchAll(/BETWEEN 1 AND (\d+)/g))
       expect([current, extended]).toContain(Number(upper))
     const counts = [
-      ...document.matchAll(/(\d+) to (\d+) kinds/g),
-      ...document.matchAll(/(\d+) current kinds to (\d+)/g),
+      ...text.matchAll(/(\d+) to (\d+) kinds/g),
+      ...text.matchAll(/(\d+) current kinds to (\d+)/g),
     ]
     expect(counts.length).toBeGreaterThanOrEqual(4)
     for (const [, from, to] of counts)
@@ -434,10 +435,10 @@ describe('workflow design numeric contracts', () => {
       /from three to four/i,
       /\b1[–-]4\b/,
       /\(4\), matching/,
-      /existing unique key `\(webhook_id, booking_id, event_type\)`/,
+      /\(webhook_id, booking_id, event_type\)/,
       /Backfill existing rows as booking-origin/,
     ])
-      expect(document).not.toMatch(stale)
+      expect(text).not.toMatch(stale)
 
     expect(text).toContain('Steps 13d and 13e own the additive `workflow.executed` subscription')
     expect(text).toContain(
@@ -449,6 +450,9 @@ describe('workflow design numeric contracts', () => {
     expect(text).toContain('verifies an additive OpenAPI diff')
     expect(text).toContain('Published migrations 0017 and 0064 remain unchanged')
     expect(text).toContain('so `workflows_disabled` wins when both apply')
+    expect(text).toContain('compares the requested set with the row locked by `lockedWebhook()`')
+    // Postgres needs the exact arbiter columns once 14a re-keys the delivery uniqueness.
+    expect(text).toContain("moves the existing capture's conflict target")
     const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
     expect(step('13d')).toContain('replaces the 0064 webhooks.events CHECK')
     expect(step('13d')).toContain(`${current} to ${extended} kinds`)
