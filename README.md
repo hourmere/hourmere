@@ -106,7 +106,7 @@ at the host with an A record only and allow TCP 80/443 and UDP 443 (plus SSH) be
 git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 ./scripts/setup.sh --source
-docker compose up -d --build --wait
+./scripts/compose-up.sh -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
 
@@ -120,6 +120,13 @@ in `.env` before starting. **No prebuilt public image is
 published yet**; Compose builds the checked-out source. Application and job migrations run
 automatically (`AUTO_MIGRATE=true`). Open `/sign-in` and claim the first account immediately;
 `SIGNUP=first-user` restricts later registration as described below.
+
+Use `./scripts/compose-up.sh` for starts and upgrades. It hashes the current host `Caddyfile`
+on each run and makes Compose recreate only the proxy when that content changes, including
+operator edits. This briefly interrupts HTTPS while Caddy restarts. Keep editing the root
+`Caddyfile`; retain its global log filter that removes request URIs and request/response
+headers. Review upstream changes alongside customizations before starting the new revision.
+Direct `docker compose up` bypasses this digest update.
 
 Select `plain` for an existing proxy or an explicitly acknowledged private loopback trial.
 It keeps the app on `127.0.0.1:3000` and PostgreSQL unpublished. For your own proxy, set its
@@ -137,7 +144,7 @@ background jobs; to split them after setup, run:
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  ./scripts/compose-up.sh -d --build --wait
 )
 ```
 
@@ -153,7 +160,8 @@ separately before standalone Compose commands so they read `.env` too.
 The `.env` backup preserves this choice, and upgrades need no tracked Compose edits.
 Give containers at least 35 seconds to stop.
 
-Before upgrading, take a full backup and record the current branch name or tag alongside
+Before upgrading, take a full backup, including the host `Caddyfile` with any operator
+customizations, and record the current branch name or tag alongside
 the backup's saved commit. A checkout-only rollback with
 `git checkout <previous branch or tag>` is safe if a guard, `docker compose pull` or
 `docker compose stop` fails before the new-version `docker compose up` command runs.
@@ -177,16 +185,34 @@ and other current settings. See the [guarded upgrade procedures](https://hourmer
 For a pre-start failure, if the app or worker was already stopped (including a partial
 `stop` failure), bring the old version back with the block below after restoring that
 selection. Replace `PREVIOUS_BRANCH_OR_TAG` with the recorded name. If no service was
-stopped, only the checkout is needed. The block uses the existing old application image;
+stopped, run the same block: checkout can replace the host Caddyfile while the running
+proxy still holds its old inode. The block uses the existing old application image;
 do not add `--build` or pull an application image during this recovery.
 
 ```sh
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
   unset COMPOSE_FILE &&
-  docker compose up -d --wait
+  compose_services=$(docker compose config --services) &&
+  docker compose up -d --wait app db &&
+  if printf '%s\n' "$compose_services" | grep -qx worker; then
+    docker compose up -d --wait --no-deps worker
+  fi &&
+  docker compose up -d --wait --force-recreate --no-deps proxy
 )
 ```
+
+Starting app/database and the selected worker explicitly leaves the proxy untouched
+until the final command, avoiding a second HTTPS interruption. Named certificate and
+data volumes are preserved. The final command also works when the previous revision
+lacks the helper; it briefly restarts the proxy so it binds the prior revision's actual `Caddyfile`. For plain mode,
+omit that command and remove the preceding `&&`. Full restore must restore the backed-up
+host `Caddyfile` before creating the proxy, as shown in the self-hosting guide.
+
+When upgrading from an older release, compare `sha256sum Caddyfile` with
+`docker compose exec -T proxy sha256sum /etc/caddy/Caddyfile` (use `shasum -a 256 Caddyfile`
+on macOS). If the hashes differ, run
+`docker compose up -d --wait --force-recreate --no-deps proxy`, then compare again.
 
 The application image retains small public attribution and booking-confirmation links to the
 hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);

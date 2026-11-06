@@ -230,7 +230,7 @@ from connecting a calendar.
 4. Copy the client ID and secret into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in your
    private `.env`. Keep `PUBLIC_URL` set to the same external origin. Never commit the
    credentials. The default Compose file forwards both variables; recreate affected
-   services with `docker compose up -d --wait`, or restart direct server processes.
+   services with `./scripts/compose-up.sh -d --wait`, or restart direct server processes.
 5. Open your instance's `/sign-in`, choose **Continue with Google** and confirm that Google
    returns you to Hourmere. The instance's registration policy still applies to new users.
 
@@ -325,7 +325,7 @@ before recreating the stack. For plain mode, remove both lines of the proxy veri
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  ./scripts/compose-up.sh -d --build --wait
 )
 ```
 
