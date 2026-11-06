@@ -7,7 +7,7 @@ import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0062_reschedule_requests.sql'
+const migration = '0064_reschedule_requests.sql'
 describe.skipIf(!serverUrl)('reschedule request migration', () => {
   it('preserves predecessor bookings and webhook receipts, supports fresh install and no-op rerun', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-reschedule-predecessor-'))

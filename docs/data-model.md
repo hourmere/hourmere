@@ -1469,7 +1469,7 @@ legacy compatibility, recipient policy and reply limitations.
 
 ## Host requests for another time
 
-Migration 0062 adds `booking_reschedule_requests`. A host of a confirmed future booking
+Migration 0064 adds `booking_reschedule_requests`. A host of a confirmed future booking
 may ask its booker to choose another time, optionally including a plain-text note.
 Imported read-only records and group-seat bookings refuse this action. Authorization is
 identical to host rescheduling; being a team administrator alone does not grant it.

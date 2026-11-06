@@ -178,7 +178,7 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Upgrade notes
 
-- **Coordinate the reschedule-request upgrade (migration 0062).** Stop every old web/all
+- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
   and worker process before applying the migration, then restart every role with the new
   code. The webhook delivery uniqueness constraint changes to include the request identity;
   old booking writers cannot use it after migration. Do not run mixed application versions.
