@@ -1,5 +1,5 @@
 -- Internal SMS dispatch reservations, not a reminder queue. A reservation commits
--- before provider I/O and is never reclaimed: uncertain outcomes cannot resend.
+-- before provider I/O. Only definite rate limits can retry; uncertain outcomes cannot resend.
 CREATE TABLE sms_deliveries (
   key_hash bytea PRIMARY KEY CHECK (octet_length(key_hash) = 32),
   request_hash bytea CHECK (request_hash IS NULL OR octet_length(request_hash) = 32),
@@ -7,7 +7,9 @@ CREATE TABLE sms_deliveries (
   recipient_mask text,
   organization_id uuid,
   provider_message_id text,
-  status text NOT NULL CHECK (status IN ('dispatching','accepted','failed','unknown','expired')),
+  status text NOT NULL CHECK (status IN ('dispatching','accepted','failed','unknown','rate_limited','expired')),
+  retry_not_before timestamptz,
+  CHECK ((status = 'rate_limited') = (retry_not_before IS NOT NULL)),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CHECK ((status = 'expired' AND num_nonnulls(request_hash,recipient_hash,recipient_mask,organization_id,provider_message_id) = 0)

@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto'
+import { createHmac } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import { sql } from 'kysely'
@@ -38,7 +38,7 @@ function digest(secret: string, purpose: string, value: string): Buffer {
 /** Retain only a non-reversible job key and timestamps after 720 elapsed hours. Never delete tombstones. */
 export async function purgeSmsDeliveryDetails(db: Db) {
   await sql`UPDATE sms_deliveries SET request_hash=NULL,recipient_hash=NULL,
-    recipient_mask=NULL,organization_id=NULL,provider_message_id=NULL,status='expired',
+    recipient_mask=NULL,organization_id=NULL,provider_message_id=NULL,retry_not_before=NULL,status='expired',
     updated_at=clock_timestamp()
     WHERE key_hash IN (SELECT key_hash FROM sms_deliveries
       WHERE status <> 'expired' AND created_at < clock_timestamp()-interval '720 hours'
@@ -48,7 +48,7 @@ export async function purgeSmsDeliveryDetails(db: Db) {
 /**
  * At-most-once dispatch: commit a permanent reservation before any provider I/O.
  * A crash between commit and dispatch can lose a message; retrying cannot duplicate it.
- * Neither provider rejection nor uncertainty releases budget or the reservation.
+ * Only a definite provider rate-limit response permits another attempt after backoff.
  */
 export function createSmsService(deps: {
   db: Db
@@ -73,11 +73,7 @@ export function createSmsService(deps: {
         input.body.length > 1600
       )
         throw new SmsError('sms_invalid_request')
-      // Job keys deliberately do not depend on an operator's rotatable secret.
-      const key = createHash('sha256')
-        .update('hourmere/sms/job/v1\0')
-        .update(input.idempotencyKey)
-        .digest()
+      const key = digest(deps.hashSecret, 'job', input.idempotencyKey)
       const recipient = digest(deps.hashSecret, 'recipient', to)
       const request = digest(
         deps.hashSecret,
@@ -98,7 +94,16 @@ export function createSmsService(deps: {
             throw new SmsError('sms_idempotency_conflict')
           if (existing.status === 'accepted' && existing.provider_message_id)
             return existing.provider_message_id
-          throw new SmsError('sms_delivery_unknown')
+          if (existing.status === 'failed') throw new SmsError('sms_provider_rejected')
+          if (existing.status !== 'rate_limited') throw new SmsError('sms_delivery_unknown')
+          const remaining = await sql<{ seconds: number }>`SELECT ceil(extract(epoch FROM
+            (${existing.retry_not_before}::timestamptz-clock_timestamp())))::int AS seconds`.execute(
+            tx,
+          )
+          if ((remaining.rows[0]?.seconds ?? 1) > 0)
+            throw new SmsError('sms_rate_limited', {
+              retryAfterSeconds: remaining.rows[0]?.seconds,
+            })
         }
         const counts = await sql<{
           recipient_hour: number
@@ -110,7 +115,7 @@ export function createSmsService(deps: {
           count(*) FILTER (WHERE recipient_hash=${recipient} AND created_at > clock_timestamp()-interval '1 hour')::int AS recipient_hour,
           count(*) FILTER (WHERE recipient_hash=${recipient})::int AS recipient_day,
           count(*) FILTER (WHERE organization_id=${input.organizationId}::uuid)::int AS organization_day
-          FROM sms_deliveries WHERE status <> 'expired' AND created_at > clock_timestamp()-interval '24 hours'`.execute(
+          FROM sms_deliveries WHERE status NOT IN ('expired','rate_limited') AND created_at > clock_timestamp()-interval '24 hours'`.execute(
           tx,
         )
         const count = counts.rows[0]
@@ -132,6 +137,14 @@ export function createSmsService(deps: {
             organization_id: input.organizationId,
             status: 'dispatching',
           })
+          .onConflict((conflict) =>
+            conflict.column('key_hash').doUpdateSet({
+              status: 'dispatching',
+              retry_not_before: null,
+              created_at: sql`clock_timestamp()`,
+              updated_at: sql`clock_timestamp()`,
+            }),
+          )
           .execute()
         return undefined
       })
@@ -146,11 +159,20 @@ export function createSmsService(deps: {
         if (!/^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(result.providerMessageId))
           throw new SmsError('sms_delivery_unknown')
       } catch (error) {
+        const rateLimited = error instanceof SmsError && error.code === 'sms_rate_limited'
+        const requestedDelay = error instanceof SmsError ? error.retryAfterSeconds : undefined
+        const retryDelay = Number.isFinite(requestedDelay)
+          ? Math.min(3600, Math.max(1, Math.ceil(requestedDelay as number)))
+          : 60
         await deps.db
           .updateTable('sms_deliveries')
           .set({
-            status:
-              error instanceof SmsError && error.code === 'sms_provider_rejected'
+            retry_not_before: rateLimited
+              ? sql`clock_timestamp()+${retryDelay}*interval '1 second'`
+              : null,
+            status: rateLimited
+              ? 'rate_limited'
+              : error instanceof SmsError && error.code === 'sms_provider_rejected'
                 ? 'failed'
                 : 'unknown',
             updated_at: sql`clock_timestamp()`,
@@ -158,6 +180,11 @@ export function createSmsService(deps: {
           .where('key_hash', '=', key)
           .where('status', '=', 'dispatching')
           .execute()
+        if (rateLimited)
+          throw new SmsError('sms_rate_limited', {
+            retryAfterSeconds: retryDelay,
+            providerCode: error instanceof SmsError ? error.providerCode : undefined,
+          })
         // Unknown exceptions may contain a provider request/body/phone: never propagate them.
         throw error instanceof SmsError ? error : new SmsError('sms_delivery_unknown')
       }
@@ -176,7 +203,7 @@ export function createSmsService(deps: {
   }
 }
 
-/** Register only when the operator configures SMS; does not schedule any sends. */
+/** Always register retention, including when SMS sending is disabled. */
 export function smsRetentionJob(deps: { db: Db }) {
   return defineJob({
     name: 'sms-retention',

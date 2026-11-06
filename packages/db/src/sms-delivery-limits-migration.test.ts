@@ -97,11 +97,16 @@ describe.skipIf(!serverUrl)('SMS delivery migration', () => {
     })
     const source = await readFile(join(migrationsDir, migration), 'utf8')
     const cases: [string, string, Record<string, unknown>][] = [
+      [
+        "(status = 'rate_limited') = (retry_not_before IS NOT NULL)",
+        'true',
+        { status: 'rate_limited' },
+      ],
       ['octet_length(key_hash) = 32', 'true', { key_hash: Buffer.alloc(31) }],
       ['octet_length(request_hash) = 32', 'true', { request_hash: Buffer.alloc(31) }],
       ['octet_length(recipient_hash) = 32', 'true', { recipient_hash: Buffer.alloc(31) }],
       [
-        "status IN ('dispatching','accepted','failed','unknown','expired')",
+        "status IN ('dispatching','accepted','failed','unknown','rate_limited','expired')",
         'true',
         { status: 'invalid' },
       ],

@@ -1,5 +1,7 @@
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+import { assertSmsLogsPrivate } from './sms-log-test-utils.ts'
 import {
   createFakeSmsProvider,
   createTwilioSmsProvider,
@@ -130,6 +132,27 @@ describe('SMS providers', () => {
       expect(request).toHaveBeenCalledTimes(1)
     },
   )
+  it.each([
+    () => new Response(null, { status: 429, headers: { 'Retry-After': '12' } }),
+    () => new Response('malformed', { status: 429, headers: { 'Retry-After': '12' } }),
+    () => new Response('x'.repeat(32769), { status: 429, headers: { 'Retry-After': '12' } }),
+    () =>
+      new Response(new ReadableStream({ start() {} }), {
+        status: 429,
+        headers: { 'Retry-After': '12' },
+      }),
+  ])('preserves definite rate limiting when the optional response body fails', async (response) => {
+    await expect(
+      createTwilioSmsProvider(
+        config,
+        vi.fn<typeof fetch>().mockResolvedValue(response()),
+        5,
+      ).sendSms(input),
+    ).rejects.toMatchObject({
+      code: 'sms_rate_limited',
+      retryAfterSeconds: 12,
+    })
+  })
   it('times out even when HTTP ignores abort', async () => {
     const request = vi.fn<typeof fetch>().mockImplementation(() => new Promise(() => {}))
     await expect(createTwilioSmsProvider(config, request, 5).sendSms(input)).rejects.toMatchObject({
@@ -157,6 +180,29 @@ describe('SMS providers', () => {
       ),
     ).rejects.toMatchObject({ code: 'sms_delivery_unknown' })
   })
+  it.each(['success', 'rejected', 'rate_limited', 'timeout', 'transport', 'server'] as const)(
+    'never logs private request data during %s or retry',
+    async (outcome) => {
+      await assertSmsLogsPrivate(async () => {
+        const request = vi.fn<typeof fetch>().mockImplementation(async () => {
+          if (outcome === 'timeout') return new Promise(() => {})
+          if (outcome === 'transport') throw new Error(`${input.to} ${input.body}`)
+          if (outcome === 'success') return success()
+          const status = { rejected: 400, rate_limited: 429, server: 503 }[outcome]
+          return Response.json(
+            { code: 20429, message: `${input.to} ${input.body}` },
+            { status, headers: { 'Retry-After': '1' } },
+          )
+        })
+        const provider = createTwilioSmsProvider(config, request, 5)
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (outcome === 'success') await expect(provider.sendSms(input)).resolves.toBeDefined()
+          else await expect(provider.sendSms(input)).rejects.toHaveProperty('code')
+        }
+        expect(request).toHaveBeenCalledTimes(2)
+      }, input)
+    },
+  )
   it('sanitizes transport errors', async () => {
     const request = vi
       .fn<typeof fetch>()
@@ -224,6 +270,29 @@ it('source-copy mutations detect weakened provider protections', async () => {
   ]
   cases.push(
     [
+      'if (response.status !== 429) throw error',
+      'throw error',
+      async (module) => {
+        const request = vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(new Response('malformed', { status: 429 }))
+        await expect(
+          module.createTwilioSmsProvider(config, request).sendSms(input),
+        ).rejects.toMatchObject({ code: 'sms_rate_limited' })
+      },
+    ],
+    [
+      'const body = new URLSearchParams({ To: to, Body: input.body })',
+      'console.warn("twilio send", to, input.body); const body = new URLSearchParams({ To: to, Body: input.body })',
+      async (module) => {
+        await assertSmsLogsPrivate(async () => {
+          await module
+            .createTwilioSmsProvider(config, vi.fn<typeof fetch>().mockResolvedValue(success()))
+            .sendSms(input)
+        }, input)
+      },
+    ],
+    [
       'setTimeout(() => controller.abort(), timeoutMs)',
       'setTimeout(() => controller.abort(), 30000)',
       async (module) => {
@@ -258,22 +327,22 @@ it('source-copy mutations detect weakened provider protections', async () => {
       },
     ],
   )
-  for (const [before, after, verify] of cases) {
-    expect(source.includes(before)).toBe(true)
-    const copy = new URL(`./sms-provider.mutation-${crypto.randomUUID()}.ts`, import.meta.url)
-    try {
-      await writeFile(copy, source)
-      await verify(await import(copy.href))
-      await unlink(copy)
-      const mutant = new URL(`./sms-provider.mutation-${crypto.randomUUID()}.ts`, import.meta.url)
-      try {
-        await writeFile(mutant, source.replace(before, after))
-        await expect(verify(await import(mutant.href))).rejects.toThrow()
-      } finally {
-        await unlink(mutant)
+  const cacheRoot = new URL('../.cache/', import.meta.url)
+  await mkdir(cacheRoot, { recursive: true })
+  const directory = await mkdtemp(fileURLToPath(new URL('sms-provider-', cacheRoot)))
+  try {
+    for (const [index, [before, after, verify]] of cases.entries()) {
+      expect(source.includes(before)).toBe(true)
+      for (const mutated of [false, true, false]) {
+        const copy = pathToFileURL(`${directory}/${index}-${crypto.randomUUID()}.ts`)
+        await writeFile(copy, mutated ? source.replace(before, after) : source)
+        const module = await import(copy.href)
+        if (mutated)
+          await expect(verify(module), before).rejects.toMatchObject({ name: 'AssertionError' })
+        else await verify(module)
       }
-    } finally {
-      await unlink(copy).catch(() => {})
     }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
 })

@@ -8,7 +8,6 @@ export type SmsErrorCode =
   | 'sms_delivery_unknown'
   | 'sms_idempotency_conflict'
   | 'sms_provider_rejected'
-  | 'sms_provider_unavailable'
   | 'sms_timeout'
 
 /** Safe diagnostics only: never attach request/response bodies, phones or causes. */
@@ -181,7 +180,15 @@ export function createTwilioSmsProvider(
           void response.body?.cancel().catch(() => {})
           throw new SmsError('sms_delivery_unknown')
         }
-        const data = await boundedJson(response, controller.signal)
+        // Receiving 429 proves Twilio did not process the request, even when its
+        // optional error body is absent, malformed, oversized or interrupted.
+        let data: Record<string, unknown>
+        try {
+          data = await boundedJson(response, controller.signal)
+        } catch (error) {
+          if (response.status !== 429) throw error
+          data = {}
+        }
         if (!response.ok) {
           const providerCode =
             Number.isSafeInteger(data.code) && typeof data.code === 'number' && data.code >= 0

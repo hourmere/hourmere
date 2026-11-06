@@ -1,11 +1,28 @@
 import { createHmac, randomUUID } from 'node:crypto'
-import { readFile, unlink, writeFile } from 'node:fs/promises'
-import { createDb, type Db } from '@hourmere/db'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { createDb, createPool, type Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '../../db/src/testing.ts'
-import { SmsError, type SmsProvider } from './sms-provider.ts'
+import { assertSmsLogsPrivate } from './sms-log-test-utils.ts'
+import { createTwilioSmsProvider, SmsError, type SmsProvider } from './sms-provider.ts'
 import { createSmsService, purgeSmsDeliveryDetails, type SmsLimits } from './sms-service.ts'
+
+async function sourceCopy(source: string) {
+  const directory = await mkdtemp(
+    fileURLToPath(new URL('../../../node_modules/.sms-service-', import.meta.url)),
+  )
+  const file = new URL(`file://${directory}/service.ts`)
+  await writeFile(
+    file,
+    source.replace(
+      "'./sms-provider.ts'",
+      JSON.stringify(new URL('./sms-provider.ts', import.meta.url).href),
+    ),
+  )
+  return { file, cleanup: () => rm(directory, { recursive: true, force: true }) }
+}
 
 const secret = 'synthetic-sms-hmac-key-at-least-32-characters'
 const request = () => ({
@@ -67,6 +84,12 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
     const input = request()
     await service.sendSms(input)
     const row = await db.selectFrom('sms_deliveries').selectAll().executeTakeFirstOrThrow()
+    expect(row.key_hash).toEqual(
+      createHmac('sha256', secret)
+        .update('hourmere/sms/job/v1\0')
+        .update(input.idempotencyKey)
+        .digest(),
+    )
     expect(row.recipient_mask).toBe('+****23')
     expect(row.recipient_hash).toHaveLength(32)
     expect(row.request_hash).toHaveLength(32)
@@ -159,7 +182,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
   it.each([
     new SmsError('sms_timeout'),
     new SmsError('sms_provider_rejected'),
-    new SmsError('sms_provider_unavailable', { retryAfterSeconds: 60 }),
+    new SmsError('sms_delivery_unknown', { retryAfterSeconds: 60 }),
     new Error('sensitive provider body'),
   ])('never retries a provider failure or ambiguous outcome %#', async (error) => {
     const sendSms = vi.fn(async () => {
@@ -168,10 +191,147 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
     const { service } = setup(roomy, { sendSms })
     const input = request()
     await expect(service.sendSms(input)).rejects.toBeInstanceOf(SmsError)
-    await expect(service.sendSms(input)).rejects.toMatchObject({ code: 'sms_delivery_unknown' })
+    await expect(service.sendSms(input)).rejects.toMatchObject({
+      code:
+        error instanceof SmsError && error.code === 'sms_provider_rejected'
+          ? 'sms_provider_rejected'
+          : 'sms_delivery_unknown',
+    })
     expect(sendSms).toHaveBeenCalledTimes(1)
   })
-  it('retains crash reservations and secret-rotation deduplication', async () => {
+  it.each([undefined, 0, 9000, Number.NaN])('bounds provider retry delays %s', async (delay) => {
+    const { service } = setup(roomy, {
+      sendSms: async () => {
+        throw new SmsError('sms_rate_limited', { retryAfterSeconds: delay })
+      },
+    })
+    const expected = delay === 0 ? 1 : delay === 9000 ? 3600 : 60
+    await expect(service.sendSms(request())).rejects.toMatchObject({
+      code: 'sms_rate_limited',
+      retryAfterSeconds: expected,
+    })
+    const { rows } = await owned.pool.query(
+      'SELECT extract(epoch FROM retry_not_before-updated_at) AS delay FROM sms_deliveries',
+    )
+    expect(Number(rows[0].delay)).toBeCloseTo(expected, 1)
+  })
+  it('retries definite rate limits only after backoff and charges only actual dispatches', async () => {
+    await verifyRetry(createSmsService)
+  })
+  async function verifyRetry(factory: typeof createSmsService, aged = false) {
+    const input = request()
+    const providerMessageId = `SM${'2'.repeat(32)}`
+    const http = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 20429 }), {
+          status: 429,
+          headers: { 'Retry-After': '3600' },
+        }),
+      )
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ sid: providerMessageId }), { status: 201 }),
+      )
+    const twilio = createTwilioSmsProvider(
+      { accountSid: `AC${'1'.repeat(32)}`, authToken: 'synthetic', from: '+14155550124' },
+      http,
+    )
+    const sendSms = vi.fn(twilio.sendSms)
+    const service = factory({
+      db,
+      hashSecret: secret,
+      limits: {
+        recipientPerHour: 1,
+        recipientPerDay: 1,
+        instancePerHour: 1,
+        organizationPerDay: 1,
+      },
+      provider: { sendSms },
+    })
+    await expect(service.sendSms(input)).rejects.toMatchObject({ code: 'sms_rate_limited' })
+    await expect(service.sendSms(input)).rejects.toMatchObject({
+      code: 'sms_rate_limited',
+      retryAfterSeconds: expect.any(Number),
+    })
+    expect(sendSms).toHaveBeenCalledTimes(1)
+    await expect(service.sendSms({ ...input, body: 'changed' })).rejects.toMatchObject({
+      code: 'sms_idempotency_conflict',
+    })
+    await db
+      .updateTable('sms_deliveries')
+      .set({
+        retry_not_before: sql`clock_timestamp()-interval '1 second'`,
+        ...(aged ? { created_at: sql<Date>`clock_timestamp()-interval '25 hours'` } : {}),
+      })
+      .execute()
+    const pools = [createPool(owned.url), createPool(owned.url)]
+    let results: PromiseSettledResult<{ providerMessageId: string }>[]
+    try {
+      const workers = [
+        service,
+        ...pools.map((pool) =>
+          factory({
+            db: createDb(pool),
+            hashSecret: secret,
+            limits: {
+              recipientPerHour: 1,
+              recipientPerDay: 1,
+              instancePerHour: 1,
+              organizationPerDay: 1,
+            },
+            provider: { sendSms },
+          }),
+        ),
+      ]
+      results = await Promise.allSettled(
+        Array.from({ length: 12 }, (_, index) => (workers[index % 3] ?? service).sendSms(input)),
+      )
+    } finally {
+      await Promise.all(pools.map((pool) => pool.end()))
+    }
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true)
+    expect(sendSms).toHaveBeenCalledTimes(2)
+    await expect(service.sendSms(input)).resolves.toEqual({ providerMessageId })
+    await expect(service.sendSms({ ...input, idempotencyKey: randomUUID() })).rejects.toMatchObject(
+      { code: 'sms_rate_limited' },
+    )
+    expect(sendSms).toHaveBeenCalledTimes(2)
+  }
+  it('never logs destinations or bodies across success, failures, and retries', async () => {
+    await verifyLogs(createSmsService)
+  })
+  async function verifyLogs(factory: typeof createSmsService) {
+    for (const code of [
+      undefined,
+      'sms_provider_rejected',
+      'sms_rate_limited',
+      'sms_timeout',
+      'sms_delivery_unknown',
+    ] as const) {
+      const input = request()
+      const service = factory({
+        db,
+        hashSecret: secret,
+        limits: roomy,
+        provider: {
+          sendSms: async () => {
+            if (code) throw new SmsError(code)
+            return { providerMessageId: 'SMsynthetic' }
+          },
+        },
+      })
+      await assertSmsLogsPrivate(async () => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            await service.sendSms(input)
+          } catch (error) {
+            expect(error).toBeInstanceOf(SmsError)
+          }
+        }
+      }, input)
+    }
+  }
+  it('retains crash reservations', async () => {
     const { service, sendSms } = setup()
     const input = request()
     await service.sendSms(input)
@@ -180,8 +340,6 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
       .set({ status: 'dispatching', provider_message_id: null })
       .execute()
     await expect(service.sendSms(input)).rejects.toMatchObject({ code: 'sms_delivery_unknown' })
-    const rotated = createSmsService({ db, hashSecret: `new-${secret}`, provider: { sendSms } })
-    await expect(rotated.sendSms(input)).rejects.toMatchObject({ code: 'sms_idempotency_conflict' })
     expect(sendSms).toHaveBeenCalledTimes(1)
   })
   it('scrubs delivery details after 30 days but never reopens old job keys', async () => {
@@ -246,12 +404,10 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
                 })
                 .execute()
               const fixed = source.replaceAll('clock_timestamp()', `TIMESTAMPTZ '${example.now}'`)
-              const file = new URL(`./sms-service.mutation-${randomUUID()}.ts`, import.meta.url)
+              const { file, cleanup } = await sourceCopy(
+                mutated ? fixed.replace("interval '24 hours'", "interval '1 day'") : fixed,
+              )
               try {
-                await writeFile(
-                  file,
-                  mutated ? fixed.replace("interval '24 hours'", "interval '1 day'") : fixed,
-                )
                 const module: typeof import('./sms-service.ts') = await import(file.href)
                 const service = module.createSmsService({
                   db: connection,
@@ -269,7 +425,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
                   await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
                 else await verify()
               } finally {
-                await unlink(file)
+                await cleanup()
               }
             }
           } finally {
@@ -301,12 +457,10 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
               .set({ created_at: new Date(Date.parse(example.now) - example.ageHours * 3_600_000) })
               .execute()
             const fixed = source.replaceAll('clock_timestamp()', `TIMESTAMPTZ '${example.now}'`)
-            const file = new URL(`./sms-service.mutation-${randomUUID()}.ts`, import.meta.url)
+            const { file, cleanup } = await sourceCopy(
+              mutated ? fixed.replace("interval '720 hours'", "interval '30 days'") : fixed,
+            )
             try {
-              await writeFile(
-                file,
-                mutated ? fixed.replace("interval '720 hours'", "interval '30 days'") : fixed,
-              )
               const module: typeof import('./sms-service.ts') = await import(file.href)
               const verify = async () => {
                 await module.purgeSmsDeliveryDetails(connection)
@@ -322,7 +476,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
               if (mutated) await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
               else await verify()
             } finally {
-              await unlink(file)
+              await cleanup()
             }
           }
         } finally {
@@ -368,8 +522,74 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
     }
     mutations.push(
       [
+        'const to = normalizeSmsDestination(input.to)',
+        'const to = normalizeSmsDestination(input.to); console.info(to, input.body)',
+        async (module) => verifyLogs(module.createSmsService),
+      ],
+      [
+        "digest(deps.hashSecret, 'job', input.idempotencyKey)",
+        "digest('wrong-secret', 'job', input.idempotencyKey)",
+        async (module) => {
+          const input = request()
+          await make(module).sendSms(input)
+          const row = await db.selectFrom('sms_deliveries').selectAll().executeTakeFirstOrThrow()
+          expect(row.key_hash).toEqual(
+            createHmac('sha256', secret)
+              .update('hourmere/sms/job/v1\0')
+              .update(input.idempotencyKey)
+              .digest(),
+          )
+        },
+      ],
+      [
+        'if ((remaining.rows[0]?.seconds ?? 1) > 0)',
+        'if (false)',
+        async (module) => verifyRetry(module.createSmsService),
+      ],
+      [
+        'created_at: sql`clock_timestamp()`,',
+        'created_at: sql`created_at`,',
+        async (module) => verifyRetry(module.createSmsService, true),
+      ],
+      [
+        "status NOT IN ('expired','rate_limited')",
+        "status <> 'expired'",
+        async (module) => verifyRetry(module.createSmsService),
+      ],
+      [
+        'Math.min(3600, Math.max(1, Math.ceil(requestedDelay as number)))',
+        'Math.ceil(requestedDelay as number)',
+        async (module) => {
+          await expect(
+            make(module, roomy, {
+              sendSms: async () => {
+                throw new SmsError('sms_rate_limited', { retryAfterSeconds: 9000 })
+              },
+            }).sendSms(request()),
+          ).rejects.toMatchObject({ retryAfterSeconds: 3600 })
+        },
+      ],
+      [
+        "if (existing.status === 'failed') throw new SmsError('sms_provider_rejected')",
+        "if (false) throw new SmsError('sms_provider_rejected')",
+        async (module) => {
+          const service = make(module, roomy, {
+            sendSms: async () => {
+              throw new SmsError('sms_provider_rejected')
+            },
+          })
+          const input = request()
+          await expect(service.sendSms(input)).rejects.toMatchObject({
+            code: 'sms_provider_rejected',
+          })
+          await expect(service.sendSms(input)).rejects.toMatchObject({
+            code: 'sms_provider_rejected',
+          })
+        },
+      ],
+      [
         "createHmac('sha256', secret)",
-        "createHash('sha256')",
+        "createHmac('sha256', 'wrong-secret')",
         async (module) => {
           const input = request()
           await make(module).sendSms(input)
@@ -511,15 +731,14 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
       expect(source).toContain(before)
       for (const mutated of [false, true, false]) {
         await db.deleteFrom('sms_deliveries').execute()
-        const file = new URL(`./sms-service.mutation-${randomUUID()}.ts`, import.meta.url)
+        const { file, cleanup } = await sourceCopy(mutated ? source.replace(before, after) : source)
         try {
-          await writeFile(file, mutated ? source.replace(before, after) : source)
           const module = await import(file.href)
           if (mutated)
             await expect(verify(module), before).rejects.toMatchObject({ name: 'AssertionError' })
           else await verify(module)
         } finally {
-          await unlink(file)
+          await cleanup()
         }
       }
     }

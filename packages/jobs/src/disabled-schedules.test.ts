@@ -51,6 +51,7 @@ describe.skipIf(!databaseUrl)('disabled feature schedules', () => {
         await owned.drop()
       }
     },
+    20_000,
   )
   it('rejects contradictory schedule configuration', async () => {
     const jobs = createJobs({

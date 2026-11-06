@@ -5,7 +5,7 @@ description: Operator-owned Twilio configuration, durable sending limits and cur
 
 Hourmere includes an internal SMS provider foundation for self-hosted instances. **There
 are no user-facing SMS reminders, workflow actions, host settings, REST endpoints, MCP
-tools or CLI commands yet.** Configuring this foundation schedules only hourly metadata cleanup, never SMS sending jobs.
+tools or CLI commands yet.** Hourly metadata cleanup runs even when SMS is disabled; this foundation never schedules SMS sending jobs.
 An unconfigured internal send fails closed with `sms_not_configured`.
 
 SMS usage is billed to **the instance operator's own Twilio account**. No Hourmere company
@@ -34,7 +34,7 @@ each secret. A single trailing newline is removed. Empty/unreadable files fail s
 without disclosing their paths or contents. In containers, mount the files read-only and
 use their **container paths**; Compose forwards paths but does not create secret mounts.
 Apply the mounts to both the app and any separate worker. Keep SMS settings identical
-on every role; disabling SMS removes its persisted cleanup schedule at startup. Other configuration retains
+on every role; disabling SMS leaves its metadata cleanup schedule active. Other configuration retains
 its existing environment-only behavior.
 
 Partial credentials, conflicting authentication methods/senders, malformed SIDs, invalid
@@ -42,8 +42,11 @@ limits and reused authentication/encryption hash keys fail startup in every proc
 There is no endpoint URL override: requests use Twilio's HTTPS Messages API, with bounded
 timeouts and redirects disabled. The fixed provider URL has no user-controlled host;
 the generic outbound webhook URL guard is not used. Credentials are never stored in
-the database. Keep the hash key unchanged: rotating it changes destination hashes and
-resets the effective per-number counters; stop sending during any planned key migration.
+the database. Only the default Twilio US1 endpoint (`api.twilio.com`) is supported;
+regional accounts in IE1 and AU1 are unsupported.
+Keep the hash key unchanged and backed up: rotating it changes both destination and
+job-key hashes, resets per-number accounting and defeats deduplication of old job keys.
+Do not rotate it without a separate data/key migration.
 
 Twilio documents [HTTP Basic authentication](https://www.twilio.com/docs/usage/requests-to-twilio)
 using the Account SID/Auth Token or API Key SID/secret. The
@@ -65,7 +68,7 @@ callbacks; manage those separately in Twilio.
 Limits must be positive whole numbers, at most 2147483647. PostgreSQL enforces all four
 budgets before contacting Twilio, across process restarts and concurrent workers. Windows
 are rolling elapsed hours and 24-hour days, independent of local time zones and DST.
-Failed and ambiguous attempts consume budget too. All
+Failed and ambiguous attempts consume budget too; provider 429 responses do not. All
 instances sharing a database share the instance budget; an organization's daily budget
 also applies to its destinations. Configure the same ceilings on every process.
 
@@ -75,7 +78,7 @@ and [message throughput and queues](https://www.twilio.com/docs/messaging/guides
 depend on sender type and registration. A low per-number allowance limits repeated
 harassment; instance and organization budgets bound aggregate abuse. Raise them only
 with a considered usage budget and account-side geographic permissions and spending alerts.
-Limits count attempted API messages, not SMS segments or money. A body can contain up to
+Limits count attempted API messages except provider 429 responses, not SMS segments or money. A body can contain up to
 1600 characters and become multiple billable segments; Unicode may increase segment use.
 
 Destinations use the project's international phone syntax and phone metadata validation.
@@ -85,21 +88,30 @@ is made. Metadata cannot prove current carrier ownership, reachability or absenc
 number reassignment. Twilio geographic permissions provide an additional operator control.
 
 Each logical job must retain one idempotency key. Hourmere reserves that key before the
-provider call and never dispatches it twice, including after a timeout, process crash or
-429 response. This favors at-most-once attempts: a crash before sending can lose a message,
-and an ambiguous response cannot be automatically retried safely because the Messages
-API does not document a create-message idempotency guarantee. A repeated key returns its
-stored result or a typed terminal/uncertain result. Future workflows must decide whether
-a new logical send is appropriate; changing a key merely to retry bypasses this protection.
+provider call. A provider 429 is a known non-send: its `rate_limited` record releases the
+local budgets and stores a retry-not-before time using the database clock. `Retry-After`
+is bounded to 1–3600 seconds, defaulting to 60 seconds when missing or invalid. Retrying
+before that time returns `sms_rate_limited` with the remaining `retryAfterSeconds`.
+After that time the same key can reserve again under the shared database lock, after
+checking the request fingerprint and all budgets; concurrent retries dispatch only once.
+
+Other outcomes retain the reservation. Accepted requests return their stored result,
+and definitive provider rejections remain `sms_provider_rejected`. A timeout first returns
+`sms_timeout`; its stored result, transport failures, 5xx responses and process crashes
+return `sms_delivery_unknown` on retry. These uncertain reservations cannot
+be retried automatically because the Messages API does not document a create-message
+idempotency guarantee. A crash before sending can lose a message. Future workflows must
+decide whether a new logical send is appropriate; changing a key merely to retry bypasses
+this protection.
 
 ## Privacy and retention
 
 Hourmere does not log message bodies or full destination numbers. Delivery accounting
-stores a keyed destination hash, a masked number, provider message ID, status and timestamps;
-it does not store message bodies or Twilio credentials. Details are scrubbed after 30 days
-by bounded hourly cleanup on configured instances, configured-send maintenance or the
-internal maintenance operation. Cleanup processes at most 1000 records per run, so large
-backlogs can require multiple runs. Disabling SMS also disables its scheduled cleanup;
-run internal maintenance before retiring an installation. Minimal irreversible job-key tombstones
-remain so old retries cannot send again. Twilio has its own message storage and retention;
-configure those policies separately in the operator account.
+stores purpose-separated keyed destination, request and job-key hashes, a masked number,
+provider message ID, status and timestamps; it does not store message bodies or Twilio
+credentials. Details are scrubbed 30 days after the latest reserved attempt by bounded hourly cleanup on every running
+worker, even when SMS is disabled, and by configured-send maintenance. Cleanup processes
+at most 1000 records per run, so large backlogs can require multiple runs. Keep a worker
+running to drain the backlog after disabling SMS; a stopped installation cannot run cleanup.
+Minimal keyed job tombstones remain so old retries cannot send again. Twilio has its own
+message storage and retention; configure those policies separately in the operator account.

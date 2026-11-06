@@ -501,7 +501,6 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   })
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
-    disabledSchedules: config.SMS_PROVIDER ? [] : ['sms-retention'],
     definitions: [
       ...waitlistMaintenanceJobs({
         scan: () => scanWaitlists(waitlistDeps),

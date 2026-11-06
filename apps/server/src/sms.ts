@@ -28,7 +28,7 @@ export function createConfiguredSmsService(config: Config, db: Db) {
   })
 }
 
-/** Only configured instances schedule SMS metadata maintenance. Never schedules sending. */
-export function configuredSmsJobs(config: Config, db: Db) {
-  return config.SMS_PROVIDER ? [smsRetentionJob({ db })] : []
+/** Metadata cleanup remains active when sending is disabled. Never schedules sending. */
+export function configuredSmsJobs(_config: Config, db: Db) {
+  return [smsRetentionJob({ db })]
 }

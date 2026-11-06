@@ -440,5 +440,5 @@ setting. No Stripe credentials are read; see [the operator note and limitations]
 
 See [SMS provider foundation](/docs/sms-provider) for operator-owned Twilio credentials,
 SMS-specific secret files, durable limits and retention. It is off without `SMS_PROVIDER`;
-configuration does not enable user-facing SMS or schedule sending jobs; configured instances run hourly metadata cleanup. All SMS charges belong
+configuration does not enable user-facing SMS or schedule sending jobs; hourly metadata cleanup continues even when SMS is disabled. All SMS charges belong
 to the operator’s Twilio account.

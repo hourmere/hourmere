@@ -877,6 +877,7 @@ export interface SmsDeliveries {
   recipient_hash: Buffer | null;
   recipient_mask: string | null;
   request_hash: Buffer | null;
+  retry_not_before: Timestamp | null;
   status: string;
   updated_at: Generated<Timestamp>;
 }
