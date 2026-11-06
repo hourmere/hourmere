@@ -22,17 +22,17 @@ export const admin = {
   'Edit branding': '编辑品牌设置',
   'Primary colour': '主色',
   'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5：1。与白色页面背景的对比度会单独显示。',
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
   'Brand logo': '品牌标志',
   'A logo is saved for this space.': '此空间已保存标志。',
   'Remove logo': '移除标志',
   'Save branding': '保存品牌设置',
   'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
-    '已保存颜色：{colour}。按钮文字：{text}。与白色的对比度：{ratio}：1。',
+    '已保存颜色：{colour}。按钮文字：{text}。与白色的对比度：{ratio}:1。',
   Black: '黑色',
   White: '白色',
   'Branding saved. Booking pages and emails are unchanged.':
-    '品牌设置已保存。预约页面和邮件尚未更改。',
+    '品牌设置已保存。预约页面和邮件暂不受影响。',
 
   Imported: '已导入',
   'the original scheduling system': '原预约系统',

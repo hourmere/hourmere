@@ -8,7 +8,7 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0062_organization_branding.sql'
+const migration = '0063_organization_branding.sql'
 describe.skipIf(!serverUrl)('branding migration', () => {
   it('preserves populated predecessor organizations, membership and bookings; matches fresh and no-op rerun', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-brand-predecessor-'))
