@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
 import { expectStackGap } from '../test/layout.ts'
 import {
@@ -27,6 +27,17 @@ vi.mock('./env.ts', async (importOriginal) => ({
   preferredLocale: () => env.locale,
   now: () => env.now,
 }))
+
+// Keep cold route transformation outside the UI readiness deadlines. The real
+// lazy routes and API-driven loading states remain exercised below.
+beforeAll(async () => {
+  await Promise.all([
+    import('./BookingPage.tsx'),
+    import('./HostPage.tsx'),
+    import('./ManageBookingPage.tsx'),
+    import('./Embed.tsx'),
+  ])
+})
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/')
