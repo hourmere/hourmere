@@ -69,12 +69,15 @@ English, German, French, Spanish and Brazilian Portuguese are supported too.
 ## Request and response reference
 
 `POST /api/v1/open-time-snippets` accepts the same JSON fields as the MCP tool and CLI.
-Its schema is included in `/api/v1/openapi.json`.
+Its schema is included in `/api/v1/openapi.json`. Both range boundaries are RFC 3339
+instants with uppercase `T`/`Z` or an explicit UTC offset and at most three
+fractional-second digits.
 
 | Field | Meaning |
 |---|---|
 | `eventTypeId` or `slug` | Exactly one saved event reference in the caller's acting organization. |
-| `from`, `to` | Required RFC 3339 instants with uppercase `T`/`Z` or an explicit UTC offset and at most three fractional-second digits; `to` must follow `from`. At most **31 elapsed days**. |
+| `from` | Required inclusive start instant. |
+| `to` | Required exclusive end instant, after `from` and at most **31 elapsed days** later. |
 | `count` | Optional integer from 1 to 10; defaults to 3. |
 | `displayTimeZone` | Optional IANA zone for labels; defaults to the caller's profile zone, with UTC fallback. |
 | `locale` | Optional supported snippet language; defaults to the caller's profile language, with English fallback. |
