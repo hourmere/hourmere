@@ -547,8 +547,12 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
   async function family(factory = createAuth, path: FamilyPath = 'revoke') {
     const auth = instance(factory),
       { actor, clientId, presented, sibling, token } = await familySetup()
-    const response = await presentRevoked(auth, path, clientId, token)
-    expect(response.status, 'native family response').toBe(400)
+    // Unexpected errors reach the caller as exceptions; count them as a failed response.
+    const status = await presentRevoked(auth, path, clientId, token).then(
+      (response) => response.status,
+      () => 500,
+    )
+    expect(status, 'native family response').toBe(400)
     expect(await familyTokens(clientId), 'family tokens invalidated').toEqual({
       refresh: [],
       access: [],
