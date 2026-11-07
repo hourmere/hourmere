@@ -78,6 +78,7 @@ import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
+import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -100,6 +101,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -127,6 +129,7 @@ export function productRoutes({
   mcpAuth,
   publicUrl = 'http://localhost',
   webhooks = { enabled: false },
+  webhookQueue,
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
@@ -158,6 +161,7 @@ export function productRoutes({
   waitlistSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   webhooks?: import('@hourmere/webhooks').WebhookSettings
+  webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
   socialProviders: Config['socialProviders']
@@ -202,6 +206,7 @@ export function productRoutes({
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
     brandingRoutes({ db }),
+    slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
       db,
       followUpHostNotesEnabled,
@@ -242,6 +247,8 @@ export function productRoutes({
 /** The same tool registry is used by the running server and capability contract tests. */
 export function productTools({
   db,
+  webhooks = { enabled: false },
+  webhookQueue,
   waitlistSecret,
   smtpConfigured,
   publicUrl,
@@ -256,6 +263,8 @@ export function productTools({
   zoomConference,
 }: {
   db: Db
+  webhooks?: import('@hourmere/webhooks').WebhookSettings
+  webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
   waitlistSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
@@ -290,6 +299,7 @@ export function productTools({
       successRedirectPolicy,
     }),
     ...oneTimeLinkTools({ db, publicUrl }),
+    ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
     ...(slotSnippetsEnabled
       ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
       : []),
@@ -433,6 +443,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         }
       : undefined
   const webhookSettings = {
+    publicUrl: config.PUBLIC_URL,
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
@@ -688,6 +699,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         privacyPolicyUrl: config.PRIVACY_POLICY_URL,
         termsUrl: config.TERMS_URL,
         webhooks: webhookSettings,
+        webhookQueue: jobs,
         notify,
         googleCalendar,
         microsoftCalendar,
@@ -713,6 +725,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
             }
           : {}),
         tools: productTools({
+          webhooks: webhookSettings,
+          webhookQueue: jobs,
           db,
           slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
           waitlistSecret: config.BETTER_AUTH_SECRET,

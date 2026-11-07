@@ -38,6 +38,11 @@ const all = [
   'create_one_time_link',
   'list_one_time_links',
   'revoke_one_time_link',
+  'list_slack_destinations',
+  'create_slack_destination',
+  'update_slack_destination',
+  'delete_slack_destination',
+  'test_slack_destination',
   'generate_open_time_snippet',
   'list_calendar_connections',
   'list_conference_connections',
@@ -50,6 +55,10 @@ const all = [
 ]
 const configurationWrites = new Set([
   'set_branding',
+  'create_slack_destination',
+  'update_slack_destination',
+  'delete_slack_destination',
+  'test_slack_destination',
   'create_event_type',
   'update_event_type',
   'set_event_type_notifications',
@@ -73,6 +82,7 @@ const writes = new Set([
 const otherReads = new Set([
   'get_branding',
   'export_bookings',
+  'list_slack_destinations',
   'list_schedules',
   'get_schedule',
   'list_calendar_connections',

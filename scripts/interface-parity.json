@@ -1,5 +1,8 @@
 {
-  "generateOpenTimeSnippet": { "mcp": "generate_open_time_snippet", "cli": "open-time-snippet" },
+  "generateOpenTimeSnippet": {
+    "mcp": "generate_open_time_snippet",
+    "cli": "open-time-snippet"
+  },
   "authorizeConferenceConnectionMeetings": {
     "exemption": "browser-session-only",
     "reason": "Authorizing meeting permissions on an existing Zoom connection requires live browser consent."
@@ -160,5 +163,21 @@
     "mcpReference": "set_branding",
     "cliUpload": "branding upload",
     "reason": "Binary images use REST upload; MCP sets the validated reference returned by the upload."
+  },
+  "createSlackDestination": {
+    "mcp": "create_slack_destination",
+    "cli": "slack create"
+  },
+  "updateSlackDestination": {
+    "mcp": "update_slack_destination",
+    "cli": "slack update"
+  },
+  "deleteSlackDestination": {
+    "mcp": "delete_slack_destination",
+    "cli": "slack delete"
+  },
+  "testSlackDestination": {
+    "mcp": "test_slack_destination",
+    "cli": "slack test"
   }
 }

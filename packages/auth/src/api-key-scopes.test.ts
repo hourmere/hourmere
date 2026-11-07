@@ -22,6 +22,7 @@ const restContract = {
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/bookings/export.csv',
+    'GET /api/v1/slack-destinations',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -108,6 +109,10 @@ const restContract = {
   other_write: [
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
+    'POST /api/v1/slack-destinations',
+    'PATCH /api/v1/slack-destinations/{id}',
+    'DELETE /api/v1/slack-destinations/{id}',
+    'POST /api/v1/slack-destinations/{id}/test',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -348,6 +353,11 @@ describe('shared API-key scope policy', () => {
       full: [
         'get_branding',
         'set_branding',
+        'list_slack_destinations',
+        'create_slack_destination',
+        'update_slack_destination',
+        'delete_slack_destination',
+        'test_slack_destination',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -381,6 +391,7 @@ describe('shared API-key scope policy', () => {
       ],
       read: [
         'get_branding',
+        'list_slack_destinations',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',

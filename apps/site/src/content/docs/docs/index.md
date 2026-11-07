@@ -42,6 +42,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
+  minimal booking data and at-least-once delivery; duplicate messages are possible.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
