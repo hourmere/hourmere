@@ -3,8 +3,8 @@
 Adds an encrypted incoming-webhook URL, destination kind and optional event filter to the
 existing transactional webhook outbox. Existing signed endpoints remain `webhook` with
 unchanged secrets, payloads and delivery state. Synthetic Slack tests have no booking ID.
-`pause_reason` is `url_rejected` only while a Slack destination is paused because Slack
-answered 404 or 410; manual pauses and every generic webhook keep it null.
+`pause_reason` is `url_rejected` from Slack's 404/410 until the URL is replaced or the
+destination is enabled; pausing an active destination and every generic webhook keep it null.
 
 A synthetic test delivery stores its own event ID in `webhook_deliveries.request_id`.
 Migration 0064 made `(webhook_id, booking_id, event_type, request_id)` unique with

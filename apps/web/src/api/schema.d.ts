@@ -5688,7 +5688,7 @@ export interface components {
             isActive: boolean;
             /** Format: uuid */
             organizationId: string;
-            /** @description Why delivery paused this destination: `url_rejected` when Slack answered 404 or 410 for its URL. Null when active or paused manually. Replacing the URL or enabling the destination clears it. Open string: new values may appear and still mean paused. */
+            /** @description Why delivery paused this destination: `url_rejected` after Slack answered 404 or 410 for its URL. It stays until the URL is replaced or the destination is enabled; other edits, including another pause, keep it. Null while active and after pausing an active destination. Open string: new values may appear and still mean paused. */
             pauseReason: string | null;
             /** Format: date-time */
             updatedAt: string;

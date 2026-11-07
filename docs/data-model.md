@@ -1350,9 +1350,9 @@ pages use the existing `(webhook_id,id)` index in reverse order.
 
 Migration 0068 adds first-class Slack destinations to `webhooks`: `destination_kind`
 (default `webhook`), `url_ciphertext`, optional `event_type_id` and `pause_reason`.
-`pause_reason` is `url_rejected` only while Slack's 404/410 keeps a Slack destination
-paused (a check constraint requires an inactive Slack row); manual pauses and generic
-webhooks keep it null. A partial unique index
+`pause_reason` is `url_rejected` from Slack's 404/410 until the URL is replaced or the
+destination is enabled (a check constraint requires an inactive Slack row); pausing an
+active destination and generic webhooks keep it null. A partial unique index
 allows one Slack destination per organization without consuming the ten signed-webhook
 slots. The URL field contains only a masked Slack address; AES-256-GCM ciphertext uses
 the webhook encryption key with organization, destination ID and URL-specific associated

@@ -125,7 +125,7 @@ export function SettingsPage() {
               : null
         }
       />
-      <SlackIntegrations key={organizationId} organizationId={organizationId} />
+      <SlackIntegrations key={`slack-${organizationId}`} organizationId={organizationId} />
       {!personal && (
         <TeamMembers
           key={organizationId}

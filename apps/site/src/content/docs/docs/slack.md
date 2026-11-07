@@ -106,8 +106,9 @@ CLI to subscribe to the two reschedule-request events; saving from the settings 
 them. `eventTypeId` is a UUID belonging to this organization or null. Update accepts the same
 fields optionally; omitting a field preserves it, and null clears the event-type filter.
 Responses contain only destination metadata and a masked URL. `pauseReason` is
-`url_rejected` while Slack's 404/410 keeps the destination paused and null otherwise,
-including after a manual pause; treat any other value as paused. Test returns a `deliveryId`
+`url_rejected` after Slack answered 404/410 and stays until you replace the URL or enable
+the destination. It is null while the destination is active and after you pause an active
+destination. Treat any other value as paused. Test returns a `deliveryId`
 and HTTP 202, which acknowledges queueing rather than Slack acceptance. While a sample is
 pending (including retries), another test receives HTTP 409 `slack_test_pending`. REST and
 MCP share a limit of five test requests per minute per organization in each server process

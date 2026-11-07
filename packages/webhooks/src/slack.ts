@@ -27,11 +27,9 @@ export const SlackCreateInput = z.strictObject({
   eventTypeId: z.uuid().nullable().optional(),
 })
 export const SlackUpdateInput = SlackCreateInput.partial().refine((v) => Object.keys(v).length > 0)
-/** Known automatic pause causes; new values may appear and still mean paused. */
-export const SLACK_PAUSE_REASONS = ['url_rejected'] as const
 export interface SlackDestinationView extends WebhookView {
   eventTypeId: string | null
-  /** `url_rejected` while Slack's 404/410 keeps it paused; null for manual pauses. */
+  /** `url_rejected` while Slack's 404/410 keeps it paused; null otherwise. Open string. */
   pauseReason: string | null
 }
 const invalid = () =>

@@ -47,8 +47,8 @@ final owner/admin check found the destination, so refused or unknown-ID calls ne
 the admins' budget. A durable destination lock rejects another sample with HTTP 409 `slack_test_pending` while a sample
 is pending, including retries. Sample enqueue shares the delivery-row transaction.
 A definitive Slack 404/410 pauses the destination after one attempt and sets
-`pause_reason = 'url_rejected'`; replacing the URL or enabling the destination clears it,
-and a manual pause leaves it null. The settings page asks for a new URL only for that
+`pause_reason = 'url_rejected'`; replacing the URL or enabling the destination clears it.
+Other edits, including another pause, keep it; pausing an active destination leaves it null. The settings page asks for a new URL only for that
 reason. Workers serialize sends per destination with a transaction advisory lock and wait
 at most `SLACK_SENDER_WAIT_MS` (10 s) for it; a timeout rolls back and the job retries.
 The bound is restored before any row lock, so a 404/410 pause after Slack answered never

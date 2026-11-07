@@ -96,4 +96,6 @@ it.skipIf(!process.env.DATABASE_URL)(
       }
     }
   },
+  // Two throwaway databases and two catalog snapshots; keep clear of the 5 s default.
+  60_000,
 )
