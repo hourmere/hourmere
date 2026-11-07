@@ -54,6 +54,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -70,6 +72,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -163,6 +166,22 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
 
+## Store organization branding
+
+`get_branding` reads the current organization's saved logo reference, primary color and
+WCAG contrast results (`full` or `read` keys). `set_branding` accepts `brandPrimaryColor`
+as `#RRGGBB` and `brandLogo` as an existing uploaded SHA-256 reference (`full` keys).
+Omitted fields stay unchanged; `null` clears a field. Personal owners and team
+owners/admins can use these tools; members cannot. Readable black or white button text
+is selected automatically. The background contrast is reported against white.
+
+Upload a PNG, JPEG or WebP through REST `POST /api/v1/branding/logo` or
+`hourmere branding upload --file logo.png --content-type image/png`; MCP accepts the
+returned reference, not binary image data or remote URLs. Uploads are limited to
+512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
+the current organization. SVG and animated images are rejected. This stores branding;
+public page and email theme application is not included yet.
+
 ## Configure booking limits
 
 `create_event_type` and `update_event_type` accept nullable `maxBookingsPerDay`,
@@ -172,3 +191,22 @@ explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month a
 whenever each pair is configured. The same REST permissions and validation apply.
 See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
 time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.
+## Export bookings without filling agent context
+
+`export_bookings` validates the same bounded range and permissions as REST, then
+returns `downloadPath`, `authentication: "api_key_or_session"` and
+`containsPersonalData: true`. It never returns CSV rows, signed URLs or credentials.
+The relative pointer is not a capability: downloading requires an authorized session
+or `read`/`full` API key on the same instance, with organization membership checked
+again. An OAuth MCP grant can obtain the pointer but cannot authenticate the REST
+request; use a suitable API key or the signed-in bookings page to download.
+
+Required inputs are RFC 3339 `from` (inclusive) and `to` (exclusive), at most 366 days
+apart. Optional inputs are `timeZone` (UTC by default), `bom` (false by default),
+`status`, `eventTypeId`, `hostUserId`, `endAfter`, `endTo` and `order`. Personal owners
+export their own bookings. Team exports require a browser session and are unavailable
+to MCP API keys or OAuth grants (`team_management_access_denied`). The pointer pins the
+organization to prevent a browser workspace switch from downloading another workspace.
+Use `hourmere export --input export.json --output bookings.csv` for a streamed private
+file. Keeping rows out of MCP responses prevents large personal-data dumps in model
+context. See [CSV exports](https://hourmere.com/docs/booking-export).

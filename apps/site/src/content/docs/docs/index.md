@@ -28,6 +28,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Open-time snippets for agents](/docs/open-time-snippets): draft an email with current
   alternatives and direct booking links through REST, MCP or CLI.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
+- [CSV booking export](/docs/booking-export): download a bounded date range for reporting,
+  with personal-owner and team-administrator permissions.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
   choose busy-time calendars and a booking destination.
@@ -55,6 +57,11 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Requests to choose another time](/docs/request-reschedule) retain the original booking
   until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
   bookings do not support requests.
+- [Branding settings](/docs/branding) store a logo and primary colour per space; public
+  booking pages and emails do not apply them yet.
+- [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
+  permit one active export per organization. Files contain personal data; there is no
+  scheduled export or automatic delivery. Answers use a JSON column.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.

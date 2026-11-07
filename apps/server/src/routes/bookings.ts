@@ -5,6 +5,7 @@ import {
   type BookingNotifier,
   cancelHostBooking,
   cancelManagedBooking,
+  exportBookingsCsv,
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
@@ -768,6 +769,63 @@ export function bookingRoutes({
           cursor: q.cursor,
         })
         return c.json(page, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/export.csv',
+        operationId: 'exportBookingsCsv',
+        summary: 'Download bookings as CSV',
+        description:
+          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
+        security: authenticated,
+        middleware: caller,
+        request: {
+          query: ListBookingsQuery.omit({ limit: true, cursor: true })
+            .extend({
+              from: Instant,
+              to: Instant,
+              timeZone: z.string().optional(),
+              eventTypeId: z.uuid().optional(),
+              hostUserId: z.uuid().optional(),
+              expectedOrganizationId: z.uuid().optional(),
+              bom: z.enum(['true', 'false']).optional(),
+            })
+            .strict(),
+        },
+        responses: {
+          200: {
+            description: 'CSV download with RFC 4180 quoting and formula protection',
+            content: { 'text/csv': { schema: z.string() } },
+          },
+          400: error('Invalid export filters or range'),
+          401: unauthorized,
+          403: error(
+            'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
+          ),
+          409: error(
+            'export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
+          ),
+          429: keyRateLimited,
+        },
+      }),
+      async (c) => {
+        const q = c.req.valid('query')
+        const body = await exportBookingsCsv(
+          context(c.var.principal),
+          { ...q, bom: q.bom === 'true' },
+          c.req.raw.signal,
+        )
+        return new Response(body, {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': 'attachment; filename="bookings.csv"',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
       },
     )
 

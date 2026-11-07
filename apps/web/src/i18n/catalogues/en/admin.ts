@@ -1,5 +1,38 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Loading logo preview…': 'Loading logo preview…',
+  'Logo preview is unavailable.': 'Logo preview is unavailable.',
+  'Saved brand logo': 'Saved brand logo',
+
+  'Booking page branding': 'Booking page branding',
+  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
+    'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.',
+  'Branding access has not been confirmed.': 'Branding access has not been confirmed.',
+  'Only the personal owner or team owners and admins can manage branding.':
+    'Only the personal owner or team owners and admins can manage branding.',
+  'Manage branding': 'Manage branding',
+  'Loading branding…': 'Loading branding…',
+  'Could not load branding.': 'Could not load branding.',
+  'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
+    'Enter a colour in #RRGGBB format, or leave it empty to clear it.',
+  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
+    'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+  'Edit branding': 'Edit branding',
+  'Primary colour': 'Primary colour',
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
+  'Brand logo': 'Brand logo',
+  'A logo is saved for this space.': 'A logo is saved for this space.',
+  'Remove logo': 'Remove logo',
+  'Save branding': 'Save branding',
+  'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
+    'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.',
+  Black: 'Black',
+  White: 'White',
+  'Branding saved. Booking pages and emails are unchanged.':
+    'Branding saved. Booking pages and emails are unchanged.',
   'Group-seat bookings do not support reschedule requests.':
     'Group-seat bookings do not support reschedule requests.',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
@@ -21,6 +54,19 @@ export const admin = {
   'Could not request a new time. {0}': 'Could not request a new time. {0}',
   'Retry the same request': 'Retry the same request',
   'Send request': 'Send request',
+
+  'Export bookings as CSV': 'Export bookings as CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    'Choose a start-time range of at most 366 days. Current booking filters also apply.',
+  'This file contains personal data. Store and share it carefully.':
+    'This file contains personal data. Store and share it carefully.',
+  'CSV times use {zone} and UTC.': 'CSV times use {zone} and UTC.',
+  'Bookings starting at or after (UTC)': 'Bookings starting at or after (UTC)',
+  'Bookings starting before (UTC)': 'Bookings starting before (UTC)',
+  'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
+  'Could not download CSV. Check the booking range and try again shortly.':
+    'Could not download CSV. Check the booking range and try again shortly.',
+  'Download CSV': 'Download CSV',
 
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',

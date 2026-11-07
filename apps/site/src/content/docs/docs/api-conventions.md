@@ -6,6 +6,15 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## CSV booking export
+
+`GET /api/v1/bookings/export.csv` adds an authenticated UTF-8 CSV download. Personal
+owners can export their own bookings; API keys need `read` or `full` scope. Team
+exports require a browser session and current owner/admin membership, and retain the
+existing team-admin booking data boundary (including no custom answers or free-text titles). Errors before
+streaming use the ordinary JSON error envelope; an interrupted stream must be discarded.
+See [CSV booking export](/docs/booking-export) for columns, limits, privacy and MCP/CLI.
+
 ## Open-time snippet generation
 
 `POST /api/v1/open-time-snippets` reads current availability and returns direct links with
@@ -62,6 +71,13 @@ cancelled reschedule predecessor **Rescheduled**. Its `status` remains `cancelle
 the existing status filters retain that meaning. No reschedule-chain identifier is added.
 
 ## Versioning
+
+Organization branding adds `GET/PATCH /api/v1/branding`, binary
+`POST /api/v1/branding/logo` and protected `GET /api/v1/branding/logo/{hash}`. PATCH
+preserves omitted settings; null clears them. Reads require full/read API keys and
+writes require full, together with personal ownership or a team owner/admin role.
+Session writes require `X-Expected-Organization-Id`. See [branding](/docs/branding) for
+the image envelope, content-hash references and automatic readable text selection.
 
 - Product endpoints live under `/api/v1`. A breaking change means `/api/v2`, not an edit.
 - Within a version, only additive changes: new endpoints, new optional request fields,
