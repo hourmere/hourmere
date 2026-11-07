@@ -4,7 +4,6 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 import { cimd } from '@better-auth/cimd'
 import { fetchClientMetadataResource } from '@better-auth/cimd/node'
-import { runWithTransaction } from '@better-auth/core/context'
 import { mcp } from '@better-auth/mcp'
 import type { Db } from '@hourmere/db'
 import type { BetterAuthPlugin } from 'better-auth'
@@ -176,21 +175,6 @@ function offlineAccessLifecycle(db: Db, resource: string): BetterAuthPlugin {
   }
 }
 
-/** Consent and revocation can change several native rows: commit their audit together. */
-function transactionalMcp(plugin: ReturnType<typeof mcp>) {
-  const consent = plugin.endpoints.oauth2Consent
-  plugin.endpoints.oauth2Consent = Object.assign((context: Parameters<typeof consent>[0]) => {
-    if (!context?.context) return consent(context)
-    return runWithTransaction(context.context.adapter, () => consent(context))
-  }, consent) as typeof consent
-  const revoke = plugin.endpoints.oauth2Revoke
-  plugin.endpoints.oauth2Revoke = Object.assign((context: Parameters<typeof revoke>[0]) => {
-    if (!context?.context) return revoke(context)
-    return runWithTransaction(context.context.adapter, () => revoke(context))
-  }, revoke) as typeof revoke
-  return plugin
-}
-
 export function mcpOAuthPlugins(
   db: Db,
   baseUrl: string,
@@ -199,69 +183,67 @@ export function mcpOAuthPlugins(
   const { issuer, resource } = mcpOAuthUrls(baseUrl)
   return [
     jwt({ jwt: { issuer }, disableSettingJwtHeader: true }),
-    transactionalMcp(
-      mcp({
-        resource,
-        loginPage: '/oauth/authorize',
-        consentPage: '/oauth/consent',
-        scopes: MCP_OAUTH_SCOPES,
-        grantTypes: ['authorization_code', 'refresh_token'],
-        accessTokenExpiresIn: 300,
-        refreshTokenExpiresIn: 30 * 24 * 60 * 60,
-        // Explicit format lets the lifecycle guard look up hashed tokens without decoding.
-        storeTokens: { hash: async (value) => hashOAuthToken(value) },
-        refreshTokenReuseInterval: 30,
-        codeExpiresIn: 300,
-        allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: true,
-        clientRegistrationDefaultApplicationType: 'infer',
-        allowPublicClientPrelogin: true,
-        // Administrative client/resource APIs are not part of connecting a user's app.
-        clientPrivileges: async () => false,
-        resourcePrivileges: async () => false,
-        postLogin: {
-          page: '/oauth/authorize',
-          shouldRedirect: async ({ user, session }) => {
-            const intent = intents.getStore()
-            return !intent || intent.userId !== user.id || intent.sessionId !== session.id
-          },
-          consentReferenceId: async ({ user, session }) => {
-            const intent = intents.getStore()
-            if (!intent || intent.userId !== user.id || intent.sessionId !== session.id)
-              throw refused()
-            await requireMembership(db, user.id, intent.organizationId)
-            return intent.grantId
-          },
+    mcp({
+      resource,
+      loginPage: '/oauth/authorize',
+      consentPage: '/oauth/consent',
+      scopes: MCP_OAUTH_SCOPES,
+      grantTypes: ['authorization_code', 'refresh_token'],
+      accessTokenExpiresIn: 300,
+      refreshTokenExpiresIn: 30 * 24 * 60 * 60,
+      // Explicit format lets the lifecycle guard look up hashed tokens without decoding.
+      storeTokens: { hash: async (value) => hashOAuthToken(value) },
+      refreshTokenReuseInterval: 30,
+      codeExpiresIn: 300,
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+      clientRegistrationDefaultApplicationType: 'infer',
+      allowPublicClientPrelogin: true,
+      // Administrative client/resource APIs are not part of connecting a user's app.
+      clientPrivileges: async () => false,
+      resourcePrivileges: async () => false,
+      postLogin: {
+        page: '/oauth/authorize',
+        shouldRedirect: async ({ user, session }) => {
+          const intent = intents.getStore()
+          return !intent || intent.userId !== user.id || intent.sessionId !== session.id
         },
-        // Runs at the token endpoint (code exchange and refresh), where a grant that no
-        // longer holds is RFC 6749 invalid_grant, never the browser flow's 403.
-        customAccessTokenClaims: async ({ user, referenceId, scopes }) => {
-          if (!user || !referenceId || !isUuid(referenceId)) throw invalidGrant()
-          const grant = await db
-            .selectFrom('mcp_oauth_grants')
-            .select('organization_id')
-            .where('id', '=', referenceId)
-            .where('user_id', '=', user.id)
-            .executeTakeFirst()
-          if (!grant) throw invalidGrant()
-          await requireMembership(db, user.id, grant.organization_id, invalidGrant)
-          const consent = await currentConsent(db, referenceId, user.id)
-          if (
-            !Array.isArray(consent.scopes) ||
-            !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
-            (scopes.includes('offline_access') && !consent.scopes.includes('offline_access')) ||
-            !Array.isArray(consent.resources) ||
-            !consent.resources.includes(resource)
-          )
-            throw invalidGrant()
-          await touchClient(db, consent.client_id)
-          return {
-            'https://hourmere.com/organization': grant.organization_id,
-            'https://hourmere.com/grant': referenceId,
-          }
+        consentReferenceId: async ({ user, session }) => {
+          const intent = intents.getStore()
+          if (!intent || intent.userId !== user.id || intent.sessionId !== session.id)
+            throw refused()
+          await requireMembership(db, user.id, intent.organizationId)
+          return intent.grantId
         },
-      }),
-    ),
+      },
+      // Runs at the token endpoint (code exchange and refresh), where a grant that no
+      // longer holds is RFC 6749 invalid_grant, never the browser flow's 403.
+      customAccessTokenClaims: async ({ user, referenceId, scopes }) => {
+        if (!user || !referenceId || !isUuid(referenceId)) throw invalidGrant()
+        const grant = await db
+          .selectFrom('mcp_oauth_grants')
+          .select('organization_id')
+          .where('id', '=', referenceId)
+          .where('user_id', '=', user.id)
+          .executeTakeFirst()
+        if (!grant) throw invalidGrant()
+        await requireMembership(db, user.id, grant.organization_id, invalidGrant)
+        const consent = await currentConsent(db, referenceId, user.id)
+        if (
+          !Array.isArray(consent.scopes) ||
+          !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
+          (scopes.includes('offline_access') && !consent.scopes.includes('offline_access')) ||
+          !Array.isArray(consent.resources) ||
+          !consent.resources.includes(resource)
+        )
+          throw invalidGrant()
+        await touchClient(db, consent.client_id)
+        return {
+          'https://hourmere.com/organization': grant.organization_id,
+          'https://hourmere.com/grant': referenceId,
+        }
+      },
+    }),
     cimd({ fetchClientMetadataResource: metadataFetcher, metadataProfile: 'mcp-2026-07-28' }),
     offlineAccessLifecycle(db, resource),
   ] as const
