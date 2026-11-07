@@ -698,13 +698,52 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
       ],
       [
         'SELECT pg_advisory_xact_lock(1852798057, 1936552802)',
-        'SELECT pg_sleep(0.05)',
+        'SELECT 1',
         async (module) => {
-          const service = make(module, { ...roomy, instancePerHour: 1 })
-          const results = await Promise.allSettled(
-            Array.from({ length: 12 }, () => service.sendSms(request())),
-          )
-          expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+          // Hold the real database fence until the sender is observably waiting on it.
+          // This tests synchronization without hoping concurrent queries happen to overlap.
+          const blocker = await owned.pool.connect()
+          const sendSms = vi.fn(async () => ({ providerMessageId: 'SMsynthetic' }))
+          let sending: Promise<unknown> | undefined
+          let completed = false
+          let observedWaiter = false
+          try {
+            await blocker.query('SELECT pg_advisory_lock(1852798057, 1936552802)')
+            const service = make(module, roomy, { sendSms })
+            sending = service.sendSms(request()).finally(() => {
+              completed = true
+            })
+            // Attach a rejection handler immediately, then inspect its result after release.
+            const settled = Promise.allSettled([sending])
+            sending = settled
+            await vi.waitFor(
+              async () => {
+                const { rows } = await blocker.query(`SELECT 1 FROM pg_locks
+                WHERE locktype='advisory' AND classid=1852798057 AND objid=1936552802
+                  AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+                  AND NOT granted`)
+                observedWaiter = rows.length > 0
+                expect(observedWaiter || completed).toBe(true)
+              },
+              { timeout: 10_000, interval: 10 },
+            )
+            expect(observedWaiter, 'sender must wait for the held database fence').toBe(true)
+            expect(sendSms).not.toHaveBeenCalled()
+          } finally {
+            let unlocked = false
+            try {
+              await blocker.query('SELECT pg_advisory_unlock(1852798057, 1936552802)')
+              unlocked = true
+            } finally {
+              // Destroy the connection on unlock failure so its session lock cannot survive.
+              blocker.release(!unlocked)
+              await sending
+            }
+          }
+          expect(await sending).toEqual([
+            { status: 'fulfilled', value: { providerMessageId: 'SMsynthetic' } },
+          ])
+          expect(sendSms).toHaveBeenCalledTimes(1)
         },
       ],
     )
@@ -734,9 +773,18 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
         const { file, cleanup } = await sourceCopy(mutated ? source.replace(before, after) : source)
         try {
           const module = await import(file.href)
-          if (mutated)
-            await expect(verify(module), before).rejects.toMatchObject({ name: 'AssertionError' })
-          else await verify(module)
+          if (mutated) {
+            let failure: unknown
+            try {
+              await verify(module)
+            } catch (error) {
+              failure = error
+            }
+            expect(
+              failure,
+              `Mutation must fail a real assertion: ${before} -> ${after}`,
+            ).toMatchObject({ name: 'AssertionError' })
+          } else await verify(module)
         } finally {
           await cleanup()
         }
