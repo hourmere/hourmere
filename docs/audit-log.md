@@ -18,8 +18,8 @@ sequence gaps are normal after rollback and IDs do not promise commit ordering.
 Indexes cover organization plus time, actor, or action, with ID tie breakers.
 
 Actors form a database-checked closed set: `user`, `api_key`, `oauth_client`,
-`system` (job/service name as ID), `external_api_key`, `external_oauth_client` and
-`anonymous` (the last three without IDs). Credentials are
+`system` (job/service name as ID), `external_api_key`, `external_oauth_client`,
+`external_user` and `anonymous` (the last four without IDs). Credentials are
 `session` (optional session ID), `api_key` (ID and actual scope), `oauth` (client
 and grant IDs), or `none`. Legacy internal calls without an authenticated
 principal may have a null API-key scope (unknown); HTTP and MCP authenticated
@@ -30,8 +30,9 @@ made through another organization's OAuth grant (for example MCP `create_booking
 public booking page) uses `external_oauth_client`. Both have credential `none`: the
 booked organization's journal holds no foreign key, user, client or grant ID, or key
 scope. A credential that can no longer be resolved to the booked organization (a key
-or grant deleted while the request ran) is treated the same way. The database rejects
-any external actor with a credential other than `none`. Organization comparisons use
+or grant deleted while the request ran) is treated the same way. A signed-in person who
+is not a member, such as an invitee declining a team invitation, is `external_user`. The
+database rejects any external actor with a credential other than `none`. Organization comparisons use
 the canonical UUID form, so a differently spelled organization ID in key metadata is
 still the same organization.
 Unauthenticated OAuth client registration has no organization and is instance-wide;
@@ -51,14 +52,17 @@ therefore incur these snapshot reads and one audit INSERT per affected entity.
 The application and database reject extra detail keys. Role changes allow only
 `oldRole` and `newRole`; API key creation and the reserved rotation action allow
 only `scope`; all webhook actions allow only `events` (the subscribed event list);
-OAuth token revocation allows only `familySize` (see below). Every other action
-requires an empty object. No key names, webhook URLs or secrets
-are recorded. New detail keys require deliberate schema and documentation review.
+OAuth token revocation allows only `familySize` (see below). Branding updates allow
+only `logo` (`uploaded`, `selected` or `removed`) and `primaryColor` (`set` or
+`cleared`), at least one of them; the database also checks these values. Every other
+action requires an empty object. No key names, webhook URLs, secrets, images, logo
+hashes or colours are recorded. New detail keys require deliberate schema and
+documentation review.
 
 | Area | Actions |
 | --- | --- |
 | Membership | `membership.invited`, `membership.accepted`, `membership.invitation_rejected`, `membership.removed`, `membership.left`, `membership.role_changed`, `membership.invitation_cancelled` |
-| Organization | `organization.created`, `organization.updated` |
+| Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
@@ -100,7 +104,15 @@ be written, nothing of the family is deleted and the request fails.
 API-key updates, disables, re-enables and deletes are matched to the requested key in
 canonical UUID form; the request may spell the key ID in any letter case. An invitee
 rejecting an invitation is recorded in the inviting team as
-`membership.invitation_rejected`, attributed to the invitee's session.
+`membership.invitation_rejected` with actor `external_user`, credential `none` and the
+invitation as target. The invitee never joined, so the team's journal keeps no user or
+session ID of theirs.
+
+Branding changes through REST, MCP or the CLI record `organization.branding_updated`
+on the organization, attributed to the caller's credential: a logo upload records
+`logo: uploaded`, and an update records what it changes (`logo: selected` or
+`removed`, `primaryColor: set` or `cleared`). An update without fields and a refused
+change record nothing; reading branding or the logo is not recorded.
 
 A host asking the invitee to pick a new time records `booking.reschedule_requested`
 on the booking, attributed to the host's credential; an idempotent replay records
@@ -159,6 +171,6 @@ operator database changes.
 
 This is a management journal, not an access log: reads, failed attempts, ordinary
 sign-ins and session refreshes, third-party provider internals, email contents,
-and database changes made directly by an operator are not recorded. No-show and
-branding features absent from the current main branch are not introduced by this
-work. Existing booking provenance columns remain intact.
+and database changes made directly by an operator are not recorded. Hourmere has no
+no-show marking yet; adding it must add its audit events. Existing booking provenance
+columns remain intact.

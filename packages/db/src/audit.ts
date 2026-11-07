@@ -12,6 +12,7 @@ export const auditDetails = {
   'organization.ownership_transferred': [],
   'organization.updated': [],
   'organization.created': [],
+  'organization.branding_updated': ['logo', 'primaryColor'],
   'membership.invitation_cancelled': [],
   'membership.invitation_rejected': [],
   'api_key.created': ['scope'],
@@ -52,6 +53,7 @@ export interface AuditActor {
     | 'anonymous'
     | 'external_api_key'
     | 'external_oauth_client'
+    | 'external_user'
   id?: string
 }
 export interface AuditCredential {

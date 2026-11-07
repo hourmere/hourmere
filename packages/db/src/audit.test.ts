@@ -83,6 +83,9 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         'webhook.resumed',
       ].map((action) => [action, { events: ['booking.created'] }]),
       ['oauth.token_revoked', { familySize: 2 }],
+      ['organization.branding_updated', { logo: 'uploaded' }],
+      ['organization.branding_updated', { logo: 'selected', primaryColor: 'set' }],
+      ['organization.branding_updated', { logo: 'removed', primaryColor: 'cleared' }],
     ] as [AuditEvent['action'], Record<string, unknown>][]
     for (const [action, details] of cases) {
       await db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, action, details }))
@@ -105,6 +108,8 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         'oldRole',
         'newRole',
         'familySize',
+        'logo',
+        'primaryColor',
       ]) {
         if ((auditDetails[action] as readonly string[]).includes(key)) continue
         await expect(
@@ -125,7 +130,23 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
       }
     }
-  })
+    // Branding details say what changed, never the colour, the image or its hash.
+    for (const details of [
+      {},
+      { primaryColor: '#12AB34' },
+      { logo: 'a'.repeat(64) },
+      { logo: null },
+      { logo: 1 },
+      { primaryColor: ['set'] },
+    ])
+      await expect(
+        owned.pool.query(
+          `INSERT INTO audit_events (actor_type, actor_id, credential_type, action, target_type, target_id, details)
+           VALUES ('system', 'test', 'none', 'organization.branding_updated', 'organization', 'test', $1::jsonb)`,
+          [JSON.stringify(details)],
+        ),
+      ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
+  }, 30_000)
   it('rolls back the change when audit fails and the event when the change fails', async () => {
     const id = randomUUID()
     await expect(
@@ -172,12 +193,14 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       },
       { actor: { type: 'external_api_key' }, credential: { type: 'api_key', id: 'key' } },
       { actor: { type: 'external_api_key' }, credential: { type: 'session', id: 'session' } },
+      { actor: { type: 'external_user', id: 'invitee' }, credential: { type: 'none' } },
+      { actor: { type: 'external_user' }, credential: { type: 'session', id: 'session' } },
     ]) {
       await expect(
         db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, ...bad } as AuditEvent)),
       ).rejects.toThrow()
     }
-    for (const type of ['external_api_key', 'external_oauth_client'] as const)
+    for (const type of ['external_api_key', 'external_oauth_client', 'external_user'] as const)
       await db.transaction().execute((trx) =>
         writeAuditEvent(trx, {
           ...event,

@@ -761,9 +761,11 @@ export function createTeamRolePolicy(
               .where('status', '=', 'pending')
               .returningAll()
               .executeTakeFirstOrThrow()
+            // The invitee never joined: the team's journal keeps no user or session ID of theirs.
             await writeAuditEvent(trx, {
               organizationId: organization.id,
-              ...auditActor(actor),
+              actor: { type: 'external_user' },
+              credential: { type: 'none' },
               action: 'membership.invitation_rejected',
               targetType: 'invitation',
               targetId: invitation.id,

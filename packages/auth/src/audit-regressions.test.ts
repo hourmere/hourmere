@@ -697,16 +697,18 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       rows.map((row) => row.action),
       'rejection audit actions',
     ).toEqual(['organization.created', 'membership.invited', 'membership.invitation_rejected'])
-    expect(rows[2]).toMatchObject({
-      actor_type: 'user',
-      actor_id: recipient.user.id,
-      credential_type: 'session',
-      credential_id: recipient.sessionId,
+    // The invitee never joined: no user or session ID of theirs in the team's journal.
+    expect(rows[2], 'rejection attribution').toMatchObject({
+      actor_type: 'external_user',
+      actor_id: null,
+      credential_type: 'none',
+      credential_id: null,
       target_type: 'invitation',
       target_id: invitation.id,
       details: {},
     })
-    expect(JSON.stringify(rows)).not.toContain(recipient.user.email)
+    for (const value of [recipient.user.email, recipient.user.id, recipient.sessionId])
+      expect(JSON.stringify(rows), 'rejection attribution').not.toContain(value)
     expect(await events(recipient.organizationId)).toEqual([])
   }
   it('records an invitee rejecting an invitation in the inviting team', () => rejection())

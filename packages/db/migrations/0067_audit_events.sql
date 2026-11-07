@@ -4,7 +4,7 @@ CREATE TABLE audit_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   organization_id uuid,
   occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  actor_type text NOT NULL CHECK (actor_type IN ('user','api_key','oauth_client','system','anonymous','external_api_key','external_oauth_client')),
+  actor_type text NOT NULL CHECK (actor_type IN ('user','api_key','oauth_client','system','anonymous','external_api_key','external_oauth_client','external_user')),
   actor_id text,
   credential_type text NOT NULL CHECK (credential_type IN ('session','api_key','oauth','none')),
   credential_id text,
@@ -21,17 +21,22 @@ CREATE TABLE audit_events (
       WHEN action IN ('api_key.created','api_key.rotated') THEN details - 'scope' = '{}'::jsonb
       WHEN action IN ('webhook.created','webhook.updated','webhook.deleted','webhook.secret_rotated','webhook.paused','webhook.resumed') THEN details - 'events' = '{}'::jsonb
       WHEN action = 'oauth.token_revoked' THEN details - 'familySize' = '{}'::jsonb
+      -- Which branding settings changed and how; never the image or the colour itself.
+      WHEN action = 'organization.branding_updated' THEN details - ARRAY['logo','primaryColor'] = '{}'::jsonb
+        AND details <> '{}'::jsonb
+        AND (NOT details ? 'logo' OR coalesce(details->>'logo' IN ('uploaded','selected','removed'), false))
+        AND (NOT details ? 'primaryColor' OR coalesce(details->>'primaryColor' IN ('set','cleared'), false))
       ELSE details = '{}'::jsonb
     END
   ),
   request_id text CHECK (request_id IS NULL OR length(request_id) BETWEEN 1 AND 128),
   CONSTRAINT audit_actor_identity CHECK (
-    (actor_type IN ('anonymous','external_api_key','external_oauth_client') AND actor_id IS NULL) OR
-    (actor_type NOT IN ('anonymous','external_api_key','external_oauth_client') AND actor_id IS NOT NULL AND length(actor_id) BETWEEN 1 AND 256)
+    (actor_type IN ('anonymous','external_api_key','external_oauth_client','external_user') AND actor_id IS NULL) OR
+    (actor_type NOT IN ('anonymous','external_api_key','external_oauth_client','external_user') AND actor_id IS NOT NULL AND length(actor_id) BETWEEN 1 AND 256)
   ),
-  -- A caller from another organization never leaves its credential identifiers here.
+  -- A caller from outside the organization never leaves its credential identifiers here.
   CONSTRAINT audit_external_actor_credential CHECK (
-    actor_type NOT IN ('external_api_key','external_oauth_client') OR credential_type = 'none'
+    actor_type NOT IN ('external_api_key','external_oauth_client','external_user') OR credential_type = 'none'
   ),
   CONSTRAINT audit_credential_shape CHECK (
     (credential_type = 'none' AND credential_id IS NULL AND credential_scope IS NULL

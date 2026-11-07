@@ -56,7 +56,9 @@ replacement. Include the database in normal backups; no external object store is
 Branding belongs to the current organization. Personal settings require the personal
 owner; team settings require a current owner or admin. An ordinary team member cannot
 read or edit these administrative settings. Read API keys require `read` or `full` scope;
-changes require `full`. Role checks still apply to every credential.
+changes require `full`. Role checks still apply to every credential. Every logo upload
+and every saved change is recorded in the [audit log](/docs/audit-log) with the credential
+used and which setting changed, never the image or the colour.
 
 REST uses `GET /api/v1/branding` and `PATCH /api/v1/branding`. Send only the fields to change:
 
