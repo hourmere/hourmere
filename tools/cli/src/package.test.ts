@@ -1,8 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
@@ -41,31 +40,19 @@ describe('CLI npm packaging protections', () => {
     expect(() => assertPackedScripts(manifest, PACK_FILES)).not.toThrow()
   })
 
-  it('refuses a local npm publish without a compiled CLI before any publication', async () => {
+  it('refuses the prepublish guard without a compiled CLI', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-cli-publish-'))
     directories.push(directory)
-    const userConfig = join(directory, 'user.npmrc')
-    const globalConfig = join(directory, 'global.npmrc')
-    await Promise.all([
-      writeFile(join(directory, 'package.json'), JSON.stringify(manifest)),
-      writeFile(userConfig, ''),
-      writeFile(globalConfig, ''),
-    ])
-    const result = spawnSync('npm', ['publish', '--dry-run', '--offline'], {
+    // The npm lifecycle integration lives in pack-smoke; exercise the exact
+    // manifest command here without starting npm and its configuration discovery.
+    expect(manifest.scripts.prepublishOnly).toBe('node dist/index.js --version')
+    const [, ...args] = manifest.scripts.prepublishOnly.split(' ')
+    const result = spawnSync(process.execPath, args, {
       cwd: directory,
       encoding: 'utf8',
-      env: {
-        PATH: process.env.PATH,
-        SystemRoot: process.env.SystemRoot,
-        npm_config_cache: join(directory, 'cache'),
-        npm_config_userconfig: userConfig,
-        npm_config_globalconfig: globalConfig,
-        npm_config_audit: 'false',
-        npm_config_fund: 'false',
-      },
+      env: {},
     })
     expect(result.status).toBe(1)
-    expect(result.stdout).toContain('node dist/index.js --version')
     expect(result.stderr).toContain('MODULE_NOT_FOUND')
   })
 
@@ -139,42 +126,20 @@ describe('CLI npm packaging protections', () => {
   })
 
   it.each(['tsconfig.json', 'tsconfig.build.json'])(
-    'types fetch but rejects native Temporal with the CLI %s',
+    'overrides the server Temporal library for the CLI %s',
     async (name) => {
-      const configPath = fileURLToPath(new URL(`../${name}`, import.meta.url))
-      const directory = await mkdtemp(join(tmpdir(), 'hourmere-cli-types-'))
-      directories.push(directory)
-      const probe = join(directory, 'probe.ts')
-      const config = join(directory, 'tsconfig.json')
-      const source = `
-        void fetch(new Request(new URL('https://hourmere.example.invalid/mcp'), {
-          signal: AbortSignal.timeout(30_000),
-        })).then((response: Response) => response.json())
-        // @ts-expect-error Node 22 has no native Temporal API.
-        Temporal.Now.instant()
-        export {}
-      `
-      await Promise.all([
-        writeFile(probe, source),
-        writeFile(
-          config,
-          JSON.stringify({
-            extends: configPath,
-            compilerOptions: {
-              noEmit: true,
-              rootDir: directory,
-              typeRoots: [fileURLToPath(new URL('../../../node_modules/@types', import.meta.url))],
-            },
-            include: ['probe.ts'],
-          }),
-        ),
-      ])
-      const compiler = fileURLToPath(new URL('../../../node_modules/.bin/tsc', import.meta.url))
-      const result = spawnSync(compiler, ['-p', config, '--pretty', 'false'], {
-        encoding: 'utf8',
-      })
-      expect(result.stdout + result.stderr).toBe('')
-      expect(result.status).toBe(0)
+      const config = JSON.parse(await readFile(new URL(`../${name}`, import.meta.url), 'utf8'))
+      const base = JSON.parse(
+        await readFile(new URL('../../../tsconfig.base.json', import.meta.url), 'utf8'),
+      )
+      expect(config.extends).toBe('../../tsconfig.base.json')
+      expect(config.compilerOptions.lib).toEqual(['es2024'])
+      expect(base.compilerOptions.types).toEqual(['node'])
+      // pack-smoke compiles fetch/Temporal probes against both real configs on
+      // Node 22 and 24. Compiler startup is an integration gate, not a unit timeout.
+      const smoke = await readFile(new URL('../scripts/pack-smoke.ts', import.meta.url), 'utf8')
+      expect(smoke).toContain("['tsconfig.json', 'tsconfig.build.json']")
+      expect(smoke).toContain('// @ts-expect-error Node 22 has no native Temporal API.')
     },
   )
 

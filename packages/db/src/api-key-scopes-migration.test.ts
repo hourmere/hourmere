@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createDb } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
@@ -21,10 +21,22 @@ const keyNow = Date.now()
 // These deterministic synthetic credentials are never included in assertion diagnostics.
 const predecessorKey = (index: number) => `hm_${String.fromCharCode(65 + index).repeat(64)}`
 
-async function predecessorDirectory() {
+// Mutation and malformed-row cases need only the real migrations defining their
+// fixtures. Keep the complete predecessor in the upgrade/fresh-schema integration case.
+const fixtureMigrations = new Set([
+  '0001_auth.sql',
+  '0002_scheduling.sql',
+  '0003_schema_followups.sql',
+  '0010_booking_cancellation_origin.sql',
+  '0016_mcp_oauth.sql',
+  '0030_mcp_oauth_client_activity.sql',
+  '0047_event_type_durations.sql',
+])
+
+async function predecessorDirectory(complete = false) {
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-scoped-keys-predecessor-'))
   for (const file of await readdir(migrationsDir)) {
-    if (file.endsWith('.sql') && file < migration) {
+    if (file.endsWith('.sql') && file < migration && (complete || fixtureMigrations.has(file))) {
       await copyFile(join(migrationsDir, file), join(directory, file))
     }
   }
@@ -203,19 +215,67 @@ const sqlstate = async (work: Promise<unknown>) => {
 }
 
 describe.skipIf(!serverUrl)('API key scope migration', () => {
-  it('preserves real predecessor keys, backfills full, matches fresh schema and reruns without writes', async () => {
-    const directory = await predecessorDirectory()
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    let authPool: ReturnType<typeof createAuthPool> | undefined
+  const databases: TestDatabase[] = []
+  const available: TestDatabase[] = []
+  beforeAll(async () => {
+    // Physical CREATE/DROP can wait for shared-server checkpoints. Reuse two
+    // owned databases and reset their schemas between cases instead of paying
+    // that cost twice in every mutation test.
+    for (let index = 0; index < 2; index++) {
+      const database = await createTestDatabase(serverUrl as string, undefined, { migrate: false })
+      databases.push(database)
+      available.push(database)
+    }
+  })
+  afterAll(async () => {
+    await Promise.all(databases.map((database) => database.drop()))
+  })
+  async function fixtureDatabase(directory: string, migrate = true): Promise<TestDatabase> {
+    const database = available.pop()
+    if (!database) throw new Error('No isolated migration fixture database available')
+    const drop = async () => {
+      await database.pool.query(
+        'DROP SCHEMA IF EXISTS auth CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;',
+      )
+      available.push(database)
+    }
     try {
-      upgraded = await createTestDatabase(serverUrl as string, directory)
+      if (migrate) await runMigrations(database.pool, directory)
+      return { ...database, drop }
+    } catch (error) {
+      await drop()
+      throw error
+    }
+  }
+
+  describe('complete predecessor upgrade', () => {
+    let directory: string
+    let upgraded: TestDatabase
+    let fresh: TestDatabase
+    let before: Awaited<ReturnType<typeof records>>
+    let sentinels: Awaited<ReturnType<typeof sentinelRecords>>
+    let applied: string[]
+    beforeAll(async () => {
+      // Prepare the two historical schemas once. The cases below separately prove
+      // data/schema preservation and real credential verification on that full upgrade.
+      directory = await predecessorDirectory(true)
+      upgraded = await fixtureDatabase(directory)
       await seed(upgraded.pool)
-      const before = await records(upgraded.pool)
-      const sentinels = await sentinelRecords(upgraded.pool)
-      for (const rows of Object.values(sentinels)) expect(rows.length).toBeGreaterThan(0)
+      before = await records(upgraded.pool)
+      sentinels = await sentinelRecords(upgraded.pool)
       await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(upgraded.pool, directory)).toEqual([migration])
+      applied = await runMigrations(upgraded.pool, directory)
+      fresh = await fixtureDatabase(directory)
+    })
+    afterAll(async () => {
+      await fresh?.drop()
+      await upgraded?.drop()
+      if (directory) await rm(directory, { recursive: true, force: true })
+    })
+
+    it('preserves real predecessor keys, backfills full, matches fresh schema and reruns without writes', async () => {
+      for (const rows of Object.values(sentinels)) expect(rows.length).toBeGreaterThan(0)
+      expect(applied).toEqual([migration])
       expect(await records(upgraded.pool)).toEqual(
         before.map((row) => ({ ...row, metadata: { ...row.metadata, scope: 'full' } })),
       )
@@ -235,52 +295,53 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
           .rows,
       ).toEqual(tuples)
       expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
-      fresh = await createTestDatabase(serverUrl as string, directory)
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       expect(await runMigrations(fresh.pool, directory)).toEqual([])
+    })
 
-      const signup = { mode: 'open', allowedDomains: [] } as const
-      authPool = createAuthPool(upgraded.url, signup)
-      const auth = createAuth({
-        pool: authPool,
-        db: createDb(upgraded.pool),
-        baseURL: 'http://localhost:43847',
-        secret: 'synthetic-predecessor-scope-authentication-secret-32-characters',
-        signup,
-        mailer: { send: async () => {} },
-      })
-      const resolve = createCallerResolver({ auth, db: createDb(upgraded.pool) })
-      // Real plugin verification proves the retained digests still authenticate as full,
-      // including absent/null/non-string organization fallbacks and explicit personal/team pins.
-      for (const index of [0, 1, 2, 5, 6, 7, 8]) {
-        const result = await resolve(
-          new Headers({ authorization: `Bearer ${predecessorKey(index)}` }),
-        )
-        expect(result).toMatchObject({
-          ok: true,
-          principal: {
-            kind: 'api_key',
-            apiKeyScope: 'full',
-            user: { id: userId },
-            organization: { id: index === 2 ? teamId : personalId, personal: index !== 2 },
-          },
+    it('authenticates preserved predecessor credentials with full scope and retains disabled/expired failures', async () => {
+      let authPool: ReturnType<typeof createAuthPool> | undefined
+      try {
+        const signup = { mode: 'open', allowedDomains: [] } as const
+        authPool = createAuthPool(upgraded.url, signup)
+        const auth = createAuth({
+          pool: authPool,
+          db: createDb(upgraded.pool),
+          baseURL: 'http://localhost:43847',
+          secret: 'synthetic-predecessor-scope-authentication-secret-32-characters',
+          signup,
+          mailer: { send: async () => {} },
         })
+        const resolve = createCallerResolver({ auth, db: createDb(upgraded.pool) })
+        // Real plugin verification proves the retained digests still authenticate as full,
+        // including absent/null/non-string organization fallbacks and explicit personal/team pins.
+        for (const index of [0, 1, 2, 5, 6, 7, 8]) {
+          const result = await resolve(
+            new Headers({ authorization: `Bearer ${predecessorKey(index)}` }),
+          )
+          expect(result).toMatchObject({
+            ok: true,
+            principal: {
+              kind: 'api_key',
+              apiKeyScope: 'full',
+              user: { id: userId },
+              organization: { id: index === 2 ? teamId : personalId, personal: index !== 2 },
+            },
+          })
+        }
+        // Disabled and expired predecessor keys keep their previous credential failure.
+        for (const index of [3, 4]) {
+          expect(
+            await resolve(new Headers({ authorization: `Bearer ${predecessorKey(index)}` })),
+          ).toMatchObject({ ok: false, error: 'unauthorized' })
+        }
+        expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
+        expect(authPool.totalCount).toBeLessThanOrEqual(3)
+        expect(upgraded.pool.totalCount).toBeLessThanOrEqual(3)
+      } finally {
+        await authPool?.end()
       }
-      // Disabled and expired predecessor keys keep their previous credential failure.
-      for (const index of [3, 4]) {
-        expect(
-          await resolve(new Headers({ authorization: `Bearer ${predecessorKey(index)}` })),
-        ).toMatchObject({ ok: false, error: 'unauthorized' })
-      }
-      expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
-      expect(authPool.totalCount).toBeLessThanOrEqual(3)
-      expect(upgraded.pool.totalCount).toBeLessThanOrEqual(3)
-    } finally {
-      await authPool?.end()
-      await fresh?.drop()
-      await upgraded?.drop()
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it.each(['{broken', '[]', 'null', '"string"', '3'])(
@@ -289,7 +350,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
       const directory = await predecessorDirectory()
       let database: TestDatabase | undefined
       try {
-        database = await createTestDatabase(serverUrl as string, directory)
+        database = await fixtureDatabase(directory)
         await seed(database.pool)
         await database.pool.query(
           'UPDATE auth.apikey SET metadata=$1 WHERE name=$2 AND enabled=false',
@@ -328,8 +389,11 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
   )
 
   it('canonicalizes direct inserts and refuses invalid, changed or removed scopes while allowing native maintenance', async () => {
-    const database = await createTestDatabase(serverUrl as string)
+    const directory = await predecessorDirectory()
+    let database: TestDatabase | undefined
     try {
+      await copyFile(join(migrationsDir, migration), join(directory, migration))
+      database = await fixtureDatabase(directory)
       const pool = database.pool
       const insert = (metadata: string | null) =>
         pool.query(
@@ -375,7 +439,8 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
         expect(await sqlstate(insert(metadata))).toBe('23514')
       }
     } finally {
-      await database.drop()
+      await database?.drop()
+      await rm(directory, { recursive: true, force: true })
     }
   })
   it.each([
@@ -395,7 +460,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
       let database: TestDatabase | undefined
       let restored: TestDatabase | undefined
       try {
-        database = await createTestDatabase(serverUrl as string, directory)
+        database = await fixtureDatabase(directory)
         await seed(database.pool)
         const before = await records(database.pool)
         const sentinels = await sentinelRecords(database.pool)
@@ -449,7 +514,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
           name: 'AssertionError',
         })
         await writeFile(join(directory, migration), source)
-        restored = await createTestDatabase(serverUrl as string, directory, { migrate: false })
+        restored = await fixtureDatabase(directory, false)
         // Seed through the actual predecessor before applying the restored migration.
         await rm(join(directory, migration))
         await runMigrations(restored.pool, directory)
