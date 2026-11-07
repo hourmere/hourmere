@@ -73,6 +73,7 @@ const classes = {
   other_read: [
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/slack-destinations',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
@@ -195,6 +196,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let date: string
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
+    const personalKeys = new Map<ApiKeyScope, string>()
 
     beforeAll(async () => {
       database = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -237,6 +239,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           (
             await auth.api.createApiKey({
               body: { userId: owner.user.id, metadata: { scope, organizationId: teamId } },
+            })
+          ).key,
+        )
+      // Exports permit scoped keys only for the owner's personal organization.
+      for (const scope of scopes)
+        personalKeys.set(
+          scope,
+          (
+            await auth.api.createApiKey({
+              body: {
+                userId: owner.user.id,
+                metadata: { scope, organizationId: owner.organization.id },
+              },
             })
           ).key,
         )
@@ -312,6 +327,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
         path = path
           .replaceAll('{id}', randomUUID())
@@ -674,14 +690,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 110-operation contract and all 330 scope combinations', () => {
+    it('covers the exact 111-operation contract and all 333 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(110)
-      expect(new Set(ids).size).toBe(110)
+      expect(ids).toHaveLength(111)
+      expect(new Set(ids).size).toBe(111)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(330)
+      expect(cases).toHaveLength(333)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -693,7 +709,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           {
             method: fixture.method,
             headers: {
-              authorization: `Bearer ${keys.get(scope)}`,
+              authorization: `Bearer ${(operation === 'GET /api/v1/bookings/export.csv' ? personalKeys : keys).get(scope)}`,
               'content-type': 'application/json',
               ...fixture.headers,
             },
@@ -724,6 +740,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(response.status).toBe(fixture.expectedStatus)
           if (operation === 'GET /api/v1/branding/logo/{hash}') {
             expect(response.headers.get('content-type')).toBe('image/png')
+          } else if (operation === 'GET /api/v1/bookings/export.csv') {
+            expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+            expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
           } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')

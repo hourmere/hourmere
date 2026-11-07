@@ -22,6 +22,7 @@ const all = [
   'request_reschedule',
   'cancel_booking',
   'list_bookings',
+  'export_bookings',
   'retry_conference',
   'retry_calendar_copy',
   'get_profile',
@@ -80,6 +81,7 @@ const writes = new Set([
 ])
 const otherReads = new Set([
   'get_branding',
+  'export_bookings',
   'list_slack_destinations',
   'list_schedules',
   'get_schedule',

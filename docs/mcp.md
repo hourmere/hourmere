@@ -77,6 +77,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -195,3 +196,22 @@ explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month a
 whenever each pair is configured. The same REST permissions and validation apply.
 See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
 time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.
+## Export bookings without filling agent context
+
+`export_bookings` validates the same bounded range and permissions as REST, then
+returns `downloadPath`, `authentication: "api_key_or_session"` and
+`containsPersonalData: true`. It never returns CSV rows, signed URLs or credentials.
+The relative pointer is not a capability: downloading requires an authorized session
+or `read`/`full` API key on the same instance, with organization membership checked
+again. An OAuth MCP grant can obtain the pointer but cannot authenticate the REST
+request; use a suitable API key or the signed-in bookings page to download.
+
+Required inputs are RFC 3339 `from` (inclusive) and `to` (exclusive), at most 366 days
+apart. Optional inputs are `timeZone` (UTC by default), `bom` (false by default),
+`status`, `eventTypeId`, `hostUserId`, `endAfter`, `endTo` and `order`. Personal owners
+export their own bookings. Team exports require a browser session and are unavailable
+to MCP API keys or OAuth grants (`team_management_access_denied`). The pointer pins the
+organization to prevent a browser workspace switch from downloading another workspace.
+Use `hourmere export --input export.json --output bookings.csv` for a streamed private
+file. Keeping rows out of MCP responses prevents large personal-data dumps in model
+context. See [CSV exports](https://hourmere.com/docs/booking-export).
