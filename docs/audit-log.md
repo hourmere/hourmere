@@ -94,12 +94,19 @@ are recorded the same way: one `oauth.token_revoked` event per affected grant, e
 with `familySize` (the number of refresh tokens invalidated for that client and user
 in all organizations, so another organization's event can reveal that count, never
 which grants or organizations). The OAuth client is the actor. The grant whose token
-was presented is the target and credential of its event, in its own organization (or
-with no organization once that grant was disconnected). Every other affected grant
-gets an event in its own organization with credential `none`, so the presenting
-grant's ID never reaches another tenant. Deleting the family's access tokens and
-refresh tokens and writing these events commit in one transaction: if an event cannot
-be written, nothing of the family is deleted and the request fails.
+was presented is the target and credential of its event, in its own organization (on
+revocation, with no organization once that grant was disconnected). Every other
+affected grant gets an event in its own organization with credential `none`, so the
+presenting grant's ID never reaches another tenant. Deleting the family's access tokens
+and refresh tokens and writing these events commit in one transaction: if an event
+cannot be written, nothing of the family is deleted and the request fails.
+
+At the token endpoint Hourmere first checks the presented token's grant, consent and
+membership; a refresh refused there (for example after disconnection or after the
+user left the organization) invalidates nothing and records nothing. If a client
+presents another client's revoked token for revocation, Better Auth invalidates the
+presenting client's own family for that user: those grants get events with credential
+`none`, and the presented token's grant, which lost nothing, gets no event.
 
 API-key updates, disables, re-enables and deletes are matched to the requested key in
 canonical UUID form; the request may spell the key ID in any letter case. An invitee
@@ -110,9 +117,10 @@ session ID of theirs.
 
 Branding changes through REST, MCP or the CLI record `organization.branding_updated`
 on the organization, attributed to the caller's credential: a logo upload records
-`logo: uploaded`, and an update records what it changes (`logo: selected` or
-`removed`, `primaryColor: set` or `cleared`). An update without fields and a refused
-change record nothing; reading branding or the logo is not recorded.
+`logo: uploaded`, and an update records each setting it sets (`logo: selected` or
+`removed`, `primaryColor: set` or `cleared`), even when the stored value was already
+the same. An update without fields and a refused change record nothing; reading
+branding or the logo is not recorded.
 
 A host asking the invitee to pick a new time records `booking.reschedule_requested`
 on the booking, attributed to the host's credential; an idempotent replay records

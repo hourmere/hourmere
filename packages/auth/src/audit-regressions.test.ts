@@ -591,7 +591,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
   it('records refresh-token reuse at the token endpoint like revocation reuse', () =>
     family(createAuth, 'token'))
   it.each(['revoke', 'token'] as const)(
-    'deletes the %s family access tokens itself inside the family transaction',
+    'deletes the %s family access tokens before its refresh tokens when nothing cascades',
     async (path) => {
       // Without the cascade, the refresh tokens can only go once their access tokens are gone:
       // the deferred native deletion must run before them, in the same transaction.
@@ -630,6 +630,71 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     await expect(family(await sourceCopy('./audit.ts', before, after))).rejects.toThrow(
       /family audit/,
     )
+  })
+  it("records another client's revoked token only against the presenting client's family", async () => {
+    const auth = instance(),
+      { actor, clientId: owner, presented, token } = await familySetup()
+    // A second public client, connected by the same user in another organization, presents
+    // the first client's revoked token. Better Auth wipes the presenting client's family.
+    const presenter = randomUUID()
+    await db
+      .insertInto('auth.oauthClient')
+      .values({
+        clientId: presenter,
+        redirectUris: JSON.stringify(['https://example.test/callback']),
+        tokenEndpointAuthMethod: 'none',
+      })
+      .execute()
+    const team = await db
+      .insertInto('auth.organization')
+      .values({ name: 'Presenter team', slug: randomUUID(), createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const grant = await db
+      .insertInto('mcp_oauth_grants')
+      .values({ user_id: actor.user.id, organization_id: team.id, client_id: presenter })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.oauthRefreshToken')
+      .values({
+        clientId: presenter,
+        userId: actor.user.id,
+        referenceId: grant.id,
+        token: createHash('sha256')
+          .update(randomBytes(32).toString('base64url'))
+          .digest('base64url'),
+        scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 86400000),
+      })
+      .execute()
+    const status = await presentRevoked(auth, 'revoke', presenter, token).then(
+      (response) => response.status,
+      () => 500,
+    )
+    expect(status, 'cross-client family response').toBe(400)
+    expect((await familyTokens(owner)).refresh, 'cross-client family').toHaveLength(2)
+    expect((await familyTokens(presenter)).refresh, 'cross-client family').toEqual([])
+    const revoked = async (organizationId: string) =>
+      (await events(organizationId)).filter((row) => row.action === 'oauth.token_revoked')
+    // The presented token's grant lost nothing: its organization gets no event naming
+    // the other client.
+    expect(await revoked(actor.organizationId), 'cross-client family audit').toEqual([])
+    const wiped = await revoked(team.id)
+    expect(wiped, 'cross-client family audit').toEqual([
+      expect.objectContaining({
+        actor_type: 'oauth_client',
+        actor_id: presenter,
+        credential_type: 'none',
+        oauth_client_id: null,
+        oauth_grant_id: null,
+        target_type: 'oauth_grant',
+        target_id: grant.id,
+        details: { familySize: 1 },
+      }),
+    ])
+    expect(JSON.stringify(wiped), 'cross-client family audit').not.toContain(presented.id)
   })
   it.each(['revoke', 'token'] as const)(
     'keeps the whole family, access tokens included, when its %s audit fails',

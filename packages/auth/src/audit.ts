@@ -251,16 +251,23 @@ export function authAuditRecords(): BetterAuthPlugin {
                 const presented = endpoint ? presentedRefreshTokens.get(endpoint) : undefined
                 if (!presented) throw new Error('OAuth family audit requires the presented token')
                 const clientId = String(before[0]?.clientId)
-                const presentedGrant = String(presented.referenceId)
+                // Better Auth wipes the presenting client's family even when the revoked token
+                // belongs to another client. That token's grant then lost nothing and its
+                // organization gets no event naming this client.
+                const presentedGrant =
+                  presented.clientId === clientId &&
+                  before.some((row) => sameId(row.referenceId, presented.referenceId))
+                    ? String(presented.referenceId)
+                    : undefined
                 // The presented grant is the target and credential. Other grants of the same
                 // client and user lose their tokens too; their organizations get their own
                 // event without the presenting grant, because it may belong to another tenant.
                 const grants = [
-                  presentedGrant,
+                  ...(presentedGrant ? [presentedGrant] : []),
                   ...new Set(
                     before
                       .map((row) => String(row.referenceId))
-                      .filter((grantId) => !sameId(grantId, presentedGrant)),
+                      .filter((grantId) => !presentedGrant || !sameId(grantId, presentedGrant)),
                   ),
                 ]
                 for (const grantId of grants) {
