@@ -59,7 +59,16 @@ The website at hourmere.com is separate from your Hourmere instance.
   booking pages and emails do not apply them yet.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
-  this limitation applies equally to self-hosted installations.
+  this limitation applies equally to self-hosted installations. Existing occurrences retain
+  their shared location, schedule and conference settings when event settings change, and
+  continue accepting seats until full, subject to current booking cutoffs and usable pinned
+  conference resources. New occurrences use the edited settings. A full occurrence gives
+  the same error for existing and unknown email addresses; exact request replays still work.
+  With spare capacity, duplicate-email rejection does not guarantee membership privacy:
+  booking with a different email address creates a real seat and its notifications.
+  Host occurrence mail drains batches of four for up to 230 seconds per worker run;
+  remaining due messages stay durable for the next run, subject to reminder expiry,
+  the instance email abuse budget and delivery retries.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain

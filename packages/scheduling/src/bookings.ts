@@ -1268,7 +1268,6 @@ async function publicBooking(
           throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
         throw unavailable()
       }
-      requireCollectedPhone(current.location)
       if (guests.length > 0 && !current.allowGuests) {
         throw new DomainError(
           'invalid',
@@ -1297,6 +1296,7 @@ async function publicBooking(
         snapshot,
         expectedSlotId: input.expectedGroupSlotId,
       })
+      requireCollectedPhone(groupSlot ? groupSlot.location : current.location)
       let selectedHostIds = current.hostUserIds
       if (current.schedulingType === 'round_robin') {
         await lockRoundRobinState(trx, current.id)
@@ -2084,7 +2084,7 @@ export async function rescheduleHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
-    await lockGroupBooking(trx, id, start, durationMinutes)
+    await lockGroupBooking(trx, id, start, durationMinutes, ctx.principal.organization.id)
     const old = await trx
       .selectFrom('bookings')
       .select(RESCHEDULE_COLUMNS)
@@ -2147,7 +2147,7 @@ export async function cancelHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
-    await lockGroupBooking(trx, id)
+    await lockGroupBooking(trx, id, undefined, undefined, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')
       .innerJoin(resolvedBookingHosts(trx).as('bh'), 'bh.booking_id', 'b.id')
