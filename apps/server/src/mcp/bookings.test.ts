@@ -158,6 +158,40 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     }
   }
 
+  it('passes an invitee location choice and phone to the shared booking service', async () => {
+    const host = await f.host({ handle: `choice-${randomUUID().slice(0, 8)}` })
+    await f.schedule(host.userId)
+    const id = await f.eventType(host.organizationId, host.userId, { slug: 'choice' })
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify([
+          { id: 'office', kind: 'in_person', address: 'Private address' },
+          { id: 'call', kind: 'phone', askInvitee: true },
+        ]),
+      })
+      .where('id', '=', id)
+      .execute()
+    const input = {
+      handle: host.handle,
+      slug: 'choice',
+      start: '2026-11-02T08:00:00Z',
+      locationOptionId: 'call',
+      idempotencyKey: randomUUID(),
+      invitee: { name: 'Guest', email: 'guest@example.test', timeZone: 'UTC' },
+    }
+    expect(errorOf(await call('create_booking', input)).error).toBe('invalid_invitee_phone')
+    const selected = { ...input, inviteePhone: '+14155550123' }
+    const result = ok<{ booking: { location: unknown }; replayed: boolean }>(
+      await call('create_booking', selected),
+    )
+    expect(result.booking.location).toEqual({ kind: 'phone', number: '+14155550123' })
+    expect(ok<{ replayed: boolean }>(await call('create_booking', selected)).replayed).toBe(true)
+    expect(
+      errorOf(await call('create_booking', { ...selected, locationOptionId: 'office' })).error,
+    ).toBe('idempotency_key_reused')
+  })
+
   it('documents host-pool and activation conflicts with availability refresh in create_booking', async () => {
     const client = await connect(agent.key)
     try {
@@ -776,6 +810,21 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   })
 
   describe('find_available_slots', () => {
+    it('validates the selected location when finding slots', async () => {
+      expect(
+        errorOf(
+          await call('find_available_slots', {
+            handle: 'ada',
+            slug: 'intro',
+            timeZone: 'UTC',
+            startDate: '2026-11-02',
+            endDate: '2026-11-02',
+            locationOptionId: 'missing',
+          }),
+        ).error,
+      ).toBe('invalid_location_choice')
+    })
+
     it('reads the dates in the requested time zone and gives each slot in UTC and in it', async () => {
       const berlin = ok<{
         eventType: { title: string; questions: unknown[]; host: { timeZone: string } }

@@ -9,6 +9,7 @@ import {
   createEventType,
   getPublicTeamEventType,
   type PublicEventType,
+  publicLocationOptions,
   updateEventType,
 } from '@hourmere/scheduling'
 import {
@@ -41,6 +42,7 @@ function verifyPublicKeys(
       'handle',
       'host',
       'location',
+      'locations',
       'questions',
       'slug',
       'team',
@@ -55,6 +57,7 @@ function verifyPublicKeys(
   )
   expect(Object.keys(page.team ?? {}).sort()).toEqual(['name', 'slug'])
   expect(Object.keys(page.location ?? {})).toEqual(['kind'])
+  expect(page.locations).toEqual([{ id: 'legacy', kind: 'phone' }])
   expect(page.allowedDurationsMinutes).toEqual(
     allowedDurationsMinutes.length > 1
       ? [...allowedDurationsMinutes].sort((a, b) => a - b)
@@ -219,9 +222,13 @@ function projectionCopy(replacement?: [string, string]): Projection {
     source = source.replace(...replacement)
   }
   const javascript = stripTypeScriptTypes(source)
-  return new Function('eventTypeNotFound', `${javascript}; return publicEventType`)(() => {
+  return new Function(
+    'eventTypeNotFound',
+    'publicLocationOptions',
+    `${javascript}; return publicEventType`,
+  )(() => {
     throw new Error('Missing synthetic record')
-  }) as Projection
+  }, publicLocationOptions) as Projection
 }
 
 function verifyProjection(
@@ -245,6 +252,7 @@ function verifyProjection(
     hostName: 'Ada Lovelace',
     hostTimeZone: 'UTC',
     location: { kind: 'phone', number: '+14155550123' },
+    locations: [{ id: 'legacy', kind: 'phone', number: '+14155550123' }],
     questions: [],
     hosts: [
       { name: 'Ada Lovelace', timeZone: 'UTC' },
@@ -264,6 +272,17 @@ describe('public team DTO source-copy negative controls', () => {
 
   it.each(schedulingTypes)('keeps offered durations in ascending order for a %s event', (type) => {
     verifyProjection(projectionCopy(), type, [60, 30, 15])
+  })
+
+  it('detects exposing private location settings in public choices', () => {
+    const mutant = projectionCopy([
+      'locations: publicLocationOptions(et.locations)',
+      'locations: et.locations',
+    ])
+    expect(() => verifyProjection(mutant, 'individual')).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyProjection(projectionCopy(), 'individual')
   })
 
   it('detects exposing a singleton duration list', () => {

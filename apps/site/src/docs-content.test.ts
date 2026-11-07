@@ -727,3 +727,16 @@ describe('consolidated guide facts', () => {
     expect(read(`${siteDocs}/embedding.md`).split(fact)).toHaveLength(2)
   })
 })
+
+describe('location phone input documentation', () => {
+  it('describes accepted separators and the stored E.164 form', () => {
+    const contract = prose(read(`${siteDocs}/api-conventions.md`))
+    expect(contract).toContain(
+      'The number must start with + and contain 7–15 digits including the country code',
+    )
+    expect(contract).toContain(
+      'spaces, parentheses, dots and hyphens are accepted and removed before storage in E.164 form',
+    )
+    expect(contract).not.toContain('The number must be E.164.')
+  })
+})

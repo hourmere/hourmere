@@ -102,6 +102,13 @@ describe.skipIf(!serverUrl)('public single-host team booking', () => {
     return { host, org, id, teamSlug, slug, path: `/api/v1/public/teams/${teamSlug}/${slug}` }
   }
 
+  it('validates the selected location on team slot queries', async () => {
+    const s = await setup()
+    const response = await appWith().request(`${s.path}/slots?${range}&locationOptionId=missing`)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_location_choice' })
+  })
+
   it('serves a single-host team page and redacts private details', async () => {
     const t = await setup()
     await db

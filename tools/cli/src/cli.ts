@@ -62,6 +62,8 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+           book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 After booking: create-event/update-event accept --success-redirect-url URL,
