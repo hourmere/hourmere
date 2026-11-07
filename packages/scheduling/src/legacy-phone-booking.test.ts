@@ -174,10 +174,14 @@ describe('invitee phone booking source-copy controls', () => {
       "location?.kind === 'phone' && location.askInvitee === true",
       'false',
     ],
-    ['guard call before persistence', '      requireCollectedPhone(current.location)\n', ''],
+    [
+      'guard call before persistence',
+      '      requireCollectedPhone(groupSlot ? groupSlot.location : current.location)\n',
+      '',
+    ],
     [
       'locked configuration check',
-      'requireCollectedPhone(current.location)',
+      'requireCollectedPhone(groupSlot ? groupSlot.location : current.location)',
       'requireCollectedPhone(et.location)',
     ],
   ])('detects removal of %s', async (_name, before, after) => {
