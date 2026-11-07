@@ -341,8 +341,8 @@ MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
 [request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
 for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
 
-Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
-`full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
+Native creation accepts `metadata.scope` with exactly `full`, `read` or `bookings`;
+omitting it keeps `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
 Top-level `scope`/`scopes`, arrays, combinations and unknown values get
 `400 INVALID_METADATA`. Updates containing `metadata.scope`, even the same value, get
 `400 API_KEY_SCOPE_IMMUTABLE`. Create a replacement, update clients, then revoke the old key.
