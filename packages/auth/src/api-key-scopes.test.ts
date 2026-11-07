@@ -19,6 +19,9 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -103,6 +106,8 @@ const restContract = {
     'GET /api/v1/teams/{teamId}/readiness',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -341,6 +346,8 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'get_branding',
+        'set_branding',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -349,6 +356,7 @@ describe('shared API-key scope policy', () => {
         'request_reschedule',
         'cancel_booking',
         'list_bookings',
+        'export_bookings',
         'retry_conference',
         'retry_calendar_copy',
         'get_profile',
@@ -372,10 +380,12 @@ describe('shared API-key scope policy', () => {
         'resend_waitlist_verification',
       ],
       read: [
+        'get_branding',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
         'list_bookings',
+        'export_bookings',
         'get_profile',
         'list_event_types',
         'get_event_type',
@@ -485,6 +495,22 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "rest('GET', '/api/v1/bookings/export.csv', 'other_read'",
+      "rest('GET', '/api/v1/bookings/export.csv', 'booking_read'",
+    ],
+    ["mcp('export_bookings', 'other_read'", "mcp('export_bookings', 'booking_read'"],
+    ["cli('export', 'export_bookings')", "cli('export', 'list_bookings')"],
+  ] as const)('kills broadened export scope: %s', (before, after) => {
+    const verify = (operation: typeof apiKeyOperation) => {
+      for (const id of ['GET /api/v1/bookings/export.csv', 'mcp:export_bookings', 'cli:export'])
+        expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    }
+    verify(sourceCopyRegistry())
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow()
+  })
+
   it.each([
     [
       "mcp('get_event_type_waitlist', 'other_read'",
@@ -654,5 +680,52 @@ describe('scope policy source-copy mutation checks', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
     verifyNotificationWrites(sourceCopyPolicy(undefined, sourceCopyRegistry()))
+  })
+})
+
+describe('branding scope source-copy protections', () => {
+  function verify(operation = apiKeyOperation) {
+    for (const id of [
+      'GET /api/v1/branding',
+      'GET /api/v1/branding/logo/{hash}',
+      'mcp:get_branding',
+      'cli:branding get',
+    ])
+      expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    for (const id of [
+      'PATCH /api/v1/branding',
+      'POST /api/v1/branding/logo',
+      'mcp:set_branding',
+      'cli:branding set',
+    ])
+      expect(operation(id)?.allowedScopes).toEqual(['full'])
+  }
+  it('keeps the accepted read/write scope matrix in source copies', () =>
+    verify(sourceCopyRegistry()))
+  it.each([
+    [
+      "rest('GET', '/api/v1/branding', 'other_read'",
+      "rest('GET', '/api/v1/branding', 'booking_read'",
+    ],
+    [
+      "rest('GET', '/api/v1/branding/logo/{hash}', 'other_read'",
+      "rest('GET', '/api/v1/branding/logo/{hash}', 'booking_read'",
+    ],
+    [
+      "rest('PATCH', '/api/v1/branding', 'other_write'",
+      "rest('PATCH', '/api/v1/branding', 'booking_write'",
+    ],
+    [
+      "rest('POST', '/api/v1/branding/logo', 'other_write'",
+      "rest('POST', '/api/v1/branding/logo', 'booking_write'",
+    ],
+    ["mcp('get_branding', 'other_read'", "mcp('get_branding', 'booking_read'"],
+    ["mcp('set_branding', 'other_write'", "mcp('set_branding', 'booking_write'"],
+    ["cli('branding set', 'set_branding')", "cli('branding set', 'create_booking')"],
+    ["cli('branding get', 'get_branding')", "cli('branding get', 'get_profile')"],
+  ] as const)('kills broadened authority %s', (before, after) => {
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 })

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { constants, readFileSync } from 'node:fs'
-import { mkdtemp, open, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -71,8 +71,11 @@ function sourceCopy(change?: readonly [string, string]): typeof runCli {
     expect(source.includes(change[0]), 'mutation must match source').toBe(true)
     source = source.replace(...change)
   }
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
-  const bindings = { constants, open, ...client }
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
+  const bindings = { constants, open, unlink, ...client }
   return new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),
   ) as typeof runCli
@@ -88,7 +91,10 @@ function clientSourceCopy(change?: readonly [string, string]): typeof callTool {
     /export const \{ version \} = JSON.parse\([\s\S]*?as \{ version: string \}/,
     '',
   )
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
   return new Function('version', `${source}; return callTool`)(client.version) as typeof callTool
 }
 

@@ -68,10 +68,15 @@ function rest(
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
+  rest('GET', '/api/v1/branding', 'other_read', 'key'),
+  rest('GET', '/api/v1/branding/logo/{hash}', 'other_read', 'key'),
+  rest('PATCH', '/api/v1/branding', 'other_write', 'key'),
+  rest('POST', '/api/v1/branding/logo', 'other_write', 'key'),
   rest('GET', '/api/v1/book/{token}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/book/{token}/slots', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/bookings', 'booking_read', 'key'),
+  rest('GET', '/api/v1/bookings/export.csv', 'other_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}/organization', 'session_only', 'session_only'),
   rest('POST', '/api/v1/bookings/{id}/calendar-copy/retry', 'booking_write', 'key'),
@@ -212,6 +217,8 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('get_branding', 'other_read', ['GET /api/v1/branding']),
+  mcp('set_branding', 'other_write', ['PATCH /api/v1/branding']),
   mcp('whoami', 'booking_read', ['GET /api/v1/me']),
   mcp('find_available_slots', 'booking_read', [
     'GET /api/v1/public/{handle}/{slug}/slots',
@@ -266,6 +273,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('cancel_booking', 'booking_write', ['POST /api/v1/bookings/{id}/cancel'], 'host'),
   mcp('cancel_booking', 'booking_write', ['POST /api/v1/bookings/manage/cancel'], 'manageToken'),
   mcp('list_bookings', 'booking_read', ['GET /api/v1/bookings']),
+  mcp('export_bookings', 'other_read', ['GET /api/v1/bookings/export.csv']),
   mcp('retry_conference', 'booking_write', ['POST /api/v1/bookings/{id}/conference/retry']),
   mcp('retry_calendar_copy', 'booking_write', ['POST /api/v1/bookings/{id}/calendar-copy/retry']),
   mcp('get_profile', 'booking_read', ['GET /api/v1/profile']),
@@ -324,6 +332,8 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
   cli('whoami', 'whoami'),
+  cli('branding get', 'get_branding'),
+  cli('branding set', 'set_branding'),
   cli('profile', 'get_profile'),
   cli('catalog', 'list_event_types'),
   cli('event', 'get_event_type'),
@@ -335,6 +345,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('slots', 'find_available_slots'),
   cli('book', 'create_booking'),
   cli('list', 'list_bookings'),
+  cli('export', 'export_bookings'),
   cli('reschedule', 'reschedule_booking'),
   cli('request-reschedule', 'request_reschedule'),
   cli('cancel', 'cancel_booking'),

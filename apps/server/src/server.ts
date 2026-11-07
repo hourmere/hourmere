@@ -70,6 +70,7 @@ import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
+import { brandingTools } from './mcp/branding.ts'
 import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
@@ -84,6 +85,7 @@ import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { bookingRoutes } from './routes/bookings.ts'
+import { brandingRoutes } from './routes/branding.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -199,6 +201,7 @@ export function productRoutes({
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
+    brandingRoutes({ db }),
     eventTypeRoutes({
       db,
       followUpHostNotesEnabled,
@@ -278,6 +281,7 @@ export function productTools({
       bookingMaxInviteeReschedules,
     }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
+    ...brandingTools({ db }),
     ...eventTypeTools({
       db,
       automaticMeet,

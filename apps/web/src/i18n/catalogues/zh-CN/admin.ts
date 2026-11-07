@@ -2,6 +2,39 @@
 export const admin = {
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
+  'Loading logo preview…': '正在加载标志预览…',
+  'Logo preview is unavailable.': '暂时无法预览标志。',
+  'Saved brand logo': '已保存的品牌标志',
+
+  'Booking page branding': '预约页面品牌设置',
+  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
+    '为当前空间保存标志和主色。目前尚未应用到预约页面和邮件。',
+  'Branding access has not been confirmed.': '尚未确认品牌设置权限。',
+  'Only the personal owner or team owners and admins can manage branding.':
+    '只有个人空间所有者、团队所有者和管理员可以管理品牌设置。',
+  'Manage branding': '管理品牌设置',
+  'Loading branding…': '正在加载品牌设置…',
+  'Could not load branding.': '无法加载品牌设置。',
+  'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
+    '请输入 #RRGGBB 格式的颜色，留空即可清除。',
+  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
+    '请选择不超过 512 KB 的 PNG、JPEG 或 WebP 图片。不支持 SVG。',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
+  'Edit branding': '编辑品牌设置',
+  'Primary colour': '主色',
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
+  'Brand logo': '品牌标志',
+  'A logo is saved for this space.': '此空间已保存标志。',
+  'Remove logo': '移除标志',
+  'Save branding': '保存品牌设置',
+  'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
+    '已保存颜色：{colour}。按钮文字：{text}。与白色的对比度：{ratio}:1。',
+  Black: '黑色',
+  White: '白色',
+  'Branding saved. Booking pages and emails are unchanged.':
+    '品牌设置已保存。预约页面和邮件暂不受影响。',
   'Group-seat bookings do not support reschedule requests.': '团体席位预约不支持请求改期。',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
     '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
@@ -22,6 +55,19 @@ export const admin = {
   'Could not request a new time. {0}': '无法发送改期请求。{0}',
   'Retry the same request': '重试此请求',
   'Send request': '发送请求',
+
+  'Export bookings as CSV': '将预约导出为 CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    '请选择不超过 366 天的预约开始时间范围。导出时同样适用当前的筛选条件。',
+  'This file contains personal data. Store and share it carefully.':
+    '此文件包含个人数据。请妥善保存并谨慎分享。',
+  'CSV times use {zone} and UTC.': 'CSV 中的时间使用{zone}和 UTC。',
+  'Bookings starting at or after (UTC)': '预约开始时间不早于（UTC）',
+  'Bookings starting before (UTC)': '预约开始时间早于（UTC）',
+  'Include UTF-8 BOM for Excel': '包含 UTF-8 BOM，便于 Excel 读取',
+  'Could not download CSV. Check the booking range and try again shortly.':
+    '无法下载 CSV。请检查预约时间范围，稍后重试。',
+  'Download CSV': '下载 CSV',
 
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
