@@ -76,6 +76,8 @@ notifications and trigger configured integrations.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `list_slack_destinations` | — | `slack list` | `full, read` |
 | `create_slack_destination` | — | `slack create` | `full` |
 | `update_slack_destination` | — | `slack update` | `full` |

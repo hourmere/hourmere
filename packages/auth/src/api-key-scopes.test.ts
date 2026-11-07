@@ -19,6 +19,8 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/slack-destinations',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
@@ -104,6 +106,8 @@ const restContract = {
     'GET /api/v1/teams/{teamId}/readiness',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
     'POST /api/v1/slack-destinations',
     'PATCH /api/v1/slack-destinations/{id}',
     'DELETE /api/v1/slack-destinations/{id}',
@@ -346,6 +350,8 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'get_branding',
+        'set_branding',
         'list_slack_destinations',
         'create_slack_destination',
         'update_slack_destination',
@@ -382,6 +388,7 @@ describe('shared API-key scope policy', () => {
         'resend_waitlist_verification',
       ],
       read: [
+        'get_branding',
         'list_slack_destinations',
         'whoami',
         'find_available_slots',
@@ -665,5 +672,52 @@ describe('scope policy source-copy mutation checks', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
     verifyNotificationWrites(sourceCopyPolicy(undefined, sourceCopyRegistry()))
+  })
+})
+
+describe('branding scope source-copy protections', () => {
+  function verify(operation = apiKeyOperation) {
+    for (const id of [
+      'GET /api/v1/branding',
+      'GET /api/v1/branding/logo/{hash}',
+      'mcp:get_branding',
+      'cli:branding get',
+    ])
+      expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    for (const id of [
+      'PATCH /api/v1/branding',
+      'POST /api/v1/branding/logo',
+      'mcp:set_branding',
+      'cli:branding set',
+    ])
+      expect(operation(id)?.allowedScopes).toEqual(['full'])
+  }
+  it('keeps the accepted read/write scope matrix in source copies', () =>
+    verify(sourceCopyRegistry()))
+  it.each([
+    [
+      "rest('GET', '/api/v1/branding', 'other_read'",
+      "rest('GET', '/api/v1/branding', 'booking_read'",
+    ],
+    [
+      "rest('GET', '/api/v1/branding/logo/{hash}', 'other_read'",
+      "rest('GET', '/api/v1/branding/logo/{hash}', 'booking_read'",
+    ],
+    [
+      "rest('PATCH', '/api/v1/branding', 'other_write'",
+      "rest('PATCH', '/api/v1/branding', 'booking_write'",
+    ],
+    [
+      "rest('POST', '/api/v1/branding/logo', 'other_write'",
+      "rest('POST', '/api/v1/branding/logo', 'booking_write'",
+    ],
+    ["mcp('get_branding', 'other_read'", "mcp('get_branding', 'booking_read'"],
+    ["mcp('set_branding', 'other_write'", "mcp('set_branding', 'booking_write'"],
+    ["cli('branding set', 'set_branding')", "cli('branding set', 'create_booking')"],
+    ["cli('branding get', 'get_branding')", "cli('branding get', 'get_profile')"],
+  ] as const)('kills broadened authority %s', (before, after) => {
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 })

@@ -71,6 +71,8 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/slack-destinations',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
@@ -87,6 +89,8 @@ const classes = {
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
     'POST /api/v1/slack-destinations',
     'PATCH /api/v1/slack-destinations/{id}',
     'DELETE /api/v1/slack-destinations/{id}',
@@ -631,6 +635,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         expectedStatus = 204
       }
+      if (operation === 'PATCH /api/v1/branding') payload = { brandPrimaryColor: '#123456' }
+      if (
+        operation === 'POST /api/v1/branding/logo' ||
+        operation === 'GET /api/v1/branding/logo/{hash}'
+      ) {
+        const { default: sharp } = await import('sharp')
+        const image = await sharp({
+          create: { width: 2, height: 2, channels: 4, background: '#123456' },
+        })
+          .png()
+          .toBuffer()
+        if (method === 'POST') {
+          payload = image
+          headers['content-type'] = 'image/png'
+        } else {
+          const { uploadBrandLogo } = await import('@hourmere/scheduling')
+          const branding = await uploadBrandLogo(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            image,
+            'image/png',
+          )
+          path = path.replace('{hash}', branding.brandLogo as string)
+        }
+      }
       path = path.replace('{id}', id).replace('{date}', date)
       return {
         method,
@@ -646,14 +674,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 106-operation contract and all 318 scope combinations', () => {
+    it('covers the exact 110-operation contract and all 330 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(106)
-      expect(new Set(ids).size).toBe(106)
+      expect(ids).toHaveLength(110)
+      expect(new Set(ids).size).toBe(110)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(318)
+      expect(cases).toHaveLength(330)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -669,7 +697,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
               'content-type': 'application/json',
               ...fixture.headers,
             },
-            ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
+            ...(fixture.payload === undefined
+              ? {}
+              : {
+                  body: Buffer.isBuffer(fixture.payload)
+                    ? new Uint8Array(fixture.payload)
+                    : JSON.stringify(fixture.payload),
+                }),
           },
           { incoming: { socket: { remoteAddress: `192.0.2.${(sequence % 250) + 1}` } } },
         )
@@ -688,7 +722,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
-          if (response.status !== 204) {
+          if (operation === 'GET /api/v1/branding/logo/{hash}') {
+            expect(response.headers.get('content-type')).toBe('image/png')
+          } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
             if (operation === 'PUT /api/v1/event-types/{id}/notifications')
@@ -740,7 +776,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe(
-          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+          operation === 'GET /api/v1/instance/embed' ||
+            (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
+            ? 'private, no-store'
+            : 'no-store',
         )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link

@@ -1,5 +1,38 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Loading logo preview…': '正在加载标志预览…',
+  'Logo preview is unavailable.': '暂时无法预览标志。',
+  'Saved brand logo': '已保存的品牌标志',
+
+  'Booking page branding': '预约页面品牌设置',
+  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
+    '为当前空间保存标志和主色。目前尚未应用到预约页面和邮件。',
+  'Branding access has not been confirmed.': '尚未确认品牌设置权限。',
+  'Only the personal owner or team owners and admins can manage branding.':
+    '只有个人空间所有者、团队所有者和管理员可以管理品牌设置。',
+  'Manage branding': '管理品牌设置',
+  'Loading branding…': '正在加载品牌设置…',
+  'Could not load branding.': '无法加载品牌设置。',
+  'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
+    '请输入 #RRGGBB 格式的颜色，留空即可清除。',
+  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
+    '请选择不超过 512 KB 的 PNG、JPEG 或 WebP 图片。不支持 SVG。',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
+  'Edit branding': '编辑品牌设置',
+  'Primary colour': '主色',
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
+  'Brand logo': '品牌标志',
+  'A logo is saved for this space.': '此空间已保存标志。',
+  'Remove logo': '移除标志',
+  'Save branding': '保存品牌设置',
+  'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
+    '已保存颜色：{colour}。按钮文字：{text}。与白色的对比度：{ratio}:1。',
+  Black: '黑色',
+  White: '白色',
+  'Branding saved. Booking pages and emails are unchanged.':
+    '品牌设置已保存。预约页面和邮件暂不受影响。',
   'Event type filter': '按活动类型筛选',
   'All event types': '所有活动类型',
   'Saved event type — details unavailable': '已保存的活动类型（详情暂不可用）',

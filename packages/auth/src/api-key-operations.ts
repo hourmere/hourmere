@@ -68,6 +68,10 @@ function rest(
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
+  rest('GET', '/api/v1/branding', 'other_read', 'key'),
+  rest('GET', '/api/v1/branding/logo/{hash}', 'other_read', 'key'),
+  rest('PATCH', '/api/v1/branding', 'other_write', 'key'),
+  rest('POST', '/api/v1/branding/logo', 'other_write', 'key'),
   rest('GET', '/api/v1/book/{token}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/book/{token}/slots', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key'),
@@ -217,6 +221,8 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('get_branding', 'other_read', ['GET /api/v1/branding']),
+  mcp('set_branding', 'other_write', ['PATCH /api/v1/branding']),
   mcp('list_slack_destinations', 'other_read', ['GET /api/v1/slack-destinations']),
   mcp('create_slack_destination', 'other_write', ['POST /api/v1/slack-destinations']),
   mcp('update_slack_destination', 'other_write', ['PATCH /api/v1/slack-destinations/{id}']),
@@ -334,6 +340,8 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
   cli('whoami', 'whoami'),
+  cli('branding get', 'get_branding'),
+  cli('branding set', 'set_branding'),
   cli('profile', 'get_profile'),
   cli('catalog', 'list_event_types'),
   cli('event', 'get_event_type'),

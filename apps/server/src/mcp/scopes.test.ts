@@ -30,6 +30,8 @@ const all = [
   'set_event_type_notifications',
   'list_schedules',
   'get_schedule',
+  'get_branding',
+  'set_branding',
   'create_event_type',
   'update_event_type',
   'create_one_time_link',
@@ -51,6 +53,7 @@ const all = [
   'resend_waitlist_verification',
 ]
 const configurationWrites = new Set([
+  'set_branding',
   'create_slack_destination',
   'update_slack_destination',
   'delete_slack_destination',
@@ -76,6 +79,7 @@ const writes = new Set([
   'resend_waitlist_verification',
 ])
 const otherReads = new Set([
+  'get_branding',
   'list_slack_destinations',
   'list_schedules',
   'get_schedule',
@@ -383,6 +387,8 @@ describe('MCP scoped discovery and dispatch', () => {
 
 describe('CLI scope parity', () => {
   const commands = [
+    ['branding get', 'get_branding'],
+    ['branding set', 'set_branding'],
     ['whoami', 'whoami'],
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],

@@ -1,5 +1,38 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Loading logo preview…': 'Loading logo preview…',
+  'Logo preview is unavailable.': 'Logo preview is unavailable.',
+  'Saved brand logo': 'Saved brand logo',
+
+  'Booking page branding': 'Booking page branding',
+  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
+    'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.',
+  'Branding access has not been confirmed.': 'Branding access has not been confirmed.',
+  'Only the personal owner or team owners and admins can manage branding.':
+    'Only the personal owner or team owners and admins can manage branding.',
+  'Manage branding': 'Manage branding',
+  'Loading branding…': 'Loading branding…',
+  'Could not load branding.': 'Could not load branding.',
+  'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
+    'Enter a colour in #RRGGBB format, or leave it empty to clear it.',
+  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
+    'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+  'Edit branding': 'Edit branding',
+  'Primary colour': 'Primary colour',
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
+  'Brand logo': 'Brand logo',
+  'A logo is saved for this space.': 'A logo is saved for this space.',
+  'Remove logo': 'Remove logo',
+  'Save branding': 'Save branding',
+  'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
+    'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.',
+  Black: 'Black',
+  White: 'White',
+  'Branding saved. Booking pages and emails are unchanged.':
+    'Branding saved. Booking pages and emails are unchanged.',
   'Event type filter': 'Event type filter',
   'All event types': 'All event types',
   'Saved event type — details unavailable': 'Saved event type — details unavailable',

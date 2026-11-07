@@ -54,6 +54,7 @@ function productSourceCopy(change?: Change): Factory {
     catalogTools: () => [],
     integrationTools: () => [],
     waitlistTools: () => [],
+    brandingTools: () => [],
     oneTimeLinkTools: () => [],
     slackDestinationTools: () => [],
     openTimeSnippetTools: () => [],

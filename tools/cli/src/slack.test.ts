@@ -6,6 +6,8 @@ import { runCli } from './cli.ts'
 import * as client from './client.ts'
 
 const secret = 'https://hooks.slack.com/services/Tfixture/Bfixture/private-fixture-secret'
+// Single- and multi-line import declarations; the bindings below supply their values.
+const imports = /^import\b[\s\S]*?from\s+['"][^'"]+['"]\n/gm
 async function verify(command: string, runner = runCli) {
   let output = ''
   const fetcher = vi.fn<typeof fetch>(async () =>
@@ -42,12 +44,12 @@ it('source-copy mutation detects missing URL redaction', async () => {
   expect(source).toContain(anchor)
   const baseline = source
   source = source.replace(anchor, '')
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  source = stripTypeScriptTypes(source.replace(imports, '')).replace(/\bexport /g, '')
   const bindings = { constants, ...client, open }
   const mutant = new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),
   ) as typeof runCli
-  const baselineScript = stripTypeScriptTypes(baseline.replace(/^import[^\n]+\n/gm, '')).replace(
+  const baselineScript = stripTypeScriptTypes(baseline.replace(imports, '')).replace(
     /\bexport /g,
     '',
   )
