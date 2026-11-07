@@ -82,14 +82,20 @@ the user and app session. Revoking a refresh family after its grant was already
 disconnected keeps native invalidation and response behavior; absent grants do not
 cause audit failure.
 
-Presenting an already revoked refresh token makes Better Auth invalidate the client's
-whole refresh-token family for that user, across every grant and organization. This
-is recorded as one `oauth.token_revoked` event per affected grant, each with
-`familySize` (the number of refresh tokens invalidated). The grant whose token was
-presented is the target and credential of its event, in its own organization (or
-with no organization once that grant was disconnected). Every other affected grant gets an event in its own
-organization with credential `none`, so the presenting grant's ID never reaches
-another tenant. Access tokens deleted with the family are covered by these events.
+Presenting an already revoked refresh token, either for revocation
+(`/api/auth/oauth2/revoke`) or for a refresh outside the 30-second retry window
+(`/api/auth/oauth2/token`), makes Better Auth invalidate the client's whole
+refresh-token family for that user, across every grant and organization. Both paths
+are recorded the same way: one `oauth.token_revoked` event per affected grant, each
+with `familySize` (the number of refresh tokens invalidated for that client and user
+in all organizations, so another organization's event can reveal that count, never
+which grants or organizations). The OAuth client is the actor. The grant whose token
+was presented is the target and credential of its event, in its own organization (or
+with no organization once that grant was disconnected). Every other affected grant
+gets an event in its own organization with credential `none`, so the presenting
+grant's ID never reaches another tenant. Deleting the family's access tokens and
+refresh tokens and writing these events commit in one transaction: if an event cannot
+be written, nothing of the family is deleted and the request fails.
 
 API-key updates, disables, re-enables and deletes are matched to the requested key in
 canonical UUID form; the request may spell the key ID in any letter case. An invitee
@@ -140,6 +146,10 @@ automatic expiry/replacement cancellation are not separate management events
 (new replacement invitations retain their invitation event).
 Automatic API-key expiry cleanup is not a user management action and is not
 recorded, including cleanup triggered by another user’s key endpoint.
+When an authorization code is presented a second time, Better Auth deletes the tokens
+already issued for it. This automatic replay response is not recorded: it concerns
+the one connection whose code was replayed, and Better Auth ignores its failures, so
+making it depend on the journal could leave those tokens valid.
 Paid-booking holds (creating, confirming and cancelling a payment hold) are service
 functions that no route reaches yet; wiring them to a route must add booking audit
 events. Automatic payment-hold expiry and unpaid-hold personal-data erasure are system

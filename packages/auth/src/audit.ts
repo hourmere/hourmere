@@ -41,6 +41,8 @@ export const withAuthAuditTransaction = <T>(
 
 type Row = Record<string, unknown>
 type Condition = { field: string; operator?: string; value: unknown }
+/** Better Auth wipes a refresh family when a revoked token is presented to either path. */
+const refreshFamilyPaths = ['/oauth2/revoke', '/oauth2/token']
 
 /**
  * Request validation accepts any UUID spelling and Postgres compares uuid values without
@@ -93,8 +95,11 @@ export function authAuditRecords(): BetterAuthPlugin {
       ],
     },
     init(ctx) {
-      // Revocation finds the presented refresh token before any family invalidation.
+      // Revocation and refresh find the presented refresh token before any family
+      // invalidation.
       const presentedRefreshTokens = new WeakMap<object, Row>()
+      // Family access-token deletion waits for the family's refresh-token transaction.
+      const deferredFamilyAccessTokens = new WeakMap<object, { model: string }>()
       const wrap = (adapter: DBTransactionAdapter, inTransaction: boolean) => {
         // Synthetic adapters in unit harnesses may omit reads.
         const findOne = adapter.findOne?.bind(adapter)
@@ -104,7 +109,8 @@ export function authAuditRecords(): BetterAuthPlugin {
             const endpoint = tryGetCurrentAuthEndpointContext()
             if (
               found &&
-              endpoint?.path === '/oauth2/revoke' &&
+              endpoint &&
+              refreshFamilyPaths.includes(endpoint.path ?? '') &&
               request.model === 'oauthRefreshToken' &&
               (request.where as Condition[] | undefined)?.some(
                 (condition) => condition.field === 'token',
@@ -128,15 +134,19 @@ export function authAuditRecords(): BetterAuthPlugin {
             const endpoint = tryGetCurrentAuthEndpointContext()
             const path = endpoint?.path ?? ''
             const where = (request.where as Condition[] | undefined) ?? []
-            // Revoking a reused refresh token invalidates the client's whole family for that
-            // user: first the family's access tokens, then its refresh tokens. One event,
-            // written with the refresh tokens, records the family.
+            // Presenting a reused refresh token (to revoke or to refresh) invalidates the
+            // client's whole family for that user: first the family's access tokens, then
+            // its refresh tokens, by client and user. One event per grant, written with the
+            // refresh tokens, records the family.
+            const familyPath = refreshFamilyPaths.includes(path)
             const refreshFamily =
-              path === '/oauth2/revoke' &&
+              familyPath &&
               request.model === 'oauthRefreshToken' &&
-              method === 'deleteMany'
+              method === 'deleteMany' &&
+              where.some((condition) => condition.field === 'clientId') &&
+              where.some((condition) => condition.field === 'userId')
             const familyAccessTokens =
-              path === '/oauth2/revoke' &&
+              familyPath &&
               request.model === 'oauthAccessToken' &&
               method === 'deleteMany' &&
               where.some(
@@ -155,6 +165,7 @@ export function authAuditRecords(): BetterAuthPlugin {
                     )))) ||
               (request.model === 'oauthClient' && method === 'create') ||
               (request.model === 'oauthConsent' && (method === 'create' || method === 'update')) ||
+              refreshFamily ||
               (['oauthRefreshToken', 'oauthAccessToken'].includes(request.model) &&
                 path === '/oauth2/revoke' &&
                 !familyAccessTokens) ||
@@ -167,6 +178,14 @@ export function authAuditRecords(): BetterAuthPlugin {
                   '/sign-out',
                 ].includes(path)) ||
               (request.model === 'account' && (path === '/unlink-account' || method === 'create'))
+            if (familyAccessTokens && !inTransaction && endpoint) {
+              // Better Auth deletes these on the base adapter, committed on their own just
+              // before the refresh tokens. Run the deletion inside the refresh tokens'
+              // transaction instead, so the deletions and the family events commit together.
+              // Never hold this connection while asking the pool for another.
+              deferredFamilyAccessTokens.set(endpoint, request)
+              return 0
+            }
             if (!relevant) return (original as (r: unknown) => Promise<unknown>)(request)
             if (!inTransaction) {
               return ctx.adapter.transaction((trx) =>
@@ -221,6 +240,11 @@ export function authAuditRecords(): BetterAuthPlugin {
                         },
                       ],
                     }
+              const deferred = refreshFamily && endpoint && deferredFamilyAccessTokens.get(endpoint)
+              if (deferred && endpoint) {
+                deferredFamilyAccessTokens.delete(endpoint)
+                await (original as (r: unknown) => Promise<unknown>)(deferred)
+              }
               const result = await (original as (r: unknown) => Promise<unknown>)(actualRequest)
               if (refreshFamily) {
                 if (!before.length) return result

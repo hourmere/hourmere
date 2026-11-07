@@ -812,6 +812,38 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     })
     expect(JSON.stringify(rows)).not.toContain(tokens.refresh_token)
   })
+  it('still revokes tokens issued for a replayed authorization code, outside the journal', async () => {
+    const s = await session(),
+      a = await begin(s),
+      code = (await approved(s, a)).searchParams.get('code') as string
+    const first = await exchange(a, code)
+    expect(first.status).toBe(200)
+    const tokens = (await first.json()) as { refresh_token: string }
+    const issued = () =>
+      db.selectFrom('auth.oauthRefreshToken').select('id').where('userId', '=', s.user.id).execute()
+    expect(await issued()).toHaveLength(1)
+    // Native replay detection deletes what the code issued; it is not a family invalidation.
+    expect((await exchange(a, code)).status).toBe(400)
+    expect(await issued(), 'replayed code tokens').toEqual([])
+    const refreshed = await request('/api/auth/oauth2/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: CLIENT,
+        refresh_token: tokens.refresh_token,
+        resource: `${BASE}/mcp`,
+      }),
+    })
+    expect(refreshed.status >= 400).toBe(true)
+    expect(
+      (
+        await sql`SELECT id FROM audit_events WHERE action='oauth.token_revoked' AND organization_id=${s.user.principal.organization.id}`.execute(
+          db,
+        )
+      ).rows,
+    ).toEqual([])
+  })
   it('rolls back native token revocation when its audit fails', async () => {
     const s = await session(),
       tokens = await connected(s)

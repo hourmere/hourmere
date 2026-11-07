@@ -436,9 +436,10 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       ),
     ).rejects.toThrow(/native revocation status after disconnect/)
   })
-  async function family(factory = createAuth) {
-    const auth = instance(factory),
-      actor = await account(),
+  type FamilyPath = 'revoke' | 'token'
+  /** One client, one user, two grants in two organizations, each with refresh and access tokens. */
+  async function familySetup() {
+    const actor = await account(),
       clientId = randomUUID()
     const team = await db
       .insertInto('auth.organization')
@@ -463,9 +464,22 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
           .executeTakeFirstOrThrow(),
       )
     const [presented, sibling] = grants as [(typeof grants)[number], (typeof grants)[number]]
+    // The refresh endpoint first checks that the presented grant's consent still holds.
+    await db
+      .insertInto('auth.oauthConsent')
+      .values({
+        clientId,
+        userId: actor.user.id,
+        referenceId: presented.id,
+        scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+        resources: JSON.stringify([`${origin}/mcp`]),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .execute()
     const tokens = grants.map(() => randomBytes(32).toString('base64url'))
-    for (const [index, grant] of grants.entries())
-      await db
+    for (const [index, grant] of grants.entries()) {
+      const refresh = await db
         .insertInto('auth.oauthRefreshToken')
         .values({
           clientId,
@@ -478,28 +492,67 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 86400000),
           // Presenting an already revoked refresh token is native reuse detection.
-          revoked: index === 0 ? new Date() : null,
+          revoked: index === 0 ? new Date(Date.now() - 60000) : null,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('auth.oauthAccessToken')
+        .values({
+          clientId,
+          userId: actor.user.id,
+          referenceId: grant.id,
+          refreshId: refresh.id,
+          token: randomBytes(32).toString('base64url'),
+          scopes: JSON.stringify(['mcp:tools']),
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 300000),
         })
         .execute()
-    const response = await auth.handler(
-      new Request(`${origin}/api/auth/oauth2/revoke`, {
+    }
+    return { actor, clientId, presented, sibling, token: tokens[0] as string }
+  }
+  function presentRevoked(auth: Auth, path: FamilyPath, clientId: string, token: string) {
+    return auth.handler(
+      new Request(`${origin}/api/auth/oauth2/${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: clientId,
-          token: tokens[0] as string,
-          token_type_hint: 'refresh_token',
-        }),
+        body: new URLSearchParams(
+          path === 'revoke'
+            ? { client_id: clientId, token, token_type_hint: 'refresh_token' }
+            : {
+                grant_type: 'refresh_token',
+                client_id: clientId,
+                refresh_token: token,
+                resource: `${origin}/mcp`,
+              },
+        ),
       }),
     )
-    expect(response.status).toBe(400)
-    expect(
-      await db
+  }
+  async function familyTokens(clientId: string) {
+    return {
+      refresh: await db
         .selectFrom('auth.oauthRefreshToken')
         .select('id')
         .where('clientId', '=', clientId)
         .execute(),
-    ).toEqual([])
+      access: await db
+        .selectFrom('auth.oauthAccessToken')
+        .select('id')
+        .where('clientId', '=', clientId)
+        .execute(),
+    }
+  }
+  async function family(factory = createAuth, path: FamilyPath = 'revoke') {
+    const auth = instance(factory),
+      { actor, clientId, presented, sibling, token } = await familySetup()
+    const response = await presentRevoked(auth, path, clientId, token)
+    expect(response.status, 'native family response').toBe(400)
+    expect(await familyTokens(clientId), 'family tokens invalidated').toEqual({
+      refresh: [],
+      access: [],
+    })
     const revoked = async (organizationId: string) =>
       (await events(organizationId)).filter((row) => row.action === 'oauth.token_revoked')
     expect(await revoked(actor.organizationId), 'presented family audit').toEqual([
@@ -531,6 +584,34 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
   }
   it('records refresh-family invalidation against the presented grant with its size', () =>
     family())
+  it('records refresh-token reuse at the token endpoint like revocation reuse', () =>
+    family(createAuth, 'token'))
+  it.each(['revoke', 'token'] as const)(
+    'deletes the %s family access tokens itself inside the family transaction',
+    async (path) => {
+      // Without the cascade, the refresh tokens can only go once their access tokens are gone:
+      // the deferred native deletion must run before them, in the same transaction.
+      const [constraint] = (
+        await sql<{ conname: string }>`SELECT c.conname FROM pg_constraint c
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+        WHERE c.conrelid = 'auth."oauthAccessToken"'::regclass AND c.contype = 'f'
+          AND a.attname = 'refreshId'`.execute(db)
+      ).rows
+      expect(typeof constraint?.conname).toBe('string')
+      const name = sql.id(constraint?.conname as string)
+      await sql`ALTER TABLE auth."oauthAccessToken" DROP CONSTRAINT ${name},
+      ADD CONSTRAINT ${name} FOREIGN KEY ("refreshId") REFERENCES auth."oauthRefreshToken"(id)`.execute(
+        db,
+      )
+      try {
+        await family(createAuth, path)
+      } finally {
+        await sql`ALTER TABLE auth."oauthAccessToken" DROP CONSTRAINT ${name},
+        ADD CONSTRAINT ${name} FOREIGN KEY ("refreshId") REFERENCES auth."oauthRefreshToken"(id)
+        ON DELETE CASCADE`.execute(db)
+      }
+    },
+  )
   it.each([
     ['per-token family events', 'if (refreshFamily) {', 'if (false) {'],
     [
@@ -546,6 +627,35 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       /family audit/,
     )
   })
+  it.each(['revoke', 'token'] as const)(
+    'keeps the whole family, access tokens included, when its %s audit fails',
+    async (path) => {
+      const auth = instance(),
+        { clientId, token } = await familySetup()
+      await sql`CREATE FUNCTION reject_family_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action='oauth.token_revoked' THEN RAISE EXCEPTION 'synthetic family audit failure'; END IF;
+        RETURN NEW; END $$`.execute(db)
+      await sql`CREATE TRIGGER reject_family_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_family_audit()`.execute(
+        db,
+      )
+      try {
+        let refused: boolean
+        try {
+          refused = (await presentRevoked(auth, path, clientId, token)).status >= 500
+        } catch {
+          refused = true
+        }
+        expect(refused, 'family audit failure refused').toBe(true)
+        // Deletions and events commit together: nothing of the family is gone.
+        const left = await familyTokens(clientId)
+        expect(left.refresh, 'family refresh tokens kept').toHaveLength(2)
+        expect(left.access, 'family access tokens kept').toHaveLength(2)
+      } finally {
+        await sql`DROP TRIGGER reject_family_audit ON audit_events`.execute(db)
+        await sql`DROP FUNCTION reject_family_audit()`.execute(db)
+      }
+    },
+  )
   async function rejection(factory = createAuth) {
     const auth = instance(factory),
       actor = await account(),
