@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -375,6 +376,14 @@ export async function manageInvitation(
           })
           .returningAll()
           .executeTakeFirstOrThrow()
+        await writeAuditEvent(trx, {
+          organizationId,
+          actor: { type: 'user', id: actor.userId },
+          credential: { type: 'session', id: actor.sessionId },
+          action: 'membership.invited',
+          targetType: 'invitation',
+          targetId: invitation.id,
+        })
       }
       // Legacy native resends changed expiresAt without changing createdAt. Missing
       // metadata uses the known 48-hour creator policy, never their inflated difference.

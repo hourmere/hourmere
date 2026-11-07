@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
@@ -53,6 +54,8 @@ function sourceCopy(replacement?: Replacement): Remove {
     '',
   )
   const bindings = {
+    auditActor,
+    writeAuditEvent,
     assertTeamOwnerRemains,
     checkTeamManagementAccess,
     isUuid,
@@ -79,6 +82,8 @@ function policySourceCopy(
     '',
   )
   const bindings = {
+    auditActor,
+    writeAuditEvent,
     AsyncLocalStorage,
     assertTeamOwnerRemains,
     tryGetCurrentAuthEndpointContext,

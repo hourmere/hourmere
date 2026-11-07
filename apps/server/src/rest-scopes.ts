@@ -6,6 +6,8 @@ import {
   type Principal,
   requireApiKeyOperation,
 } from '@hourmere/auth'
+import { auditActor } from '@hourmere/db/audit'
+import type { BookingOrigin } from '@hourmere/scheduling'
 import type { Context, Handler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { matchedRoutes } from 'hono/route'
@@ -14,6 +16,16 @@ import { ErrorBody, json } from './openapi.ts'
 
 // Bound from the declared route at registration, never from a caller-controlled URL.
 const operations = new WeakMap<Context, string>()
+const auditPrincipals = new WeakMap<Context, Principal>()
+
+/** Preserve public capability/idempotency semantics while attributing a validated key. */
+export function publicBookingAuditOrigin(
+  c: Context,
+  source: BookingOrigin['source'] = 'web',
+): BookingOrigin {
+  const principal = auditPrincipals.get(c)
+  return { source, apiKeyId: null, ...(principal ? { audit: auditActor(principal) } : {}) }
+}
 
 // These native protocols authenticate through their own state/signature, or are public
 // operational metadata. A new unclassified product route never inherits an exemption.
@@ -38,6 +50,7 @@ async function checkBearer(c: Context, resolveCaller: CallerResolver, operationI
     return c.json({ error: 'unauthorized' }, 401)
   }
   requireApiKeyOperation(result.principal, operationId)
+  auditPrincipals.set(c, result.principal)
 }
 
 /** Called after authentication, before validation or any resource lookup. */

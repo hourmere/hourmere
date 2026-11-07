@@ -9,6 +9,7 @@ import {
   withMcpOAuthIntent,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { defineJob } from '@hourmere/jobs'
 import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
@@ -404,6 +405,13 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
           .where('clientId', '=', c.client_id)
           .execute()
         await trx.deleteFrom('mcp_oauth_grants').where('id', '=', c.id).execute()
+        await writeAuditEvent(trx, {
+          organizationId: c.organization_id,
+          ...auditActor(p),
+          action: 'oauth.token_revoked',
+          targetType: 'oauth_grant',
+          targetId: c.id,
+        })
       })
       return { success: true }
     },

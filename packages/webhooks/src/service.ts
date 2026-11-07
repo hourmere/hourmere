@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -145,6 +146,23 @@ const visibleColumns = [
   'updated_at',
 ] as const
 
+async function auditWebhook(
+  trx: Db,
+  ctx: WebhookServiceContext,
+  action: AuditAction,
+  row: { id: string; organization_id: string; events: string[] },
+) {
+  await writeAuditEvent(trx, {
+    organizationId: row.organization_id,
+    ...auditActor(ctx.principal),
+    action,
+    targetType: 'webhook',
+    targetId: row.id,
+    details: { events: row.events },
+    requestId: ctx.requestId,
+  })
+}
+
 export async function listWebhooks(ctx: ServiceContext): Promise<WebhookView[]> {
   await requireAdmin(ctx.db, ctx)
   return (
@@ -208,6 +226,7 @@ export async function createWebhook(
       })
       .returning(visibleColumns)
       .executeTakeFirstOrThrow()
+    await auditWebhook(trx, ctx, 'webhook.created', row)
     return { webhook: view(row), secret }
   })
 }
@@ -259,6 +278,16 @@ export async function updateWebhook(
       .where('id', '=', row.id)
       .returning(visibleColumns)
       .executeTakeFirstOrThrow()
+    // Pausing and resuming are distinct from editing the subscribed events. A call that
+    // does both records both; a call that changes neither still records the update.
+    const activity = updated.is_active === row.is_active ? undefined : updated.is_active
+    if (activity !== undefined)
+      await auditWebhook(trx, ctx, activity ? 'webhook.resumed' : 'webhook.paused', updated)
+    if (
+      activity === undefined ||
+      [...updated.events].sort().join() !== [...row.events].sort().join()
+    )
+      await auditWebhook(trx, ctx, 'webhook.updated', updated)
     return view(updated)
   })
 }
@@ -280,6 +309,7 @@ export async function rotateWebhookSecret(
       })
       .where('id', '=', row.id)
       .execute()
+    await auditWebhook(trx, ctx, 'webhook.secret_rotated', row)
     return { secret }
   })
 }
@@ -288,6 +318,7 @@ export async function deleteWebhook(ctx: WebhookServiceContext, id: unknown) {
   await ctx.db.transaction().execute(async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
+    await auditWebhook(trx, ctx, 'webhook.deleted', row)
   })
 }
 

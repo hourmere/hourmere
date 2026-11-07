@@ -99,6 +99,7 @@ export default defineConfig({
             { label: 'Booking page branding', link: '/docs/branding' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },
+            { label: 'Audit log', link: '/docs/audit-log' },
             { label: 'CSV booking export', link: '/docs/booking-export' },
             { label: 'Interface languages', link: '/docs/interface-languages' },
           ],

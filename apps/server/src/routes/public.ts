@@ -20,6 +20,7 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import {
   BookingWithToken,
   Instant,
@@ -493,7 +494,7 @@ export function publicRoutes({
               waitlistToken: body.waitlistToken,
               idempotencyKey: c.req.valid('header')['idempotency-key'],
             },
-            { source: body.source ?? 'web', apiKeyId: null },
+            publicBookingAuditOrigin(c, body.source ?? 'web'),
           )
           return replayed ? c.json(result, 200) : c.json(result, 201)
         },
