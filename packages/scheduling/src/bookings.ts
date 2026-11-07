@@ -1386,7 +1386,6 @@ async function publicBooking(
       const responses = validateResponses(current.questions, input.responses ?? {})
       const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
       const end = input.start.add({ minutes: durationMinutes })
-      const chosenOption = selectBookableLocationOption(current, input.locationOptionId)
       const groupSlot = await admitGroupSlot(trx, {
         event: current,
         bookerEmail: invitee.email,
@@ -1395,7 +1394,11 @@ async function publicBooking(
         now,
         snapshot,
         expectedSlotId: input.expectedGroupSlotId,
+        locationOptionId: input.locationOptionId,
       })
+      const chosenOption = groupSlot
+        ? null
+        : selectBookableLocationOption(current, input.locationOptionId)
       let selectedHostIds = current.hostUserIds
       if (current.schedulingType === 'round_robin') {
         await lockRoundRobinState(trx, current.id)
@@ -1445,7 +1448,8 @@ async function publicBooking(
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
-      const choice = await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)
+      const choice =
+        groupSlot ?? (await resolveBookingLocation(ctx, trx, current, selectedHostIds, input))
       requireCollectedPhone(choice.location)
       let settings: SuccessRedirect | null = null
       if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
@@ -1506,12 +1510,14 @@ async function publicBooking(
           now: ctx.now,
         })
       }
-      await prepareChosenBookingConference(
-        ctx,
-        trx,
-        id,
-        isPreservedSingleton(current.locations, input.locationOptionId),
-      )
+      if (groupSlot) await prepareBookingConference(ctx, trx, id)
+      else
+        await prepareChosenBookingConference(
+          ctx,
+          trx,
+          id,
+          isPreservedSingleton(current.locations, input.locationOptionId),
+        )
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return {
         booking: await loadBooking(trx, id),
@@ -2193,7 +2199,7 @@ export async function rescheduleHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
-    await lockGroupBooking(trx, id, start, durationMinutes)
+    await lockGroupBooking(trx, id, start, durationMinutes, ctx.principal.organization.id)
     const old = await trx
       .selectFrom('bookings')
       .select(RESCHEDULE_COLUMNS)
@@ -2256,7 +2262,7 @@ export async function cancelHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
-    await lockGroupBooking(trx, id)
+    await lockGroupBooking(trx, id, undefined, undefined, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')
       .innerJoin(resolvedBookingHosts(trx).as('bh'), 'bh.booking_id', 'b.id')

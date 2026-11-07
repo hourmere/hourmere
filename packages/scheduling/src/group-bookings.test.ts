@@ -126,6 +126,53 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
       expect(seat.location_option).toEqual(slot.location_option)
     }
   })
+  it('validates existing occurrence choices against its snapshot after the current default changes', async () => {
+    const s = await setup(3)
+    const original = {
+      id: 'original',
+      kind: 'link',
+      url: 'https://example.test/class',
+      isDefault: true,
+    }
+    await db
+      .updateTable('event_types')
+      .set({ locations: JSON.stringify([original]) })
+      .where('id', '=', s.eventId)
+      .execute()
+    const first = await s.book('a@example.test')
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify([
+          { id: 'phone', kind: 'phone', askInvitee: true, isDefault: true },
+        ]),
+        location: JSON.stringify({ kind: 'phone', askInvitee: true }),
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    const input = {
+      handle: s.handle,
+      slug: 'group',
+      start: START,
+      invitee: { name: 'B', email: 'b@example.test', timeZone: 'UTC' },
+    }
+    await expect(
+      createPublicBooking(ctx, {
+        ...input,
+        locationOptionId: 'phone',
+        inviteePhone: '+14155550123',
+      }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect((await state(s.eventId))[0]!.active_seats).toBe(1)
+    const explicit = await createPublicBooking(ctx, { ...input, locationOptionId: 'original' })
+    const implicit = await s.book('c@example.test')
+    expect(explicit.booking.location).toEqual(first.booking.location)
+    expect(implicit.booking.location).toEqual(first.booking.location)
+    await expect(s.book('d@example.test', START.add({ hours: 1 }))).rejects.toMatchObject({
+      code: 'location_unavailable',
+    })
+    expect(await state(s.eventId)).toHaveLength(1)
+  })
   it('refuses invitee-phone collection even when it is the group default', async () => {
     const s = await setup()
     await db
@@ -168,7 +215,7 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
     expect(JSON.stringify(await getManagedBooking(ctx, b.manageToken!))).not.toContain(
       'alice@example.test',
     )
-    await expect(s.book('ALICE@example.test')).rejects.toMatchObject({ code: 'slot_unavailable' })
+    await expect(s.book('ALICE@example.test')).rejects.toMatchObject({ code: 'slot_taken' })
     const replay = await s.book('alice@example.test', START, key)
     expect(replay.booking.id).toBe(a.booking.id)
     expect(replay.manageToken).toBeNull()
@@ -244,6 +291,10 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
         s.book('b@example.test'),
       ])
       expect(outcomes.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected')
+          expect(outcome.reason).toMatchObject({ code: 'slot_taken' })
+      }
       expect((await state(s.eventId))[0]!.active_seats).toBe(2)
       const rows = await db
         .selectFrom('bookings')
@@ -343,23 +394,237 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
     await cancelHostBooking(host, b.booking.id)
     expect((await state(s.eventId))[0]!.state).toBe('retired')
   })
-  it('rejects incompatible shared locations and preserves full/disabled creation replay', async () => {
-    const s = await setup(3)
+  it('hides membership on full occurrences while replaying the original seat without writes', async () => {
+    const s = await setup()
     const key = randomUUID()
-    const a = await s.book('a@example.test', START, key)
+    const a = await s.book('alice@example.test', START, key)
+    await s.book('bob@example.test')
+    for (const email of ['ALICE@example.test', 'stranger@example.test']) {
+      await expect(s.book(email)).rejects.toMatchObject({
+        code: 'slot_taken',
+        errorAlias: 'group_slot_full',
+      })
+    }
+    expect(await s.book('alice@example.test', START, key)).toMatchObject({
+      booking: { id: a.booking.id },
+      manageToken: null,
+      replayed: true,
+    })
+    expect((await state(s.eventId))[0]!.active_seats).toBe(2)
+    expect(
+      await db.selectFrom('bookings').select('id').where('event_type_id', '=', s.eventId).execute(),
+    ).toHaveLength(2)
+    expect(
+      await db
+        .selectFrom('booking_notifications')
+        .select('booking_id')
+        .where('booking_id', '=', a.booking.id)
+        .execute(),
+    ).toHaveLength(1)
+  })
+  it.each([
+    'location',
+    'legacy phone location',
+    'default location',
+    'schedule',
+    'Zoom connection',
+  ] as const)(
+    'keeps existing occurrence logistics after a %s edit, including new seats and moves',
+    async (setting) => {
+      const s = await setup(3)
+      const originalLocation = { kind: 'link', url: 'https://example.test/class' }
+      const option = { id: 'original', isDefault: true, ...originalLocation }
+      await db
+        .updateTable('event_types')
+        .set({ locations: JSON.stringify([option]) })
+        .where('id', '=', s.eventId)
+        .execute()
+      const key = randomUUID()
+      const a = await s.book('a@example.test', START, key)
+      const moving = await s.book('moving@example.test', START.add({ hours: 1 }))
+      const before = (await state(s.eventId))[0]!
+      if (setting === 'location') {
+        await db
+          .updateTable('event_types')
+          .set({ location: JSON.stringify({ kind: 'link', url: 'https://example.test/changed' }) })
+          .where('id', '=', s.eventId)
+          .execute()
+      } else if (setting === 'legacy phone location') {
+        await db
+          .updateTable('event_types')
+          .set({ location: JSON.stringify({ kind: 'phone', askInvitee: true }) })
+          .where('id', '=', s.eventId)
+          .execute()
+      } else if (setting === 'default location') {
+        await db
+          .updateTable('event_types')
+          .set({
+            locations: JSON.stringify([
+              { id: 'changed', kind: 'in_person', address: 'New office', isDefault: true },
+            ]),
+          })
+          .where('id', '=', s.eventId)
+          .execute()
+      } else if (setting === 'schedule') {
+        const scheduleId = await f.schedule(s.userId, { isDefault: false, weeklyHours: {} })
+        await db
+          .updateTable('event_type_hosts')
+          .set({ schedule_id: scheduleId })
+          .where('event_type_id', '=', s.eventId)
+          .execute()
+      } else {
+        const connection = await db
+          .insertInto('conference_connections')
+          .values({
+            user_id: s.userId,
+            provider: 'zoom',
+            mode: 'meetings',
+            external_user_id: randomUUID(),
+            status: 'active',
+            credentials: Buffer.from('synthetic'),
+            scopes: [
+              'user:read:user',
+              'meeting:write:meeting',
+              'meeting:read:meeting',
+              'meeting:update:meeting',
+              'meeting:delete:meeting',
+            ],
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await db
+          .updateTable('event_types')
+          .set({ zoom_connection_id: connection.id })
+          .where('id', '=', s.eventId)
+          .execute()
+      }
+      const joined = await s.book('b@example.test')
+      const moved = await rescheduleManagedBooking(ctx, moving.manageToken!, {
+        start: START,
+        idempotencyKey: randomUUID(),
+      })
+      for (const seat of [joined, moved]) {
+        expect(seat.booking.location).toEqual(originalLocation)
+        expect(
+          await db
+            .selectFrom('bookings')
+            .select(['group_slot_id', 'location_option'])
+            .where('id', '=', seat.booking.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ group_slot_id: before.id, location_option: option })
+      }
+      const after = (await state(s.eventId)).find((slot) => slot.id === before.id)!
+      expect(after).toMatchObject({
+        active_seats: 3,
+        location: before.location,
+        location_option: before.location_option,
+        host_schedule_id: before.host_schedule_id,
+        zoom_connection_id: before.zoom_connection_id,
+      })
+      expect((await s.book('a@example.test', START, key)).booking.id).toBe(a.booking.id)
+      await db
+        .updateTable('event_types')
+        .set({ is_active: false })
+        .where('id', '=', s.eventId)
+        .execute()
+      expect((await s.book('a@example.test', START, key)).booking.id).toBe(a.booking.id)
+    },
+  )
+  it('keeps the pinned automatic Zoom resource when the selected connection changes', async () => {
+    const s = await setup(3)
+    const connection = await db
+      .insertInto('conference_connections')
+      .values({
+        user_id: s.userId,
+        provider: 'zoom',
+        mode: 'meetings',
+        external_user_id: randomUUID(),
+        status: 'active',
+        credentials: Buffer.from('synthetic'),
+        scopes: [
+          'user:read:user',
+          'meeting:write:meeting',
+          'meeting:read:meeting',
+          'meeting:update:meeting',
+          'meeting:delete:meeting',
+        ],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
     await db
       .updateTable('event_types')
-      .set({ location: JSON.stringify({ kind: 'link', url: 'https://example.test/changed' }) })
+      .set({
+        location: JSON.stringify({ kind: 'zoom', autoCreate: true }),
+        zoom_connection_id: connection.id,
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    const c = { ...ctx, automaticZoom: true }
+    await s.book('a@example.test', START, randomUUID(), c)
+    const original = await db
+      .selectFrom('group_slot_conferences')
+      .selectAll()
+      .where('group_slot_id', '=', (await state(s.eventId))[0]!.id)
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('event_types')
+      .set({
+        zoom_connection_id: null,
+        locations: JSON.stringify([
+          { id: 'new-link', kind: 'link', url: 'https://example.test/new', isDefault: true },
+          { id: 'office', kind: 'in_person', address: 'New office' },
+        ]),
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    await s.book('b@example.test', START, randomUUID(), c)
+    expect(
+      await db
+        .selectFrom('group_slot_conferences')
+        .selectAll()
+        .where('group_slot_id', '=', original.group_slot_id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(original)
+    expect((await state(s.eventId))[0]).toMatchObject({
+      active_seats: 2,
+      zoom_connection_id: connection.id,
+    })
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'needs_reauth', credentials: null })
+      .where('id', '=', connection.id)
+      .execute()
+    await expect(s.book('c@example.test', START, randomUUID(), c)).rejects.toMatchObject({
+      code: 'automatic_zoom_unavailable',
+    })
+    expect((await state(s.eventId))[0]!.active_seats).toBe(2)
+  })
+  it('keeps current notice and booking-window cutoffs on occupied occurrences', async () => {
+    const s = await setup(3)
+    await s.book('a@example.test')
+    await expect(
+      s.book('b@example.test', START, randomUUID(), {
+        ...ctx,
+        now: () => START.add({ minutes: 1 }),
+      }),
+    ).rejects.toMatchObject({ code: 'slot_unavailable' })
+    await db
+      .updateTable('event_types')
+      .set({ minimum_notice_minutes: 48 * 60 })
       .where('id', '=', s.eventId)
       .execute()
     await expect(s.book('b@example.test')).rejects.toMatchObject({ code: 'slot_unavailable' })
-    expect((await s.book('a@example.test', START, key)).booking.id).toBe(a.booking.id)
     await db
       .updateTable('event_types')
-      .set({ is_active: false })
+      .set({ minimum_notice_minutes: 0, booking_window_days: 1 })
       .where('id', '=', s.eventId)
       .execute()
-    expect((await s.book('a@example.test', START, key)).booking.id).toBe(a.booking.id)
+    await expect(
+      s.book('b@example.test', START, randomUUID(), {
+        ...ctx,
+        now: () => NOW.subtract({ hours: 48 }),
+      }),
+    ).rejects.toMatchObject({ code: 'slot_unavailable' })
   })
   it('rolls back first slot and capacity when transactional notifications fail', async () => {
     const s = await setup()

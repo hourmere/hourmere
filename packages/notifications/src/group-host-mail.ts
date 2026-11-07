@@ -302,16 +302,24 @@ export function groupHostMailJob(deps: NotificationDeps) {
     retry: { limit: 0 },
     expireInSeconds: 300,
     handler: async (_, { signal }) => {
-      const rows = (
-        await sql<{ id: string }>`SELECT id FROM group_slot_host_messages
+      // Leave time for one bounded SMTP attempt before the job's five-minute expiry.
+      // Four is a query batch size, not an instance-wide per-minute delivery cap.
+      const deadline = performance.now() + 230_000
+      while (performance.now() < deadline) {
+        signal.throwIfAborted()
+        const rows = (
+          await sql<{ id: string }>`SELECT id FROM group_slot_host_messages
         WHERE state IN ('pending','processing') AND next_attempt_at<=${asDate(clock(deps))} AND due_at<=${asDate(clock(deps))}
         AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY next_attempt_at,id LIMIT 4`.execute(
-          deps.db,
-        )
-      ).rows
-      for (const row of rows) {
-        signal.throwIfAborted()
-        await deliverGroupHostMail(deps, row.id, signal)
+            deps.db,
+          )
+        ).rows
+        if (rows.length === 0) return
+        for (const row of rows) {
+          signal.throwIfAborted()
+          if (performance.now() >= deadline) return
+          await deliverGroupHostMail(deps, row.id, signal)
+        }
       }
     },
   })
