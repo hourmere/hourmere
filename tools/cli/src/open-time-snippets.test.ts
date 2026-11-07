@@ -1,5 +1,5 @@
 import { constants, readFileSync } from 'node:fs'
-import { open } from 'node:fs/promises'
+import { open, unlink } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { expect, it, vi } from 'vitest'
 import { runCli } from './cli.ts'
@@ -52,7 +52,7 @@ function copy(change?: [string, string]): typeof runCli {
     /\bexport /g,
     '',
   )
-  const bindings = { constants, open, ...client }
+  const bindings = { constants, open, unlink, ...client }
   return new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),
   )

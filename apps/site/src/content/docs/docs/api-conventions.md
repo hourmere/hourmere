@@ -6,6 +6,15 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## CSV booking export
+
+`GET /api/v1/bookings/export.csv` adds an authenticated UTF-8 CSV download. Personal
+owners can export their own bookings; API keys need `read` or `full` scope. Team
+exports require a browser session and current owner/admin membership, and retain the
+existing team-admin booking data boundary (including no custom answers or free-text titles). Errors before
+streaming use the ordinary JSON error envelope; an interrupted stream must be discarded.
+See [CSV booking export](/docs/booking-export) for columns, limits, privacy and MCP/CLI.
+
 ## Open-time snippet generation
 
 `POST /api/v1/open-time-snippets` reads current availability and returns direct links with

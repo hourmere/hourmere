@@ -81,3 +81,21 @@ booking state, and loads only that booking's hosts and attendees. Event metadata
 its associated event type in that team, with a null title after soft deletion. Existing host,
 public, management-token and agent interfaces keep their contracts. This endpoint grants
 read access only.
+
+## CSV exports
+
+`GET /api/v1/bookings/export.csv` in a team organization uses the same live verified
+browser-session and exact owner/admin check, including session expiry and current active
+organization. API keys and MCP OAuth grants cannot export team data and receive
+`403 team_management_access_denied`. A personal export retains the full personal columns
+on browser, REST, MCP-pointer and CLI surfaces; no key scope grants team-wide export access.
+
+Team CSV columns are `id`, `event_type_id`, `event_type`, `start`, `end`, `start_utc`,
+`end_utc`, `status`, `invitee_name`, `invitee_email`, `guests_count`, `hosts`,
+`cancelled_at` and `time_zone`. Local times and the display zone derive only from the
+already-readable booking instants. `hosts` contains saved host IDs and names only,
+including former members, with no email addresses. Deleted event titles are empty.
+The CSV excludes custom answers, free-text booking titles, cancellation reasons, location
+metadata/links, attribution and creation timestamps. It does not widen the whitelist above.
+The same bounded range, streaming limits and file privacy guidance apply as documented in
+[CSV booking exports](https://hourmere.com/docs/booking-export).
