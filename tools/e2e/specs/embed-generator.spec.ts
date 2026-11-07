@@ -47,9 +47,13 @@ for (const mode of ['inline', 'popup'] as const) {
     await expect(frame.getByRole('heading', { name: 'You’re booked', exact: true })).toBeVisible()
     expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
 
-    // The app origin is intentionally absent from EMBED_ALLOWED_ORIGINS. Only this
-    // synthetic parent document is supplied here; widget, iframe and API stay real.
-    await page.route(`${app.url}/generated-embed`, (route) =>
+    // A different loopback hostname is a separate, unlisted third-party origin.
+    // Fulfill only its parent document locally; widget, iframe and API stay real.
+    const refusedParent = new URL('/generated-embed', app.parentUrl)
+    refusedParent.hostname = refusedParent.hostname === 'localhost' ? '127.0.0.1' : 'localhost'
+    expect(refusedParent.origin).not.toBe(new URL(app.url).origin)
+    expect(refusedParent.origin).not.toBe(new URL(app.parentUrl).origin)
+    await page.route(refusedParent.href, (route) =>
       route.fulfill({
         contentType: 'text/html',
         body: `<!doctype html><title>Disallowed website</title>${copied}`,
@@ -58,7 +62,7 @@ for (const mode of ['inline', 'popup'] as const) {
     const rejected = page.waitForResponse((response) =>
       new URL(response.url()).pathname.startsWith('/embed/'),
     )
-    await page.goto(`${app.url}/generated-embed`)
+    await page.goto(refusedParent.href)
     if (mode === 'popup')
       await page.getByRole('button', { name: 'Book <our> meeting & chat', exact: true }).click()
     const response = await rejected
