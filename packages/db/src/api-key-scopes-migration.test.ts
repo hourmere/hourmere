@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createDb } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
@@ -214,6 +214,42 @@ const sqlstate = async (work: Promise<unknown>) => {
   }
 }
 
+async function afterFixtureWork<T extends { setup?: Promise<void>; pending?: Promise<void> }>(
+  state: T,
+  cleanup: (state: T) => Promise<void>,
+) {
+  await Promise.allSettled([state.setup, state.pending])
+  await cleanup(state)
+}
+
+it('drains aborted fixture work and releases only its original database after the next case starts', async () => {
+  const barrier = Promise.withResolvers<void>()
+  const controller = new AbortController()
+  const released: string[] = []
+  const first = {
+    id: 'first',
+    pending: barrier.promise.then(() => controller.signal.throwIfAborted()),
+  }
+  let current = first
+  const release = async (state: { id: string }) => {
+    released.push(state.id)
+  }
+  const firstCleanup = afterFixtureWork(current, release)
+  controller.abort(new Error('Synthetic fixture timeout'))
+  try {
+    expect(released).toEqual([])
+    // Model a timed-out teardown whose old promise still runs after the runner
+    // has started another case. Old cleanup must retain its original owner.
+    current = { id: 'second', pending: Promise.resolve() }
+    await afterFixtureWork(current, release)
+    expect(released).toEqual(['second'])
+  } finally {
+    barrier.resolve()
+    await firstCleanup
+  }
+  expect(released).toEqual(['second', 'first'])
+})
+
 describe.skipIf(!serverUrl)('API key scope migration', () => {
   const databases: TestDatabase[] = []
   const available: TestDatabase[] = []
@@ -233,11 +269,15 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
   async function fixtureDatabase(directory: string, migrate = true): Promise<TestDatabase> {
     const database = available.pop()
     if (!database) throw new Error('No isolated migration fixture database available')
-    const drop = async () => {
-      await database.pool.query(
-        'DROP SCHEMA IF EXISTS auth CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;',
-      )
-      available.push(database)
+    let dropping: Promise<void> | undefined
+    const drop = () => {
+      dropping ??= (async () => {
+        await database.pool.query(
+          'DROP SCHEMA IF EXISTS auth CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;',
+        )
+        available.push(database)
+      })()
+      return dropping
     }
     try {
       if (migrate) await runMigrations(database.pool, directory)
@@ -443,7 +483,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
-  it.each([
+  describe.each([
     'backfill',
     'hash preservation',
     'organization preservation',
@@ -453,81 +493,111 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
     'OAuth grant preservation',
     'booking attribution preservation',
     'duration configuration preservation',
-  ] as const)(
-    'detects a source-copy %s migration mutation and verifies restored SQL',
-    async (protection) => {
-      const directory = await predecessorDirectory()
-      let database: TestDatabase | undefined
-      let restored: TestDatabase | undefined
-      try {
-        database = await fixtureDatabase(directory)
-        await seed(database.pool)
-        const before = await records(database.pool)
-        const sentinels = await sentinelRecords(database.pool)
-        const source = await readFile(join(migrationsDir, migration), 'utf8')
-        let mutant = source
-        if (protection === 'backfill')
-          mutant = source.replace(
-            'UPDATE auth.apikey\nSET metadata = (coalesce(metadata::jsonb, \'{}\'::jsonb) || \'{"scope":"full"}\'::jsonb)::text;',
-            'SELECT 1;',
-          )
-        if (protection === 'hash preservation')
-          mutant += "\nUPDATE auth.apikey SET key='mutated-synthetic-hash';"
-        if (protection === 'organization preservation')
-          mutant += "\nUPDATE auth.apikey SET metadata=(metadata::jsonb - 'organizationId')::text;"
-        if (protection === 'state preservation') mutant += '\nUPDATE auth.apikey SET enabled=true;'
-        if (protection === 'immutable trigger')
-          mutant = source.replace(
-            "IF parsed -> 'scope' IS DISTINCT FROM old_scope THEN",
-            'IF false THEN',
-          )
-        if (protection === 'session preservation')
-          mutant += `\nUPDATE auth.session SET "activeOrganizationId"='00000000-0000-4000-8000-000000000003';`
-        if (protection === 'OAuth grant preservation')
-          mutant +=
-            "\nUPDATE mcp_oauth_grants SET organization_id='00000000-0000-4000-8000-000000000003';"
-        if (protection === 'booking attribution preservation')
-          mutant +=
-            '\nUPDATE bookings SET api_key_id=null,cancelled_api_key_id=null,idempotency_key=null,idempotency_fingerprint=null;'
-        if (protection === 'duration configuration preservation')
-          mutant += '\nUPDATE event_types SET allowed_durations_minutes=ARRAY[duration_minutes];'
-        expect(mutant).not.toBe(source)
-        await writeFile(join(directory, migration), mutant)
-        await runMigrations(database.pool, directory)
-        const assertPreserved = async (pool: pg.Pool, expectedSentinels = sentinels) => {
-          if (protection === 'immutable trigger') {
-            expect(
-              await sqlstate(
-                pool.query(
-                  "UPDATE auth.apikey SET metadata=jsonb_set(metadata::jsonb,'{scope}','\"read\"')::text",
-                ),
-              ),
-            ).toBe('23514')
-          } else {
-            expect(await records(pool)).toEqual(
-              before.map((row) => ({ ...row, metadata: { ...row.metadata, scope: 'full' } })),
-            )
-            expect(await sentinelRecords(pool)).toEqual(expectedSentinels)
-          }
+  ] as const)('source-copy %s migration protection', (protection) => {
+    interface FixtureState {
+      directory?: string
+      database?: TestDatabase
+      before?: Awaited<ReturnType<typeof records>>
+      sentinels?: Awaited<ReturnType<typeof sentinelRecords>>
+      setup?: Promise<void>
+      pending?: Promise<void>
+    }
+    let state: FixtureState
+    beforeEach(() => {
+      const current: FixtureState = {}
+      state = current
+      current.setup = (async () => {
+        current.directory = await predecessorDirectory()
+        current.database = await fixtureDatabase(current.directory)
+        await seed(current.database.pool)
+        current.before = await records(current.database.pool)
+        current.sentinels = await sentinelRecords(current.database.pool)
+      })()
+      return current.setup
+    })
+    afterEach(async () => {
+      // Capture ownership before awaiting: even if teardown itself times out,
+      // its continuation must never release a subsequent case's database.
+      await afterFixtureWork(state, async (current) => {
+        try {
+          await current.database?.drop()
+        } finally {
+          if (current.directory) await rm(current.directory, { recursive: true, force: true })
         }
-        await expect(assertPreserved(database.pool)).rejects.toMatchObject({
-          name: 'AssertionError',
-        })
-        await writeFile(join(directory, migration), source)
-        restored = await fixtureDatabase(directory, false)
-        // Seed through the actual predecessor before applying the restored migration.
-        await rm(join(directory, migration))
-        await runMigrations(restored.pool, directory)
-        await seed(restored.pool)
-        const restoredSentinels = await sentinelRecords(restored.pool)
-        await writeFile(join(directory, migration), source)
-        await runMigrations(restored.pool, directory)
-        await assertPreserved(restored.pool, restoredSentinels)
-      } finally {
-        await restored?.drop()
-        await database?.drop()
-        await rm(directory, { recursive: true, force: true })
-      }
-    },
-  )
+      })
+    })
+    for (const variant of ['mutated', 'restored'] as const) {
+      it(`checks ${variant} SQL against the preservation assertion`, ({ signal }) => {
+        const current = state
+        current.pending = (async () => {
+          const fixture = current.database
+          const path = current.directory
+          const before = current.before
+          const sentinels = current.sentinels
+          if (!fixture || !path || !before || !sentinels)
+            throw new Error('Migration fixture setup did not complete')
+          signal.throwIfAborted()
+          const source = await readFile(join(migrationsDir, migration), 'utf8')
+          let mutant = source
+          if (protection === 'backfill')
+            mutant = source.replace(
+              'UPDATE auth.apikey\nSET metadata = (coalesce(metadata::jsonb, \'{}\'::jsonb) || \'{"scope":"full"}\'::jsonb)::text;',
+              'SELECT 1;',
+            )
+          if (protection === 'hash preservation')
+            mutant += "\nUPDATE auth.apikey SET key='mutated-synthetic-hash';"
+          if (protection === 'organization preservation')
+            mutant +=
+              "\nUPDATE auth.apikey SET metadata=(metadata::jsonb - 'organizationId')::text;"
+          if (protection === 'state preservation')
+            mutant += '\nUPDATE auth.apikey SET enabled=true;'
+          if (protection === 'immutable trigger')
+            mutant = source.replace(
+              "IF parsed -> 'scope' IS DISTINCT FROM old_scope THEN",
+              'IF false THEN',
+            )
+          if (protection === 'session preservation')
+            mutant += `\nUPDATE auth.session SET "activeOrganizationId"='00000000-0000-4000-8000-000000000003';`
+          if (protection === 'OAuth grant preservation')
+            mutant +=
+              "\nUPDATE mcp_oauth_grants SET organization_id='00000000-0000-4000-8000-000000000003';"
+          if (protection === 'booking attribution preservation')
+            mutant +=
+              '\nUPDATE bookings SET api_key_id=null,cancelled_api_key_id=null,idempotency_key=null,idempotency_fingerprint=null;'
+          if (protection === 'duration configuration preservation')
+            mutant += '\nUPDATE event_types SET allowed_durations_minutes=ARRAY[duration_minutes];'
+          expect(mutant).not.toBe(source)
+          signal.throwIfAborted()
+          await writeFile(join(path, migration), variant === 'mutated' ? mutant : source)
+          signal.throwIfAborted()
+          await runMigrations(fixture.pool, path)
+          signal.throwIfAborted()
+          const assertPreserved = async (pool: pg.Pool, expectedSentinels = sentinels) => {
+            if (protection === 'immutable trigger') {
+              expect(
+                await sqlstate(
+                  pool.query(
+                    "UPDATE auth.apikey SET metadata=jsonb_set(metadata::jsonb,'{scope}','\"read\"')::text",
+                  ),
+                ),
+              ).toBe('23514')
+            } else {
+              expect(await records(pool)).toEqual(
+                before.map((row) => ({ ...row, metadata: { ...row.metadata, scope: 'full' } })),
+              )
+              expect(await sentinelRecords(pool)).toEqual(expectedSentinels)
+            }
+          }
+          if (variant === 'mutated') {
+            await expect(assertPreserved(fixture.pool)).rejects.toMatchObject({
+              name: 'AssertionError',
+            })
+          } else {
+            await assertPreserved(fixture.pool)
+          }
+        })()
+        return current.pending
+      })
+    }
+  })
 })
