@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join, matchesGlob } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import type { PlaywrightTestConfig } from '@playwright/test'
+import { describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 import functionalConfig from '../tools/e2e/playwright.config.ts'
 
@@ -50,6 +51,38 @@ const releaseSource = readFileSync(
   'utf8',
 )
 
+// Inspect selectors against real files without loading every browser fixture in a child
+// process. Configuration is the boundary under test; browser execution belongs to e2e.
+function selectedSpecs(
+  config: PlaywrightTestConfig,
+  project: NonNullable<PlaywrightTestConfig['projects']>[number],
+) {
+  const matches = (file: string, patterns: string | RegExp | (string | RegExp)[]) =>
+    [patterns]
+      .flat()
+      .some((pattern) =>
+        pattern instanceof RegExp
+          ? pattern.test(file)
+          : matchesGlob(file, pattern.startsWith('**/') ? pattern : `**/${pattern}`),
+      )
+  const directory = join(root, 'tools/e2e', project.testDir ?? config.testDir ?? 'specs')
+  return readdirSync(directory, { recursive: true, encoding: 'utf8' })
+    .map((file) => join(directory, file))
+    .filter((file) =>
+      matches(file, project.testMatch ?? config.testMatch ?? '**/*.@(spec|test).?(c|m)[jt]s?(x)'),
+    )
+    .filter((file) => !matches(file, project.testIgnore ?? config.testIgnore ?? []))
+    .map((file) => basename(file))
+    .sort()
+}
+
+// These smoke specs use literal top-level declarations; retain the named five-path
+// coverage contract without executing browser fixtures during a unit test.
+function declaredTests(file: string) {
+  const source = readFileSync(join(root, 'tools/e2e/specs', file), 'utf8')
+  return [...source.matchAll(/^test\('([^']+)'/gm)].map((match) => match[1])
+}
+
 describe('UI measurement CI contract', () => {
   it('keeps measurement specs out of every functional project', () => {
     const measurementSpecs = '**/{layout,a11y,visual,cross-engine}.spec.ts'
@@ -80,51 +113,19 @@ describe('UI measurement CI contract', () => {
   })
 
   it('lists measurement specs in no functional project and the site spec only in its own', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'hourmere-ui-functional-'))
-    try {
-      const reporter = join(directory, 'tests.mjs')
-      writeFileSync(
-        reporter,
-        `export default class {
-          onBegin(config, suite) {
-            console.log(JSON.stringify(suite.allTests().map((test) => [test.parent.project().name, test.location.file.split('/').pop()])))
-          }
-        }`,
-      )
-      const result = spawnSync(
-        process.execPath,
-        [
-          fileURLToPath(import.meta.resolve('@playwright/test/cli')),
-          'test',
-          '--config',
-          'tools/e2e/playwright.config.ts',
-          '--list',
-          '--reporter',
-          reporter,
-        ],
-        { cwd: root, encoding: 'utf8', timeout: 60_000 },
-      )
-      expect(result.status, result.stderr).toBe(0)
-      const tests = JSON.parse(result.stdout.trim()) as [string, string][]
-      expect(tests.length).toBeGreaterThan(0)
-      const files = (project: string) =>
-        new Set(tests.filter(([p]) => p === project).map(([, f]) => f))
-      for (const project of ['desktop', 'mobile', 'site-desktop', 'site-mobile']) {
-        expect(
-          [...files(project)].filter((file) =>
-            /^(layout|a11y|visual|cross-engine)\.spec\.ts$/.test(file),
-          ),
-          project,
-        ).toEqual([])
-      }
-      expect(files('desktop').has('site-layout.spec.ts')).toBe(false)
-      expect(files('mobile').has('site-layout.spec.ts')).toBe(false)
-      expect([...files('site-desktop')]).toEqual(['site-layout.spec.ts'])
-      expect([...files('site-mobile')]).toEqual(['site-layout.spec.ts'])
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
+    const projects = functionalConfig.projects ?? []
+    for (const project of projects) {
+      const files = selectedSpecs(functionalConfig, project)
+      expect(files.length, project.name).toBeGreaterThan(0)
+      expect(
+        files.filter((file) => /^(layout|a11y|visual|cross-engine)\.spec\.ts$/.test(file)),
+        project.name,
+      ).toEqual([])
+      if (project.name?.startsWith('site-')) expect(files).toEqual(['site-layout.spec.ts'])
+      else expect(files).not.toContain('site-layout.spec.ts')
     }
   })
+
   it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(workflow.on.push).toEqual({ branches: ['main'] })
@@ -328,60 +329,43 @@ process.exitCode = args.includes('--dry-run') && process.env.HOURMERE_DEPENDENCI
 })
 
 describe('report-only browser command', () => {
-  it('resolves native WebKit and Firefox projects without inheriting the Chrome channel', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'hourmere-ui-config-'))
+  it('resolves native WebKit and Firefox projects without inheriting the Chrome channel', async () => {
+    vi.stubEnv('HOURMERE_UI_SUITE', 'cross-engine')
+    vi.resetModules()
     try {
-      const reporter = join(directory, 'projects.mjs')
-      writeFileSync(
-        reporter,
-        `import { basename } from 'node:path'
-        export default class {
-          onBegin(config, suite) {
-            const specs = suite => [...new Set(suite.allTests().map(test=>basename(test.location.file)))].sort()
-            console.log(JSON.stringify({
-              projects:config.projects.map(({name,use})=>({name,browserName:use.browserName,channel:use.channel})),
-              specs:specs(suite),
-              coverage:suite.suites.map(project=>({project:project.title,specs:specs(project)})),
-              tests:suite.allTests().length,
-            }))
-          }
-        }`,
-      )
-      // --list resolves the actual merged Playwright configuration without launching browsers.
-      const result = spawnSync(
-        process.execPath,
-        [
-          fileURLToPath(import.meta.resolve('@playwright/test/cli')),
-          'test',
-          '--config',
-          process.env.HOURMERE_UI_AUDIT_CONFIG ?? 'tools/e2e/playwright.audit.config.ts',
-          '--list',
-          '--reporter',
-          reporter,
-        ],
-        {
-          cwd: root,
-          env: { ...process.env, HOURMERE_UI_SUITE: 'cross-engine' },
-          encoding: 'utf8',
-          timeout: 30_000,
-        },
-      )
-      expect(result.status, result.stderr).toBe(0)
-      expect(JSON.parse(result.stdout.trim())).toEqual({
-        projects: [
-          { name: 'webkit-desktop', browserName: 'webkit' },
-          { name: 'webkit-iphone', browserName: 'webkit' },
-          { name: 'firefox-desktop', browserName: 'firefox' },
-        ],
-        specs: ['cross-engine.spec.ts', 'host-slot-picker.spec.ts'],
-        coverage: ['webkit-desktop', 'webkit-iphone', 'firefox-desktop'].map((project) => ({
-          project,
-          specs: ['cross-engine.spec.ts', 'host-slot-picker.spec.ts'],
+      const { default: config } = (await import(
+        process.env.HOURMERE_UI_AUDIT_CONFIG ?? '../tools/e2e/playwright.audit.config.ts'
+      )) as { default: PlaywrightTestConfig }
+      const projects = config.projects ?? []
+      expect(
+        projects.map(({ name, use }) => ({
+          name,
+          browserName: use?.browserName,
+          channel: use?.channel ?? config.use?.channel,
         })),
-        tests: 15,
-      })
+      ).toEqual([
+        { name: 'webkit-desktop', browserName: 'webkit', channel: undefined },
+        { name: 'webkit-iphone', browserName: 'webkit', channel: undefined },
+        { name: 'firefox-desktop', browserName: 'firefox', channel: undefined },
+      ])
+      for (const project of projects) {
+        expect(selectedSpecs(config, project), project.name).toEqual([
+          'cross-engine.spec.ts',
+          'host-slot-picker.spec.ts',
+        ])
+      }
+      expect(declaredTests('cross-engine.spec.ts')).toEqual([
+        'booking happy path',
+        'sign-in page and protected-page redirect',
+        'embed popup booking and keyboard dismissal',
+        'event-types list beside a long booking link',
+      ])
+      expect(declaredTests('host-slot-picker.spec.ts')).toEqual([
+        'copies two saved open times as complete plain and rich email snippets',
+      ])
     } finally {
-      rmSync(directory, { recursive: true, force: true })
+      vi.unstubAllEnvs()
+      vi.resetModules()
     }
   })
 
