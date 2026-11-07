@@ -988,3 +988,10 @@ see [proxy behavior](/docs/self-hosting#proxy-behavior-and-an-existing-proxy).
 Public joining, host administration, REST/MCP/CLI operations, mail-link confirmations and
 optional public-booking attribution are available. See [booking waitlists](/docs/booking-waitlist)
 for setup, SMTP requirements, capacity errors and the complete lifecycle.
+
+## SMS foundation
+
+An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
+SMS sending with durable per-number, instance and organization limits. Costs are billed
+to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
+no SMS sending jobs or status callback endpoint are enabled by configuration.

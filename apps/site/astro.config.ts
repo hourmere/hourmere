@@ -111,6 +111,7 @@ export default defineConfig({
             { label: 'Automatic Zoom', link: '/docs/automatic-zoom' },
             { label: 'Automatic Google Meet', link: '/docs/automatic-google-meet' },
             { label: 'Webhooks', link: '/docs/webhooks' },
+            { label: 'SMS provider foundation', link: '/docs/sms-provider' },
             { label: 'Website widgets', link: '/docs/embedding' },
           ],
         },
