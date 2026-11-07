@@ -27,8 +27,12 @@ export const SlackCreateInput = z.strictObject({
   eventTypeId: z.uuid().nullable().optional(),
 })
 export const SlackUpdateInput = SlackCreateInput.partial().refine((v) => Object.keys(v).length > 0)
+/** Known automatic pause causes; new values may appear and still mean paused. */
+export const SLACK_PAUSE_REASONS = ['url_rejected'] as const
 export interface SlackDestinationView extends WebhookView {
   eventTypeId: string | null
+  /** `url_rejected` while Slack's 404/410 keeps it paused; null for manual pauses. */
+  pauseReason: string | null
 }
 const invalid = () =>
   new DomainError('invalid', 'invalid_slack_destination', 'Invalid Slack destination configuration')
@@ -40,6 +44,7 @@ const columns = [
   'events',
   'event_type_id',
   'is_active',
+  'pause_reason',
   'created_at',
   'updated_at',
 ] as const
@@ -50,6 +55,7 @@ function view(row: {
   events: string[]
   event_type_id: string | null
   is_active: boolean
+  pause_reason: string | null
   created_at: Date
   updated_at: Date
 }): SlackDestinationView {
@@ -60,6 +66,7 @@ function view(row: {
     events: row.events,
     eventTypeId: row.event_type_id,
     isActive: row.is_active,
+    pauseReason: row.pause_reason,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   }
@@ -75,6 +82,8 @@ function key(settings: WebhookSettings) {
 }
 async function authorize(trx: Db, ctx: WebhookServiceContext, deferFinal = false) {
   await ctx.prepareOrganizationWrite?.(trx)
+  // API keys, MCP OAuth and CLI have no session context check: refuse non-admins before
+  // they take or wait for any organization or destination lock.
   if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
     await requireAdmin(trx, ctx)
   // Only creation needs to serialize the organization-wide destination limit.
@@ -107,6 +116,7 @@ async function locked(trx: Db, ctx: WebhookServiceContext, id: unknown) {
     .where('id', '=', id as string)
     .forUpdate()
     .executeTakeFirst()
+  // A demotion or removal committed while this call waited for the destination must win.
   await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
   await requireAdmin(trx, ctx, true)
   if (!row) throw missing()
@@ -206,6 +216,8 @@ export async function updateSlackDestination(
           ...(data.events && { events: [...data.events].sort() }),
           ...(data.eventTypeId !== undefined && { event_type_id: data.eventTypeId }),
           ...(data.isActive !== undefined && { is_active: data.isActive }),
+          // A replacement URL or an explicit enable resolves an automatic 404/410 pause.
+          ...((url || data.isActive) && { pause_reason: null }),
           updated_at: new Date(ctx.now().epochMilliseconds),
         })
         .where('id', '=', row.id)
@@ -220,17 +232,24 @@ export async function deleteSlackDestination(ctx: WebhookServiceContext, id: unk
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
   })
 }
+/**
+ * `admit` runs only after the caller passed the final owner/admin check for an existing
+ * destination, so refused or missing-destination calls never use the test budget. It may
+ * throw to refuse the attempt; nothing has been written at that point.
+ */
 export async function testSlackDestination(
   ctx: WebhookServiceContext,
   settings: WebhookSettings,
   id: unknown,
   queue?: WebhookQueue,
+  admit?: () => void,
 ) {
   key(settings)
   if (!settings.enabled || !queue)
     throw new DomainError('conflict', 'slack_unavailable', 'Slack delivery is unavailable')
   return ctx.db.transaction().execute(async (trx) => {
     const row = await locked(trx, ctx, id)
+    admit?.()
     if (!row.is_active)
       throw new DomainError(
         'conflict',
@@ -261,7 +280,10 @@ export async function testSlackDestination(
         organization_id: row.organization_id,
         booking_id: null,
         event_id: eventId,
-        // Samples have no booking; distinguish successive completed tests in deduplication.
+        // Deliveries are unique on (webhook_id, booking_id, event_type, request_id) with
+        // NULLS NOT DISTINCT (migration 0064). A sample has no booking, so its own event ID
+        // is the discriminator that lets a new test follow a finished one. On rows with a
+        // null booking_id, request_id is this sample marker, never a reschedule-request ID.
         request_id: eventId,
         event_type: eventType,
         payload: slackPayload({ type: eventType }),

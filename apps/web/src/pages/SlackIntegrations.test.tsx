@@ -21,6 +21,7 @@ const destination = {
   url: 'https://hooks.slack.com/services/••••',
   events: ['booking.created'],
   isActive: true,
+  pauseReason: null,
   eventTypeId: '00000000-0000-7000-8000-000000000071',
   createdAt: '2026-11-06T00:00:00Z',
   updatedAt: '2026-11-06T00:00:00Z',
@@ -45,14 +46,39 @@ describe('Slack settings', () => {
   it('shows a paused destination and prevents sending a sample until enabled', async () => {
     server({ [`GET ${base}`]: () => json(200, [{ ...destination, isActive: false }]) })
     await open()
-    expect(
-      await screen.findByText(
-        'Slack destination paused. Check or replace the webhook URL before enabling it.',
-      ),
-    ).toBeTruthy()
+    expect(await screen.findByText('Slack notifications are paused.')).toBeTruthy()
+    expect(screen.queryByText(/Slack rejected this webhook URL/)).toBeNull()
     expect(
       (screen.getByRole('button', { name: 'Send test message' }) as HTMLButtonElement).disabled,
     ).toBe(true)
+  })
+  it('asks for a replacement URL only after Slack rejected the saved one', async () => {
+    server({
+      [`GET ${base}`]: () =>
+        json(200, [{ ...destination, isActive: false, pauseReason: 'url_rejected' }]),
+    })
+    const user = await open()
+    expect(
+      await screen.findByText(
+        'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText('Slack notifications are paused.')).toBeNull()
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(
+      await screen.findByText(
+        'Slack 拒绝了此 Webhook 地址，通知已暂停。请先更换地址，再启用通知。',
+      ),
+    ).toBeTruthy()
+  })
+  it('treats an unknown pause reason as a neutral pause', async () => {
+    server({
+      [`GET ${base}`]: () =>
+        json(200, [{ ...destination, isActive: false, pauseReason: 'future_reason' }]),
+    })
+    await open()
+    expect(await screen.findByText('Slack notifications are paused.')).toBeTruthy()
+    expect(screen.queryByText(/Slack rejected this webhook URL/)).toBeNull()
   })
   it('wraps the integration toggle and expanded actions within narrow panel content', async () => {
     server({ [`GET ${base}`]: () => json(200, [destination]) })
@@ -292,6 +318,7 @@ describe('Slack settings', () => {
     ).toBe(true)
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(screen.getByRole('heading', { name: '集成' })).toBeDefined()
+    expect(screen.getByText('Slack 通知已暂停。')).toBeDefined()
     expect(screen.getByLabelText('新的 Slack Webhook 地址')).toBeDefined()
     expect(screen.getByLabelText('按活动类型筛选')).toBeDefined()
     expect(screen.getByLabelText('预约已创建')).toBeDefined()

@@ -1038,6 +1038,7 @@ export interface Webhooks {
   id: Generated<string>;
   is_active: Generated<boolean>;
   organization_id: string;
+  pause_reason: string | null;
   secret_ciphertext: Buffer;
   updated_at: Generated<Timestamp>;
   url: string;

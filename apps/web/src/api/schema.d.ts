@@ -3332,7 +3332,7 @@ export interface paths {
         put?: never;
         /**
          * Queue one sample notification through the delivery outbox
-         * @description At most five attempts per organization per minute, shared with MCP on this server. Returns 409 slack_test_pending while a sample is pending.
+         * @description At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
          */
         post: operations["testSlackDestination"];
         delete?: never;
@@ -5688,6 +5688,8 @@ export interface components {
             isActive: boolean;
             /** Format: uuid */
             organizationId: string;
+            /** @description Why delivery paused this destination: `url_rejected` when Slack answered 404 or 410 for its URL. Null when active or paused manually. Replacing the URL or enabling the destination clears it. Open string: new values may appear and still mean paused. */
+            pauseReason: string | null;
             /** Format: date-time */
             updatedAt: string;
             url: string;

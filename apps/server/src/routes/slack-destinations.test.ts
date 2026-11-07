@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { slackDestinationTools } from '../mcp/slack-destinations.ts'
 import { type McpCaller, runTool, type Tool } from '../mcp/tools.ts'
 import * as openapi from '../openapi.ts'
-import { slackTestLimiter } from '../slack-test-limit.ts'
+import { SlackTestRateLimited, slackTestLimiter } from '../slack-test-limit.ts'
 import * as teamManagement from '../team-management.ts'
 import { slackDestinationRoutes } from './slack-destinations.ts'
 import { productApp, syntheticSessionCookie } from './test-app.ts'
@@ -189,6 +189,7 @@ describe.skipIf(!serverUrl)('Slack REST API', () => {
       ...openapi,
       ...teamManagement,
       slackTestLimiter,
+      SlackTestRateLimited,
     }
     const compile = (text: string) =>
       new Function(
@@ -281,6 +282,7 @@ describe.skipIf(!serverUrl)('Slack REST API', () => {
       ...openapi,
       ...teamManagement,
       slackTestLimiter,
+      SlackTestRateLimited,
     }
     const factory = new Function(
       ...Object.keys(bindings),

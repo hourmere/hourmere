@@ -9,7 +9,12 @@ import {
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { deliverWebhook, webhookBookingNotifier } from './delivery.ts'
-import { createSlackDestination, listSlackDestinations, testSlackDestination } from './slack.ts'
+import {
+  createSlackDestination,
+  listSlackDestinations,
+  testSlackDestination,
+  updateSlackDestination,
+} from './slack.ts'
 import { slackPayload } from './slack-format.ts'
 
 const now = Temporal.Instant.from('2026-11-01T12:00Z')
@@ -190,7 +195,10 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack operational safeguards', () =>
         ),
       ).resolves.toEqual([undefined, undefined])
       expect(transport).toHaveBeenCalledTimes(1)
-      expect((await listSlackDestinations(f.ctx))[0]?.isActive).toBe(false)
+      expect((await listSlackDestinations(f.ctx))[0]).toMatchObject({
+        isActive: false,
+        pauseReason: 'url_rejected',
+      })
       const rows = await f.rows()
       expect(rows.filter((row) => row.status === 'failed')).toHaveLength(1)
       expect(rows.find((row) => row.status === 'failed')).toMatchObject({
@@ -241,5 +249,132 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack operational safeguards', () =>
       release()
       await send
     }
+  })
+  it('keeps the rejected-URL reason only until the URL is replaced or the destination enabled', async () => {
+    const f = await fixture()
+    // Each pause uses a new booking event: replaying the same one is deduplicated.
+    const pausedBySlack = async (type: 'created' | 'cancelled') => {
+      await f.capture(true, type)
+      const pending = (await f.rows()).filter((row) => row.status === 'pending')
+      for (const row of pending)
+        await deliverWebhook(
+          { db, ...settings, transport: async () => 410, now: () => now },
+          row.id,
+          signal(),
+        )
+      expect((await listSlackDestinations(f.ctx))[0]).toMatchObject({
+        isActive: false,
+        pauseReason: 'url_rejected',
+      })
+    }
+    const update = (input: Record<string, unknown>) =>
+      updateSlackDestination(f.ctx, f.destination.id, input, settings)
+    await pausedBySlack('created')
+    // Unrelated edits and a repeated pause keep the reason: the saved URL is still rejected.
+    expect(await update({ events: ['booking.cancelled', 'booking.created'] })).toMatchObject({
+      pauseReason: 'url_rejected',
+    })
+    expect(await update({ eventTypeId: null })).toMatchObject({ pauseReason: 'url_rejected' })
+    expect(await update({ isActive: false })).toMatchObject({ pauseReason: 'url_rejected' })
+    expect(
+      await update({ url: 'https://hooks.slack.com/services/TNEW/BNEW/replacement' }),
+    ).toMatchObject({ isActive: false, pauseReason: null })
+    expect(await update({ isActive: true })).toMatchObject({ isActive: true, pauseReason: null })
+    await pausedBySlack('cancelled')
+    expect(await update({ isActive: true })).toMatchObject({ isActive: true, pauseReason: null })
+    // A manual pause never claims that Slack rejected the URL.
+    expect(await update({ isActive: false })).toMatchObject({ isActive: false, pauseReason: null })
+    await expect(
+      db
+        .updateTable('webhooks')
+        .set({ is_active: true, pause_reason: 'url_rejected' })
+        .where('id', '=', f.destination.id)
+        .execute(),
+    ).rejects.toMatchObject({ code: '23514' })
+  })
+  it('bounds the wait for another Slack sender and leaves the delivery for a later retry', async () => {
+    const f = await fixture()
+    await f.capture()
+    const sample = await testSlackDestination(f.ctx, settings, f.destination.id, queue)
+    const [booking] = (await f.rows()).filter((row) => row.id !== sample.deliveryId)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const transport = vi.fn(async () => {
+      await held
+      return 200
+    })
+    const deps = { db, ...settings, transport, now: () => now, slackSenderWaitMs: 50 }
+    const first = deliverWebhook(deps, booking?.id as string, signal())
+    let outcome: unknown
+    try {
+      await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1), { timeout: 15_000 })
+      // The guard timer only stops an unbounded wait from hanging the suite.
+      outcome = await Promise.race([
+        deliverWebhook(deps, sample.deliveryId, signal()).then(
+          () => 'delivered',
+          (error: unknown) => error,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('still waiting'), 3000)),
+      ])
+    } finally {
+      release()
+      await first
+    }
+    expect(outcome).toEqual(new Error('Webhook delivery deferred'))
+    expect(transport).toHaveBeenCalledTimes(1)
+    const deferred = (await f.rows()).find((row) => row.id === sample.deliveryId)
+    expect(deferred).toMatchObject({ status: 'pending', attempts: 0, last_error: null })
+    await deliverWebhook(deps, sample.deliveryId, signal())
+    expect(transport).toHaveBeenCalledTimes(2)
+    expect((await f.rows()).map((row) => row.status)).toEqual(['delivered', 'delivered'])
+  })
+  it('applies the bound only to the sender wait, not to the revoked-URL pause', async () => {
+    const f = await fixture()
+    await f.capture()
+    const [delivery] = await f.rows()
+    // An in-progress booking capture holds SHARE on the destination; the 404 pause must
+    // wait for it however long it takes instead of failing after Slack answered.
+    const client = await owned.pool.connect()
+    let send: Promise<unknown> | undefined
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT id FROM webhooks WHERE id = $1 FOR SHARE', [f.destination.id])
+      const pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid
+      let settled = false
+      send = deliverWebhook(
+        { db, ...settings, transport: async () => 404, now: () => now, slackSenderWaitMs: 1 },
+        delivery?.id as string,
+        signal(),
+      ).then(
+        () => 'paused',
+        (error: unknown) => error,
+      )
+      void send.finally(() => {
+        settled = true
+      })
+      let queued = false
+      while (!settled && !queued)
+        queued =
+          (
+            await owned.pool.query(
+              'SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND $1::int = ANY(pg_blocking_pids(pid))',
+              [pid],
+            )
+          ).rows.length > 0
+      expect(queued).toBe(true)
+      await client.query('COMMIT')
+      expect(await send).toBe('paused')
+    } finally {
+      await client.query('ROLLBACK')
+      client.release()
+      await send
+    }
+    expect((await listSlackDestinations(f.ctx))[0]).toMatchObject({
+      isActive: false,
+      pauseReason: 'url_rejected',
+    })
   })
 })

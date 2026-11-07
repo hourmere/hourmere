@@ -6,13 +6,15 @@ import { createDb, runMigrations } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
 import { expect, it } from 'vitest'
+import { snapshotSchema } from '../../db/src/upgrade-schema-snapshot.ts'
 import { encryptWebhookSecret } from './crypto.ts'
 
 it.skipIf(!process.env.DATABASE_URL)(
-  '0068 preserves predecessor endpoints and delivery history and supports fresh install and rerun',
+  '0068 preserves predecessor endpoints and delivery history, matches a fresh install and reruns as a no-op',
   async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hourmere-slack-predecessor-'))
     let owned: TestDatabase | undefined
+    let fresh: TestDatabase | undefined
     const migration = '0068_slack_destinations.sql'
     try {
       owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -73,16 +75,21 @@ it.skipIf(!process.env.DATABASE_URL)(
         destination_kind: 'webhook',
         url_ciphertext: null,
         event_type_id: null,
+        pause_reason: null,
       })
       expect(await db.selectFrom('webhook_deliveries').selectAll().execute()).toEqual(history)
       expect(await runMigrations(owned.pool, dir)).toEqual([])
-      await owned.pool.query('DROP SCHEMA public CASCADE')
-      await owned.pool.query('DROP SCHEMA auth CASCADE')
-      await owned.pool.query('CREATE SCHEMA public')
-      expect(await runMigrations(owned.pool, dir)).toEqual([...predecessors, migration])
+      // A fresh install from the same files (only the predecessors plus 0068) must produce
+      // exactly the upgraded auth and public schemas: columns, constraints, indexes, triggers.
+      fresh = await createTestDatabase(process.env.DATABASE_URL as string, dir, {
+        tag: 'slack_fresh',
+      })
+      expect(await snapshotSchema(owned.pool)).toEqual(await snapshotSchema(fresh.pool))
+      expect(await runMigrations(fresh.pool, dir)).toEqual([])
       expect(await runMigrations(owned.pool, dir)).toEqual([])
     } finally {
       try {
+        await fresh?.drop()
         await owned?.drop()
       } finally {
         await rm(dir, { recursive: true, force: true })

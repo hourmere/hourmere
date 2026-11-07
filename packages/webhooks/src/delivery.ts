@@ -23,7 +23,17 @@ export interface WebhookDeps extends WebhookSettings {
   now?: (() => Temporal.Instant) | undefined
   /** Only isolated fixtures replace the built-in HTTP(S)/DNS transport. */
   transport?: WebhookTransport | undefined
+  /** Only isolated fixtures shorten the Slack sender wait (SLACK_SENDER_WAIT_MS). */
+  slackSenderWaitMs?: number | undefined
 }
+
+/**
+ * Longest wait for another worker's send to the same Slack destination. With the 10 s
+ * transport deadline it stays inside the 30 s job lease; a timed-out job retries later
+ * with the normal backoff instead of holding a worker slot and pool connection.
+ */
+export const SLACK_SENDER_WAIT_MS = 10_000
+const LOCK_NOT_AVAILABLE = '55P03'
 
 /** Capture current changes only; the operator switch controls every destination kind. */
 export function webhookBookingNotifier(
@@ -206,10 +216,29 @@ export async function deliverWebhook(
     // Serialize only Slack workers before taking SHARE: booking capture never takes
     // this advisory lock and stays unblocked during the network call. A revoked send
     // can then upgrade its row lock after the call without another sender upgrading.
-    if (found.destination_kind === 'slack')
-      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${found.webhook_id}, 578231))`.execute(
+    if (found.destination_kind === 'slack') {
+      // Bound only this wait. Later row-lock waits keep the session setting: a timeout
+      // after Slack accepted a message would turn it into a duplicate on retry.
+      const previous = await sql<{
+        value: string
+      }>`SELECT current_setting('lock_timeout') AS value`.execute(trx)
+      await sql`SELECT set_config('lock_timeout', ${`${deps.slackSenderWaitMs ?? SLACK_SENDER_WAIT_MS}ms`}, true)`.execute(
         trx,
       )
+      try {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${found.webhook_id}, 578231))`.execute(
+          trx,
+        )
+      } catch (error) {
+        // SQL error text is never surfaced; the job retries with its normal backoff.
+        if ((error as { code?: string } | null)?.code === LOCK_NOT_AVAILABLE)
+          throw new Error('Webhook delivery deferred')
+        throw error
+      }
+      await sql`SELECT set_config('lock_timeout', ${previous.rows[0]?.value ?? '0'}, true)`.execute(
+        trx,
+      )
+    }
     // Endpoint first, then delivery: deletion cascades in that order too.
     const endpoint = await trx
       .selectFrom('webhooks')
@@ -324,7 +353,11 @@ export async function deliverWebhook(
     if (slackRevoked)
       await trx
         .updateTable('webhooks')
-        .set({ is_active: false, updated_at: new Date(now.epochMilliseconds) })
+        .set({
+          is_active: false,
+          pause_reason: 'url_rejected',
+          updated_at: new Date(now.epochMilliseconds),
+        })
         .where('id', '=', endpoint.id)
         .execute()
     await trx

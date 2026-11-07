@@ -46,8 +46,30 @@ Personal destinations also include the invitee name. Team destinations send only
 listed booking fields and omit attendee and host details. Neither sends email addresses,
 custom answers, free-text booking titles, cancellation reasons, management tokens,
 conference URLs or calendar credentials.
-Text is escaped and rendered without mention/link parsing, preventing user-controlled
-content from pinging a channel or injecting links.
+
+User-controlled text is the event-type title and, for personal destinations, the invitee
+name. Hourmere escapes `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;`, replaces `@` with
+the full-width `＠`, and sends the message as `plain_text` with Slack formatting (`mrkdwn`)
+and link unfurling turned off. That text therefore cannot mention people or channels
+(including `@here` and `<!channel>`), apply formatting or form a labelled link such as
+`<https://example.com|label>`. Hourmere does not alter web addresses in that text: Slack
+may show a plain address or domain name as a clickable link that displays the address
+itself, just as it does for the admin booking link.
+
+Every Slack event type uses the same message layout. The first line names the event type:
+
+<!-- slack-events:start -->
+| Event type | Sent when | First line |
+|---|---|---|
+| `booking.created` | A booking is made | `Hourmere: booking.created` |
+| `booking.rescheduled` | A booking moves to a new time | `Hourmere: booking.rescheduled` |
+| `booking.cancelled` | A booking is cancelled | `Hourmere: booking.cancelled` |
+| `booking.reschedule_requested` | A host asks the invitee to choose a new time | `Hourmere: booking.reschedule_requested` |
+| `booking.reschedule_request_expired` | That request expires without a new time | `Hourmere: booking.reschedule_request_expired` |
+<!-- slack-events:end -->
+
+The remaining lines are the same for every event type. Request events keep the booking's
+current times and `confirmed` status. They do not include the request ID or its message.
 
 Times use the personal organization owner’s public profile time zone, including the UTC
 offset at the booking instant. There is no team organization time-zone setting; team
@@ -78,14 +100,20 @@ The sample notification has no booking and bypasses the event-type filter.
 | Test | `POST /slack-destinations/{id}/test` | `test_slack_destination` | `slack test` |
 
 Creation accepts `{ url, events, isActive?, eventTypeId? }`. `events` is a nonempty,
-duplicate-free selection of `booking.created`, `booking.cancelled`, `booking.rescheduled`.
-`eventTypeId` is a UUID belonging to this organization or null. Update accepts the same
+duplicate-free selection of the five event types listed under [What is sent](#what-is-sent).
+The settings page offers booking created, cancelled and rescheduled. Use REST, MCP or the
+CLI to subscribe to the two reschedule-request events; saving from the settings page keeps
+them. `eventTypeId` is a UUID belonging to this organization or null. Update accepts the same
 fields optionally; omitting a field preserves it, and null clears the event-type filter.
-Responses contain only destination metadata and a masked URL. Test returns a `deliveryId`
+Responses contain only destination metadata and a masked URL. `pauseReason` is
+`url_rejected` while Slack's 404/410 keeps the destination paused and null otherwise,
+including after a manual pause; treat any other value as paused. Test returns a `deliveryId`
 and HTTP 202, which acknowledges queueing rather than Slack acceptance. While a sample is
 pending (including retries), another test receives HTTP 409 `slack_test_pending`. REST and
 MCP share a limit of five test requests per minute per organization in each server process
-(HTTP 429 on REST). The pending-sample guard applies across all server instances.
+(HTTP 429 on REST). Only requests from a current owner/admin for an existing destination
+count; refused (403) and unknown-destination (404) requests do not, so team members cannot
+use up the admins' limit. The pending-sample guard applies across all server instances.
 
 API keys need `read` or `full` to list and `full` to create, update, delete or test;
 organization ownership/admin permission still applies. Browser-session writes require
@@ -107,8 +135,11 @@ schedule and failure tracking. Booking changes and notification enqueue commit o
 back together. Replaying a successful booking request does not enqueue another event.
 The existing retry budget is thirteen total attempts, starting at one minute and doubling
 with jitter up to one hour. A Slack 404/410 instead stops after one attempt and pauses
-the destination. Settings shows its paused state; replace the revoked URL and enable
-notifications before testing again. See [webhook delivery limits](/docs/webhooks#delivery-and-operational-limits).
+the destination. Settings then says Slack rejected the URL; replace it and enable
+notifications before testing again. A destination you pause yourself shows only that
+notifications are paused. Sends to one destination run one at a time across workers. A
+worker waits at most 10 seconds for another worker's send. After that, it retries later
+on the normal schedule, and that run counts as one of the thirteen attempts. See [webhook delivery limits](/docs/webhooks#delivery-and-operational-limits).
 
 Slack incoming webhooks do **not** verify Hourmere's outbound webhook signature, and
 Slack request signing is for requests sent by Slack, not incoming-webhook delivery.
@@ -123,6 +154,10 @@ validates an Hourmere HMAC signature.
 - One destination per organization; the channel is determined by its webhook URL.
 - Notifications are minimal operational updates, not full booking summaries. No custom
   message template, interactive actions or channel selection is supported.
+- Slack may turn a plain web address or domain name in an event-type title or a personal
+  invitee name into a clickable link. Mentions, formatting and labelled links are blocked.
+- The settings page lists three of the five event types; manage the reschedule-request
+  events through REST, MCP or the CLI.
 - Delivery is at least once. A worker interrupted after Slack accepts a message can retry
   it, and Slack incoming webhooks do not deduplicate Hourmere delivery IDs. Duplicate
   messages are possible. There is no exactly-once or ordering guarantee.

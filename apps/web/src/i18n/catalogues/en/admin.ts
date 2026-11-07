@@ -53,8 +53,9 @@ export const admin = {
   'Could not update Slack notifications. Check your access and settings, then try again.':
     'Could not update Slack notifications. Check your access and settings, then try again.',
   'No Slack destination yet.': 'No Slack destination yet.',
-  'Slack destination paused. Check or replace the webhook URL before enabling it.':
-    'Slack destination paused. Check or replace the webhook URL before enabling it.',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.',
+  'Slack notifications are paused.': 'Slack notifications are paused.',
   'Slack destination saved.': 'Slack destination saved.',
   'Slack test message queued. This does not confirm delivery.':
     'Slack test message queued. This does not confirm delivery.',

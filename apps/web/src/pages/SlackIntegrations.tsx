@@ -138,9 +138,11 @@ function SlackSettings({
               </p>
               {!destination.isActive && (
                 <p role="status">
-                  {t(
-                    'Slack destination paused. Check or replace the webhook URL before enabling it.',
-                  )}
+                  {destination.pauseReason === 'url_rejected'
+                    ? t(
+                        'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.',
+                      )
+                    : t('Slack notifications are paused.')}
                 </p>
               )}
               <SlackForm

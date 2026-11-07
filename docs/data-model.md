@@ -1349,7 +1349,10 @@ pages use the existing `(webhook_id,id)` index in reverse order.
 
 
 Migration 0068 adds first-class Slack destinations to `webhooks`: `destination_kind`
-(default `webhook`), `url_ciphertext` and optional `event_type_id`. A partial unique index
+(default `webhook`), `url_ciphertext`, optional `event_type_id` and `pause_reason`.
+`pause_reason` is `url_rejected` only while Slack's 404/410 keeps a Slack destination
+paused (a check constraint requires an inactive Slack row); manual pauses and generic
+webhooks keep it null. A partial unique index
 allows one Slack destination per organization without consuming the ten signed-webhook
 slots. The URL field contains only a masked Slack address; AES-256-GCM ciphertext uses
 the webhook encryption key with organization, destination ID and URL-specific associated
@@ -1364,7 +1367,10 @@ admin booking link; personal payloads add the invitee name. Team-wide payloads e
 free-text booking titles, answers, attendee details, meeting links and reschedule-chain identifiers. Both capture and delivery check the
 current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
 only that filter; active/subscribed checks still apply. One pending test per destination
-is enforced under its row lock. Slack requires `WEBHOOKS_ENABLED=true` and
+is enforced under its row lock. A test delivery stores its own event ID in `request_id`:
+with migration 0064's `NULLS NOT DISTINCT` key on `(webhook_id, booking_id, event_type,
+request_id)`, a null value would make every later sample a duplicate of the first. On rows
+with a null `booking_id`, `request_id` is this sample marker, not a reschedule-request ID. Slack requires `WEBHOOKS_ENABLED=true` and
 `WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
 processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
 

@@ -23,7 +23,7 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
-import { slackTestLimiter } from '../slack-test-limit.ts'
+import { SlackTestRateLimited, slackTestLimiter } from '../slack-test-limit.ts'
 import {
   EXPECTED_ORGANIZATION_HEADER,
   organizationContextAccess,
@@ -40,7 +40,13 @@ export const SlackDestination = z
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
-  .extend({ eventTypeId: z.uuid().nullable() })
+  .extend({
+    eventTypeId: z.uuid().nullable(),
+    pauseReason: z.string().nullable().openapi({
+      description:
+        'Why delivery paused this destination: `url_rejected` when Slack answered 404 or 410 for its URL. Null when active or paused manually. Replacing the URL or enabling the destination clears it. Open string: new values may appear and still mean paused.',
+    }),
+  })
   .openapi('SlackDestination')
 const Params = z.object({ id: z.string() })
 const ExpectedReadHeaders = z.object({
@@ -216,7 +222,7 @@ export function slackDestinationRoutes(
         operationId: 'testSlackDestination',
         summary: 'Queue one sample notification through the delivery outbox',
         description:
-          'At most five attempts per organization per minute, shared with MCP on this server. Returns 409 slack_test_pending while a sample is pending.',
+          'At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.',
         security: authenticated,
         middleware: caller,
         request: { params: Params, headers: ExpectedWriteHeaders },
@@ -233,20 +239,26 @@ export function slackDestinationRoutes(
         },
       }),
       async (c) => {
-        const retryAfter = slackTestLimiter.hit(c.var.principal.organization.id)
-        if (retryAfter !== undefined) {
-          c.header('Retry-After', String(retryAfter))
+        try {
+          return c.json(
+            await testSlackDestination(
+              writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              deps,
+              c.req.valid('param').id,
+              deps.queue,
+              // Counted only after the final owner/admin check found the destination.
+              () => {
+                const retryAfter = slackTestLimiter.hit(c.var.principal.organization.id)
+                if (retryAfter !== undefined) throw new SlackTestRateLimited(retryAfter)
+              },
+            ),
+            202,
+          )
+        } catch (error) {
+          if (!(error instanceof SlackTestRateLimited)) throw error
+          c.header('Retry-After', String(error.retryAfterSeconds))
           return c.json({ error: 'rate_limited' }, 429)
         }
-        return c.json(
-          await testSlackDestination(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-            deps,
-            c.req.valid('param').id,
-            deps.queue,
-          ),
-          202,
-        )
       },
     )
   }

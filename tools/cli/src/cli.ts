@@ -58,6 +58,8 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
 
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
 Supply incoming-webhook URLs only through private JSON input; responses are masked.
+Slack events: booking.created, booking.rescheduled, booking.cancelled,
+  booking.reschedule_requested, booking.reschedule_request_expired.
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy

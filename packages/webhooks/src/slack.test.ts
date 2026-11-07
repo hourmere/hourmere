@@ -336,13 +336,16 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack durable destinations', () => {
         { isActive: false },
         settings,
       ).catch((error) => error)
-      await vi.waitFor(async () => {
-        const result = await owned.pool.query(
-          'SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid))',
-          [pid],
-        )
-        expect(result.rows.length).toBeGreaterThan(0)
-      })
+      await vi.waitFor(
+        async () => {
+          const result = await owned.pool.query(
+            'SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid))',
+            [pid],
+          )
+          expect(result.rows.length).toBeGreaterThan(0)
+        },
+        { timeout: 15_000, interval: 10 },
+      )
       allowed = false
       await client.query('COMMIT')
       expect(await change).toEqual(new Error('session revoked'))

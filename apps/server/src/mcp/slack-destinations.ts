@@ -98,7 +98,7 @@ export function slackDestinationTools(
       name: 'test_slack_destination',
       title: 'Test Slack destination',
       description:
-        'Queue one synthetic sample notification for this enabled Slack destination as an owner/admin. Requires full API key scope. Delivery is asynchronous with bounded retries; this does not confirm Slack received it. At most five attempts per organization per minute, shared with REST on this server. Returns slack_test_pending while a sample is pending.',
+        'Queue one synthetic sample notification for this enabled Slack destination as an owner/admin. Requires full API key scope. Delivery is asynchronous with bounded retries; this does not confirm Slack received it. At most five authorized attempts per organization per minute, shared with REST on this server; refused and unknown-destination calls are not counted. Returns slack_test_pending while a sample is pending.',
       input: z.strictObject({ id: z.uuid() }),
       output: z.object({ deliveryId: z.uuid() }),
       privateInput: () => true,
@@ -106,9 +106,17 @@ export function slackDestinationTools(
       privateValidationMessage: 'Invalid Slack configuration',
       annotations: { ...annotations, openWorldHint: true },
       async run({ id }, call) {
-        const retryAfter = slackTestLimiter.hit(call.caller.organization.id)
-        if (retryAfter !== undefined) throw new RateLimited(retryAfter)
-        return testSlackDestination(serviceContext(deps, call.caller), deps, id, deps.queue)
+        return testSlackDestination(
+          serviceContext(deps, call.caller),
+          deps,
+          id,
+          deps.queue,
+          // Counted only after the final owner/admin check found the destination.
+          () => {
+            const retryAfter = slackTestLimiter.hit(call.caller.organization.id)
+            if (retryAfter !== undefined) throw new RateLimited(retryAfter)
+          },
+        )
       },
     }),
   ]

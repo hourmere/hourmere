@@ -53,8 +53,9 @@ export const admin = {
   'Could not update Slack notifications. Check your access and settings, then try again.':
     '无法更新 Slack 通知。请检查权限和设置，然后重试。',
   'No Slack destination yet.': '尚未设置 Slack 接收地址。',
-  'Slack destination paused. Check or replace the webhook URL before enabling it.':
-    'Slack 接收地址已暂停。启用前请检查或更换 Webhook 地址。',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack 拒绝了此 Webhook 地址，通知已暂停。请先更换地址，再启用通知。',
+  'Slack notifications are paused.': 'Slack 通知已暂停。',
   'Slack destination saved.': '已保存 Slack 接收地址。',
   'Slack test message queued. This does not confirm delivery.':
     'Slack 测试消息已加入发送队列。这不代表消息已送达。',
