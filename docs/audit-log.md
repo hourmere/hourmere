@@ -177,8 +177,9 @@ housekeeping and are not recorded. The operator [Cal.com import](calcom-import.m
 a command-line tool with direct database access, is not recorded, like other
 operator database changes.
 
-This is a management journal, not an access log: reads, failed attempts, ordinary
-sign-ins and session refreshes, third-party provider internals, email contents,
-and database changes made directly by an operator are not recorded. Hourmere has no
+This is a management journal, not an access log: reads (including CSV booking
+exports), failed attempts, ordinary sign-ins and session refreshes, third-party
+provider internals, email contents, and database changes made directly by an operator
+are not recorded. Hourmere has no
 no-show marking yet; adding it must add its audit events. Existing booking provenance
 columns remain intact.
