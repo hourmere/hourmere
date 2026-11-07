@@ -1,4 +1,6 @@
+import { createServer } from 'node:http'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
+import { listenOwned } from '../listeners.ts'
 
 for (const mode of ['inline', 'popup'] as const) {
   test(`copied ${mode} code books on an allowed website and is rejected elsewhere`, async ({
@@ -47,33 +49,42 @@ for (const mode of ['inline', 'popup'] as const) {
     await expect(frame.getByRole('heading', { name: 'You’re booked', exact: true })).toBeVisible()
     expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
 
-    // A different loopback hostname is a separate, unlisted third-party origin.
-    // Fulfill only its parent document locally; widget, iframe and API stay real.
-    const refusedParent = new URL('/generated-embed', app.parentUrl)
-    refusedParent.hostname = refusedParent.hostname === 'localhost' ? '127.0.0.1' : 'localhost'
-    expect(refusedParent.origin).not.toBe(new URL(app.url).origin)
-    expect(refusedParent.origin).not.toBe(new URL(app.parentUrl).origin)
-    await page.route(refusedParent.href, (route) =>
-      route.fulfill({
-        contentType: 'text/html',
-        body: `<!doctype html><title>Disallowed website</title>${copied}`,
+    // A third owned listener gives the copied code a real, unlisted parent origin.
+    // Keep the loopback hostname consistent so browser network policy does not
+    // intercept the request before Hourmere can enforce its own origin allow list.
+    const refusedParent = await listenOwned(
+      createServer((_request, response) => {
+        response.setHeader('Content-Type', 'text/html; charset=utf-8')
+        response.setHeader('Cache-Control', 'no-store')
+        response.end(
+          `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Disallowed website</title><body>${copied}</body></html>`,
+        )
       }),
     )
-    const rejected = page.waitForResponse((response) =>
-      new URL(response.url()).pathname.startsWith('/embed/'),
-    )
-    await page.goto(refusedParent.href)
-    if (mode === 'popup')
-      await page.getByRole('button', { name: 'Book <our> meeting & chat', exact: true }).click()
-    const response = await rejected
-    expect(response.status()).toBe(403)
-    // Chromium may substitute its own error document for a denied frame. Inspect
-    // the same real URL directly as well to verify the server's denial contract.
-    const denial = await page.request.get(response.url())
-    expect(denial.status()).toBe(403)
-    expect(await denial.json()).toEqual({ error: 'embedding_not_allowed' })
-    expect(denial.headers()['x-frame-options']).toBe('DENY')
-    await expect(frame.locator('.calendar-month')).toHaveCount(0)
-    expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
+    try {
+      expect(refusedParent.url).not.toBe(new URL(app.url).origin)
+      expect(refusedParent.url).not.toBe(new URL(app.parentUrl).origin)
+      const refusedUrl = `${refusedParent.url}/generated-embed`
+      // Bypass the fixture's external-request guard for this owned document only.
+      await page.route(refusedUrl, (route) => route.continue())
+      const rejected = page.waitForResponse((response) =>
+        new URL(response.url()).pathname.startsWith('/embed/'),
+      )
+      await page.goto(refusedUrl)
+      if (mode === 'popup')
+        await page.getByRole('button', { name: 'Book <our> meeting & chat', exact: true }).click()
+      const response = await rejected
+      expect(response.status()).toBe(403)
+      // Chromium may substitute its own error document for a denied frame. Inspect
+      // the same real URL directly as well to verify the server's denial contract.
+      const denial = await page.request.get(response.url())
+      expect(denial.status()).toBe(403)
+      expect(await denial.json()).toEqual({ error: 'embedding_not_allowed' })
+      expect(denial.headers()['x-frame-options']).toBe('DENY')
+      await expect(frame.locator('.calendar-month')).toHaveCount(0)
+      expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
+    } finally {
+      await refusedParent.close()
+    }
   })
 }
