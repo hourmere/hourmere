@@ -239,6 +239,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -2590,6 +2591,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -2824,6 +2826,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -4437,6 +4440,10 @@ export interface components {
                 /** @description IANA time zone */
                 timeZone: string;
             };
+            /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+            inviteePhone?: string;
+            /** @description An id from the public event locations. Omission selects the default or first option. */
+            locationOptionId?: string;
             responses?: components["schemas"]["Responses"];
             /**
              * @description Optional untrusted attribution hint for an embedded public booking; never grants privileges
@@ -4530,7 +4537,7 @@ export interface components {
             isActive: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4564,6 +4571,65 @@ export interface components {
                  */
                 url: string;
             } | null;
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            locations: ({
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "zoom";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "phone";
+                label?: string;
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number?: string;
+            } | {
+                address: string;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "in_person";
+                label?: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "link";
+                label?: string;
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
             /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
@@ -4654,7 +4720,7 @@ export interface components {
              * @default false
              */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4688,6 +4754,65 @@ export interface components {
                  */
                 url: string;
             } | null;
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            locations?: ({
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "zoom";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "phone";
+                label?: string;
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number?: string;
+            } | {
+                address: string;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "in_person";
+                label?: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "link";
+                label?: string;
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
             /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
@@ -4830,7 +4955,7 @@ export interface components {
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden?: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4864,6 +4989,65 @@ export interface components {
                  */
                 url: string;
             } | null;
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            locations?: ({
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "zoom";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "phone";
+                label?: string;
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number?: string;
+            } | {
+                address: string;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "in_person";
+                label?: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "link";
+                label?: string;
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
             /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
@@ -5257,6 +5441,17 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
             } | null;
+            /** @description Ordered location choices; private host details are disclosed only after booking. */
+            locations: {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                label?: string;
+            }[] | null;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -5355,6 +5550,17 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
             } | null;
+            /** @description Ordered location choices; private host details are disclosed only after booking. */
+            locations: {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                label?: string;
+            }[] | null;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -5932,6 +6138,10 @@ export interface operations {
                         /** @description IANA time zone */
                         timeZone: string;
                     };
+                    /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+                    inviteePhone?: string;
+                    /** @description An id from the public event locations. Omission selects the default or first option. */
+                    locationOptionId?: string;
                     responses?: components["schemas"]["Responses"];
                     /**
                      * Format: date-time
@@ -5999,7 +6209,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Slot unavailable or idempotency key reused */
+            /** @description Slot unavailable, chosen location unavailable (location_unavailable), or idempotency key reused */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9394,7 +9604,7 @@ export interface operations {
                     "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
-            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_location_choice`, `invalid_invitee_phone`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9430,7 +9640,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9650,7 +9860,7 @@ export interface operations {
                     "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
-            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_location_choice`, `invalid_invitee_phone`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9686,7 +9896,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
                 headers: {
                     [name: string]: unknown;

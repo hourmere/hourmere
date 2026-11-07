@@ -99,7 +99,7 @@ export interface EventType {
   conferenceOrganizer: { userId: string } | null
   /** Read compatibility projection of the default (or first) location option. */
   location: LocationSettings | null
-  /** Internal configuration; transport writes are introduced with the editor. */
+  /** Ordered location choices exposed through REST and MCP event-type reads and writes. */
   locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
   questions: Question[]

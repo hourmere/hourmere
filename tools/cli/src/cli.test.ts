@@ -222,6 +222,7 @@ describe('CLI transport and arguments', () => {
         : { slug: 'intro', title: 'Intro' }),
       durationMinutes: 30,
       allowedDurationsMinutes: [15, 30, 60],
+      locations: [{ id: 'call', kind: 'phone', askInvitee: true, label: 'Call me' }],
     }
     const result = await run([command, '--input', '-'], input, { runner })
     expect(result.code).toBe(0)
@@ -232,12 +233,56 @@ describe('CLI transport and arguments', () => {
     })
   }
   it.each([false, true])(
-    'forwards all event type duration settings for update=%s',
+    'forwards all event type duration and location settings for update=%s',
     async (update) => {
       await verifyEventTypeWrite(runCli, update)
       await verifyEventTypeWrite(sourceCopy(), update)
     },
   )
+
+  it('forwards the selected location and collected phone through book JSON', async () => {
+    const input = {
+      handle: 'ada',
+      slug: 'intro',
+      start: '2026-12-01T10:00:00Z',
+      locationOptionId: 'call',
+      inviteePhone: '+14155550123',
+      idempotencyKey: 'choice-test',
+    }
+    const result = await run(['book', '--input', '-'], input)
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params.arguments).toEqual(input)
+  })
+
+  async function verifySlotLocation(runner = runCli) {
+    const input = {
+      teamSlug: 'team',
+      slug: 'intro',
+      from: '2026-12-01T10:00:00Z',
+      to: '2026-12-01T12:00:00Z',
+      locationOptionId: 'meet',
+    }
+    const result = await run(['slots', '--input', '-'], input, { runner })
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params).toMatchObject({
+      name: 'find_available_slots',
+      arguments: input,
+    })
+  }
+  it('forwards the selected location to slot availability through JSON', async () => {
+    await verifySlotLocation()
+    await verifySlotLocation(sourceCopy())
+    await expect(
+      verifySlotLocation(
+        sourceCopy([
+          'const input = await readInput(args.input, options.stdin)',
+          'const input = await readInput(args.input, options.stdin); delete input.locationOptionId',
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
   async function verifyRedirectFlags(runner = runCli) {
     for (const command of ['create-event', 'update-event']) {

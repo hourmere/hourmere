@@ -1,5 +1,7 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   'Loading logo preview…': '正在加载标志预览…',
   'Logo preview is unavailable.': '暂时无法预览标志。',
   'Saved brand logo': '已保存的品牌标志',

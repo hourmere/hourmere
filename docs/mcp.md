@@ -182,6 +182,15 @@ returned reference, not binary image data or remote URLs. Uploads are limited to
 the current organization. SVG and animated images are rejected. This stores branding;
 public page and email theme application is not included yet.
 
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
+`inviteePhone`, normalized to E.164 after removing common phone separators.
+CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.
+
 ## Configure booking limits
 
 `create_event_type` and `update_event_type` accept nullable `maxBookingsPerDay`,

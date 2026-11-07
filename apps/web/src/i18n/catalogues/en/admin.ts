@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
   'Loading logo preview…': 'Loading logo preview…',
   'Logo preview is unavailable.': 'Logo preview is unavailable.',
   'Saved brand logo': 'Saved brand logo',
