@@ -399,7 +399,7 @@ export async function runCli(options: {
             error.retryAfterSeconds !== undefined && {
               retryAfterSeconds: error.retryAfterSeconds,
             }),
-          ...(called && { outcomeMayBeUnknown: true }),
+          ...(called && code !== 'slot_snippets_disabled' && { outcomeMayBeUnknown: true }),
         },
         secrets,
       ),

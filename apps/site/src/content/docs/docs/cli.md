@@ -190,7 +190,9 @@ is supplied in JSON; omitted language and display zone use the caller's profile 
 `--json` makes the normal JSON output explicit. The response includes `slots` with direct
 links, `text` and `html` for your draft. Generation sends no mail and reserves no time.
 `read`, `bookings` and `full` keys work with personal-owner or team-owner/admin permission,
-when the operator enables `SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
+when the operator enables `SLOT_SNIPPETS_ENABLED`. When off (the default), the CLI exits 1
+with `{"error":"slot_snippets_disabled"}`
+on stderr and empty stdout, without `outcomeMayBeUnknown`. See [the agent guide](/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
 
 ## Configure meeting lengths

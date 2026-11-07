@@ -145,7 +145,9 @@ booking links plus rendered `text` and `html`, using the same formatter as the a
 Use it to draft “three times next week”; it neither sends email nor reserves times.
 Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
 or an authorized `mcp:tools` OAuth connection. The instance must enable
-`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
+`SLOT_SNIPPETS_ENABLED`. When off (the default), `generate_open_time_snippet` is absent
+from `tools/list`; a direct call returns JSON-RPC error `-32602` with
+`Tool generate_open_time_snippet not found`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 
 ## Configure an after-booking redirect

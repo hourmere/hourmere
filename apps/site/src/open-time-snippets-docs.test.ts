@@ -91,4 +91,73 @@ describe('open-time snippet documentation facts', () => {
     ).toThrow(assertion)
     expect(route).toContain("409: 'no_available_slots, calendar_sync_unavailable'")
   })
+
+  it.each([
+    [
+      'open-time-snippets',
+      [
+        'REST',
+        'HTTP 404',
+        '{"error":"slot_snippets_disabled"}',
+        'MCP',
+        'absent from tools/list',
+        '{"code":-32602,"message":"Tool generate_open_time_snippet not found"}',
+        'CLI',
+        'exits 1',
+        'stderr',
+        'stdout empty',
+        'without outcomeMayBeUnknown',
+      ],
+    ],
+    ['rest', ['HTTP 404', '{"error":"slot_snippets_disabled"}']],
+    ['mcp', ['absent from tools/list', '-32602', 'Tool generate_open_time_snippet not found']],
+    [
+      'cli',
+      [
+        'exits 1',
+        '{"error":"slot_snippets_disabled"}',
+        'stderr',
+        'empty stdout',
+        'without outcomeMayBeUnknown',
+      ],
+    ],
+  ] as const)('%s describes its disabled-feature response', (name, required) => {
+    const source = prose(read(`apps/site/src/content/docs/docs/${name}.md`))
+    const checkDisabled = (text: string) => {
+      for (const fact of required) expect(text).toContain(fact)
+    }
+    checkDisabled(source)
+    for (const fact of required) {
+      expect(() => checkDisabled(source.replaceAll(fact, 'changed response'))).toThrow(assertion)
+    }
+  })
+
+  it('keeps the repository MCP guide explicit about hidden tools', () => {
+    const source = prose(read('docs/mcp.md'))
+    for (const fact of [
+      'absent from tools/list',
+      '-32602',
+      'Tool generate_open_time_snippet not found',
+    ]) {
+      expect(source).toContain(fact)
+      expect(() => expect(source.replaceAll(fact, '')).toContain(fact)).toThrow(assertion)
+    }
+  })
+
+  it.each(['docs/api-conventions.md', 'apps/site/src/content/docs/docs/api-conventions.md'])(
+    '%s names the accepted native scope values without a dangling reference',
+    (path) => {
+      const source = prose(read(path))
+      const sentence = 'Native creation accepts metadata.scope with exactly full, read or bookings;'
+      expect(source).toContain(sentence)
+      expect(() =>
+        expect(
+          source.replace(
+            sentence,
+            'Native creation accepts metadata.scope with one of those exact values;',
+          ),
+        ).toContain(sentence),
+      ).toThrow(assertion)
+    },
+  )
 })

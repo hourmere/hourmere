@@ -213,6 +213,19 @@ export async function callTool(options: {
         retry && /^\d{1,9}$/.test(retry) ? retrySeconds(Number(retry)) : undefined,
       )
     }
+    // Disabled snippets are deliberately hidden from MCP discovery. Translate only
+    // this tool's exact unknown-tool response; other protocol failures stay errors.
+    if (
+      tool === 'generate_open_time_snippet' &&
+      isObject(reply) &&
+      reply.jsonrpc === '2.0' &&
+      reply.id === 1 &&
+      reply.result === undefined &&
+      isObject(reply.error) &&
+      reply.error.code === -32602 &&
+      reply.error.message === 'Tool generate_open_time_snippet not found'
+    )
+      throw new CliError('slot_snippets_disabled')
     if (!isObject(reply) || reply.jsonrpc !== '2.0' || reply.id !== 1 || !isObject(reply.result))
       throw new CliError('invalid_response')
     const result = reply.result
