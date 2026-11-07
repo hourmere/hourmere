@@ -11,12 +11,3 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
-
-Group occurrence host mail is drained in batches during each minute's worker run;
-the batch size does not limit an instance to four messages per minute. The worker
-starts new attempts for up to 230 seconds, leaving time for a bounded SMTP attempt
-before its five-minute job expiry. Remaining rows stay durable for the next run.
-Shared instance hourly mail limits (including the host reserve), per-message receipts,
-coalesced calendar updates, and finite retry limits still apply. Reminders expire at
-the occurrence start, so an SMTP outage or a backlog exceeding the worker's time
-budget can still prevent delivery before that deadline.
