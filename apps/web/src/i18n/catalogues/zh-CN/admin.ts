@@ -54,6 +54,19 @@ export const admin = {
   'Retry the same request': '重试此请求',
   'Send request': '发送请求',
 
+  'Export bookings as CSV': '将预约导出为 CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    '请选择不超过 366 天的预约开始时间范围。导出时同样适用当前的筛选条件。',
+  'This file contains personal data. Store and share it carefully.':
+    '此文件包含个人数据。请妥善保存并谨慎分享。',
+  'CSV times use {zone} and UTC.': 'CSV 中的时间使用{zone}和 UTC。',
+  'Bookings starting at or after (UTC)': '预约开始时间不早于（UTC）',
+  'Bookings starting before (UTC)': '预约开始时间早于（UTC）',
+  'Include UTF-8 BOM for Excel': '包含 UTF-8 BOM，便于 Excel 读取',
+  'Could not download CSV. Check the booking range and try again shortly.':
+    '无法下载 CSV。请检查预约时间范围，稍后重试。',
+  'Download CSV': '下载 CSV',
+
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
 
