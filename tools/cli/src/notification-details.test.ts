@@ -23,7 +23,7 @@ function clientCopy(replacement?: Replacement): typeof client {
   return new Function(
     'readFileSync',
     'clientModuleUrl',
-    `${source}; return { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version }`,
+    `${source}; return { CliError, callTool, downloadCsv, endpoint, isObject, MAX_INPUT_BYTES, version }`,
   )(readFileSync, new URL('./client.ts', import.meta.url).href) as typeof client
 }
 function commandCopy(

@@ -358,6 +358,119 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     const second = await book('other')
     expect((await intent(second.booking.id)).organizer_user_id).not.toBe(c.organizer_user_id)
   })
+  it('round robin selected Meet filters the mixed pool before fairness assignment', async () => {
+    const { e } = await event('round_robin')
+    await updateEventType(admin, e.id, {
+      locations: [
+        { id: 'office', kind: 'in_person', address: 'Office', isDefault: true },
+        { id: 'meet', kind: 'google_meet', autoCreate: true },
+      ],
+    })
+    await db
+      .updateTable('round_robin_state')
+      .set({ next_sequence: '6' })
+      .where('event_type_id', '=', e.id)
+      .execute()
+    await db
+      .updateTable('event_type_hosts')
+      .set({ last_assigned_sequence: '5' })
+      .where('event_type_id', '=', e.id)
+      .where(
+        'user_id',
+        'in',
+        users.slice(0, 2).map((u) => u.id),
+      )
+      .execute()
+    const query = {
+      handle: slug,
+      slug: 'meet',
+      start: START,
+      end: START.add({ hours: 1 }),
+      locationOptionId: 'meet',
+    }
+    expect((await listPublicTeamSlots(ctx, query)).length).toBeGreaterThan(0)
+    const pending = createPublicTeamBooking(ctx, {
+      handle: slug,
+      slug: 'meet',
+      start: START,
+      locationOptionId: 'meet',
+      invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+      idempotencyKey: 'selected-meet',
+    })
+    await expect(pending).resolves.toMatchObject({ booking: { status: 'confirmed' } })
+    const result = await pending
+    expect(users.slice(0, 2).map((u) => u.id)).toContain(
+      (await intent(result.booking.id)).organizer_user_id,
+    )
+  })
+  it.each(['disabled', 'no_ready_hosts'] as const)(
+    'maps selected round robin Meet readiness (%s) to location_unavailable',
+    async (reason) => {
+      const { e } = await event('round_robin')
+      await updateEventType(admin, e.id, {
+        locations: [
+          { id: 'office', kind: 'in_person', address: 'Office', isDefault: true },
+          { id: 'meet', kind: 'google_meet', autoCreate: true },
+        ],
+      })
+      if (reason === 'disabled') ctx.automaticMeet = false
+      else
+        await db
+          .updateTable('profiles')
+          .set({ destination_calendar_id: null })
+          .where(
+            'user_id',
+            'in',
+            users.map((u) => u.id),
+          )
+          .execute()
+      const query = { handle: slug, slug: 'meet', start: START, end: START.add({ hours: 1 }) }
+      expect((await listPublicTeamSlots(ctx, query)).length).toBeGreaterThan(0)
+      await expect(
+        listPublicTeamSlots(ctx, { ...query, locationOptionId: 'meet' }),
+      ).rejects.toMatchObject({
+        code: 'location_unavailable',
+        message: 'The chosen location is unavailable.',
+      })
+      await expect(
+        createPublicTeamBooking(ctx, {
+          handle: slug,
+          slug: 'meet',
+          start: START,
+          locationOptionId: 'meet',
+          invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+          idempotencyKey: 'unavailable-selected-meet',
+        }),
+      ).rejects.toMatchObject({
+        code: 'location_unavailable',
+        message: 'The chosen location is unavailable.',
+      })
+    },
+  )
+  it('selected Meet slots exclude times available only from an ineligible host', async () => {
+    const { e } = await event('round_robin')
+    await updateEventType(admin, e.id, {
+      locations: [
+        { id: 'office', kind: 'in_person', address: 'Office', isDefault: true },
+        { id: 'meet', kind: 'google_meet', autoCreate: true },
+      ],
+    })
+    await db
+      .updateTable('schedules')
+      .set({ weekly_hours: JSON.stringify({}) })
+      .where(
+        'user_id',
+        'in',
+        users.slice(0, 2).map((u) => u.id),
+      )
+      .execute()
+    const query = { handle: slug, slug: 'meet', start: START, end: START.add({ hours: 1 }) }
+    expect((await listPublicTeamSlots(ctx, query)).length).toBeGreaterThan(0)
+    expect(await listPublicTeamSlots(ctx, { ...query, locationOptionId: 'meet' })).toEqual([])
+    await expect(
+      listPublicTeamSlots(ctx, { ...query, locationOptionId: 'removed' }),
+    ).rejects.toMatchObject({ code: 'invalid_location_choice' })
+  })
   it('round robin public slots exclude times offered only by Meet-ineligible hosts', async () => {
     await event('round_robin')
     await db

@@ -20,6 +20,7 @@ import {
   type Location,
   type PublicEventTypeRecord,
   parseLocation,
+  selectBookableLocationOption,
   selectDurationMinutes,
   toInstant,
   toIso,
@@ -34,12 +35,20 @@ import {
   cancelBookingConference,
   eligibleMeetHosts,
   prepareBookingConference,
+  requireMeetDestination,
+  requireZoomConnection,
   unresolvedLocation,
+  withLocationAvailability,
 } from './conferences.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { admitGroupSlot, lockGroupBooking } from './group-seat-admission.ts'
 import { bookingHostIds, lockOrganization, resolvedBookingHosts } from './hosts.ts'
+import {
+  isPreservedSingleton,
+  resolveLocationChoice,
+  selectLocationOption,
+} from './location-options.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -359,13 +368,13 @@ const RESCHEDULE_COLUMNS = [
   'end_at',
   'title',
   'location',
+  'location_option',
   'responses',
   'required_host_user_ids',
   'hosts_use_default_schedule',
   'manage_token_hash',
   'notification_snapshot',
   'group_slot_id',
-  'location_option',
 ] as const
 
 /**
@@ -725,7 +734,93 @@ async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<
 
 // --- Writing bookings -------------------------------------------------------------------
 
-/** The existing booking form cannot collect an invitee's phone number yet. */
+/**
+ * Resolve only against the locked configuration and the actual assigned hosts. Payment holds
+ * share it so a hold stores the chosen option exactly as its confirmed booking would.
+ */
+export async function resolveBookingLocation(
+  ctx: PublicContext,
+  db: Db,
+  event: PublicEventTypeRecord,
+  hosts: string[],
+  input: Pick<CreateBookingInput, 'locationOptionId' | 'inviteePhone'>,
+) {
+  const options = event.locations
+  const chosen = selectLocationOption(options, input.locationOptionId)
+  const organizer =
+    event.schedulingType === 'collective' ? event.conferenceOrganizerUserId : hosts[0]
+  const meetReady: string[] = []
+  const zoomReady: string[] = []
+  try {
+    if (organizer && automaticMeet(chosen)) {
+      await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
+      meetReady.push(organizer)
+    }
+    if (organizer && automaticZoom(chosen)) {
+      await requireZoomConnection(db, organizer, event.zoomConnectionId, ctx.automaticZoom, true)
+      zoomReady.push(organizer)
+    }
+  } catch (error) {
+    if (!(error instanceof DomainError)) throw error
+    if (isPreservedSingleton(options, input.locationOptionId)) throw error
+    throw new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
+  }
+  // Migration 0056 and older compatibility writes keep a single location's settings as stored
+  // (including historical phone formatting), whatever its option id. Booking one must not
+  // turn into a configuration rewrite; choosing it explicitly stores the same snapshot.
+  if (
+    chosen &&
+    options?.length === 1 &&
+    !automaticMeet(chosen) &&
+    !automaticZoom(chosen) &&
+    !(chosen.kind === 'phone' && 'askInvitee' in chosen)
+  ) {
+    const { id: _id, label: _label, isDefault: _default, ...location } = chosen
+    return { locationOption: structuredClone(chosen), location }
+  }
+  return resolveLocationChoice(
+    options,
+    {
+      ...(input.locationOptionId !== undefined && { optionId: input.locationOptionId }),
+      ...(input.inviteePhone !== undefined && { inviteePhone: input.inviteePhone }),
+    },
+    {
+      schedulingType: event.schedulingType,
+      hostUserIds: hosts,
+      ...(hosts[0] && { assignedHostUserId: hosts[0] }),
+      conferenceOrganizerUserId: event.conferenceOrganizerUserId,
+      meetReadyHostUserIds: meetReady,
+      zoomReadyHostUserIds: zoomReady,
+    },
+  )
+}
+
+/** Keep a readiness race during conference intent creation inside the choice error contract. */
+async function prepareChosenBookingConference(
+  ctx: PublicContext,
+  db: Db,
+  bookingId: string,
+  preserveLegacyErrors: boolean,
+): Promise<void> {
+  try {
+    await prepareBookingConference(ctx, db, bookingId)
+  } catch (error) {
+    if (
+      !preserveLegacyErrors &&
+      error instanceof DomainError &&
+      (error.code.startsWith('automatic_meet_') || error.code.startsWith('automatic_zoom_'))
+    ) {
+      throw new DomainError(
+        'conflict',
+        'location_unavailable',
+        'The chosen location is unavailable.',
+      )
+    }
+    throw error
+  }
+}
+
+/** Final invariant: a persisted phone location must contain a collected number. */
 function requireCollectedPhone(location: Location | null): void {
   if (location?.kind === 'phone' && location.askInvitee === true) {
     throw new DomainError(
@@ -1004,6 +1099,8 @@ async function skipScheduledMessages(
 // --- Public booking -----------------------------------------------------------------------
 
 export interface CreateBookingInput {
+  locationOptionId?: string | undefined
+  inviteePhone?: string | undefined
   handle: string
   slug: string
   /** Internal service generation fence; transports introduce it separately. */
@@ -1209,6 +1306,8 @@ function bookingIdempotency(
         ...(oneTimeLinkId !== undefined && { oneTimeLinkId }),
         start: input.start.toString(),
         durationMinutes: input.durationMinutes,
+        locationOptionId: input.locationOptionId,
+        inviteePhone: input.inviteePhone,
         ...(input.expectedGroupSlotId !== undefined
           ? { expectedGroupSlotId: input.expectedGroupSlotId }
           : {}),
@@ -1295,15 +1394,20 @@ async function publicBooking(
         now,
         snapshot,
         expectedSlotId: input.expectedGroupSlotId,
+        locationOptionId: input.locationOptionId,
       })
-      requireCollectedPhone(groupSlot ? groupSlot.location : current.location)
+      const chosenOption = groupSlot
+        ? null
+        : selectBookableLocationOption(current, input.locationOptionId)
       let selectedHostIds = current.hostUserIds
       if (current.schedulingType === 'round_robin') {
         await lockRoundRobinState(trx, current.id)
         const available: string[] = []
         let stale = false
-        const candidates = automaticMeet(current.location)
-          ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
+        const candidates = automaticMeet(chosenOption)
+          ? await withLocationAvailability(current.locations, input.locationOptionId, () =>
+              eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet),
+            )
           : current.eligibleHostUserIds
         for (const hostUserId of candidates) {
           await expirePaymentHolds({ db: trx, hostUserId })
@@ -1344,6 +1448,9 @@ async function publicBooking(
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
+      const choice =
+        groupSlot ?? (await resolveBookingLocation(ctx, trx, current, selectedHostIds, input))
+      requireCollectedPhone(choice.location)
       let settings: SuccessRedirect | null = null
       if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
         try {
@@ -1371,13 +1478,13 @@ async function publicBooking(
       const { id, manageToken } = await insertBooking(trx, {
         successRedirect,
         groupSlotId: groupSlot?.id,
-        locationOption: groupSlot?.locationOption,
         organizationId: current.organizationId,
         eventTypeId: current.id,
         start: input.start,
         end,
         title: `${current.title} with ${invitee.name}`,
-        location: current.location,
+        location: groupSlot ? groupSlot.location : choice.location,
+        locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
         responses,
         source: origin.source,
         apiKeyId: origin.apiKeyId,
@@ -1403,7 +1510,14 @@ async function publicBooking(
           now: ctx.now,
         })
       }
-      await prepareBookingConference(ctx, trx, id)
+      if (groupSlot) await prepareBookingConference(ctx, trx, id)
+      else
+        await prepareChosenBookingConference(
+          ctx,
+          trx,
+          id,
+          isPreservedSingleton(current.locations, input.locationOptionId),
+        )
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return {
         booking: await loadBooking(trx, id),
@@ -1683,6 +1797,7 @@ async function rescheduleLocked(
     end,
     title: old.title,
     location: parseLocation(old.location),
+    locationOption: old.location_option,
     responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
     source: origin.source,
     apiKeyId: origin.apiKeyId,

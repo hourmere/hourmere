@@ -1,4 +1,9 @@
 export const common = {
+  'Meeting location': 'Besprechungsort',
+  'Your phone number': 'Ihre Telefonnummer',
+  'Choose one of the available locations.': 'Wählen Sie einen der verfügbaren Orte.',
+  'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
+    'Geben Sie + und insgesamt 7–15 Ziffern einschließlich Ländervorwahl ein. Leerzeichen, Klammern, Punkte und Bindestriche sind erlaubt.',
   'This request has expired or changed. Reload your booking to choose what to do next.':
     'Diese Anfrage ist abgelaufen oder wurde geändert. Laden Sie Ihre Buchung neu, um den nächsten Schritt zu wählen.',
   'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':

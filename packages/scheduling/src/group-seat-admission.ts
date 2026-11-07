@@ -1,6 +1,11 @@
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
-import { findSlots, type PublicEventTypeRecord, parseLocation } from './availability.ts'
+import {
+  findSlots,
+  type PublicEventTypeRecord,
+  parseLocation,
+  selectBookableLocationOption,
+} from './availability.ts'
 import { DomainError } from './errors.ts'
 import { createNotificationSnapshot, type NotificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
@@ -70,6 +75,7 @@ export async function admitGroupSlot(
     bookerEmail: string
     preserveDurationBookingId?: string | undefined
     sourceSlotId?: string | undefined
+    locationOptionId?: string | undefined
     expectedSlotId?: string | undefined
   },
 ) {
@@ -140,6 +146,15 @@ export async function admitGroupSlot(
   if (slot && !q.preserveDurationBookingId && !config.allowed_durations_minutes.includes(duration))
     throw groupUnavailable()
   if (slot) {
+    if (
+      q.locationOptionId !== undefined &&
+      (slot.location_option as { id?: string } | null)?.id !== q.locationOptionId
+    )
+      throw new DomainError(
+        'conflict',
+        'location_unavailable',
+        'Group seats share the configured location.',
+      )
     // This interval already reserves the host. Logistics edits govern new occurrences,
     // not additional seats in an immutable existing occurrence.
     if (
@@ -161,6 +176,7 @@ export async function admitGroupSlot(
       locationOption: slot.location_option,
     }
   }
+  selectBookableLocationOption(q.event, q.locationOptionId)
   const source = q.sourceSlotId
     ? await db
         .selectFrom('group_slots')

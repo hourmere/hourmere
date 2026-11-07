@@ -86,6 +86,7 @@ const eventKeys = [
   'maxBookingsPerWeek',
   'maxBookingsPerMonth',
   'location',
+  'locations',
   'questions',
   'notifications',
   'waitlist',
@@ -451,6 +452,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
   function assertEvent(item: Json) {
     keys(item, eventKeys)
     keys(item.location, ['kind', 'number'])
+    expect(item.locations).toEqual([{ id: 'legacy', kind: 'phone', number: '+15555550123' }])
     expect(item.hosts).toHaveLength(1)
     for (const host of item.hosts) keys(host, ['userId'])
     expect(item.questions).toHaveLength(1)
@@ -567,12 +569,14 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
         'description',
         'durationMinutes',
         'location',
+        'locations',
         'allowGuests',
         'questions',
         'host',
         'team',
       ])
       keys(event.location, ['kind'])
+      expect(event.locations).toEqual([{ id: 'legacy', kind: 'phone' }])
       keys(event.host, ['name', 'timeZone'])
       keys(event.team, ['name', 'slug'])
       for (const question of event.questions)
@@ -823,12 +827,15 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
           'description',
           'durationMinutes',
           'location',
+          'locations',
           'allowGuests',
           'questions',
           'host',
           'team',
         ])
         keys(slots.eventType.location, ['kind'])
+        expect(slots.eventType.locations).toEqual([{ id: 'legacy', kind: 'phone' }])
+        expect(JSON.stringify(slots.eventType)).not.toContain('+15555550123')
         keys(slots.eventType.host, ['name', 'timeZone'])
         keys(slots.eventType.team, ['name', 'slug'])
         for (const question of slots.eventType.questions)

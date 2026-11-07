@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
   'Loading logo preview…': 'Loading logo preview…',
   'Logo preview is unavailable.': 'Logo preview is unavailable.',
   'Saved brand logo': 'Saved brand logo',
@@ -54,6 +56,19 @@ export const admin = {
   'Could not request a new time. {0}': 'Could not request a new time. {0}',
   'Retry the same request': 'Retry the same request',
   'Send request': 'Send request',
+
+  'Export bookings as CSV': 'Export bookings as CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    'Choose a start-time range of at most 366 days. Current booking filters also apply.',
+  'This file contains personal data. Store and share it carefully.':
+    'This file contains personal data. Store and share it carefully.',
+  'CSV times use {zone} and UTC.': 'CSV times use {zone} and UTC.',
+  'Bookings starting at or after (UTC)': 'Bookings starting at or after (UTC)',
+  'Bookings starting before (UTC)': 'Bookings starting before (UTC)',
+  'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
+  'Could not download CSV. Check the booking range and try again shortly.':
+    'Could not download CSV. Check the booking range and try again shortly.',
+  'Download CSV': 'Download CSV',
 
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',

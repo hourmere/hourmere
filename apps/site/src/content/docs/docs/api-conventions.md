@@ -6,6 +6,15 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## CSV booking export
+
+`GET /api/v1/bookings/export.csv` adds an authenticated UTF-8 CSV download. Personal
+owners can export their own bookings; API keys need `read` or `full` scope. Team
+exports require a browser session and current owner/admin membership, and retain the
+existing team-admin booking data boundary (including no custom answers or free-text titles). Errors before
+streaming use the ordinary JSON error envelope; an interrupted stream must be discarded.
+See [CSV booking export](/docs/booking-export) for columns, limits, privacy and MCP/CLI.
+
 ## Open-time snippet generation
 
 `POST /api/v1/open-time-snippets` reads current availability and returns direct links with
@@ -1197,18 +1206,27 @@ A different value can edit a single unlabelled option: the ID survives settings 
 while changing the kind or recreating a cleared option allocates a new ID. A changed
 value (including null) for multiple or labelled options returns HTTP 409
 `location_options_conflict`, with guidance to use `locations`. MCP `update_event_type`
-returns the same domain code. Full option-list writes are internal in this slice; clients
-that receive this conflict should omit an unchanged `location` or wait for the choice
-configuration interfaces rather than discard options.
+returns the same domain code. REST, MCP and CLI now accept complete `locations` lists.
+Omission preserves the list; `null` clears it. Do not supply both location fields.
+All transports use the shared validation and conflict rules. See
+[meeting location choices](/docs/location-choices) for settings and examples.
 
-The additive phone compatibility value `{kind:"phone",askInvitee:true}` can be read and
-written back unchanged through REST/MCP. New phone configuration requires the host’s
-`number`: creating or changing to `askInvitee` returns `400 invalid_location` until the
-public booking flow can collect the invitee’s phone number. It cannot be combined with
-`number`. `EventType.location` keeps its published discriminated `oneOf` shape, extending the existing phone branch.
-The current editor omits unchanged locations. Existing booking flows cannot collect this
-number yet and reject an effective invitee-phone default with `400 invalid_invitee_phone`
-before writing a booking. A future booking flow must collect and resolve a real number.
+The phone compatibility value `{kind:"phone",askInvitee:true}` can be read and written
+back unchanged through REST/MCP. Creating or changing this legacy field to `askInvitee`
+returns `400 invalid_location`; configure collection through `locations` instead.
+`EventType.location` retains its published discriminated `oneOf` shape. The editor omits
+unchanged locations, preserving configurations created through other interfaces.
+
+Public discovery adds `locations` with only `id`, `kind`, optional `label`, `isDefault`
+and `askInvitee`; no host contact details or connection information are exposed. Booking
+creation accepts optional `locationOptionId` (omission uses the effective default) and
+`inviteePhone` for a selected `askInvitee` phone option. The number must start with `+` and contain 7–15 digits including the country code;
+spaces, parentheses, dots and hyphens are accepted and removed before storage in E.164 form.
+Unknown/removed choices return `400 invalid_location_choice`; invalid or missing collected
+phone returns `400 invalid_invitee_phone`. Unavailable selected automatic conference
+locations return `409 location_unavailable`, without exposing provider details. Explicit
+selection and phone participate in idempotency fingerprints. Reschedule inputs do not
+accept either field: the original choice and resolved details are preserved.
 
 ## Retries
 

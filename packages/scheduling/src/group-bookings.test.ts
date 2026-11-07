@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { listPublicSlots } from './availability.ts'
 import {
   cancelHostBooking,
   cancelManagedBooking,
@@ -77,6 +78,124 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
       .orderBy('created_at')
       .execute()
   }
+  it('keeps seats on the shared default and rejects per-seat choices before creating a slot', async () => {
+    const s = await setup(3)
+    const locations = [
+      { id: 'shared', kind: 'link', url: 'https://example.test', isDefault: true },
+      { id: 'office', kind: 'in_person', address: 'Other room' },
+      { id: 'call', kind: 'phone', askInvitee: true },
+    ]
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify(locations),
+        location: JSON.stringify({ kind: 'link', url: 'https://example.test' }),
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    const query = { handle: s.handle, slug: 'group', start: START, end: START.add({ hours: 1 }) }
+    for (const locationOptionId of ['office', 'call']) {
+      await expect(listPublicSlots(ctx, { ...query, locationOptionId })).rejects.toMatchObject({
+        code: 'location_unavailable',
+      })
+      await expect(
+        createPublicBooking(ctx, {
+          ...query,
+          locationOptionId,
+          inviteePhone: '+14155550123',
+          invitee: { name: 'Guest', email: 'guest@example.test', timeZone: 'UTC' },
+        }),
+      ).rejects.toMatchObject({ code: 'location_unavailable' })
+      expect(await state(s.eventId)).toEqual([])
+    }
+    const a = await createPublicBooking(ctx, {
+      ...query,
+      locationOptionId: 'shared',
+      invitee: { name: 'A', email: 'a@example.test', timeZone: 'UTC' },
+    })
+    const b = await s.book('b@example.test')
+    const slot = (await state(s.eventId))[0]!
+    expect(slot.active_seats).toBe(2)
+    const seats = await db
+      .selectFrom('bookings')
+      .select(['location', 'location_option'])
+      .where('id', 'in', [a.booking.id, b.booking.id])
+      .execute()
+    for (const seat of seats) {
+      expect(seat.location).toEqual(slot.location)
+      expect(seat.location_option).toEqual(slot.location_option)
+    }
+  })
+  it('validates existing occurrence choices against its snapshot after the current default changes', async () => {
+    const s = await setup(3)
+    const original = {
+      id: 'original',
+      kind: 'link',
+      url: 'https://example.test/class',
+      isDefault: true,
+    }
+    await db
+      .updateTable('event_types')
+      .set({ locations: JSON.stringify([original]) })
+      .where('id', '=', s.eventId)
+      .execute()
+    const first = await s.book('a@example.test')
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify([
+          { id: 'phone', kind: 'phone', askInvitee: true, isDefault: true },
+        ]),
+        location: JSON.stringify({ kind: 'phone', askInvitee: true }),
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    const input = {
+      handle: s.handle,
+      slug: 'group',
+      start: START,
+      invitee: { name: 'B', email: 'b@example.test', timeZone: 'UTC' },
+    }
+    await expect(
+      createPublicBooking(ctx, {
+        ...input,
+        locationOptionId: 'phone',
+        inviteePhone: '+14155550123',
+      }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect((await state(s.eventId))[0]!.active_seats).toBe(1)
+    const explicit = await createPublicBooking(ctx, { ...input, locationOptionId: 'original' })
+    const implicit = await s.book('c@example.test')
+    expect(explicit.booking.location).toEqual(first.booking.location)
+    expect(implicit.booking.location).toEqual(first.booking.location)
+    await expect(s.book('d@example.test', START.add({ hours: 1 }))).rejects.toMatchObject({
+      code: 'location_unavailable',
+    })
+    expect(await state(s.eventId)).toHaveLength(1)
+  })
+  it('refuses invitee-phone collection even when it is the group default', async () => {
+    const s = await setup()
+    await db
+      .updateTable('event_types')
+      .set({
+        location: JSON.stringify({ kind: 'phone', askInvitee: true }),
+        locations: JSON.stringify([{ id: 'call', kind: 'phone', askInvitee: true }]),
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    const query = { handle: s.handle, slug: 'group', start: START, end: START.add({ hours: 1 }) }
+    await expect(listPublicSlots(ctx, query)).rejects.toMatchObject({
+      code: 'location_unavailable',
+    })
+    await expect(
+      createPublicBooking(ctx, {
+        ...query,
+        inviteePhone: '+14155550123',
+        invitee: { name: 'A', email: 'a@example.test', timeZone: 'UTC' },
+      }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect(await state(s.eventId)).toEqual([])
+  })
   it('shares occupancy, isolates managed payloads, releases only the last seat and replays without side effects', async () => {
     const s = await setup()
     const key = randomUUID()
@@ -449,7 +568,13 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
       .executeTakeFirstOrThrow()
     await db
       .updateTable('event_types')
-      .set({ zoom_connection_id: null })
+      .set({
+        zoom_connection_id: null,
+        locations: JSON.stringify([
+          { id: 'new-link', kind: 'link', url: 'https://example.test/new', isDefault: true },
+          { id: 'office', kind: 'in_person', address: 'New office' },
+        ]),
+      })
       .where('id', '=', s.eventId)
       .execute()
     await s.book('b@example.test', START, randomUUID(), c)

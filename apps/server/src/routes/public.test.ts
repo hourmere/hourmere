@@ -85,6 +85,50 @@ describe.skipIf(!serverUrl)('public routes', () => {
   const book = (start: string, more: Record<string, unknown> = {}, headers = {}) =>
     post('/api/v1/public/ada/intro/bookings', bookingRequest(start, more), headers)
 
+  it('books the selected phone option and rejects missing or invalid collected numbers', async () => {
+    const host = await f.host({ handle: `choice-${randomUUID().slice(0, 8)}` })
+    await f.schedule(host.userId)
+    const id = await f.eventType(host.organizationId, host.userId, { slug: 'choice' })
+    const locations = [
+      { id: 'office', kind: 'in_person', address: 'Private address' },
+      { id: 'call', kind: 'phone', askInvitee: true, label: 'Call me' },
+    ]
+    await db
+      .updateTable('event_types')
+      .set({ locations: JSON.stringify(locations) })
+      .where('id', '=', id)
+      .execute()
+    const path = `/api/v1/public/${host.handle}/choice`
+    const metadata = (await (await get(path)).json()) as { locations: unknown }
+    expect(metadata.locations).toEqual([
+      { id: 'office', kind: 'in_person' },
+      { id: 'call', kind: 'phone', askInvitee: true, label: 'Call me' },
+    ])
+    const input = {
+      start: '2026-11-02T08:00:00Z',
+      locationOptionId: 'call',
+      invitee: { name: 'Guest', email: 'guest@example.test', timeZone: 'UTC' },
+    }
+    for (const inviteePhone of [undefined, 'not-a-phone']) {
+      const rejected = await post(`${path}/bookings`, { ...input, inviteePhone })
+      expect(rejected.status).toBe(400)
+      expect(await rejected.json()).toMatchObject({ error: 'invalid_invitee_phone' })
+    }
+    const created = await post(`${path}/bookings`, { ...input, inviteePhone: '+14155550123' })
+    expect(created.status).toBe(201)
+    const body = (await created.json()) as { booking: { location: unknown } }
+    expect(body.booking.location).toEqual({ kind: 'phone', number: '+14155550123' })
+    expect(body.booking).not.toHaveProperty('locationOption')
+  })
+
+  it('validates the selected location when listing slots', async () => {
+    const response = await get(
+      '/api/v1/public/ada/intro/slots?start=2026-11-02T00:00:00Z&end=2026-11-03T00:00:00Z&locationOptionId=missing',
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_location_choice' })
+  })
+
   it('shows the public event type', async () => {
     const res = await get('/api/v1/public/ada/intro')
     expect(res.status).toBe(200)
@@ -96,6 +140,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
       description: null,
       durationMinutes: 30,
       location: { kind: 'phone' },
+      locations: [{ id: 'legacy', kind: 'phone' }],
       questions: [{ id: 'topic', label: 'Topic', type: 'short_text', required: true }],
       host: { name: 'Ada Lovelace', timeZone: 'Europe/Berlin' },
     })

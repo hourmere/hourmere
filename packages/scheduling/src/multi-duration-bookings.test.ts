@@ -26,6 +26,7 @@ import { DomainError } from './errors.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
 import * as groupSeatAdmission from './group-seat-admission.ts'
 import * as hosts from './hosts.ts'
+import * as locationOptions from './location-options.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
@@ -105,6 +106,7 @@ function sourceCopy(change?: Change): Api {
     ...availability,
     ...bookingPage,
     ...conferences,
+    ...locationOptions,
     ...groupSeatAdmission,
     DomainError,
     ...hosts,

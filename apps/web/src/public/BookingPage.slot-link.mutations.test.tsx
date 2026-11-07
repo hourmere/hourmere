@@ -8,6 +8,7 @@ import * as router from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as conferenceNotice from '../components/ConferenceNotice.tsx'
 import * as emailHint from '../components/EmailDeliveryHint.tsx'
+import * as formComponents from '../components/forms.tsx'
 import * as zonePicker from '../components/TimeZonePicker.tsx'
 import * as format from '../format.ts'
 import * as hooks from '../hooks.ts'
@@ -668,4 +669,127 @@ describe('public direct-slot protection source-copy controls', () => {
       'date: formatDate(Date.parse(slot.start), timeZone, locale),',
     )
   })
+})
+
+it('detects dropping the selected location from slot availability', async () => {
+  async function assertion(text: string) {
+    const api = fakeApi(
+      routes({
+        [`GET ${API}`]: () =>
+          json(200, {
+            ...EVENT,
+            locations: [
+              { id: 'office', kind: 'in_person', label: 'Office' },
+              { id: 'meet', kind: 'google_meet', label: 'Meet' },
+            ],
+          }),
+      }),
+    )
+    const view = display(text, '/ada/intro')
+    try {
+      const choice = await screen.findByRole('radio', { name: 'Meet' })
+      await userEvent.setup().click(choice)
+      await waitFor(() => expect(api.to(`GET ${API}/slots`).length).toBeGreaterThan(1))
+      expect(query(api.to(`GET ${API}/slots`).at(-1) as Call).get('locationOptionId')).toBe('meet')
+    } finally {
+      view.unmount()
+    }
+  }
+  await killed(
+    assertion,
+    'eventSlots(handle, slug, team, duration, locationOptionId)',
+    'eventSlots(handle, slug, team, duration)',
+  )
+})
+
+it('detects rejecting formatted international phone input in the public form', () => {
+  const original = readFileSync('apps/web/src/public/BookingForm.tsx', 'utf8')
+  const before = "(values.inviteePhone ?? '').replace(/[ ().-]/g, '')"
+  expect(original.split(before)).toHaveLength(2)
+  const assertion = (text: string) => {
+    const copied = compile<typeof form>(text, {
+      react,
+      '../components/forms.tsx': formComponents,
+      '../i18n/runtime.tsx': runtime,
+      '../i18n/translate.ts': translate,
+      './BookingDetails.tsx': details,
+      './validation.ts': validation,
+    })
+    expect(
+      copied.validateBookingForm(
+        [],
+        {
+          name: 'Ada',
+          email: 'ada@example.com',
+          answers: {},
+          guests: [],
+          inviteePhone: '+1 (415) 555-0123',
+        },
+        [{ id: 'call', kind: 'phone', askInvitee: true }],
+      ),
+    ).toEqual({})
+  }
+  assertion(original)
+  expect(() => assertion(original.replace(before, "values.inviteePhone ?? ''"))).toThrowError(
+    expect.objectContaining({ name: 'AssertionError' }),
+  )
+  assertion(original)
+})
+
+it('detects submitting phone separators instead of the normalized number', async () => {
+  async function assertion(text: string) {
+    const api = fakeApi(
+      routes({
+        [`GET ${API}`]: () =>
+          json(200, { ...EVENT, locations: [{ id: 'call', kind: 'phone', askInvitee: true }] }),
+      }),
+    )
+    const view = display(text)
+    try {
+      await fill()
+      fireEvent.change(screen.getByLabelText('Your phone number'), {
+        target: { value: '+1 (415) 555-0123' },
+      })
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await waitFor(() => expect(api.to(`POST ${API}/bookings`)).toHaveLength(1))
+      expect(api.to(`POST ${API}/bookings`)[0]?.body).toHaveProperty('inviteePhone', '+14155550123')
+    } finally {
+      view.unmount()
+    }
+  }
+  await killed(
+    assertion,
+    "inviteePhone: values.inviteePhone?.replace(/[ ().-]/g, ''),",
+    'inviteePhone: values.inviteePhone,',
+  )
+})
+
+it('detects keeping an unchecked time after changing the location', async () => {
+  async function assertion(text: string) {
+    fakeApi(
+      routes({
+        [`GET ${API}`]: () =>
+          json(200, {
+            ...EVENT,
+            locations: [
+              { id: 'office', kind: 'in_person', label: 'Office' },
+              { id: 'meet', kind: 'google_meet', label: 'Meet' },
+            ],
+          }),
+      }),
+    )
+    const view = display(text)
+    try {
+      await fill()
+      await userEvent.setup().click(screen.getByRole('radio', { name: 'Meet' }))
+      expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+    } finally {
+      view.unmount()
+    }
+  }
+  await killed(
+    assertion,
+    'selectedLocation(event.locations ?? [], next.locationOptionId)?.id !==\n                    locationOptionId',
+    'false',
+  )
 })
