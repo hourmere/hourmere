@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { parse } from '@babel/parser'
 import type { Principal } from '@hourmere/auth'
-import { createDb, createPool } from '@hourmere/db'
+import { createDb, createPool, type Db } from '@hourmere/db'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
@@ -14,16 +14,26 @@ import { productRoutes, productTools } from './server.ts'
 // Match camelCase operation ids as well as path segments, tool and command names.
 function isSsoName(name: string) {
   const tokens = name
+    // A plural or version suffix on the acronym is a word break: SSOs → SSO_s, ssov2 → sso_v2.
+    .replace(/(sso)(s|v\d)/gi, '$1_$2')
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    // Digits are word breaks too: sso2 → sso_2, v2sso → v_2_sso.
+    .replace(/\d+/g, '_$&_')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
   return (
     /saml|oidc|openid/i.test(name) ||
-    tokens.some((token) => /^sso\d*$/.test(token)) ||
-    tokens.join('_').includes('single_sign_on')
+    tokens.includes('sso') ||
+    tokens.join('').includes('singlesignon')
   )
 }
+
+// Hourmere is itself an OAuth authorization server for MCP clients, and this is that server's
+// discovery document (apps/server/src/mcp/endpoint.ts), not a route for signing users in
+// through an identity provider. It is the single exemption from the `openid` rule, for the
+// route inventory only; the same name on any other surface still fails.
+const MCP_OAUTH_DISCOVERY_PATH = '/.well-known/openid-configuration/api/auth'
 const design = await readFile(new URL('../../../docs/sso.md', import.meta.url), 'utf8')
 const ssoOperationIds = [
   ...design.matchAll(/^\| (?:GET|POST|PATCH|PUT|DELETE) .*?\| `([^`]+)` \|/gm),
@@ -32,6 +42,53 @@ const ssoOperationIds = [
 function expectNoSso(names: string[]) {
   expect(names.filter((name) => isSsoName(name) || ssoOperationIds.includes(name))).toEqual([])
 }
+
+function expectNoSsoRoutes(paths: string[]) {
+  expectNoSso(paths.filter((path) => path !== MCP_OAUTH_DISCOVERY_PATH))
+}
+
+// Every mount startServer (apps/server/src/server.ts) adds to createApp, without listening:
+// SCIM, the MCP endpoint with OAuth (discovery documents and the guarded authorize route),
+// waitlist confirmation pages and the built web app's static files. None of them is
+// registered in openApiRouteInventory's document-only app.
+const unavailable = async (): Promise<never> => {
+  throw new Error('Route registration must not call the provider or the database')
+}
+function productionShapedApp(db: Db) {
+  return createApp({
+    checkDb: unavailable,
+    scim: { db, enabled: true },
+    authHandler: unavailable,
+    resolveCaller: unavailable,
+    publicUrl: 'http://localhost',
+    webDist: 'web-dist-never-read',
+    waitlist: { verify: unavailable, remove: unavailable },
+    routes: productRoutes({
+      db,
+      socialProviders: {},
+      invitationMailLimits: { secret: 'catalogue-test-only' },
+      scimProvisioningEnabled: true,
+      mcpAuth: { handler: unavailable },
+    }),
+    mcp: mcpEndpoint({
+      oauth: { resolve: unavailable, handler: unavailable },
+      tools: productTools({ db }),
+    }),
+  })
+}
+// One representative path per mount, so the inventory proves that it saw each of them.
+const productionOnlyPaths = [
+  '/scim/*',
+  '/.well-known/oauth-protected-resource/mcp',
+  MCP_OAUTH_DISCOVERY_PATH,
+  '/api/auth/oauth2/authorize',
+  '/mcp',
+  '/booking/waitlist/verify',
+  '/booking/waitlist/remove',
+  '/app/sw.js',
+  '/assets/*',
+  '/hourmere-embed.js',
+]
 
 type Document = { paths: Record<string, Record<string, { operationId?: string }>> }
 function expectNoSsoOperations(document: Document) {
@@ -87,16 +144,52 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     expectNoSsoOperations((await openApiDocument()) as Document)
   })
 
-  it('registers no SSO route, including handlers omitted from OpenAPI', async () => {
-    const { routes } = await openApiRouteInventory()
-    expectNoSso(routes.map(({ path }) => path))
+  it('registers no SSO route as production assembles the app, OpenAPI or not', async () => {
+    const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
+    try {
+      const { routes } = await openApiRouteInventory()
+      const documentPaths = routes.map(({ path }) => path)
+      const productionPaths = productionShapedApp(db).routes.map(({ path }) => path)
+      expect(productionPaths).toEqual(
+        expect.arrayContaining([...documentPaths, ...productionOnlyPaths]),
+      )
+      expectNoSsoRoutes(productionPaths)
+    } finally {
+      await db.destroy()
+    }
     const plainRoutes = new Hono()
     plainRoutes.get('/api/v1/associations', (c) => c.json({}))
-    expectNoSso(plainRoutes.routes.map(({ path }) => path))
+    expectNoSsoRoutes(plainRoutes.routes.map(({ path }) => path))
     plainRoutes.get('/api/v1/saml2/metadata', (c) => c.json({}))
-    expect(() => expectNoSso(plainRoutes.routes.map(({ path }) => path))).toThrow(
+    expect(() => expectNoSsoRoutes(plainRoutes.routes.map(({ path }) => path))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+
+  it('exempts exactly the MCP OAuth discovery route and nothing else', () => {
+    const rejects = (check: () => void) =>
+      expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    expectNoSsoRoutes([MCP_OAUTH_DISCOVERY_PATH])
+    // The rule is unchanged: the same name fails on every other surface.
+    rejects(() => expectNoSso([MCP_OAUTH_DISCOVERY_PATH]))
+    rejects(() => expectNoSsoOperations({ paths: { [MCP_OAUTH_DISCOVERY_PATH]: { get: {} } } }))
+    // Any variation of the path, including a neighbour under the same prefix, fails as a route.
+    for (const path of [
+      `${MCP_OAUTH_DISCOVERY_PATH}/`,
+      ` ${MCP_OAUTH_DISCOVERY_PATH}`,
+      MCP_OAUTH_DISCOVERY_PATH.toUpperCase(),
+      '/.well-known/openid-configuration',
+      '/.well-known/openid-configuration/',
+      '/.well-known/openid-configuration/api',
+      '/.well-known/openid-configuration/api/auth/jwks',
+      '/.well-known/openid-configuration/api/sso',
+      '/.well-known/openid-configuration/*',
+      '/api/auth/.well-known/openid-configuration',
+      '/api/v1/openid-configuration/api/auth',
+    ]) {
+      rejects(() => expectNoSsoRoutes([path]))
+      rejects(() => expectNoSsoRoutes([MCP_OAUTH_DISCOVERY_PATH, path]))
+    }
   })
 
   it('keeps the MCP tools advertised to a full-scope caller', async () => {
@@ -217,6 +310,14 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     ['sso2', 'getSso2Metadata', 'sso2_metadata'],
     ['customSAMLmetadata', 'getCustomSAMLmetadata', 'customSAMLmetadata'],
     ['customOIDCmetadata', 'getCustomOIDCmetadata', 'customOIDCmetadata'],
+    ['ssos', 'listSsos', 'list_ssos'],
+    ['SSOs', 'listSSOs', 'SSOs_list'],
+    ['SSOv2', 'getSSOv2Config', 'ssov2_config'],
+    ['v2sso', 'getV2sso', 'v2sso_config'],
+    ['saml20', 'getSaml20Metadata', 'saml20_metadata'],
+    ['singlesignon', 'getsinglesignon', 'singlesignon'],
+    ['singleSignon', 'singleSignonMetadata', 'single_signon'],
+    ['openidconnect', 'getOpenidconnect', 'openidconnect'],
   ])('rejects %s names on every catalogue surface', (path, operationId, tool) => {
     const rejects = (check: () => void) =>
       expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
@@ -229,21 +330,28 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     rejects(() => expectNoSso(webRouteNames('', `export const nextPath = '/app/${path}'`)))
   })
 
-  it.each(['associations', 'lasso', 'associated', 'blossom'])(
-    'allows unrelated %s names on every catalogue surface',
-    (name) => {
-      expectNoSsoOperations({
-        paths: { [`/api/v1/${name}`]: { get: { operationId: `get${name}` } } },
-      })
-      expectNoSso([`list_${name}`, `${name} list`, `GET /api/v1/${name}`])
-      expectNoSso(
-        webRouteNames(
-          `<Routes><Route path="/app/${name}" /></Routes>`,
-          `export const nextPath = '/app/${name}'`,
-        ),
-      )
-    },
-  )
+  it.each([
+    'associations',
+    'lasso',
+    'lassos',
+    'associated',
+    'blossom',
+    'missouri',
+    'Missouri',
+    'assortment',
+    'espressos',
+  ])('allows unrelated %s names on every catalogue surface', (name) => {
+    expectNoSsoOperations({
+      paths: { [`/api/v1/${name}`]: { get: { operationId: `get${name}` } } },
+    })
+    expectNoSso([`list_${name}`, `${name} list`, `GET /api/v1/${name}`])
+    expectNoSso(
+      webRouteNames(
+        `<Routes><Route path="/app/${name}" /></Routes>`,
+        `export const nextPath = '/app/${name}'`,
+      ),
+    )
+  })
 
   it('reports both SSO capabilities false at /instance', async () => {
     const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))

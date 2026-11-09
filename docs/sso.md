@@ -846,15 +846,27 @@ Public user guides for a protocol land in its setting step, which also rewrites 
 and the bullet for the new setting; Release docs completes the cross-protocol operator
 guides, and Acceptance and defaults updates them for the on-by-default state.
 
-The Hard-off guard catalogue regression checks reject SSO names in the full Hono
-registered route inventory (including plain handlers absent from OpenAPI), OpenAPI
-paths and operation IDs, advertised MCP tools, and CLI commands and targets. The web
-source check covers JSX `<Route>` attributes in `apps/web/src/App.tsx`, including
-nested `<Routes>`, and strings, template parts and identifiers in
-`apps/web/src/paths.ts`. It does not inspect imported route components, other files
-or route-object definitions; extend that inventory if routing moves to those sources.
-The designed REST operation-ID table currently has exactly 19 entries, checked by
-the regression suite. Unrelated catalogue additions remain allowed.
+The Hard-off guard catalogue regression checks reject SSO names in the Hono route
+inventory of the app as `startServer` assembles it, with every optional mount present
+(SCIM, the MCP endpoint with its OAuth discovery documents and guarded authorize
+route, waitlist confirmation pages and the built web app's static files), including
+plain handlers absent from OpenAPI; in OpenAPI paths and operation IDs; in advertised
+MCP tools; and in CLI commands and targets. Names match `saml`, `oidc` and `openid`
+anywhere, `sso` as a word (after splitting camelCase, separators, digits and the
+plural or version suffix: `ssos`, `SSOv2`, `listSSOs`) and `single sign on` in any
+spelling. The one exemption is the existing MCP OAuth discovery route
+`/.well-known/openid-configuration/api/auth`: there Hourmere is the OAuth
+authorization server for MCP clients, not an SSO relying party; the exemption covers
+exactly that path in the route inventory and the suite checks that nothing else is
+exempt. The web source check covers JSX `<Route>` attributes in
+`apps/web/src/App.tsx`, including nested `<Routes>`, and strings, template parts and
+identifiers in `apps/web/src/paths.ts`. It does not inspect imported route
+components, other files or route-object definitions; extend that inventory if routing
+moves to those sources. The startup check also runs the production entry point
+`apps/server/src/index.ts` in a child process with `SSO_OIDC_ENABLED=true` and
+`SSO_SAML_ENABLED=true` and requires both `/instance` flags to be `false`. The
+designed REST operation-ID table currently has exactly 19 entries, checked by the
+regression suite. Unrelated catalogue additions remain allowed.
 
 **Hard-off behaviour.** Every SSO path of that protocol is unreachable; while both
 protocols are hard-off, so are the protocol-neutral SSO operations (policy, domains,

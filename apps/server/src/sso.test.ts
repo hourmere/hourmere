@@ -1,5 +1,9 @@
+import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { createRoute, z } from '@hono/zod-openapi'
 import { createDb, createPool } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
@@ -140,10 +144,19 @@ async function verifyGuard(guard = requireSsoEnabled, appFactory = createApp) {
         ' oidc',
         'OIDC',
         'oauth',
+        // Prototype keys: a lookup-table guard would resolve them to Object.prototype members.
+        'constructor',
+        '__proto__',
+        'toString',
+        'hasOwnProperty',
         null,
         false,
         0,
         {},
+        // Arrays: repeated query keys and JSON bodies arrive this way; never protocol-neutral.
+        ['oidc'],
+        ['saml'],
+        [],
       ] as const) {
         const effects = vi.fn()
         // This route is deliberately defined only in the test, never in productRoutes.
@@ -253,5 +266,76 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
     } finally {
       await owned.drop()
     }
-  })
+  }, 30_000)
+
+  it('starts the real entry point with both settings on and still reports both off', async () => {
+    // index.ts is the composition root production runs (`npm start`, the Docker CMD). Only a
+    // child process executes it, so module-scope reads and any override it passes into
+    // startServer are observed exactly as production would observe them.
+    const owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
+      tag: 'sso_entry',
+    })
+    const env: NodeJS.ProcessEnv = {}
+    for (const key of ['PATH', 'HOME', 'TMPDIR', 'NODE_OPTIONS', 'HOURMERE_OUTBOX_DB_REGISTRY'])
+      if (process.env[key]) env[key] = process.env[key]
+    Object.assign(env, {
+      DATABASE_URL: owned.url,
+      BETTER_AUTH_SECRET: randomBytes(32).toString('base64url'),
+      PUBLIC_URL: 'http://localhost',
+      PORT: '0',
+      HOURMERE_ROLE: 'web',
+      SIGNUP: 'closed',
+      SSO_OIDC_ENABLED: 'true',
+      SSO_SAML_ENABLED: 'true',
+      ssoOidcEnabled: 'true',
+      ssoSamlEnabled: 'true',
+    })
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./index.ts', import.meta.url))], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let output = ''
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk
+    })
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk
+    })
+    try {
+      const port = await new Promise<number>((resolve, reject) => {
+        const settle = () => {
+          const match = /Hourmere listening on :(\d+)/.exec(output)
+          if (match) resolve(Number(match[1]))
+        }
+        child.stdout.on('data', settle)
+        child.once('error', reject)
+        child.once('exit', (code, signal) =>
+          reject(new Error(`entry point exited (${code ?? signal}) before listening:\n${output}`)),
+        )
+      })
+      const origin = `http://127.0.0.1:${port}`
+      const response = await fetch(`${origin}/api/v1/instance`)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        ssoOidcEnabled: false,
+        ssoSamlEnabled: false,
+      })
+      const unknown = await fetch(`${origin}/api/v1/test-only-sso/known`)
+      expect(unknown.status).toBe(404)
+      expect(await unknown.json()).toEqual({ error: 'not_found' })
+      // index.ts owns shutdown too: SIGTERM must close the server and exit cleanly.
+      const exited = once(child, 'exit')
+      child.kill('SIGTERM')
+      const [code] = (await exited) as [number | null, NodeJS.Signals | null]
+      expect(code, output).toBe(0)
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit')
+        child.kill('SIGKILL')
+        await exited
+      }
+      await owned.drop()
+    }
+  }, 60_000)
 })
