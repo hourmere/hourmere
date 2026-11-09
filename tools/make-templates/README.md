@@ -19,6 +19,28 @@ After building and checking your own scenario, Make's scenario menu offers
 connections and scheduling. Review exports for private URLs, credentials and
 sample personal data before sharing. No exported scenario is supplied here.
 
+## Webhook events
+
+Hourmere webhooks deliver the events below. The two event recipes use only
+`booking.created` and `booking.cancelled`; no recipe covers the other events. Every
+event carries the shared snapshot parsed in [Verify before side effects](#verify-before-side-effects);
+the last column lists the fields an event adds to it.
+
+| Event | Make recipe | Additional payload fields |
+| --- | --- | --- |
+| `booking.created` | [Google Sheets row](booking-created-sheets.md) | None |
+| `booking.cancelled` | [Slack message](booking-cancelled-slack.md) | None |
+| `booking.rescheduled` | None | None |
+| `booking.reschedule_requested` | None | `data.requestId` |
+| `booking.reschedule_request_expired` | None | `data.requestId` |
+| `booking.attendee_no_show_changed` | None | `data.attendeeId`, `data.noShowMarkedAt`, `data.noShowMarkedBy` |
+
+To build your own scenario for another event, register only that event, reuse the
+verification and receipt steps below and add that event's fields to the data
+structure. Map an added field only in a scenario registered for its event. For
+`booking.attendee_no_show_changed`, both marker fields are null when a mark is
+removed; the payload has no attendee name or contact details.
+
 ## Register the webhook
 
 The two event recipes need no Hourmere API key during normal execution. An owner
@@ -251,6 +273,10 @@ These field paths are checked against Hourmere's API and webhook contracts.
         "isActive"
       ]
     }
+  ],
+  "webhookEvents": [
+    "booking.created",
+    "booking.cancelled"
   ],
   "webhookPayloadFields": [
     "id",

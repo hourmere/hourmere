@@ -132,9 +132,9 @@ Explore these detailed guides:
 
 - [CLI](/docs/cli): use the booking tools
   from a terminal with an API key.
-- [Make](/docs/make): connect booking webhooks to Sheets or Slack, or create bookings with HTTP.
 - [Booking webhooks](/docs/webhooks):
   configure signed delivery and retries.
+- [Make](/docs/make): connect booking webhooks to Sheets or Slack, or create bookings with HTTP.
 - [n8n](/docs/n8n): automate bookings with actions and signed triggers in self-hosted n8n.
 - [Zapier](/docs/zapier): connect booking triggers, actions and searches through a
   private integration.

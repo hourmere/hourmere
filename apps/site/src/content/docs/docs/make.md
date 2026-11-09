@@ -52,6 +52,29 @@ space owner). Create a temporary **Full account access** key at `/app/api-keys` 
 intended space, keep it in a private local file, use it only from your trusted REST
 client, then revoke it after setup. Never paste it into Make. See [API keys](/docs/api-keys).
 
+## Webhook events
+
+Hourmere webhooks deliver the events below. The two event recipes use only
+`booking.created` and `booking.cancelled`; there is no Make recipe for the other events.
+Every event carries the snapshot fields shown in
+[Booking webhooks](/docs/webhooks#payload-and-signatures); the last column lists the
+fields an event adds.
+
+| Event | Make recipe | Additional payload fields |
+| --- | --- | --- |
+| `booking.created` | [Google Sheets row](https://github.com/hourmere/hourmere/blob/main/tools/make-templates/booking-created-sheets.md) | None |
+| `booking.cancelled` | [Slack message](https://github.com/hourmere/hourmere/blob/main/tools/make-templates/booking-cancelled-slack.md) | None |
+| `booking.rescheduled` | None | None |
+| `booking.reschedule_requested` | None | `data.requestId` |
+| `booking.reschedule_request_expired` | None | `data.requestId` |
+| `booking.attendee_no_show_changed` | None | `data.attendeeId`, `data.noShowMarkedAt`, `data.noShowMarkedBy` |
+
+To build your own scenario for another event, register only that event, reuse the
+verification and receipt steps below, and map an added field only in a scenario
+registered for its event. For `booking.attendee_no_show_changed`, both marker fields
+are null when a mark is removed; the payload has no attendee name or contact details.
+See [Marking no-shows](/docs/no-shows).
+
 ## Register one webhook per event scenario
 
 Create a separate **Webhooks → Custom webhook** for each scenario. Set **Get request
@@ -174,6 +197,8 @@ handling. See also [REST quickstart](/docs/rest).
   Module names/settings may evolve; confirm them against the linked official documentation.
 - Webhooks omit invitee names, email addresses, answers and management links. Sheets and
   Slack recipes use only the minimal event snapshot; they cannot map absent contact data.
+- The recipes cover only `booking.created` and `booking.cancelled`; other webhook events,
+  including attendee no-show changes, have no Make recipe.
 - Deliveries may repeat or arrive out of order. Rescheduling emits `booking.rescheduled`,
   not an additional cancellation; the cancellation recipe does not report reschedules.
 - Hourmere acknowledges delivery on a 2xx response, not on eventual Sheets/Slack completion.
@@ -217,6 +242,10 @@ These field paths are checked against Hourmere's API and webhook contracts.
         "isActive"
       ]
     }
+  ],
+  "webhookEvents": [
+    "booking.created",
+    "booking.cancelled"
   ],
   "webhookPayloadFields": [
     "id",

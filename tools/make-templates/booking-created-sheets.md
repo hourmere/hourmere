@@ -77,6 +77,9 @@ and are not literal field-name prefixes to enter in Make.
       ]
     }
   ],
+  "webhookEvents": [
+    "booking.created"
+  ],
   "webhookPayloadFields": [
     "id",
     "type",
