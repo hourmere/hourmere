@@ -1390,6 +1390,38 @@ export const test = base.extend<{
 })
 export { expect }
 
+/**
+ * Waits until `target` keeps the same position in the top-level viewport across consecutive
+ * animation frames. Playwright's own stability check measures an element inside its frame,
+ * so it cannot see an embedded booking page's iframe move within the host page. On narrow
+ * screens, choosing a day smoothly scrolls its times into view, which scrolls the host page
+ * when the booking page is embedded. A click during that scroll can press one element and
+ * release over another: no click reaches the time, yet Playwright reports success.
+ */
+async function waitUntilAtRest(target: Locator, page: Page) {
+  await target.waitFor()
+  let previous: string | undefined
+  let unchanged = 0
+  await expect
+    .poll(
+      async () => {
+        // Two frames per sample, so a scroll that starts on the next frame is seen.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        )
+        const box = JSON.stringify(await target.boundingBox())
+        unchanged = box === previous ? unchanged + 1 : 0
+        previous = box
+        return unchanged
+      },
+      { message: 'The time should be at rest in the top-level viewport', intervals: [0] },
+    )
+    .toBeGreaterThanOrEqual(2)
+}
+
 // TEMPORARY probe variant: wait until the time is at rest in the top-level viewport.
 async function probeSettle(target: Locator, page: Page) {
   await target.waitFor()
@@ -1426,6 +1458,7 @@ export async function pickSlot(scope: Page | Locator | FrameLocator, page: Page)
       if (date && date >= cutoff) {
         await day.click()
         const slot = scope.locator('.slots button').first()
+        await waitUntilAtRest(slot, page)
         if (process.env.HOURMERE_E2E_PICK_MODE === 'settle') await probeSettle(slot, page)
         const delay = Number(process.env.HOURMERE_E2E_PICK_DELAY ?? 0)
         await slot.click(delay ? { delay } : undefined)
