@@ -8,7 +8,8 @@ cancellation, plus private attendee no-show changes. They use the same booking s
 not depend on Google, Microsoft, mail or a billing account. Webhook management is REST-only;
 there is no webhook settings page. The private [Zapier app](/docs/zapier) and the trigger
 in the [n8n community node](/docs/n8n) use these endpoints to subscribe and unsubscribe
-automatically.
+automatically. [Make recipes](/docs/make) give manual module settings for
+`booking.created` and `booking.cancelled`.
 
 ## Enable and configure
 
