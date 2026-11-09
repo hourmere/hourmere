@@ -147,6 +147,14 @@ describe('Chinese copy and punctuation', () => {
     }
   })
 
+  it.each([
+    ['Visitor', '将 Visitor 标记为未出席', '清除 Visitor 的未出席标记'],
+    ['王小明', '将王小明标记为未出席', '清除王小明的未出席标记'],
+  ])('spaces no-show attendee labels according to the inserted name %s', (name, mark, clear) => {
+    expect(translate('zh-CN', 'Mark {name} as a no-show', { name })).toBe(mark)
+    expect(translate('zh-CN', 'Clear no-show for {name}', { name })).toBe(clear)
+  })
+
   it('separates the Chinese one-time revoke label from its UUID during interpolation', () => {
     const id = 'a0000000-0000-7000-8000-000000000001'
     expect(admin['Revoke one-time link {0}']).toBe('撤销一次性链接{0}')

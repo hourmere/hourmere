@@ -32,6 +32,14 @@ export interface TargetState {
   schedules: TargetRow[]
   events: TargetRow[]
   bookings: TargetRow[]
+  groupOccupancy: {
+    group_slot_id: string
+    user_id: string
+    start_at: string
+    end_at: string
+    buffer_before_minutes: number
+    buffer_after_minutes: number
+  }[]
   waitlistEvents: { user_id: string; event_type_id: string }[]
   items: ImportItem[]
 }
@@ -159,7 +167,7 @@ export async function readTargetState(
     `SELECT e.id,e.organization_id,e.owner_user_id,e.slug,
     e.title,e.description,e.duration_minutes,e.allowed_durations_minutes,e.slot_step_minutes,
     e.buffer_before_minutes,e.buffer_after_minutes,e.minimum_notice_minutes,e.booking_window_days,
-    e.max_bookings_per_day,e.scheduling_type,e.location,e.questions,e.is_active,e.is_hidden,
+    e.max_bookings_per_day,e.max_bookings_per_week,e.max_bookings_per_month,e.scheduling_type,e.location,e.questions,e.is_active,e.is_hidden,
     e.position,e.allow_guests,e.notifications,e.success_redirect,e.deleted_at,
     coalesce((SELECT jsonb_agg(jsonb_build_object('user_id',h.user_id,'schedule_id',h.schedule_id,
       'destination_calendar_id',h.destination_calendar_id,'weight',h.weight) ORDER BY h.user_id)
@@ -190,6 +198,19 @@ export async function readTargetState(
         i.source_id=$4 AND i.entity_kind='booking' AND i.target_id=b.id)) ORDER BY b.id`,
     [organizations, userIds, cutoff, sourceId],
   )
+  // Group seats have no booking-owned host row. Read the slot-owned occupancy
+  // directly, using the same active interval protected by the exclusion constraint.
+  const groupOccupancy = await rows<TargetState['groupOccupancy'][number]>(
+    client,
+    `SELECT h.group_slot_id,h.user_id,lower(h.period) AS start_at,upper(h.period) AS end_at,
+      s.buffer_before_minutes,s.buffer_after_minutes
+    FROM booking_hosts h JOIN group_slots s ON s.id=h.group_slot_id
+    WHERE h.booking_id IS NULL AND h.group_slot_id IS NOT NULL
+      AND h.active AND h.user_id=ANY($1::uuid[])
+      AND upper(h.period)+s.buffer_after_minutes*interval '1 minute'>$2::timestamptz
+    ORDER BY h.group_slot_id,h.user_id`,
+    [userIds, cutoff],
+  )
   const items = await rows<ImportItem>(
     client,
     `SELECT source_id,entity_kind,source_primary_key,source_user_primary_key,
@@ -207,7 +228,7 @@ export async function readTargetState(
     [userIds],
   )
   if (
-    [identities, handles, schedules, events, bookings, waitlistEvents].some(
+    [identities, handles, schedules, events, bookings, groupOccupancy, waitlistEvents].some(
       (list) => list.length > 10_000,
     ) ||
     items.length > 50_050
@@ -222,6 +243,7 @@ export async function readTargetState(
     schedules,
     events,
     bookings,
+    groupOccupancy,
     waitlistEvents,
     items,
   }
@@ -246,8 +268,21 @@ export function entityState(state: TargetState, kind: EntityKind, targetId: stri
     }
     case 'schedule':
       return state.schedules.find((s) => s.id === targetId)
-    case 'event_type':
-      return state.events.find((e) => e.id === targetId && e.deleted_at == null)
+    case 'event_type': {
+      const event = state.events.find((e) => e.id === targetId && e.deleted_at == null)
+      // Null ceilings were absent from older ledger hashes; configured ceilings
+      // remain part of the hash so edits cannot be mistaken for an unchanged replay.
+      return event
+        ? Object.fromEntries(
+            Object.entries(event).filter(
+              ([key, value]) =>
+                !(
+                  ['max_bookings_per_week', 'max_bookings_per_month'].includes(key) && value == null
+                ),
+            ),
+          )
+        : undefined
+    }
     case 'booking':
       return state.bookings.find((b) => b.id === targetId)
   }
@@ -280,6 +315,13 @@ export function parserContext(
           targetUserId: h.user_id,
           start: b.start_at as string,
           end: b.end_at as string,
+        })),
+      )
+      .concat(
+        state.groupOccupancy.map((h) => ({
+          targetUserId: h.user_id,
+          start: h.start_at,
+          end: h.end_at,
         })),
       ),
   }

@@ -14,6 +14,19 @@ Restart/recreate affected processes after changing configuration. The interactiv
 plain Compose file or the optional automatic HTTPS override; see
 [self-hosting](/docs/self-hosting) for the complete command sequence.
 
+## Web build
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VITE_PWA_ENABLED` | `true` | Build-time app installation and static offline shell. Empty or omitted uses the current default; only explicit `true` or `false` is otherwise accepted. Invalid values fail the build. `false` stops registration and emits a self-unregistering worker for existing clients. |
+
+The web build reads this setting from the repository-root `.env` or its process environment.
+Docker Compose forwards it from `.env` as a build argument; a direct Docker build needs
+`--build-arg VITE_PWA_ENABLED=false`. Rebuild and redeploy after changes: setting a variable
+on a running container cannot alter compiled files. Leave the example value empty to
+follow future defaults. See [turn off app installation](/docs/self-hosting#turn-off-app-installation)
+for commands and the delayed effect on clients that are offline.
+
 ## Server and database
 
 PostgreSQL 18+ is required because migrations use `uuidv7()`. The bundled Compose stack
@@ -35,6 +48,7 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
+| `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
 

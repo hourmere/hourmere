@@ -13,6 +13,17 @@ helper (`@hourmere/notifications`), the `booking_notifications` table, and the b
 services ([`packages/scheduling/src/bookings.ts`](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/bookings.ts)), which queue the jobs in the transaction of
 every booking change, whether it came over REST or MCP (last section).
 
+## Phone location privacy
+
+For phone locations, booking emails and calendar invitations state who calls whom. A phone
+number collected from the invitee is included only for hosts and that invitee. Guests receive
+“Phone call — the host will call the invitee” without the number, including confirmations,
+reschedules, cancellations and reminders. Configured reminders use the same recipient policy;
+follow-ups contain no meeting location. The booking's saved location-option snapshot determines
+this policy even after the event type is edited or the booking is rescheduled. Host-provided
+phone numbers remain shared with attendees so they can call the host. Ordinary provider calendar
+copies remain host-only busy-time records and do not currently include meeting locations.
+
 ## Requests for another time
 
 [Host reschedule requests](/docs/request-reschedule) send the booker a private management
@@ -31,6 +42,10 @@ conference, webhook or scheduled-message delivery is produced for them. Bounded 
 exclude import-connected records before applying their page limit so ordinary work can
 continue behind stale imported intents. See the
 [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md).
+
+No-show marks are private attendance metadata. They send no email and do not reschedule,
+suppress or recreate reminders or follow-ups. Existing follow-up eligibility still uses
+the scheduled end, regardless of attendance. See [marking no-shows](/docs/no-shows).
 
 ## Configure reminders and follow-ups
 

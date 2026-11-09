@@ -104,6 +104,40 @@ event type. Its public booking page is `/{handle}/{slug}`. Configure calendars e
 through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest) or
 [MCP](/docs/mcp) guides for agent access. Test one booking before inviting others.
 
+## Turn off app installation
+
+App installation and the static offline shell are enabled by default. To disable them,
+set `VITE_PWA_ENABLED=false` in the repository-root `.env`, then rebuild and redeploy your
+source installation:
+
+```sh
+./scripts/compose-up.sh -d --build --wait
+```
+
+Compose passes this setting to the Docker build as `VITE_PWA_ENABLED`; `.env` stays outside
+the image build context. A shell-exported value overrides `.env`, so remove any conflicting
+export before building. Empty or omitted means the current default (`true`); only `true`
+and `false` are otherwise accepted. Invalid values fail the build with an error naming the
+setting. Leave the example value empty if the installation should follow future defaults.
+
+Direct web builds also read the root `.env`. To override it for one build, use
+`VITE_PWA_ENABLED=false npm run build --workspace @hourmere/web`, then deploy that output.
+A direct image build requires `docker build --build-arg VITE_PWA_ENABLED=false -t hourmere:local .`,
+then deployment of that image. A prebuilt image's setting is fixed at build time; changing
+only its runtime environment cannot disable PWA support. Build a replacement image with
+the setting disabled when needed.
+
+The disabled build stops registering workers but keeps `/app/sw.js` available as a minimal
+retirement worker. Existing clients receive it at their next online worker update check:
+it activates, deletes only Hourmere app-shell caches and unregisters itself, without
+intercepting requests or forcing a page reload. Browser update timing varies; offline
+clients cannot receive it until they reconnect. Keep serving this worker for returning
+clients instead of deleting the endpoint. Already open pages may remain controlled until
+they close or reload. The change does not delete cookies or remove installed icons; users
+can uninstall those through the browser or operating system. Set the value back to `true`
+or empty and rebuild/redeploy to enable installation again. See the
+[install guide](/docs/install-app) for device sign-in limitations and offline behavior.
+
 ## Google sign-in and calendar publishing
 
 To add the **Continue with Google** button, follow the

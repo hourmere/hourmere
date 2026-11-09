@@ -77,6 +77,29 @@ function open() {
 }
 
 describe('team admin booking detail', () => {
+  it('lets team administrators mark an attendee after the scheduled start', async () => {
+    const route = `PATCH /api/v1/bookings/${ID}/attendees/${ID}/no-show`
+    const api = server({
+      [GET]: () =>
+        json(200, {
+          ...BOOKING,
+          start: '2020-01-01T00:00:00Z',
+          canManageNoShow: true,
+          attendees: [{ ...BOOKING.attendees[0], id: ID }],
+        }),
+      [route]: () =>
+        json(200, {
+          attendeeId: ID,
+          noShowMarkedAt: '2020-01-01T00:01:00Z',
+          noShowMarkedBy: ME.user.id,
+        }),
+    })
+    open()
+    await userEvent.click(await screen.findByRole('button', { name: 'Mark Grace as a no-show' }))
+    expect(screen.getByRole('button', { name: 'Clear no-show for Grace' })).toBeDefined()
+    expect(api.to(route)[0]?.headers.get('x-expected-organization-id')).toBe(TEAM.organization.id)
+  })
+
   it('loads only the minimal admin detail with the opening team protection', async () => {
     const api = server()
     open()

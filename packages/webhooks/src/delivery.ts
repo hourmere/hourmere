@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
-import type { BookingNotifier } from '@hourmere/scheduling'
+import type { AttendeeNoShowNotifier, BookingEvent, BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { decryptWebhookSecret, webhookSignature } from './crypto.ts'
@@ -29,92 +29,124 @@ export function webhookBookingNotifier(
   queue: WebhookQueue,
   settings: WebhookSettings,
 ): BookingNotifier {
-  return async (trx, event, now) => {
-    if (!settings.enabled) return
-    if (!trx.isTransaction) throw new Error('Webhook capture requires the booking transaction')
-    if (await isImportedBooking(trx, event.bookingId)) return
-    const booking = await trx
-      .selectFrom('bookings')
-      .select([
-        'id',
-        'organization_id',
-        'event_type_id',
-        'start_at',
-        'end_at',
-        'status',
-        'source',
-        'rescheduled_from_id',
-      ])
-      .where('id', '=', event.bookingId)
-      .executeTakeFirstOrThrow()
-    const requestId = 'requestId' in event ? event.requestId : null
-    const eventType: WebhookEventType =
-      event.type === 'created'
-        ? 'booking.created'
-        : event.type === 'rescheduled'
-          ? 'booking.rescheduled'
-          : event.type === 'reschedule_requested'
-            ? 'booking.reschedule_requested'
-            : event.type === 'reschedule_request_expired'
-              ? 'booking.reschedule_request_expired'
+  return (trx, event, now) => captureBookingWebhook(queue, settings, trx, event, now)
+}
+
+/** Attendance changes never enter the mail/calendar notification pipeline. */
+export function webhookAttendeeNoShowNotifier(
+  queue: WebhookQueue,
+  settings: WebhookSettings,
+): AttendeeNoShowNotifier {
+  return (trx, event, now) =>
+    captureBookingWebhook(queue, settings, trx, { type: 'attendee_no_show_changed', ...event }, now)
+}
+
+async function captureBookingWebhook(
+  queue: WebhookQueue,
+  settings: WebhookSettings,
+  trx: Db,
+  event:
+    | BookingEvent
+    | ({ type: 'attendee_no_show_changed' } & Parameters<AttendeeNoShowNotifier>[1]),
+  now: Temporal.Instant,
+) {
+  if (!settings.enabled) return
+  if (!trx.isTransaction) throw new Error('Webhook capture requires the booking transaction')
+  if (await isImportedBooking(trx, event.bookingId)) return
+  const booking = await trx
+    .selectFrom('bookings')
+    .select([
+      'id',
+      'organization_id',
+      'event_type_id',
+      'start_at',
+      'end_at',
+      'status',
+      'source',
+      'rescheduled_from_id',
+    ])
+    .where('id', '=', event.bookingId)
+    .executeTakeFirstOrThrow()
+  const requestId = 'requestId' in event ? event.requestId : null
+  const eventType: WebhookEventType =
+    event.type === 'created'
+      ? 'booking.created'
+      : event.type === 'rescheduled'
+        ? 'booking.rescheduled'
+        : event.type === 'reschedule_requested'
+          ? 'booking.reschedule_requested'
+          : event.type === 'reschedule_request_expired'
+            ? 'booking.reschedule_request_expired'
+            : event.type === 'attendee_no_show_changed'
+              ? 'booking.attendee_no_show_changed'
               : 'booking.cancelled'
-    // Share locks serialize opt-out/deletion with capture, and are always taken by ID.
-    const endpoints = await trx
-      .selectFrom('webhooks')
-      .select('id')
-      .where('organization_id', '=', booking.organization_id)
-      .where('is_active', '=', true)
-      .where(sql<boolean>`${eventType} = ANY(events)`)
-      .orderBy('id')
-      .limit(10)
-      .forShare()
-      .execute()
-    if (!endpoints.length) return
-    const eventId = randomUUID()
-    const payload = JSON.stringify({
-      id: eventId,
-      type: eventType,
-      occurredAt: now.toString(),
-      data: {
-        ...(requestId ? { requestId } : {}),
-        bookingId: booking.id,
-        organizationId: booking.organization_id,
-        eventTypeId: booking.event_type_id,
-        start: booking.start_at.toISOString(),
-        end: booking.end_at.toISOString(),
-        status: booking.status,
-        source: booking.source,
-        rescheduledFromId: booking.rescheduled_from_id,
-      },
-    })
-    for (const endpoint of endpoints) {
-      const delivery = await trx
-        .insertInto('webhook_deliveries')
-        .values({
-          webhook_id: endpoint.id,
-          organization_id: booking.organization_id,
-          booking_id: booking.id,
-          event_id: eventId,
-          event_type: eventType,
-          request_id: requestId,
-          payload,
-          created_at: new Date(now.epochMilliseconds),
-        })
-        .onConflict((oc) =>
-          oc.columns(['webhook_id', 'booking_id', 'event_type', 'request_id']).doNothing(),
-        )
-        .returning('id')
-        .executeTakeFirst()
-      if (delivery)
-        await queue.enqueue(
-          WEBHOOK_DELIVERY_JOB,
-          { deliveryId: delivery.id },
-          {
-            transaction: trx,
-            singletonKey: delivery.id,
-          },
-        )
-    }
+  // Share locks serialize opt-out/deletion with capture, and are always taken by ID.
+  const endpoints = await trx
+    .selectFrom('webhooks')
+    .select('id')
+    .where('organization_id', '=', booking.organization_id)
+    .where('is_active', '=', true)
+    .where(sql<boolean>`${eventType} = ANY(events)`)
+    .orderBy('id')
+    .limit(10)
+    .forShare()
+    .execute()
+  if (!endpoints.length) return
+  const eventId = randomUUID()
+  // Attendance changes reuse request_id (a plain uuid without a foreign key, added by 0064)
+  // as a per-change receipt identity: this capture's fresh event ID, created in the same
+  // transaction as the change. The 0064 key (webhook, booking, event type, request) then
+  // gives every transition its own delivery, while lifecycle and reschedule-request receipts
+  // deduplicate exactly as before. The value is never sent as data.requestId.
+  const receiptId = event.type === 'attendee_no_show_changed' ? eventId : requestId
+  const payload = JSON.stringify({
+    id: eventId,
+    type: eventType,
+    occurredAt: now.toString(),
+    data: {
+      ...(requestId ? { requestId } : {}),
+      bookingId: booking.id,
+      organizationId: booking.organization_id,
+      eventTypeId: booking.event_type_id,
+      start: booking.start_at.toISOString(),
+      end: booking.end_at.toISOString(),
+      status: booking.status,
+      source: booking.source,
+      rescheduledFromId: booking.rescheduled_from_id,
+      ...(event.type === 'attendee_no_show_changed' && {
+        attendeeId: event.attendeeId,
+        noShowMarkedAt: event.noShowMarkedAt,
+        noShowMarkedBy: event.noShowMarkedBy,
+      }),
+    },
+  })
+  for (const endpoint of endpoints) {
+    const delivery = await trx
+      .insertInto('webhook_deliveries')
+      .values({
+        webhook_id: endpoint.id,
+        organization_id: booking.organization_id,
+        booking_id: booking.id,
+        event_id: eventId,
+        event_type: eventType,
+        request_id: receiptId,
+        payload,
+        created_at: new Date(now.epochMilliseconds),
+      })
+      .onConflict((oc) =>
+        oc.columns(['webhook_id', 'booking_id', 'event_type', 'request_id']).doNothing(),
+      )
+      .returning('id')
+      .executeTakeFirst()
+    if (delivery)
+      await queue.enqueue(
+        WEBHOOK_DELIVERY_JOB,
+        { deliveryId: delivery.id },
+        {
+          transaction: trx,
+          singletonKey: delivery.id,
+        },
+      )
   }
 }
 

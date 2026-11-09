@@ -117,6 +117,9 @@ const schema = z
         { error: 'WEBHOOK_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
       ),
     ),
+    SCIM_PROVISIONING_ENABLED: optional(z.enum(['true', 'false'])).transform(
+      (value) => value === 'true',
+    ),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.preprocess(
       (value) => (typeof value === 'string' && value.trim() === '' ? Number.NaN : value),
