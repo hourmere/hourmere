@@ -28,7 +28,19 @@ export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Insta
  * What a service function receives for an authenticated call. REST routes and MCP tools
  * build it the same way, so people and agents get exactly the same behavior.
  */
+export type AttendeeNoShowNotifier = (
+  trx: Db,
+  event: {
+    bookingId: string
+    attendeeId: string
+    noShowMarkedAt: string | null
+    noShowMarkedBy: string | null
+  },
+  now: Temporal.Instant,
+) => Promise<void>
+
 export interface ServiceContext {
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined

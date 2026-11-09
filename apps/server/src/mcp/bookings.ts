@@ -4,6 +4,7 @@ import { z } from '@hono/zod-openapi'
 import { retryBookingConference, retryConferenceMirror } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
 import {
+  type AttendeeNoShowNotifier,
   type BookingNotifier,
   type BookingOrigin,
   cancelHostBooking,
@@ -14,20 +15,25 @@ import {
   DomainError,
   getPublicEventType,
   getPublicTeamEventType,
+  listBookingAttendeeNoShows,
   listHostBookings,
   listPublicSlots,
   listPublicTeamSlots,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  prepareBookingExport,
   requestReschedule,
   rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
+  setAttendeeNoShow,
   validTimeZone,
 } from '@hourmere/scheduling'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit } from '../rate-limit.ts'
 import {
+  AttendeeNoShow,
   Booking,
+  BookingAttendees,
   BookingPage,
   BookingWithToken,
   CancelBody,
@@ -65,6 +71,10 @@ const MAX_MCP_SLOTS = 500
 
 const FindSlotsInput = z
   .strictObject({
+    locationOptionId: z
+      .string()
+      .optional()
+      .describe('Selected event location; keep unchanged while paging and pass to create_booking.'),
     handle: handle.optional(),
     teamSlug: z.string().min(1).max(64).optional().openapi({
       description:
@@ -216,6 +226,7 @@ export interface BookingToolsDeps {
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -240,6 +251,7 @@ export function bookingTools({
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
+  notifyAttendeeNoShow,
   automaticMeet,
   automaticZoom,
   rateLimits = {},
@@ -257,6 +269,7 @@ export function bookingTools({
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
+    notifyAttendeeNoShow,
     now,
     notify,
     automaticMeet,
@@ -316,7 +329,13 @@ export function bookingTools({
         : getPublicEventType)(pub, pageInput)
       const slots = await (args.teamSlug !== undefined ? listPublicTeamSlots : listPublicSlots)(
         pub,
-        { ...pageInput, start, end, durationMinutes: args.durationMinutes },
+        {
+          ...pageInput,
+          start,
+          end,
+          durationMinutes: args.durationMinutes,
+          locationOptionId: args.locationOptionId,
+        },
       )
       const after = args.after === undefined ? null : Temporal.Instant.from(args.after)
       const remaining =
@@ -353,7 +372,7 @@ export function bookingTools({
           : 'personal',
     title: 'Create a booking',
     description:
-      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken.",
+      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Choose locationOptionId from the event locations; askInvitee phone options require inviteePhone normalized to E.164 (common phone separators are removed). Use the same locationOptionId for slot lookup and booking. location_unavailable means the chosen option cannot be used by the assigned host. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken.",
     input: CreateBookingInput,
     output: CreateBookingOutput,
     annotations: {
@@ -371,6 +390,8 @@ export function bookingTools({
             token: args.oneTimeToken,
             start: Temporal.Instant.from(args.start),
             durationMinutes: args.durationMinutes,
+            locationOptionId: args.locationOptionId,
+            inviteePhone: args.inviteePhone,
             invitee: args.invitee,
             guests: args.guests,
             responses: args.responses,
@@ -388,6 +409,8 @@ export function bookingTools({
           slug: args.slug as string,
           start: Temporal.Instant.from(args.start),
           durationMinutes: args.durationMinutes,
+          locationOptionId: args.locationOptionId,
+          inviteePhone: args.inviteePhone,
           invitee: args.invitee,
           guests: args.guests,
           responses: args.responses,
@@ -429,7 +452,7 @@ export function bookingTools({
       typeof args === 'object' && args !== null && 'bookingId' in args ? 'host' : 'manageToken',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. When answering a host request, pass its pendingReschedule.id as rescheduleRequestId with manageToken to fence replacements and safely replay the same pick. Without that request ID, not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Imported records fail with imported_booking_read_only and remain managed in the original system. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same location choice, invitee phone, invitee, guests and answers; the new time may overlap the old one. Omitted durationMinutes preserves the original elapsed length; an explicit new length must belong to the event type’s current allowedDurationsMinutes. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. When answering a host request, pass its pendingReschedule.id as rescheduleRequestId with manageToken to fence replacements and safely replay the same pick. Without that request ID, not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Imported records fail with imported_booking_read_only and remain managed in the original system. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {
@@ -523,6 +546,83 @@ export function bookingTools({
     },
   })
 
+  const getAttendees = defineTool({
+    name: 'get_booking_attendees',
+    title: 'Read booking attendees',
+    description:
+      'Read attendee identifiers and no-show markers for a known booking ID. Only booked hosts may read via API keys or OAuth. Non-host team administrators must use the browser dashboard; other bookings return booking_not_found.',
+    input: z.strictObject({ bookingId: z.uuid() }),
+    output: BookingAttendees,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return { data: await listBookingAttendeeNoShows(context(call.caller), args.bookingId) }
+    },
+  })
+  const setNoShow = defineTool({
+    name: 'set_attendee_no_show',
+    title: 'Mark or unmark an attendee no-show',
+    description:
+      'Set noShow true to mark or false to unmark one attendee after the scheduled start. Only booked hosts may act via API keys or OAuth. Non-host team administrators must use the browser dashboard; other bookings return booking_not_found. Imported and cancelled bookings refuse changes. Replays preserve the original marker. Invitee pages, email and scheduled follow-ups are unchanged. Get attendeeId from authenticated booking reads.',
+    input: z.strictObject({ bookingId: z.uuid(), attendeeId: z.uuid(), noShow: z.boolean() }),
+    output: AttendeeNoShow,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return setAttendeeNoShow(context(call.caller), args.bookingId, args.attendeeId, args.noShow)
+    },
+  })
+  const exportBookings = defineTool({
+    name: 'export_bookings',
+    title: 'Export bookings as CSV',
+    description:
+      'Returns a small authenticated download pointer, never CSV rows. Personal owners export their own bookings. Team exports are browser-session only and unavailable to MCP/CLI credentials. Requires read/full API key scope. Download with the same instance and an authorized API key (OAuth MCP grants cannot authenticate REST). Maximum 366 days, from inclusive and to exclusive. Files contain personal data. Use the CLI export command to stream to a private file or stdout.',
+    input: z.strictObject({
+      from: Instant,
+      to: Instant,
+      timeZone: z.string().optional(),
+      bom: z.boolean().optional(),
+      status: z.enum(['confirmed', 'cancelled']).optional(),
+      eventTypeId: z.uuid().optional(),
+      hostUserId: z.uuid().optional(),
+      endAfter: Instant.optional(),
+      endTo: Instant.optional(),
+      order: z.enum(['asc', 'desc']).optional(),
+    }),
+    output: z.object({
+      downloadPath: z.string(),
+      authentication: z.literal('api_key_or_session'),
+      containsPersonalData: z.literal(true),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      await prepareBookingExport(context(call.caller), args)
+      const query = new URLSearchParams()
+      for (const [key, value] of Object.entries(args)) {
+        if (value !== undefined) query.set(key, String(value))
+      }
+      query.set('expectedOrganizationId', call.caller.organization.id)
+      return {
+        downloadPath: `/api/v1/bookings/export.csv?${query}`,
+        authentication: 'api_key_or_session' as const,
+        containsPersonalData: true as const,
+      }
+    },
+  })
+
   const retryInput = z.strictObject({ bookingId: z.uuid() })
   const retryOutput = z.object({ accepted: z.literal(true) })
   const retryAnnotations = {
@@ -564,7 +664,10 @@ export function bookingTools({
     requestRescheduleTool,
     cancelBooking,
     listBookings,
+    exportBookings,
     retryConference,
     retryCalendarCopy,
+    setNoShow,
+    getAttendees,
   ]
 }

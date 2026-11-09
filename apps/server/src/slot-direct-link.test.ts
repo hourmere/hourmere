@@ -189,7 +189,7 @@ describe.skipIf(!bootstrap)('ordinary direct-slot public reads and final booking
     const s = await team('round_robin')
     const location = new URL('./routes/public.ts', import.meta.url)
     const original = readFileSync(location, 'utf8')
-    const target = "const { start, end, durationMinutes } = c.req.valid('query')"
+    const target = "const { start, end, durationMinutes, locationOptionId } = c.req.valid('query')"
     expect(original).toContain(target)
     const source = stripTypeScriptTypes(
       original.replace(
