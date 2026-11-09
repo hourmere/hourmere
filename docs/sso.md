@@ -939,22 +939,31 @@ API key, with only the caller resolver replaced; and in CLI commands and targets
 From the Upgrade step on they also check the endpoint paths of every Better Auth plugin,
 which the route inventory sees only as the single `/api/auth/*` mount: `createAuth` is
 built from `productionAuthOptions` (`apps/server/src/server.ts`), the options `startServer`
-itself passes, with every input `startServer` supplies and the same all-groups-on
-configuration (including MCP OAuth and both social providers), against a database pool
-that never connects, and every `auth.api` endpoint path is checked; the suite also
-confirms that every endpoint path of the installed SSO plugin would be caught. A relying
-party that reuses the social sign-in endpoints adds no endpoint name (Better Auth's
-`genericOAuth` does this), so the suite also requires the sign-in providers to be exactly
-Google and Microsoft and no `genericOAuth` plugin to be registered. As a
+itself passes, with every input `startServer` supplies, against a database pool that
+never connects, and every `auth.api` endpoint path is checked. It is built under the same
+all-groups-on configuration (including MCP OAuth and both social providers) and again
+under each of the eight combinations of the groups that change what `createAuth`
+registers (MCP OAuth, Google sign-in and Microsoft sign-in, from none of them, a default
+instance, to all three), with every other setting at its default; each combination's
+endpoint paths must be among the all-on ones. The suite also confirms that every endpoint
+path of the installed SSO plugin would be caught. A relying party that reuses the social
+sign-in endpoints adds no endpoint name (Better Auth's `genericOAuth` does this), so the
+suite also requires the sign-in providers to be exactly the configured ones (Google and
+Microsoft when both are set) and no `genericOAuth` plugin to be registered in any of these
+configurations. A plugin's `onRequest` or `onResponse` hook runs outside route matching
+and can answer a path without registering an endpoint, which no inventory sees, so the
+suite also requires that only the MCP OAuth provider plugin, which answers its own
+discovery documents that way, defines one. As a
 backstop for a surface no inventory sees, every string literal that begins with `/` in
 the `src` directory of each apps, packages and tools workspace is checked too, leaving out
 only an explicit list of test-support and generated files, and no such source may import
 `@better-auth/sso`. These checks are by name. A path assembled from pieces escapes the
 literal scan, although the route and endpoint inventories still see it once it is
-registered for the production configuration; an endpoint behind an input or setting
-`startServer` does not pass, a run-together name outside the word list, and shipped code
-outside a `src` directory (the web service worker, the site worker, Astro page routes) are
-not seen.
+registered for a configuration they build; an endpoint gated on the value of a setting
+the combinations do not vary (the signup mode, the `PUBLIC_URL` scheme) or on an input
+`startServer` does not pass, what the MCP OAuth provider plugin's own request hook
+answers, a run-together name outside the word list, and shipped code outside a `src`
+directory (the web service worker, the site worker, Astro page routes) are not seen.
 Names match `saml`, `oidc` and `openid` anywhere, `sso` as a word (after splitting
 camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
 `listSSOs` — and a short list of words run together with it: `ssoconfig`,
