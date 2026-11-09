@@ -39,6 +39,8 @@ export const COMMANDS = {
   reschedule: 'reschedule_booking',
   'request-reschedule': 'request_reschedule',
   cancel: 'cancel_booking',
+  'set-no-show': 'set_attendee_no_show',
+  'booking-attendees': 'get_booking_attendees',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
   'one-time-links create': 'create_one_time_link',
@@ -58,7 +60,8 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           schedule-availability, save-availability,
-          book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
+          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees,
+          retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
@@ -85,7 +88,7 @@ book requires an explicit random idempotencyKey in its input. Calls are never re
 request-reschedule requires bookingId, an explicit idempotencyKey and optional plain-text note.
 The original slot remains booked until the invitee moves or cancels; expiry keeps it booked.
 Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
-Cancel, reschedule and retry commands refuse them with imported_booking_read_only.
+Cancel, reschedule, set-no-show and retry commands refuse them with imported_booking_read_only.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
 one-time-links create requires bookings or full scope, eventTypeId and an explicit idempotencyKey.
 Its secret URL is printed once to stdout; --output is refused and nothing is stored.

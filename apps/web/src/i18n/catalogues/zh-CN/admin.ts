@@ -1,5 +1,17 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'No-shows': '未出席记录',
+  'No-show': '未出席',
+  'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
+    '这些标记仅供主持人和团队管理员查看。不会发送邮件，已安排的会后消息也不会改变。',
+  'Clear no-show for {name}': '清除{name}的未出席标记',
+  'Mark {name} as a no-show': '将{name}标记为未出席',
+  'Clear no-show': '清除未出席标记',
+  'Mark no-show': '标记为未出席',
+  'Could not update the no-show mark. Refresh the booking and try again.':
+    '无法更新未出席标记。请刷新预约后重试。',
+  'No-show mark updated.': '未出席标记已更新。',
+
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   'Loading logo preview…': '正在加载标志预览…',

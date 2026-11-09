@@ -777,6 +777,7 @@ describe('CLI transport and arguments', () => {
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
+    ['set-no-show', 'set_attendee_no_show'],
   ])(
     'maps %s to the existing %s tool and sends one authenticated request',
     async (command, tool) => {

@@ -143,12 +143,14 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/book/{token}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
+| `GET /api/v1/bookings/{id}/attendees` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/export.csv` | Session or API key | `full, read` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/{id}/organization` | Browser session only | — |
 | `POST /api/v1/bookings/{id}/calendar-copy/retry` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/cancel` | Session or API key | `full, bookings` |
+| `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/conference/retry` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/reschedule` | Session or API key | `full, bookings` |
 | `POST /api/v1/bookings/{id}/request-reschedule` | Session or API key | `full, bookings` |
@@ -266,6 +268,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
+| `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |

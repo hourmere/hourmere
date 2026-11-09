@@ -490,6 +490,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read attendees and no-show markers for a booking
+         * @description Booked hosts and browser-session team owners/admins only. API keys of every scope and MCP OAuth may read only bookings they host; other bookings return booking_not_found. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.
+         */
+        get: operations["getBookingAttendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/attendees/{attendeeId}/no-show": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Mark or unmark one attendee as a no-show
+         * @description Only booked hosts and browser-session team owners/admins, after the scheduled start. API keys of every scope and MCP OAuth are host-only; other bookings return booking_not_found. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.
+         */
+        patch: operations["setAttendeeNoShow"];
+        trace?: never;
+    };
     "/api/v1/bookings/{id}/calendar-copy/retry": {
         parameters: {
             query?: never;
@@ -4238,13 +4278,37 @@ export interface components {
     schemas: {
         Attendee: {
             email: string;
+            /**
+             * Format: uuid
+             * @description Authenticated reads only: attendee identifier for host actions.
+             */
+            id?: string;
             /** @description The invitee who made the booking; the others are guests they added */
             isBooker: boolean;
             /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
             locale: string | null;
             name: string;
+            /**
+             * Format: date-time
+             * @description Authenticated reads only: when this attendee was marked as a no-show.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            noShowMarkedAt?: string | null;
+            /** @description Authenticated reads only: the user who marked this attendee. */
+            noShowMarkedBy?: string | null;
             /** @description IANA time zone */
             timeZone: string;
+        };
+        AttendeeNoShow: {
+            /** Format: uuid */
+            attendeeId: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            noShowMarkedAt: string | null;
+            noShowMarkedBy: string | null;
         };
         Booking: {
             /** @description The actual round-robin winner; no private host identity or availability mapping */
@@ -4268,6 +4332,8 @@ export interface components {
              */
             cancelledAt: string | null;
             cancelReason: string | null;
+            /** @description Authenticated reads only: whether this caller can change attendee no-show markers now. */
+            canManageNoShow?: boolean;
             /** @description Authenticated host reads only: the other booked hosts’ names, with no email addresses or internal identifiers. Omitted for single-host bookings. */
             coHosts?: {
                 name: string;
@@ -4369,6 +4435,22 @@ export interface components {
                 created: number;
                 rescheduled: number;
             };
+        };
+        BookingAttendees: {
+            data: {
+                email: string;
+                /** Format: uuid */
+                id: string;
+                isBooker: boolean;
+                name: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                noShowMarkedAt: string | null;
+                noShowMarkedBy: string | null;
+            }[];
         };
         /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
         BookingLocation: ({
@@ -5272,12 +5354,19 @@ export interface components {
                 data: {
                     attendees: {
                         email: string;
+                        /** Format: uuid */
+                        id?: string;
                         isBooker: boolean;
                         name: string;
+                        /** Format: date-time */
+                        noShowMarkedAt?: string | null;
+                        /** Format: uuid */
+                        noShowMarkedBy?: string | null;
                         timeZone: string;
                     }[];
                     /** Format: date-time */
                     cancelledAt: string | null;
+                    canManageNoShow?: boolean;
                     /** Format: date-time */
                     end: string;
                     eventType: {
@@ -5361,12 +5450,19 @@ export interface components {
                 data: {
                     attendees: {
                         email: string;
+                        /** Format: uuid */
+                        id?: string;
                         isBooker: boolean;
                         name: string;
+                        /** Format: date-time */
+                        noShowMarkedAt?: string | null;
+                        /** Format: uuid */
+                        noShowMarkedBy?: string | null;
                         timeZone: string;
                     }[];
                     /** Format: date-time */
                     cancelledAt: string | null;
+                    canManageNoShow?: boolean;
                     /** Format: date-time */
                     end: string;
                     eventType: {
@@ -5910,12 +6006,19 @@ export interface components {
         TeamAdminBooking: {
             attendees: {
                 email: string;
+                /** Format: uuid */
+                id?: string;
                 isBooker: boolean;
                 name: string;
+                /** Format: date-time */
+                noShowMarkedAt?: string | null;
+                /** Format: uuid */
+                noShowMarkedBy?: string | null;
                 timeZone: string;
             }[];
             /** Format: date-time */
             cancelledAt: string | null;
+            canManageNoShow?: boolean;
             /** Format: date-time */
             end: string;
             eventType: {
@@ -6096,7 +6199,7 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -6117,7 +6220,7 @@ export interface components {
             /** Format: uuid */
             eventId: string;
             /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired";
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -6268,6 +6371,159 @@ export interface operations {
                 };
             };
             /** @description Too many requests; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBookingAttendees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attendee identifiers and attendance metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingAttendees"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAttendeeNoShow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                attendeeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    noShow: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The current attendee no-show marker */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttendeeNoShow"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden or insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_not_found (also used for an unknown attendee) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_not_started, booking_cancelled, imported_booking_read_only or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -11078,7 +11334,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -11246,7 +11502,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
                     isActive?: boolean;
                 };
             };

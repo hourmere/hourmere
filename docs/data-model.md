@@ -1572,6 +1572,39 @@ is present, including paid bookings later cancelled. Unconfirmed terminal holds 
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
 
+## Private attendee no-show markers
+
+Migration 0070 adds nullable `booking_attendees.no_show_marked_at` and
+`no_show_marked_by` as a paired current-state marker. Existing attendees remain unmarked.
+Attribution is the acting account UUID, retained as history rather than a cascading account
+foreign key. Unmarking clears both fields. Booking/attendee deletion retains its existing
+retention behavior. No invitee projection includes this metadata.
+
+Actual booking hosts may change each attendee independently. Current team owners/admins
+may manage bookings they do not host only through a browser session; API keys of any scope
+and MCP OAuth retain host-only read and write access. Changes are allowed strictly after
+the scheduled start, never on cancelled or imported read-only bookings.
+Payment holds follow host booking reads: pending, expired and unpaid-cancelled holds return
+`booking_not_found`; confirmed paid bookings stay readable but refuse changes with
+`paid_booking_management_unavailable`, as host cancellation and rescheduling do.
+Collective hosts share the attendee state; round-robin authority belongs to the assigned
+host, not every pool member. Serialized changes preserve idempotent replay attribution.
+Rescheduling creates fresh attendee rows; cancellation retains historical marks.
+Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com/docs/no-shows).
+
+The migration only widens the webhook subscription and delivery event checks to add
+`booking.attendee_no_show_changed`. Migration 0064's unique delivery key
+`(webhook_id, booking_id, event_type, request_id)` with NULLs equal stays unchanged, and so
+does capture's `ON CONFLICT` target. Attendance deliveries reuse `request_id` (a plain
+`uuid` without a foreign key) as a per-change receipt identity: capture stores the change's
+fresh event ID there, in the transaction that changes the marker. Every transition therefore
+gets its own delivery, while lifecycle receipts (NULL request) and reschedule-request receipts
+(the request's ID) deduplicate exactly as before. The stored value is only a receipt key; it
+does not identify a reschedule request and attendance payloads never include
+`data.requestId`. Existing subscription arrays and delivery snapshots are preserved. The
+migration is safe to apply while the previous version runs: old code writes only the five
+older events and keeps its arbiter. Apply it before starting the new version.
+
 ## Group slots and independent seats
 
 A group event is a single-host event with `booking_mode = 'group'` and a capacity

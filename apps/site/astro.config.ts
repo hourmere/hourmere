@@ -97,6 +97,7 @@ export default defineConfig({
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'Request another time', link: '/docs/request-reschedule' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },
+            { label: 'Marking no-shows', link: '/docs/no-shows' },
             { label: 'Booking page branding', link: '/docs/branding' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },

@@ -77,6 +77,10 @@ export type BookingStatus = 'confirmed' | 'cancelled'
 export type BookingSource = 'web' | 'embed' | 'api' | 'mcp' | 'import'
 
 export interface Attendee {
+  /** Private attendance metadata: authenticated booking reads only. */
+  id?: string
+  noShowMarkedAt?: string | null
+  noShowMarkedBy?: string | null
   name: string
   email: string
   timeZone: string
@@ -86,6 +90,7 @@ export interface Attendee {
 }
 
 export interface Booking {
+  canManageNoShow?: boolean
   id: string
   isGroupSeat?: boolean
   pendingReschedule?: { id: string; expiresAt: string; note: string | null }
@@ -545,7 +550,17 @@ async function toBookings(
   )
   const attendees = await db
     .selectFrom('booking_attendees')
-    .select(['booking_id', 'name', 'email', 'time_zone', 'locale', 'is_booker'])
+    .select([
+      'booking_id',
+      'name',
+      'email',
+      'time_zone',
+      'locale',
+      'is_booker',
+      'id',
+      'no_show_marked_at',
+      'no_show_marked_by',
+    ])
     .where(
       'booking_id',
       'in',
@@ -558,6 +573,13 @@ async function toBookings(
   for (const a of attendees) {
     const list = byBooking.get(a.booking_id) ?? []
     list.push({
+      ...(host
+        ? {
+            id: a.id,
+            noShowMarkedAt: a.no_show_marked_at?.toISOString() ?? null,
+            noShowMarkedBy: a.no_show_marked_by,
+          }
+        : {}),
       name: a.name,
       email: a.email,
       timeZone: a.time_zone,
@@ -703,6 +725,14 @@ async function toBookings(
       responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
       ...(host && imported.has(r.id)
         ? { questions: parseQuestions(r.import_questions ?? []) }
+        : {}),
+      ...(host
+        ? {
+            canManageNoShow:
+              r.status === 'confirmed' &&
+              !imported.has(r.id) &&
+              Temporal.Instant.compare(host.now(), toInstant(r.start_at)) > 0,
+          }
         : {}),
       attendees: byBooking.get(r.id) ?? [],
       ...(coHosts.has(r.id) ? { coHosts: coHosts.get(r.id) } : {}),

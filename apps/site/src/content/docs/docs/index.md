@@ -38,6 +38,7 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
+- [Marking no-shows](/docs/no-shows): record private attendance per invitee or guest.
 - [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
   receive notification when a matching time opens; manage entries in the editor, REST,
   MCP or CLI. Available in full to self-hosters.
@@ -90,6 +91,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Follow-ups](/docs/reminders-and-follow-ups) use the scheduled end regardless of
   attendance. Invitees cannot stop them after the meeting starts; cancel in Hourmere
   before the start. Mail limits can permanently suppress a message.
+- [No-show marks](/docs/no-shows) are manual and private. They do not suppress follow-ups;
+  attendance reporting and exports are not yet available.
 - PostgreSQL 18+ is required for `uuidv7()`; [PgBouncer is unsupported](/docs/configuration#server-and-database).
   The [upgrade notes](https://github.com/hourmere/hourmere/blob/main/CHANGELOG.md#upgrade-notes)
   cover the database version requirement.
