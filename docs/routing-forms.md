@@ -1,11 +1,12 @@
 # Routing forms — proposed design
 
-Status: design only; no routing form is available yet. This proposal adds no tables,
-routes, UI or plan checks. The eventual feature is free on self-hosted and Cloud alike,
+Status: storage foundation only; no routing form is available yet. Migration 0072 adds
+the five storage tables; no routes, UI, execution path or plan checks exist. The eventual
+feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
 [MCP](mcp.md) and [team administrator booking fields](team-admin-bookings.md) remain
-canonical for existing behavior. All contracts below describe future implementation.
+canonical for existing behavior. Contracts beyond storage below describe future implementation.
 
 ## Official reference check
 
@@ -81,6 +82,9 @@ evaluation work finite.
 
 | Limit | Value | Meaning |
 |---|---:|---|
+| forms_per_organization | 100 | Maximum non-archived forms, including disabled forms |
+| total_forms_per_organization | 1000 | Maximum retained forms, including archived forms |
+| versions_per_form | 1000 | Maximum retained published versions of one form |
 | questions_per_form | 20 | Maximum questions in a version |
 | options_per_question | 50 | Maximum options for a select question |
 | rules_per_form | 50 | Maximum ordered rules, excluding fallback |
@@ -101,8 +105,16 @@ its largest legal request with every string at its maximum length and every char
 escaped as `\uXXXX`. The largest legal submission is 20 short-text answers of 500 CJK code
 units keyed by question UUIDs: 30,904 bytes as ordinary UTF-8 JSON and 64,764 bytes with
 every character of every string, keys and `versionId` included, escaped as `\uXXXX`. Both
-fit the cap, so clients may send either encoding. Versions and organization form quotas
-are chosen and pinned in step a1a; their numeric values are not fixed here. Public
+fit the cap, so clients may send either encoding. The storage quotas above count retained
+non-archived forms regardless of enabled state, with a separate total-forms cap that
+includes archived forms. Archiving frees a non-archived form slot; it does not free a total
+form slot. Unreferenced old-version cleanup frees a version slot, but never permits reusing
+a version number; each form retains its greatest published version number. SQL serializes
+form admission with a per-organization transaction advisory lock, without upgrading the
+organization share lock; version admission writes the form row. Form creation and
+unarchiving require READ COMMITTED isolation; other isolation modes fail closed with
+40001, and must restart at READ COMMITTED. Concurrent writers cannot exceed these quotas.
+These limits apply equally to self-hosted and Cloud installations. Public
 submissions and continuations use the named rate-limit buckets and admission ceilings in
 [Ownership, permissions and public security](#ownership-permissions-and-public-security);
 step c1 pins their values before any public routing write exists.
@@ -373,7 +385,7 @@ per-answer breakdown or new analytics IDs. If aggregate counts are added later, 
 an explicit retention/privacy contract, transaction-safe deduplication and small-count
 exposure review; they must not be reconstructed from unbooked answer retention.
 
-## Table sketch (proposal, not a migration)
+## Table sketch (storage installed by migration 0072)
 
 Application tables live in `public`, snake_case; UUIDv7 keys and `timestamptz` instants.
 Every organization reference is an FK to `auth.organization`; organization deletion
@@ -381,7 +393,7 @@ cascades. Use composite unique keys/FKs to prevent cross-organization associatio
 
 | Table | Columns and constraints | Indexes |
 |---|---|---|
-| `routing_forms` | `id`, `organization_id`, `slug`, `created_by_user_id` (historical UUID, no user FK), `draft` JSONB, `draft_revision`, nullable `published_version_id`, `enabled`, `archived_at`, timestamps; unique organization/slug and organization/id; positive revision | organization + creation time + id for keyset lists; scoped slug unique |
+| `routing_forms` | `id`, `organization_id`, `slug`, `created_by_user_id` (historical UUID, no user FK), `draft` JSONB, `draft_revision`, nonnegative `last_version_number` high-water mark, nullable `published_version_id`, `enabled`, `archived_at`, timestamps; unique organization/slug and organization/id; positive revision | organization + creation time + id for keyset lists; scoped slug unique |
 | `routing_form_versions` | `id`, `organization_id`, `form_id`, positive `version_number`, immutable `questions`/`rules`/`fallback` JSONB, `published_at`, historical publisher UUID; composite form FK and unique form/version number; unique organization/form/id for pointer FK | form + version number |
 | `routing_target_dependencies` | `organization_id`, `version_id`, rule identity (UUID text or `fallback`), historical `event_type_id`, derived health code/time; composite version FK; no cascading event/user FK; JSON target is authoritative | organization + event_type_id; unique version/rule |
 | `routing_receipts` | `id`, `organization_id`, `form_id`, `version_id`, unique `token_hash`, nullable `answers_ciphertext`, matched/resolved rule identities, resolved target snapshot, `created_at`, `expires_at`, nullable `consumed_booking_id`; composite version/booking FKs; expiry after creation; consumed implies booking and no answer ciphertext | digest unique; partial expiry + id for unconsumed cleanup; partial organization + form + expiry for unconsumed admission counts; consuming booking |
@@ -398,7 +410,10 @@ evidence survives form archive and version cleanup: detach its version FK only a
 consumption and retain historical IDs, or retain the referenced version until booking deletion;
 choose the latter initially. Unconsumed receipts cascade on physical organization deletion.
 Cleanup locks receipt rows in bounded batches, skips locked rows and does not take host locks.
-No migration number is reserved by this document.
+Migration 0072 installs this storage foundation. Version rows reject every update;
+foreign keys reject deletion of the current published version or any receipted version.
+Only unreferenced historical versions can be cleaned up. Booking routing snapshots
+reject updates and follow booking/organization deletion.
 
 ## REST, MCP and CLI contract sketch (proposal)
 
@@ -629,7 +644,7 @@ remain. “Hard-off” means the code constant above; “fixtures on” means te
 
 | Step (~one day each) | What it builds | Owned REST / MCP / CLI operations | Depends on | Rollout state | Acceptance checks |
 |---|---|---|---|---|---|
-| a1a — Routing storage | Five-table migration, composite organization FKs, immutable history support, bounded form/version quotas with values chosen and pinned here | None; storage only | None | No routing code path exists | Check main/open-PR migration numbers; realistic predecessor preservation, fresh install and no-op rerun; DB types; cross-org FK negatives; quota boundaries. Off: OpenAPI document, MCP tool list, CLI commands and web routes unchanged |
+| a1a — Routing storage | Five-table migration, composite organization FKs, immutable history support, bounded form/version quotas with values chosen and pinned here | None; storage only | None | No routing code path exists | Check main/open-PR migration numbers; realistic predecessor preservation, fresh install and no-op rerun; DB types; cross-org FK negatives; quota boundaries. Off: the generated OpenAPI document, every route registered on the app as `startServer` assembles it (`createApp(productionAppOptions(…))`, built with every optional route group on — SCIM, MCP and its OAuth, slot snippets, webhooks, the Zoom event webhook, the waitlist pages and the web app — and the Google Calendar, Microsoft Calendar and Zoom clients configured), every `/…` string literal in the production sources (apps, packages and tools; test support, fixtures and generated files excluded), the MCP tool list, the CLI command table and the web route table contain no routing-named path, operation, schema, tool, command or route, and no production source outside the storage layer (migration, generated table types, `routing-storage-*` files) imports the storage or names its tables (`scripts/routing-forms-off.test.ts`, `apps/web/src/routing-forms-off.test.tsx`); later steps delete or narrow those assertions as they add each surface. No catalogue is snapshotted or compared with a git base |
 | a1b — Hard-off guard | Code constant `routingFormsEnabled = false` in server composition (no environment variable); shared guard returning `404 routing_forms_disabled` in the order stated under Rollout gating; MCP registration helper that omits routing tools from `tools/list` while off and answers their direct calls with that code; effective state in existing public config | Extend `GET /instance` (`routingFormsEnabled`), OpenAPI and generated web types; no new MCP tool/CLI command | a1a | Hard-off constant introduced | Guard ordering and identical response; injected `true` reaches guarded paths in tests only; setting `ROUTING_FORMS_ENABLED` in the environment changes nothing; a mutation flipping the constant fails a real assertion. Off: `/instance` reports `false` |
 | a1c — Route namespace | Claim-time rejection of `route`, in any case, wherever a personal handle is claimed or changed (sign-up, profile edit, import); `RESERVED_NAMES`, `servedHandle` and team slugs unchanged; legacy collision detector for a stored personal handle `route`, wired into the effective state in e4c | None; extend existing personal-handle claim validation only | a1b | Hard-off | New or changed handle `route`/`Route`/`ROUTE` rejected on every claim path; a stored `route` handle's pages are still served; its owner can still save other profile fields with the unchanged handle, because `putProfile` revalidates the handle on every save and the claim check compares with the stored handle inside the same upsert, race-free; team slug `route` unaffected; detector finds the stored handle; no silent rename. Off: a legacy owner's pages resolve as today |
 | a2 — Shared validation and evaluation | Question/rule validation, ordered first-match evaluator, target eligibility allowlist (enabled, nondeleted, listed or hidden, same organization, `booking_mode = 'individual'`, no payment requirement), complete answer-mapping validator | None; pure/shared services | a1c | Hard-off | Every type/operator/boundary, optional answers, AND/one-of/fallback; dangling IDs, incompatible destination fields/options and cross-org targets rejected; per-member personal/single-host targets accepted within the same organization; group-mode targets and a synthetic payment-requiring projection rejected with `invalid_routing_target`, for the reasons under Scheduling interactions; unknown modes fail closed. Off: no transport, nothing reachable |
@@ -663,8 +678,9 @@ and owns its focused tests and generated artifacts. The final e5 step runs the f
 matrix rather than deferring missing implementation to acceptance. This design's doc-fact
 test checks only the numeric register, the unescaped and fully escaped maximum submission
 against the cap and the server's default body limit, and mutation controls; it does not
-claim to test routing behavior that does not exist yet. No schema change, migration,
-product strings or UI is part of this design PR.
+claim to test routing behavior that does not exist yet. The design PR introduced no schema
+changes or product surfaces; the storage step now installs migration 0072 without adding
+product strings or UI.
 
 ## Out of scope and known limitations
 
@@ -677,6 +693,9 @@ No CAPTCHA, verified lead identity, routing-only access gate or slot reservation
 share ordinary booking URLs and infer policies from repeated public outcomes. Expired
 answers may remain in operator backups; physical purge depends on working maintenance.
 
+- Archiving frees one of the 100 non-archived form slots, but retained archived forms
+  still count toward the 1000 total-forms storage cap. No public purge or unarchive
+  operation is provided by this storage step.
 - After-booking redirects are not offered for routing-continuation bookings, for listed and
   hidden targets alike and including exact replays. A host who relies on a redirect for a
   thank-you or conversion page does not get it for routed bookings; direct bookings of the
