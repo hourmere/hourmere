@@ -67,14 +67,19 @@ async function captureBookingWebhook(
     ])
     .where('id', '=', event.bookingId)
     .executeTakeFirstOrThrow()
+  const requestId = 'requestId' in event ? event.requestId : null
   const eventType: WebhookEventType =
     event.type === 'created'
       ? 'booking.created'
       : event.type === 'rescheduled'
         ? 'booking.rescheduled'
-        : event.type === 'attendee_no_show_changed'
-          ? 'booking.attendee_no_show_changed'
-          : 'booking.cancelled'
+        : event.type === 'reschedule_requested'
+          ? 'booking.reschedule_requested'
+          : event.type === 'reschedule_request_expired'
+            ? 'booking.reschedule_request_expired'
+            : event.type === 'attendee_no_show_changed'
+              ? 'booking.attendee_no_show_changed'
+              : 'booking.cancelled'
   // Share locks serialize opt-out/deletion with capture, and are always taken by ID.
   const endpoints = await trx
     .selectFrom('webhooks')
@@ -93,6 +98,7 @@ async function captureBookingWebhook(
     type: eventType,
     occurredAt: now.toString(),
     data: {
+      ...(requestId ? { requestId } : {}),
       bookingId: booking.id,
       organizationId: booking.organization_id,
       eventTypeId: booking.event_type_id,
@@ -117,10 +123,18 @@ async function captureBookingWebhook(
         booking_id: booking.id,
         event_id: eventId,
         event_type: eventType,
+        request_id: requestId,
         payload,
         created_at: new Date(now.epochMilliseconds),
       })
-      .onConflict((oc) => oc.doNothing())
+      // Lifecycle receipts are unique per endpoint/booking/event/request; each attendance
+      // change is its own receipt, so the arbiter is the partial lifecycle index.
+      .onConflict((oc) =>
+        oc
+          .columns(['webhook_id', 'booking_id', 'event_type', 'request_id'])
+          .where(sql<boolean>`event_type <> 'booking.attendee_no_show_changed'`)
+          .doNothing(),
+      )
       .returning('id')
       .executeTakeFirst()
     if (delivery)

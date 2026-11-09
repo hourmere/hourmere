@@ -100,6 +100,20 @@ export function comparable(draft: ScheduleDraft): string {
   })
 }
 
+/** Replace targets, with fresh interval identities so later edits never alias another day. */
+export function copyDay(draft: ScheduleDraft, source: Weekday, targets: Weekday[]): ScheduleDraft {
+  const days = { ...draft.days }
+  for (const target of targets) {
+    if (target === source) continue
+    const from = draft.days[source]
+    days[target] = {
+      available: from.available,
+      intervals: from.available ? from.intervals.map((i) => intervalDraft(i.start, i.end)) : [],
+    }
+  }
+  return { ...draft, days }
+}
+
 /** Minutes since midnight; an end of 00:00 is the end of the day. */
 function minutes(time: string, isEnd: boolean): number | null {
   const match = /^(\d{2}):(\d{2})$/.exec(time)

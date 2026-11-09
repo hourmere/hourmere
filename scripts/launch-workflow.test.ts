@@ -105,7 +105,13 @@ describe('release approval visibility', () => {
       },
       'jobs.publish-cli.permissions': { contents: 'read', 'id-token': 'write' },
     })
-    expect(Object.keys(ci.jobs)).toEqual(['check', 'cli-compatibility', 'docker', 'e2e'])
+    expect(Object.keys(ci.jobs)).toEqual([
+      'check',
+      'cli-compatibility',
+      'docker',
+      'e2e-shard',
+      'e2e',
+    ])
     expect(permissionScopes(ci)).toEqual({ permissions: { contents: 'read' } })
   })
 

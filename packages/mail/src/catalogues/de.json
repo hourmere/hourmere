@@ -89,5 +89,14 @@
   "waitlist.notice.expiry": "Diese Vorschläge gelten bis {expiry}. Diese Frist reserviert keinen Termin.",
   "waitlist.notice.page": "Alle aktuell angebotenen Zeiten finden Sie auf der Buchungsseite:",
   "waitlist.notice.waiting": "Ist eine Zeit nicht mehr verfügbar, bleiben Sie bis zum ursprünglichen Ablaufdatum auf der Warteliste. Falls Sie anderweitig gebucht haben, verlassen Sie die Warteliste über den folgenden Link.",
-  "waitlist.notice.footer": "Sie erhalten diese E-Mail, weil Sie eine Wartelistenanfrage für diesen Termin bestätigt haben."
+  "waitlist.notice.footer": "Sie erhalten diese E-Mail, weil Sie eine Wartelistenanfrage für diesen Termin bestätigt haben.",
+  "phone.callInvitee": "Telefonat — rufen Sie die buchende Person unter {number} an",
+  "phone.hostCallsYou": "Telefonat — die gastgebende Person ruft Sie unter {number} an",
+  "phone.hostCallsInvitee": "Telefonat — die gastgebende Person ruft die buchende Person an",
+  "phone.inviteeCallsYou": "Telefonat — die buchende Person ruft Sie unter {number} an",
+  "phone.callHost": "Telefonat — rufen Sie die gastgebende Person unter {number} an",
+  "rescheduleRequest.subject": "Bitte wählen Sie einen anderen Termin: {event}",
+  "rescheduleRequest.introduction": "{host} bittet Sie, einen anderen Termin zu wählen. Ihre ursprüngliche Buchung bleibt reserviert, bis Sie einen neuen Termin wählen oder stornieren. Diese Anfrage läuft am {expiry} ab; danach bleibt die ursprüngliche Buchung bestehen.",
+  "rescheduleRequest.expiredSubject": "Terminänderungsanfrage abgelaufen: {event}",
+  "rescheduleRequest.expiredIntroduction": "{invitee} hat vor Ablauf der Anfrage keinen neuen Termin gewählt. Die ursprüngliche Buchung bleibt bestehen."
 }

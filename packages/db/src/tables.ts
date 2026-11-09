@@ -381,6 +381,18 @@ export interface BookingNotifications {
   suppression_reason: string | null;
 }
 
+export interface BookingRescheduleRequests {
+  booking_id: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  idempotency_key: string;
+  note: string | null;
+  picked_booking_id: string | null;
+  resolved_at: Timestamp | null;
+  state: Generated<string>;
+}
+
 export interface Bookings {
   api_key_id: string | null;
   cancel_reason: string | null;
@@ -407,6 +419,12 @@ export interface Bookings {
   notification_snapshot: Json | null;
   oauth_consent_id: string | null;
   organization_id: string;
+  payment_confirmed_at: Timestamp | null;
+  payment_hold_expires_at: Timestamp | null;
+  payment_idempotency_key: string | null;
+  payment_pii_erased_at: Timestamp | null;
+  payment_reference: string | null;
+  payment_refund_required: Generated<boolean>;
   required_host_user_ids: Generated<string[]>;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
@@ -792,6 +810,18 @@ export interface OneTimeBookingLinks {
   used_at: Timestamp | null;
 }
 
+export interface OrganizationBranding {
+  brand_logo: string | null;
+  brand_primary_color: string | null;
+  organization_id: string;
+}
+
+export interface OrganizationBrandLogos {
+  data: Buffer;
+  hash: string;
+  organization_id: string;
+}
+
 export interface OrganizationOperations {
   actor_user_id: string | null;
   api_key_id: string | null;
@@ -997,6 +1027,7 @@ export interface WebhookDeliveries {
   last_error: string | null;
   organization_id: string;
   payload: string;
+  request_id: string | null;
   status: Generated<string>;
   webhook_id: string;
 }
@@ -1038,6 +1069,7 @@ export interface DB {
   booking_hosts: BookingHosts;
   booking_notification_conference_context: BookingNotificationConferenceContext;
   booking_notifications: BookingNotifications;
+  booking_reschedule_requests: BookingRescheduleRequests;
   booking_scheduled_messages: BookingScheduledMessages;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
@@ -1065,6 +1097,8 @@ export interface DB {
   mcp_oauth_intents: McpOauthIntents;
   notification_email_sends: NotificationEmailSends;
   one_time_booking_links: OneTimeBookingLinks;
+  organization_brand_logos: OrganizationBrandLogos;
+  organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;

@@ -68,11 +68,16 @@ function rest(
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
+  rest('GET', '/api/v1/branding', 'other_read', 'key'),
+  rest('GET', '/api/v1/branding/logo/{hash}', 'other_read', 'key'),
+  rest('PATCH', '/api/v1/branding', 'other_write', 'key'),
+  rest('POST', '/api/v1/branding/logo', 'other_write', 'key'),
   rest('GET', '/api/v1/book/{token}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/book/{token}/slots', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/bookings/{id}/attendees', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings', 'booking_read', 'key'),
+  rest('GET', '/api/v1/bookings/export.csv', 'other_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}/organization', 'session_only', 'session_only'),
   rest('POST', '/api/v1/bookings/{id}/calendar-copy/retry', 'booking_write', 'key'),
@@ -80,6 +85,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('PATCH', '/api/v1/bookings/{id}/attendees/{attendeeId}/no-show', 'booking_write', 'key'),
   rest('POST', '/api/v1/bookings/{id}/conference/retry', 'booking_write', 'key'),
   rest('POST', '/api/v1/bookings/{id}/reschedule', 'booking_write', 'key'),
+  rest('POST', '/api/v1/bookings/{id}/request-reschedule', 'booking_write', 'key'),
   rest('GET', '/api/v1/bookings/{id}/slots', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings/manage', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/bookings/manage/cancel', 'booking_write', 'optional_key'),
@@ -158,6 +164,8 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/schedules', 'other_read', 'key'),
   rest('POST', '/api/v1/schedules', 'other_write', 'key'),
   rest('GET', '/api/v1/schedules/{id}', 'other_read', 'key'),
+  rest('GET', '/api/v1/schedules/{id}/availability', 'other_read', 'key'),
+  rest('PUT', '/api/v1/schedules/{id}/availability', 'other_write', 'key'),
   rest('DELETE', '/api/v1/schedules/{id}', 'other_write', 'key'),
   rest('PATCH', '/api/v1/schedules/{id}', 'other_write', 'key'),
   rest('GET', '/api/v1/schedules/{id}/overrides', 'other_read', 'key'),
@@ -213,6 +221,8 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('get_branding', 'other_read', ['GET /api/v1/branding']),
+  mcp('set_branding', 'other_write', ['PATCH /api/v1/branding']),
   mcp('whoami', 'booking_read', ['GET /api/v1/me']),
   mcp('find_available_slots', 'booking_read', [
     'GET /api/v1/public/{handle}/{slug}/slots',
@@ -248,6 +258,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'team',
   ),
   mcp('create_booking', 'booking_write', ['POST /api/v1/book/{token}/bookings'], 'oneTimeLink'),
+  mcp('request_reschedule', 'booking_write', ['POST /api/v1/bookings/{id}/request-reschedule']),
   mcp('reschedule_booking', 'booking_write', [
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/manage/reschedule',
@@ -270,6 +281,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
   ]),
   mcp('get_booking_attendees', 'booking_read', ['GET /api/v1/bookings/{id}/attendees']),
+  mcp('export_bookings', 'other_read', ['GET /api/v1/bookings/export.csv']),
   mcp('retry_conference', 'booking_write', ['POST /api/v1/bookings/{id}/conference/retry']),
   mcp('retry_calendar_copy', 'booking_write', ['POST /api/v1/bookings/{id}/calendar-copy/retry']),
   mcp('get_profile', 'booking_read', ['GET /api/v1/profile']),
@@ -280,6 +292,8 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   ]),
   mcp('list_schedules', 'other_read', ['GET /api/v1/schedules']),
   mcp('get_schedule', 'other_read', ['GET /api/v1/schedules/{id}']),
+  mcp('get_schedule_availability', 'other_read', ['GET /api/v1/schedules/{id}/availability']),
+  mcp('save_schedule_availability', 'other_write', ['PUT /api/v1/schedules/{id}/availability']),
   mcp('create_event_type', 'other_write', ['POST /api/v1/event-types']),
   mcp('update_event_type', 'other_write', ['PATCH /api/v1/event-types/{id}']),
   mcp('generate_open_time_snippet', 'booking_read', ['POST /api/v1/open-time-snippets']),
@@ -328,6 +342,8 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
   cli('whoami', 'whoami'),
+  cli('branding get', 'get_branding'),
+  cli('branding set', 'set_branding'),
   cli('profile', 'get_profile'),
   cli('catalog', 'list_event_types'),
   cli('event', 'get_event_type'),
@@ -336,10 +352,14 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('set-event-notifications', 'set_event_type_notifications'),
   cli('schedules', 'list_schedules'),
   cli('schedule', 'get_schedule'),
+  cli('schedule-availability', 'get_schedule_availability'),
+  cli('save-availability', 'save_schedule_availability'),
   cli('slots', 'find_available_slots'),
   cli('book', 'create_booking'),
   cli('list', 'list_bookings'),
+  cli('export', 'export_bookings'),
   cli('reschedule', 'reschedule_booking'),
+  cli('request-reschedule', 'request_reschedule'),
   cli('cancel', 'cancel_booking'),
   cli('booking-attendees', 'get_booking_attendees'),
   cli('set-no-show', 'set_attendee_no_show'),

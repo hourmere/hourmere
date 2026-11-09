@@ -24,7 +24,10 @@ function sourceCopy(change?: Change, opener = open): typeof runCli {
     expect(source.includes(change[0]), 'source-copy mutation anchor').toBe(true)
     source = source.replace(...change)
   }
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
   const bindings = { constants, ...client, open: opener }
   return new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),

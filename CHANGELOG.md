@@ -24,8 +24,11 @@ must approve publication through the [release workflow](https://github.com/hourm
   Web and worker must share the setting; Hourmere Cloud must never set it.
 - Hosts can offer 1–12 meeting lengths on one event type in the editor, REST, MCP and CLI,
   with an explicit default. Invitees choose a length before selecting an available time.
+- Hosts can set daily, weekly and monthly booking limits per event type in the editor,
+  REST, MCP and CLI. Limits use each host’s schedule time zone; lowering a ceiling
+  does not cancel existing bookings.
 - Personal booking pages and direct-link unlisted event types, with configurable duration,
-  booking questions, locations, buffers, minimum notice, booking windows and daily limits.
+  booking questions, locations, buffers, minimum notice, booking windows and booking limits.
   Working-hours schedules, date overrides and IANA time zones account for daylight saving.
 - Team invitations and organization roles; single-host team events, collective meetings
   with two to eight required hosts, and explicitly activated equal-rotation round-robin
@@ -82,6 +85,21 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Keep concurrent MCP OAuth organization selection and consent from exhausting the application database connection pool.
+
+- Upgrade the Better Auth family and schema CLI from 1.7.12 to 1.7.16 for
+  GHSA-9hm7-xhfp-cx58 (unverified OAuth email), GHSA-fvxx-76fc-893x (revoked
+  cached sessions), GHSA-c85h-5mrr-mgx4 (padded organization owner roles),
+  GHSA-fmh4-wcc4-5jm3 (organization invitations accepted by an unverified account)
+  and GHSA-hwq2-v29r-p69r (email-change links after the address changes hands),
+  including the other fixes in the November security release. Hourmere already
+  required a verified email before accepting an invitation, so GHSA-fmh4 was blocked
+  by its own check as well; change-email is not enabled, so GHSA-hwq2 does not apply. Google and Microsoft
+  sign-in reject false email-verification claims, including the string `"false"`.
+  No database migration is needed. Rebuild and restart all application roles;
+  Hourmere uses PostgreSQL sessions without secondary storage or cookie caching.
+  Social token/JWKS requests now reject redirects, and invalid MCP client-metadata
+  responses fail with `invalid_client`. See the self-hosting upgrade notes.
 - All-day Google events block their dates in each host's availability schedule zone,
   including collective and round-robin hosts, when the calendar uses another zone.
   Exclusive end dates and daylight-saving transitions are preserved; timed events remain
@@ -149,6 +167,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Known limitations
 
+- [Booking limits](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/booking-limits.md) apply per event type and actual host, across
+  all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
+  Lowering a limit does not cancel existing bookings.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. Email abuse budgets apply per instance/database; separate instances do not
   share limits. Per-IP request limits remain in process memory.
@@ -182,12 +203,6 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Upgrade notes
 
-- Migration 0062 is not rolling-safe. Stop every old web/all/worker process, apply the
-  migration, then start all roles together with the new code. The migration replaces the
-  webhook lifecycle uniqueness constraint with a partial index; old webhook writes fail
-  with PostgreSQL `42P10` after migration and can roll back booking changes. See the
-  [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#private-attendee-no-show-markers).
-
 These notes apply to existing installations of the development source tree. Back up the
 full database (`auth`, `public` and `pgboss`), deployment configuration and original secrets
 before upgrading. Review [self-hosting recovery guidance](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore);
@@ -195,6 +210,16 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Coordinate the attendee no-show upgrade (migration 0062).** Stop every old web/all
+  and worker process, apply the migration, then start all roles together with the new code.
+  The migration replaces the webhook delivery uniqueness constraint with a partial index that
+  excludes attendance changes; old webhook writes fail with PostgreSQL `42P10` after
+  migration and can roll back booking changes. See the
+  [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#private-attendee-no-show-markers).
+- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
+  and worker process before applying the migration, then restart every role with the new
+  code. The webhook delivery uniqueness constraint changes to include the request identity;
+  old booking writers cannot use it after migration. Do not run mixed application versions.
 - **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
   stop every old `web`, `all` and `worker` process, including any on other hosts, then
   start all roles with the upgraded code: build → stop app (and any separate worker) → up.

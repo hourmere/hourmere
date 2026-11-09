@@ -28,7 +28,7 @@ import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
-import { createJobs, oneTimeBookingLinksRetentionJob } from '@hourmere/jobs'
+import { createJobs, oneTimeBookingLinksRetentionJob, paymentHoldsExpiryJob } from '@hourmere/jobs'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -45,6 +45,7 @@ import {
   notificationEmailCleanupJob,
   queuedSignInEmail,
   repairScheduledBookingEmails,
+  rescheduleRequestExpiryJob,
   reserveInvitationEmailBudget,
   type ScheduledEmailQueue,
   scheduledBookingEmailJob,
@@ -58,6 +59,7 @@ import {
   type BookingNotifier,
   cleanupWaitlist,
   ensureWaitlistKey,
+  expirePaymentHolds,
   leaveTeamMember,
   removeWaitlist,
   scanWaitlists,
@@ -74,6 +76,7 @@ import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
+import { brandingTools } from './mcp/branding.ts'
 import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
@@ -88,6 +91,7 @@ import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { bookingRoutes } from './routes/bookings.ts'
+import { brandingRoutes } from './routes/branding.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -205,6 +209,7 @@ export function productRoutes({
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
+    brandingRoutes({ db }),
     eventTypeRoutes({
       db,
       followUpHostNotesEnabled,
@@ -294,6 +299,7 @@ export function productTools({
       bookingMaxInviteeReschedules,
     }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
+    ...brandingTools({ db }),
     ...eventTypeTools({
       db,
       automaticMeet,
@@ -525,6 +531,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       waitlistEmailJob(runWaitlistEmail),
       oneTimeBookingLinksRetentionJob(db),
+      paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,
@@ -537,6 +544,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
       bookingNotificationJob(notificationDeps),
+      rescheduleRequestExpiryJob({
+        db,
+        notify: async (trx, event, now) => {
+          await bookingNotifier(jobs)(trx, event, now)
+          await webhookBookingNotifier(jobs, webhookSettings)(trx, event, now)
+        },
+      }),
       groupHostMailJob(notificationDeps),
       scheduledBookingEmailJob(notificationDeps),
       scheduledBookingEmailRepairJob(notificationDeps, scheduledQueue),
@@ -632,9 +646,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
     const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
     const notify: BookingNotifier = async (trx, event, now) => {
-      await conferenceNotifier(trx, event)
+      if (!('requestId' in event)) await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
-      if (googleCalendar) await calendarNotifier(trx, event)
+      if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
       await webhookNotifier(trx, event, now)
     }
     const auth = createAuth({

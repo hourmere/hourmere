@@ -743,6 +743,14 @@ function EventTypeForm({
 
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">{t('Location')}</h2>
+            {(saved?.locations?.length ?? 0) > 1 && (
+              <p className="hint">
+                {t(
+                  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+                  { '0': saved?.locations?.length ?? 0 },
+                )}
+              </p>
+            )}
             <LocationFields draft={draft} errors={errors} set={set} />
             {draft.locationKind === 'zoom' && (
               <ZoomMeetingFields
@@ -959,6 +967,44 @@ function EventTypeForm({
                       inputMode="numeric"
                       value={draft.maxBookingsPerDay}
                       onChange={(e) => set('maxBookingsPerDay', e.target.value)}
+                    />
+                  )}
+                </Field>
+                <Field
+                  id="maxBookingsPerWeek"
+                  label={t('Weekly limit')}
+                  optional
+                  error={errors.maxBookingsPerWeek}
+                  hint={t('Bookings per week, {0}–{1}. Empty: no limit.', {
+                    '0': RULES.maxBookingsPerWeek.min,
+                    '1': RULES.maxBookingsPerWeek.max,
+                  })}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.maxBookingsPerWeek}
+                      onChange={(e) => set('maxBookingsPerWeek', e.target.value)}
+                    />
+                  )}
+                </Field>
+                <Field
+                  id="maxBookingsPerMonth"
+                  label={t('Monthly limit')}
+                  optional
+                  error={errors.maxBookingsPerMonth}
+                  hint={t('Bookings per month, {0}–{1}. Empty: no limit.', {
+                    '0': RULES.maxBookingsPerMonth.min,
+                    '1': RULES.maxBookingsPerMonth.max,
+                  })}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.maxBookingsPerMonth}
+                      onChange={(e) => set('maxBookingsPerMonth', e.target.value)}
                     />
                   )}
                 </Field>

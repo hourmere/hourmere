@@ -22,6 +22,7 @@ import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { BookingExport } from '../bookings/BookingExport.tsx'
 import { hostZone } from '../bookings/booking-format.ts'
 import { ManualRebooking } from './ManualRebooking.tsx'
 
@@ -607,6 +608,12 @@ function BookingList({
           </button>
         </div>
       )}
+      <BookingExport
+        filters={query}
+        timeZone={timeZone}
+        expectedOrganizationId={expectedOrganizationId}
+        disabled={!!conflict}
+      />
       {shown.data.length === 0 ? (
         <EmptyState title={t('No team bookings match these filters.')}>
           <p>
