@@ -124,10 +124,10 @@ instants; payment release or `expired` holds emit no `booking.cancelled` workflo
 
 Attendee no-show marking is on main (migration 0070,
 [no-shows](../apps/site/src/content/docs/docs/no-shows.md)). A host marks or unmarks one
-attendee after the scheduled start through REST, MCP or CLI, and webhooks can subscribe to
-`booking.attendee_no_show_changed`. The change does not pass through `BookingNotifier`:
-`setAttendeeNoShow` calls a separate `AttendeeNoShowNotifier`, which only webhook capture
-implements. V1 workflows treat it as follows:
+attendee after the scheduled start in the dashboard or through REST, MCP or CLI, and
+webhooks can subscribe to `booking.attendee_no_show_changed`. The change does not pass
+through `BookingNotifier`: `setAttendeeNoShow` calls a separate `AttendeeNoShowNotifier`,
+which only webhook capture implements. V1 workflows treat it as follows:
 
 - `booking.attendee_no_show_changed` is not a workflow trigger. The marker is private host
   metadata: invitee pages, public booking responses and emails never show it, and marking
@@ -265,9 +265,9 @@ That key cannot represent several workflow executions for one booking and endpoi
 `workflow_run_id uuid` with no foreign key, like `request_id`, and replaces the key with
 `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)`.
 Workflow rows get their own column instead of reusing `request_id` as attendance rows do,
-so each column keeps a meaning the schema can check.
-A CHECK requires `workflow_run_id` exactly on `workflow.executed` rows, and another forbids
-a row carrying both `request_id` and `workflow_run_id`. No existing row is rewritten or
+so each column keeps a meaning the schema can check. A CHECK requires `workflow_run_id`
+exactly on `workflow.executed` rows, and another forbids a row carrying both `request_id`
+and `workflow_run_id`. No existing row is rewritten or
 backfilled: booking-origin rows (both columns NULL), request-origin rows and attendance
 rows (`request_id` set) keep their uniqueness, payloads, signatures and receipts. The same
 migration replaces 0070's `webhook_deliveries.event_type` CHECK, extending it from the
@@ -340,8 +340,9 @@ destination recheck. Update has no `webhooks_disabled` check today and gains non
 
 The workflow payload has the existing bounded booking ID/time/status projection plus
 `workflowId`, `workflowRevision`, `trigger` and stable `workflowRunId`, never `requestId`;
-existing booking, request and attendance payloads stay unchanged. `WebhookDelivery.bookingId` remains
-a required UUID, never null or omitted, including team workflow deliveries. Internal
+existing booking, request and attendance payloads stay unchanged.
+`WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team
+workflow deliveries. Internal
 subscription tests may use the enabled context after 13d but insert no workflow deliveries
 before 14a. Before step 13d, steps 5–6 validate endpoint existence and ownership but
 reject webhook action definitions as `invalid_workflow`; 13d enables their subscription
