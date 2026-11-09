@@ -48,6 +48,20 @@ function latest(pattern: RegExp) {
 }
 const quoted = (list: string | undefined) =>
   [...(list ?? '').matchAll(/'([^']+)'/g)].map((match) => match[1])
+/** Repository files under a directory whose names match, skipping installed and built output. */
+function files(directory: string, name: RegExp): string[] {
+  return readdirSync(new URL(`../${directory}/`, import.meta.url), { withFileTypes: true }).flatMap(
+    (entry) =>
+      entry.isDirectory()
+        ? ['node_modules', 'dist', 'build'].includes(entry.name)
+          ? []
+          : files(`${directory}/${entry.name}`, name)
+        : name.test(entry.name)
+          ? [`${directory}/${entry.name}`]
+          : [],
+  )
+}
+const testFile = /\.test\.[cm]?[jt]sx?$/
 const planRows = () => [
   ...document.matchAll(/^\| (\d+[a-z]?)\. ([^|]+)\| ([^|]+)\| ([^|]+)\| ([^|]+)\| ([^|]+)\|$/gm),
 ]
@@ -399,12 +413,34 @@ describe('workflow design numeric contracts', () => {
     expect(text).toContain(
       `The webhook baseline on main comes from migration ${subscription.number}`,
     )
+    expect(text).toContain(
+      `${subscription.number}'s \`webhooks_events_check\` is \`cardinality(events) BETWEEN 1 AND ${current}\``,
+    )
     // Step 13d replaces the installed CHECK; every migration that defined one stays as published.
     expect(text).toContain(`replaces ${subscription.number}'s \`webhooks.events\` CHECK`)
-    const definers = migrations
-      .filter(({ sql }) => [...sql.matchAll(subscriptionCheck)].length > 0)
-      .map(({ number }) => number)
+    // Both event CHECKs, inline in the first migration and named later, in migration order.
+    const deliveryCheck =
+      /event_type(?:_check| text NOT NULL) CHECK \(\s*event_type IN \(([^)]*)\)\s*\)/g
+    const history = (pattern: RegExp, list: number) =>
+      migrations.flatMap(({ number, sql }) =>
+        [...sql.matchAll(pattern)].map((match) => ({ number, match, kinds: quoted(match[list]) })),
+      )
+    const subscriptions = history(subscriptionCheck, 2)
+    const deliveries = history(deliveryCheck, 1)
+    const definers = subscriptions.map(({ number }) => number)
     expect(definers.at(-1)).toBe(subscription.number)
+    expect(deliveries.map(({ number }) => number)).toEqual(definers)
+    // Each definition keeps the earlier kinds in order and only appends ("only widened").
+    for (const defined of [subscriptions, deliveries])
+      for (const [index, { kinds }] of defined.entries()) {
+        const earlier = defined[index - 1]?.kinds ?? []
+        expect(kinds.slice(0, earlier.length)).toEqual(earlier)
+        expect(kinds.length).toBeGreaterThan(earlier.length)
+      }
+    for (const { match, kinds } of subscriptions) expect(Number(match[1])).toBe(kinds.length)
+    expect(text).toContain(
+      `${definers.at(-1)} only widened both constraints; ${definers[0]} created them and ${prose(definers.slice(1, -1))} replaced them before`,
+    )
     expect(text).toContain(`Published migrations ${prose(definers)} remain unchanged`)
     expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${current}\``)
     expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${extended}\``)
@@ -419,7 +455,7 @@ describe('workflow design numeric contracts', () => {
       expect([Number(from), Number(to)]).toEqual([current, extended])
     // Any other digit count of kinds, or a "1 to N" cardinality, is the current or extended set.
     for (const [phrase, count] of text.matchAll(
-      /\b(\d+) (?:allowed |current |webhook |booking )?(?:event )?kinds\b/g,
+      /\b(\d+) (?:allowed |current |webhook |booking )?(?:event )?(?:kinds|events|event types)\b/g,
     ))
       expect([current, extended], phrase).toContain(Number(count))
     for (const [phrase, upper] of text.matchAll(/cardinality[^.]*?\b1 ?(?:to|–|-) ?(\d+)\b/g))
@@ -429,7 +465,7 @@ describe('workflow design numeric contracts', () => {
     )
 
     // Delivery kinds and the delivery uniqueness key as main installs and uses them.
-    const deliveryKinds = latest(/event_type_check CHECK \(\s*event_type IN \(([^)]*)\)\s*\)/g)
+    const deliveryKinds = latest(deliveryCheck)
     expect(quoted(deliveryKinds.match[1])).toEqual([...WEBHOOK_EVENTS])
     // The baseline says one migration ("its") defines both event CHECKs.
     expect(deliveryKinds.number).toBe(subscription.number)
@@ -446,7 +482,19 @@ describe('workflow design numeric contracts', () => {
         .map((column) => `'${column}'`)
         .join(', ')}]).doNothing()`,
     )
-    expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns})\`, which ${key.number} added`)
+    expect(key.number).not.toBe(subscription.number)
+    expect(text).toContain(
+      `\`UNIQUE NULLS NOT DISTINCT (${columns})\`, which ${key.number} added and ${subscription.number} left unchanged`,
+    )
+    const requestColumn = latest(/ALTER TABLE webhook_deliveries ADD COLUMN (request_id) uuid;/g)
+    expect(text).toContain(`follows ${requestColumn.number}'s \`request_id\` pattern`)
+    // Every migration number written next to a webhook CHECK or the delivery key is main's.
+    for (const [phrase, number] of text.matchAll(
+      /\b(\d{4})(?:'s)? `?(?:webhooks_events_check|webhooks\.events|webhook_deliveries(?:\.event_type|_event_type_check)|event_type CHECK)/g,
+    ))
+      expect(number, phrase).toBe(subscription.number)
+    for (const [phrase, number] of text.matchAll(/\b(\d{4})(?:'s)? NULLS NOT DISTINCT/g))
+      expect(number, phrase).toBe(key.number)
     expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns}, workflow_run_id)\``)
     expect(text).toContain('No existing row is rewritten or backfilled')
     // Attendance rows store a fresh per-change receipt in request_id, as the baseline says.
@@ -455,13 +503,14 @@ describe('workflow design numeric contracts', () => {
     )
     expect(delivery).toContain('request_id: receiptId,')
     expect(text).toContain('Attendance rows carry a fresh per-change receipt ID')
+    expect(text).toContain("Request-origin rows carry the reschedule request's ID")
 
     // Stale baselines from before the reschedule-request and attendance kinds must not return.
     for (const stale of [
       /\.max\(3\)/,
       /\.max\(\d+\)/,
       // Counts of kinds are written as digits, which the checks above derive from main.
-      /\b(?:one|two|three|four|five|six|seven|eight|nine|ten) (?:allowed |current |webhook |booking )?(?:event )?(?:kinds|events)\b/i,
+      /\b(?:one|two|three|four|five|six|seven|eight|nine|ten) (?:allowed |current |webhook |booking )?(?:event )?(?:kinds|events|event types)\b/i,
       /from three to four/i,
       /\b1[–-]4\b/,
       /\(4\), matching/,
@@ -535,38 +584,80 @@ describe('workflow design numeric contracts', () => {
     expect(noShows).toContain('Marking or unmarking sends no email')
     expect(noShows).toContain('a follow-up may still be sent to an attendee marked as a no-show')
 
-    // Every integration test that binds to WEBHOOK_EVENTS is named in step 13d, which appends
-    // the workflow kind; Zapier has none, so it needs no change.
-    const testFiles = (directory: string): string[] =>
-      readdirSync(new URL(`../${directory}/`, import.meta.url), { withFileTypes: true }).flatMap(
-        (entry) =>
-          entry.isDirectory()
-            ? ['node_modules', 'dist', 'build'].includes(entry.name)
-              ? []
-              : testFiles(`${directory}/${entry.name}`)
-            : /\.test\.[cm]?[jt]s$/.test(entry.name)
-              ? [`${directory}/${entry.name}`]
-              : [],
-      )
-    const binders = [
-      'tools/zapier-hourmere',
-      'tools/n8n-nodes-hourmere',
-      'tools/make-templates',
-      'scripts',
-    ]
-      .flatMap(testFiles)
+    // Decisions restated in rows, lists and prose, which the board turns into separate cards.
+    const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
+    const acceptance = (id: string) => planRows().find((row) => row[1] === id)?.[6] ?? ''
+    expect(acceptance('1')).toContain(
+      'a no-show trigger, condition or variable is rejected as unknown',
+    )
+    expect(step('8c')).toContain('workflows register nothing on `AttendeeNoShowNotifier`')
+    expect(acceptance('8c')).toContain('and so does marking or unmarking an attendee as a no-show')
+    expect(acceptance('9')).toContain(
+      'a pending reschedule request or a no-show mark neither delays nor skips a due run',
+    )
+    expect(text).toContain(
+      'triggers on reschedule requests or attendee no-show changes, and workflow triggers in Zapier, n8n or Make',
+    )
+    expect(text).toContain('No stored `events` array is rewritten or expanded')
+    // Only owners and admins who do not host the booking are limited to a browser session.
+    expect(text).toContain(
+      'team owners and admins who do not host the booking can mark only through a browser session',
+    )
+    expect(text).toContain(
+      'The `workflows_disabled` check below concerns only adding `workflow.executed`, so keeping, adding or removing the attendance kind behaves as today',
+    )
+    // The no-show migration is the one that adds the marker.
+    const markers = migrations.filter(({ sql }) => /ADD COLUMN no_show_marked_at\b/.test(sql))
+    expect(markers).toHaveLength(1)
+    expect(text).toContain(`Attendee no-show marking is on main (migration ${markers[0]?.number},`)
+
+    // Every test under tools/ or scripts/ that binds to WEBHOOK_EVENTS, and every internal test
+    // that subscribes an endpoint to every kind, is named in step 13d, which appends the
+    // workflow kind. Zapier has none, so it needs no change.
+    const binders = ['tools', 'scripts']
+      .flatMap((directory) => files(directory, testFile))
       .filter((file) => file !== 'scripts/workflows-docs.test.ts')
       .filter((file) => read(file).includes('WEBHOOK_EVENTS'))
       .sort()
-    const step13d = planRows().find((row) => row[1] === '13d')?.[4] ?? ''
-    expect([...step13d.matchAll(/`([^`]+\.test\.ts)`/g)].map((match) => match[1]).sort()).toEqual(
-      binders,
+    const subscribers = ['packages', 'apps']
+      .flatMap((directory) => files(directory, testFile))
+      .filter((file) => read(file).includes('events: [...WEBHOOK_EVENTS]'))
+      .sort()
+    expect(binders.length).toBeGreaterThan(0)
+    expect(subscribers.length).toBeGreaterThan(0)
+    expect(
+      [...step('13d').matchAll(/`([^`]+\.test\.tsx?)`/g)].map((match) => match[1]).sort(),
+    ).toEqual([...binders, ...subscribers].sort())
+    for (const file of [...binders, ...subscribers]) expect(text).toContain(`\`${file}\``)
+    const count = numberWords[binders.length] ?? String(binders.length)
+    expect(text).toContain(
+      `${count.charAt(0).toUpperCase()}${count.slice(1)} integration tests bind to \`WEBHOOK_EVENTS\``,
     )
-    for (const file of binders) expect(text).toContain(`\`${file}\``)
     expect(binders.filter((file) => file.includes('zapier'))).toEqual([])
     expect(text).toContain('Zapier needs no change')
     expect(text).toContain('Zapier, n8n and Make do not offer `workflow.executed` in v1')
     expect(text).toContain('through one explicit exclusion of that kind')
+    expect(step('13d')).toContain('including the n8n OpenAPI enum comparison')
+    expect(step('13d')).toContain('the n8n EVENTS, Make tables and Zapier app stay unchanged')
+    expect(step('13e')).toContain(
+      'state in the Zapier, n8n and Make guides that they do not offer it',
+    )
+    expect(text).toContain(
+      'Step 13e says in the Zapier, n8n and Make guides that they do not offer the workflow kind',
+    )
+
+    // Guides that say webhook management has no MCP/CLI operation are rewritten by step 13a,
+    // the first step that adds one.
+    const restOnly = ['docs', 'apps/site/src/content', 'tools']
+      .flatMap((directory) => files(directory, /\.md$/))
+      .filter((file) => file !== 'docs/workflows.md')
+      .filter((file) => read(file).replace(/\s+/g, ' ').includes('Webhook management is REST-only'))
+      .sort()
+    expect(restOnly.length).toBeGreaterThan(0)
+    expect([...step('13a').matchAll(/`([^`]+\.md)`/g)].map((match) => match[1]).sort()).toEqual(
+      restOnly,
+    )
+    expect(step('13a')).toContain('"Webhook management is REST-only" sentence')
   })
 
   it('decides every BookingNotifier event kind on main for workflow capture', () => {

@@ -136,8 +136,8 @@ which only webhook capture implements. V1 workflows treat it as follows:
   occurrence belongs to a booking lifecycle. Integrations that need the change subscribe to
   the signed webhook directly. A later trigger needs its own contract: per-attendee
   occurrence identity, an unmark and re-mark policy, a privacy review of invitee-facing
-  mail, and team access, because team owners and admins can mark only through a browser
-  session.
+  mail, and team access, because team owners and admins who do not host the booking can
+  mark only through a browser session.
 - Workflows register nothing on `AttendeeNoShowNotifier`, and a mark or unmark changes no
   workflow run. As with follow-ups, an `after_end` workflow still runs for a marked
   attendee. No condition or template variable reads the marker. Do not infer absence from
@@ -324,11 +324,19 @@ same change:
 
 Both then compare against `WEBHOOK_EVENTS` without `workflow.executed`, through one explicit
 exclusion of that kind, so a later booking kind still fails them until its integration is
-updated. The n8n trigger's `EVENTS` and translations, and the Make recipes and tables, stay
-unchanged; the n8n signature check already rejects a delivery whose type is not in
-`EVENTS`. Zapier needs no change: its triggers are a fixed subset, and its contract test
-validates requests against the generated OpenAPI, where the extra enum value is additive.
-Step 13e says in the Zapier, n8n and Make guides that they do not offer the workflow kind.
+updated. Each test applies its exclusion at every binding site: the n8n test also removes
+the workflow kind from the generated OpenAPI subscription enum before comparing it with
+`EVENTS`, and the Make test uses the reduced list for its captures and both tables. The n8n
+trigger's `EVENTS` and translations, and the Make recipes and tables, stay unchanged; the
+n8n signature check already rejects a delivery whose type is not in `EVENTS`. Zapier needs
+no change: its triggers are a fixed subset, and its contract test validates requests against
+the generated OpenAPI, where the extra enum value is additive. Step 13e says in the Zapier,
+n8n and Make guides that they do not offer the workflow kind.
+
+Internal webhook tests that subscribe an endpoint to every kind would add
+`workflow.executed` and get `404 workflows_disabled` while workflows are off:
+`packages/webhooks/src/delivery.test.ts` and `packages/webhooks/src/no-show.test.ts`. Step
+13d makes them subscribe to the booking kinds only, or use the enabled context.
 
 While workflows are off, a create or update whose resulting event set adds
 `workflow.executed` to an endpoint not already subscribed returns `404 workflows_disabled`.
@@ -709,7 +717,10 @@ tables in that same step, and add adjacent prose documenting them as disabled un
 OpenAPI and CLI help likewise list them with that warning. The docs index must say that
 listed interfaces and forwarded Compose settings may precede feature availability. Steps
 13a–13c update webhook/MCP/CLI guides as their existing webhook tools become usable; do not
-defer those guides to step 18b.
+defer those guides to step 18b. Step 13a, the first to add webhook MCP/CLI operations, also
+rewrites the sentence "Webhook management is REST-only" wherever it appears:
+`apps/site/src/content/docs/docs/webhooks.md`, `apps/site/src/content/docs/docs/n8n.md` and
+`tools/n8n-nodes-hourmere/README.md`.
 
 Operator settings reach Compose installs through the explicit `environment:` list in
 `docker-compose.yml`; there is no `env_file`, and the worker inherits the list through
@@ -797,10 +808,10 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 11b. Localized built-in catalogs | 11a | None. Templates for every shipped public locale and fixture snapshots. | Hard-off | Locale fallback is built-in; plain-text/HTML snapshots; no sibling contacts, capabilities or unauthorized team fields; self-hosted/Cloud defaults documented. |
 | 12a. Email attempt and retry state machine | 9, 10, 11b | None. Marker commit, fenced known-not-sent reversal with re-admission, and terminal ambiguity. | Hard-off | Connection/greeting/auth failure retries the same reservation/intent after re-admission, with one ledger row; stale token cannot reverse marker; post-DATA ambiguity and crash never create a second potentially accepted attempt; bounded backoff expires at due + 60 minutes during a longer outage. |
 | 12b. Email lifecycle race integration | 12a | None. Integrate live eligibility, policy and lifecycle rechecks with fake SMTP. | Hard-off | Overlapping reminder intent wins without duplicate send; cancel-before-marker sends nothing; marker-first permits only its authorized attempt; disable/delete races; live host-text switch falls back to built-ins; no shared budget lock across workflow SMTP. |
-| 13a. Webhook discovery and creation parity | 4 | Existing `GET /api/v1/webhooks` (`listWebhooks`) / `list_webhooks` / `webhooks list`; existing `POST /api/v1/webhooks` (`createWebhook`) / `create_webhook` / `webhooks create`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Full/read discovery, full-only create; current owner/admin checks; one-time secret returned only on creation; CLI JSON/help and parity mapping; existing event kinds unchanged. |
+| 13a. Webhook discovery and creation parity | 4 | Existing `GET /api/v1/webhooks` (`listWebhooks`) / `list_webhooks` / `webhooks list`; existing `POST /api/v1/webhooks` (`createWebhook`) / `create_webhook` / `webhooks create`. Update webhook/MCP/CLI guides now, including the "Webhook management is REST-only" sentence in `apps/site/src/content/docs/docs/webhooks.md`, `apps/site/src/content/docs/docs/n8n.md` and `tools/n8n-nodes-hourmere/README.md`. | Hard-off for workflow event kind | Full/read discovery, full-only create; current owner/admin checks; one-time secret returned only on creation; CLI JSON/help and parity mapping; existing event kinds unchanged. |
 | 13b. Webhook edit and retirement parity | 13a | Existing `PATCH /api/v1/webhooks/{id}` (`updateWebhook`) / `update_webhook` / `webhooks update`; existing `DELETE /api/v1/webhooks/{id}` (`deleteWebhook`) / `delete_webhook` / `webhooks delete`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Pause after URL policy removal; immutable URL and permission tests; deletion race; parity gaps removed without changing unrelated gaps. |
 | 13c. Webhook rotation and history parity | 13b | Existing `POST /api/v1/webhooks/{id}/rotate-secret` (`rotateWebhookSecret`) / `rotate_webhook_secret` / `webhooks rotate-secret`; existing `GET /api/v1/webhooks/{id}/deliveries` (`listWebhookDeliveries`) / `list_webhook_deliveries` / `webhooks deliveries`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Rotation exposes secret once with no CLI logging; current authorization and secret rotation races; safe paginated metadata; full/read read scope and full-only rotation. |
-| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (6 to 7 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0070 webhooks.events CHECK with cardinality BETWEEN 1 AND 7 over the extended set; regenerate OpenAPI and client. Update the integration tests that bind to WEBHOOK_EVENTS, `tools/n8n-nodes-hourmere/contract.test.ts` and `scripts/make-template-validation.test.ts`, to exclude workflow.executed explicitly; the n8n EVENTS, Make tables and Zapier app stay unchanged. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request- and attendance-kind subscriptions preserved, fresh install, no-op rerun and DB types; an endpoint subscribed to all current kinds can add the workflow kind; the n8n and Make tests still fail for a booking kind that their integration lacks; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
+| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (6 to 7 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0070 webhooks.events CHECK with cardinality BETWEEN 1 AND 7 over the extended set; regenerate OpenAPI and client. Update the integration tests that bind to WEBHOOK_EVENTS, `tools/n8n-nodes-hourmere/contract.test.ts` and `scripts/make-template-validation.test.ts`, to exclude workflow.executed explicitly at every binding site, including the n8n OpenAPI enum comparison; the n8n EVENTS, Make tables and Zapier app stay unchanged. Internal webhook tests that subscribe to every kind, `packages/webhooks/src/delivery.test.ts` and `packages/webhooks/src/no-show.test.ts`, subscribe to the booking kinds only or use the enabled context. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request- and attendance-kind subscriptions preserved, fresh install, no-op rerun and DB types; an endpoint subscribed to all current kinds can add the workflow kind; the n8n and Make tests still fail for a booking kind that their integration lacks; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
 | 13e. Webhook subscription interfaces and guides | 13d | Existing listWebhooks/listWebhookDeliveries responses and the create_webhook/update_webhook and webhooks create/update interfaces carry the new kind; update MCP/CLI help, webhook/MCP/CLI guides and the payload field list; extend the existing open-enum compatibility note to the workflow kind; state in the Zapier, n8n and Make guides that they do not offer it. | Hard-off for workflow event kind | MCP and CLI return the same 404 workflows_disabled for the new kind; list Webhook.events and delivery eventType documented as open enums; required bookingId remains UUID; guides name every kind and the disabled state. |
 | 14a. Webhook outbox extension | 9, 13e | None. Signed workflow delivery payload; new migration adds nullable webhook_deliveries.workflow_run_id, re-keys the 0064 NULLS NOT DISTINCT uniqueness with it, and replaces the 0070 event_type CHECK, extending it from 6 to 7 kinds without changing booking, request or attendance deliveries; move the existing ON CONFLICT target in delivery.ts to the new key. | Hard-off | Populated predecessor with booking-origin, request-origin and attendance rows preserved unchanged, fresh install and no-op rerun; the existing capture's conflict target moves to the five-column key, booking/request duplicate capture still coalesces and each attendance change still gets its own delivery; the docs/workflows.md baseline and its doc test are updated; two workflow runs targeting one endpoint retain distinct identities; duplicate capture coalesces; transactional rollback; signatures verified with fake receiver; payload contains no new booking personal fields and no requestId. |
 | 14b. Webhook delivery fences | 14a | None. Reuse guarded transport and bounded delivery repair; add workflow cancellation/disable and expiration checks. | Hard-off | DNS rebinding, redirects, forbidden/private targets and policy removal refused; endpoint pause/rotation race; first attempt expires at due+60min but timely-started delivery retries beyond that bound with same ID and receiver dedupe; no real outbound calls. |
