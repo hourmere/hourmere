@@ -21,16 +21,16 @@ import { fileURLToPath } from 'node:url'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
 import { prepareTools } from '../apps/server/src/mcp/tools.ts'
-import { openApiDocument } from '../apps/server/src/openapi-document.ts'
+import { openApiDocument, openApiRouteInventory } from '../apps/server/src/openapi-document.ts'
 import { productTools } from '../apps/server/src/server.ts'
 import { COMMANDS, REST_COMMANDS } from '../tools/cli/src/cli.ts'
+import { isRoutingName } from './routing-forms-names.ts'
 
 const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 
-// A routing-form name: `routing`, `routed`, or `route` as a whole word or path segment
-// (`/route/…`, `route_lead`); `reroute` and `routeToken` are not surface names.
-const ROUTING_NAME = /routing|routed|(?<![a-z])route(?![a-z])/i
+// Routing-form names are matched token by token (`isRoutingName`): `route`, `routing` or
+// `routed` as a whole word of a path, identifier or camelCase name.
 
 const REST_PATHS = [
   '/api/v1/routing-forms',
@@ -75,9 +75,10 @@ const CLI_COMMANDS = [
 // The storage layer: the migration, the generated table types and the storage test support.
 const STORAGE_LAYER =
   /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/routing-storage-[^/]+\.ts$)/
-// A table name as a whole identifier: `list_routing_forms` or `routing_forms_disabled` is not one.
+// A table name as a whole identifier, in any case (PostgreSQL folds unquoted identifiers):
+// `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
-  /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/
+  /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -129,19 +130,64 @@ function productionSources(): string[] {
 
 describe('routing forms are storage only', () => {
   it('names each documented routing surface so an added one is recognised', () => {
-    for (const name of [...REST_PATHS, ...MCP_TOOLS, ...CLI_COMMANDS])
-      expect(name, name).toMatch(ROUTING_NAME)
-    for (const name of ['reroute', 'routeToken', '/api/v1/bookings/{id}'])
-      expect(name, name).not.toMatch(ROUTING_NAME)
+    for (const name of [
+      ...REST_PATHS,
+      ...MCP_TOOLS,
+      ...CLI_COMMANDS,
+      // camelCase operation IDs and component or tag names the later steps would use.
+      'routeLead',
+      'listRoutingForms',
+      'RoutingForm',
+      'Routing forms',
+      '/api/v1/routing_forms',
+      '/api/v1/forms/{id}/route',
+      '/route/:handle/:slug',
+    ])
+      expect(isRoutingName(name), name).toBe(true)
+    // Words that merely contain the letters are not routing names.
+    for (const name of [
+      'reroute',
+      'reroute_booking',
+      'rerouting',
+      'rerouted',
+      '/api/v1/bookings/{id}/rerouting',
+      'router',
+      'router-status',
+      'getRouterStatus',
+      'RouterStatus',
+      '/routes/:id',
+      '/app/router',
+      '/api/v1/bookings/{id}',
+    ])
+      expect(isRoutingName(name), name).toBe(false)
   })
 
-  it('exposes no routing path, operation, tag or schema in the OpenAPI document', async () => {
+  it('recognises routing table names as whole identifiers in any case', () => {
+    for (const source of [
+      "selectFrom('booking_routing')",
+      'DELETE FROM "routing_receipts"',
+      'SELECT 1 FROM ROUTING_RECEIPTS',
+      'from Routing_Forms',
+      "import './routing-storage-limits.ts'",
+    ])
+      expect(STORAGE_NAMES.test(source), source).toBe(true)
+    for (const source of ['list_routing_forms', 'ROUTING_FORMS_DISABLED', 'routing_forms_disabled'])
+      expect(STORAGE_NAMES.test(source), source).toBe(false)
+  })
+
+  it('exposes no routing path, operation, tag or schema in the OpenAPI document or a Hono route', async () => {
     const document = await openApiDocument()
     const names = openApiNames(document)
     expect(names.length).toBeGreaterThan(100)
     expect(names).toContain('/api/v1/bookings/{id}')
     for (const path of REST_PATHS) expect(names).not.toContain(path)
-    expect(names.filter((name) => ROUTING_NAME.test(name))).toEqual([])
+    expect(names.filter(isRoutingName)).toEqual([])
+    // Every route registered on the Hono app, including plain GET routes and pages that the
+    // OpenAPI document need not list.
+    const { routes } = await openApiRouteInventory()
+    expect(routes.length).toBeGreaterThan(100)
+    expect(routes.map(({ path }) => path)).toContain('/api/v1/bookings/:id')
+    expect(routes.filter(({ path }) => isRoutingName(path))).toEqual([])
   })
 
   it('lists no routing MCP tool, with every optional catalogue enabled', async () => {
@@ -154,7 +200,7 @@ describe('routing forms are storage only', () => {
       expect(names.length).toBeGreaterThan(20)
       expect(names).toContain('create_booking')
       for (const tool of MCP_TOOLS) expect(names).not.toContain(tool)
-      expect(names.filter((name) => ROUTING_NAME.test(name))).toEqual([])
+      expect(names.filter(isRoutingName)).toEqual([])
     } finally {
       await pool.end()
     }
@@ -169,7 +215,7 @@ describe('routing forms are storage only', () => {
     ]
     expect(names).toContain('book')
     for (const command of CLI_COMMANDS) expect(names).not.toContain(command)
-    expect(names.filter((name) => ROUTING_NAME.test(name))).toEqual([])
+    expect(names.filter(isRoutingName)).toEqual([])
   })
 
   it('keeps the routing storage unreferenced outside the storage layer', () => {

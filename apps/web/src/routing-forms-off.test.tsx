@@ -7,13 +7,14 @@
 // PATHS), each mounting its routes only while `routingFormsEnabled` is true.
 import { matchRoutes } from 'react-router'
 import { describe, expect, it } from 'vitest'
+import { isRoutingName } from '../../../scripts/routing-forms-names.ts'
 import { appRoutes } from './App.tsx'
 import { PATHS } from './paths.ts'
 
 type Route = (typeof appRoutes)[number]
 
-// A routing-form name: `routing`, `routed`, or `route` as a whole path segment.
-const ROUTING_NAME = /routing|routed|(?<![a-z])route(?![a-z])/i
+// Routing-form names are matched token by token (`isRoutingName`): `route`, `routing` or
+// `routed` as a whole path segment or identifier word; `/routes/:id` or `/app/router` is not one.
 const PUBLIC_ROUTING_PAGES = ['/route/ada/intro', '/route/team/alpha/intro', '/route/continue']
 
 function routePaths(routes: Route[], parent = ''): string[] {
@@ -30,16 +31,16 @@ describe('routing forms have no web route', () => {
     const paths = routePaths(appRoutes)
     expect(paths).toContain('/app/event-types')
     expect(paths).toContain('/:handle/:slug')
-    expect(paths.filter((path) => ROUTING_NAME.test(path))).toEqual([])
+    expect(paths.filter(isRoutingName)).toEqual([])
     const names = [...Object.keys(PATHS), ...Object.values(PATHS)]
     expect(names).toContain('/app/event-types')
-    expect(names.filter((name) => ROUTING_NAME.test(name))).toEqual([])
+    expect(names.filter(isRoutingName)).toEqual([])
   })
 
   it.each(PUBLIC_ROUTING_PAGES)('resolves %s as an ordinary public page', (pathname) => {
     // While routing is off, /route/… falls through to existing public page resolution.
     const matched = matchRoutes(appRoutes, pathname)?.map(({ route }) => route.path ?? '') ?? []
     expect(matched.length).toBeGreaterThan(0)
-    expect(matched.filter((path) => ROUTING_NAME.test(path))).toEqual([])
+    expect(matched.filter(isRoutingName)).toEqual([])
   })
 })
