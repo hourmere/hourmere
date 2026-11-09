@@ -5,8 +5,9 @@ description: Configure signed outbound booking webhooks and their delivery limit
 
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
 cancellation, plus private attendee no-show changes. They use the same booking services for public pages, REST and MCP. They do
-not depend on Google, Microsoft, mail or a billing account. This first version is API-only;
-there is no webhook settings page or third-party integration template.
+not depend on Google, Microsoft, mail or a billing account. Webhook management is REST-only;
+there is no webhook settings page. The private [Zapier app](/docs/zapier) uses these endpoints
+to subscribe and unsubscribe automatically.
 
 ## Enable and configure
 
