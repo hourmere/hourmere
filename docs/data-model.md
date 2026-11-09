@@ -1134,8 +1134,12 @@ The phases within that organization boundary are:
   inserting the form. It never upgrades or writes the organization row. Any transaction
   combining form admission with event/form/receipt operations must take this advisory
   lock after the organization lock and before event-type, form and receipt row locks.
-  Direct unarchive updates also check capacity under that advisory lock; callers that
-  combine them with other routing writes must acquire the advisory lock first.
+  Any future operation that unarchives a form must take the organization lock and then
+  this advisory lock explicitly before it locks or updates the form row. The form trigger
+  also takes the advisory lock to check capacity, but only as a backstop: a bare
+  `UPDATE … SET archived_at = NULL` locks the form row before the trigger runs and can
+  deadlock (`40P01`) with a transaction that took the advisory lock first. No unarchive
+  operation exists yet.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in

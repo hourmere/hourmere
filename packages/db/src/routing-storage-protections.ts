@@ -332,14 +332,6 @@ const checks: [
     '[]',
   ],
   [
-    'receipt digest format',
-    'routing_receipts',
-    'routing_receipts_token_hash_check',
-    receiptValues,
-    'token_hash',
-    'raw-capability',
-  ],
-  [
     'receipt target container',
     'routing_receipts',
     'routing_receipts_resolved_target_check',
@@ -388,16 +380,6 @@ const checks: [
     '[]',
   ],
 ]
-for (const table of ['routing_receipts', 'booking_routing'])
-  for (const column of ['matched_rule_id', 'resolved_rule_id'])
-    checks.push([
-      `${table} ${column} identity`,
-      table,
-      `${table}_${column}_check`,
-      table === 'routing_receipts' ? receiptValues : bookingRoutingValues,
-      column,
-      'rule-name',
-    ])
 for (const [name, table, constraint, values, column, value] of checks)
   routingProtections[name] = {
     check: async (f) => {
@@ -411,18 +393,89 @@ for (const [name, table, constraint, values, column, value] of checks)
     },
     break: drop(table, constraint),
   }
-routingProtections['dependency rule identity'] = {
-  check: async (f) => {
-    await expect(
-      insertRow(f.pool, 'routing_target_dependencies', {
-        organization_id: f.organization,
-        version_id: f.version,
-        rule_id: 'rule-name',
-        event_type_id: f.event,
-      }),
-    ).rejects.toMatchObject(checkViolation)
-  },
-  break: drop('routing_target_dependencies', 'routing_target_dependencies_rule_id_check'),
+const dependencyValues = (f: RoutingFixture) => ({
+  organization_id: f.organization,
+  version_id: f.version,
+  rule_id: 'fallback',
+  event_type_id: f.event,
+})
+const UUID_FORMAT = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+const formats: [
+  string,
+  string,
+  string,
+  (f: RoutingFixture) => Record<string, unknown>,
+  string,
+  () => string,
+][] = [
+  [
+    'receipt digest format',
+    'routing_receipts',
+    'token_hash',
+    receiptValues,
+    '^[0-9a-f]{64}$',
+    () => randomUUID().replaceAll('-', '').repeat(2),
+  ],
+  [
+    'dependency rule identity',
+    'routing_target_dependencies',
+    'rule_id',
+    dependencyValues,
+    UUID_FORMAT,
+    randomUUID,
+  ],
+]
+for (const table of ['routing_receipts', 'booking_routing'])
+  for (const column of ['matched_rule_id', 'resolved_rule_id'])
+    formats.push([
+      `${table} ${column} identity`,
+      table,
+      column,
+      table === 'routing_receipts' ? receiptValues : bookingRoutingValues,
+      UUID_FORMAT,
+      randomUUID,
+    ])
+// Each invalid value differs from a valid one only at an edge or in letter case, so dropping
+// either regex anchor, or the whole CHECK, admits at least one of them.
+const edgeValues = (valid: string) => [
+  'malformed',
+  valid.slice(1),
+  `0${valid}`,
+  `x${valid}`,
+  `${valid}0`,
+  `${valid}x`,
+  `A${valid.slice(1)}`,
+]
+// Rewrites one column's pattern inside one table; unchanged source fails the harness.
+const withoutAnchor =
+  (table: string, column: string, pattern: string, anchor: '^' | '$') => (source: string) => {
+    const start = source.indexOf(`CREATE TABLE ${table} (`)
+    const end = source.indexOf('\n);', start)
+    const find = `${column} ~ '${pattern}'`
+    const body = source.slice(start, end)
+    if (start < 0 || body.split(find).length !== 2) return source
+    const relaxed = `${column} ~ '${pattern.replace(anchor, '')}'`
+    return `${source.slice(0, start)}${body.replace(find, () => relaxed)}${source.slice(end)}`
+  }
+for (const [name, table, column, values, pattern, valid] of formats) {
+  const constraint = `${table}_${column}_check`
+  const check = async (f: RoutingFixture) => {
+    const value = valid()
+    for (const invalid of edgeValues(value))
+      await expect(
+        insertRow(f.pool, table, { ...values(f), [column]: invalid }),
+      ).rejects.toMatchObject({ ...checkViolation, constraint })
+    await insertRow(f.pool, table, { ...values(f), [column]: value })
+  }
+  routingProtections[name] = { check, break: drop(table, constraint) }
+  routingProtections[`${name} start anchor`] = {
+    check,
+    break: withoutAnchor(table, column, pattern, '^'),
+  }
+  routingProtections[`${name} end anchor`] = {
+    check,
+    break: withoutAnchor(table, column, pattern, '$'),
+  }
 }
 for (const [name, table, constraint, values] of [
   ['unique form slug', 'routing_forms', 'routing_forms_organization_id_slug_key', formValues],
@@ -637,58 +690,90 @@ routingProtections['receipt expiry strictly follows creation'] = {
   break: (source) =>
     source.replace('CHECK (expires_at > created_at)', 'CHECK (expires_at >= created_at)'),
 }
-routingProtections['dependency health code vocabulary'] = {
-  check: async (f) => {
-    for (const health of ['ok', 'unavailable', 'unknown']) {
-      await insertRow(f.pool, 'routing_target_dependencies', {
-        organization_id: f.organization,
-        version_id: f.version,
-        rule_id: randomUUID(),
-        event_type_id: f.event,
-        health_code: health,
-      })
-    }
+const HEALTH_CODES = ['ok', 'unavailable', 'unknown']
+const HEALTH_CHECK = "CHECK (health_code IN ('ok', 'unavailable', 'unknown'))"
+const checkHealthVocabulary = async (f: RoutingFixture) => {
+  for (const health_code of HEALTH_CODES)
+    await insertRow(f.pool, 'routing_target_dependencies', {
+      ...dependencyValues(f),
+      rule_id: randomUUID(),
+      health_code,
+    })
+  for (const health_code of ['anything goes', 'degraded', 'error', 'healthy', 'stale', 'OK', ''])
     await expect(
-      insertRow(f.pool, 'routing_target_dependencies', {
-        organization_id: f.organization,
-        version_id: f.version,
-        rule_id: 'fallback',
-        event_type_id: f.event,
-        health_code: 'anything goes',
-      }),
+      insertRow(f.pool, 'routing_target_dependencies', { ...dependencyValues(f), health_code }),
     ).rejects.toMatchObject({
       code: '23514',
       constraint: 'routing_target_dependencies_health_code_check',
     })
-  },
+  // Probes cannot enumerate every value a widened CHECK might admit; pin the exact set.
+  const { rows } = await f.pool.query<{ definition: string }>(
+    `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+    WHERE conrelid = 'routing_target_dependencies'::regclass AND conname = $1`,
+    ['routing_target_dependencies_health_code_check'],
+  )
+  expect(
+    [...(rows[0]?.definition ?? '').matchAll(/'([^']*)'::text/g)].map(([, code]) => code).sort(),
+  ).toEqual(HEALTH_CODES)
+}
+routingProtections['dependency health code vocabulary'] = {
+  check: checkHealthVocabulary,
   break: drop('routing_target_dependencies', 'routing_target_dependencies_health_code_check'),
 }
-routingProtections['dependency target identity immutable'] = {
-  check: async (f) => {
-    await insertRow(f.pool, 'routing_target_dependencies', {
-      organization_id: f.organization,
-      version_id: f.version,
-      rule_id: 'fallback',
-      event_type_id: f.event,
-    })
+routingProtections['dependency health code vocabulary is exact'] = {
+  check: checkHealthVocabulary,
+  break: (source) =>
+    source.replace(HEALTH_CHECK, HEALTH_CHECK.replace("'unknown'", "'unknown', 'paused'")),
+}
+
+const DEPENDENCY_IDENTITY = ['organization_id', 'version_id', 'rule_id', 'event_type_id']
+const dependencyGuard = (columns: string[]) =>
+  `IF ROW(${columns.map((column) => `NEW.${column}`).join(', ')})\n     IS DISTINCT FROM ROW(${columns.map((column) => `OLD.${column}`).join(', ')})`
+const checkDependencyIdentity = async (f: RoutingFixture) => {
+  await insertRow(f.pool, 'routing_target_dependencies', dependencyValues(f))
+  const sibling = await insertRow(f.pool, 'routing_form_versions', {
+    ...versionValues(f),
+    version_number: 2,
+  })
+  // Every rewrite except the organization-only one satisfies all keys and foreign keys, so
+  // only the guard rejects it; the BEFORE trigger also runs ahead of the organization FK.
+  for (const change of [
+    { organization_id: f.otherOrganization },
+    { organization_id: f.otherOrganization, version_id: f.otherVersion },
+    { version_id: sibling },
+    { rule_id: randomUUID() },
+    { event_type_id: randomUUID() },
+  ]) {
+    const assignments = Object.keys(change).map((column, i) => `${quote(column)}=$${i + 2}`)
     await expect(
-      f.pool.query('UPDATE routing_target_dependencies SET event_type_id=$1 WHERE version_id=$2', [
-        randomUUID(),
-        f.version,
-      ]),
+      f.pool.query(
+        `UPDATE routing_target_dependencies SET ${assignments.join(',')} WHERE version_id=$1`,
+        [f.version, ...Object.values(change)],
+      ),
     ).rejects.toMatchObject({
       code: '23514',
       constraint: 'routing_target_dependencies_identity_immutable',
     })
-    await expect(
-      f.pool.query(
-        "UPDATE routing_target_dependencies SET health_code='ok',health_checked_at=now() WHERE version_id=$1",
-        [f.version],
-      ),
-    ).resolves.toMatchObject({ rowCount: 1 })
-  },
+  }
+  await expect(
+    f.pool.query(
+      "UPDATE routing_target_dependencies SET health_code='ok',health_checked_at=now() WHERE version_id=$1",
+      [f.version],
+    ),
+  ).resolves.toMatchObject({ rowCount: 1 })
+}
+routingProtections['dependency target identity immutable'] = {
+  check: checkDependencyIdentity,
   break: noTrigger('routing_target_dependencies', 'routing_target_dependencies_guard'),
 }
+for (const column of DEPENDENCY_IDENTITY)
+  routingProtections[`dependency identity guard covers ${column}`] = {
+    check: checkDependencyIdentity,
+    break: (source) =>
+      source.replace(dependencyGuard(DEPENDENCY_IDENTITY), () =>
+        dependencyGuard(DEPENDENCY_IDENTITY.filter((kept) => kept !== column)),
+      ),
+  }
 routingProtections['form slug shape'] = {
   check: async (f) => {
     for (const slug of ['', 'Sales', '-sales', 'sales-', 'a'.repeat(65)])

@@ -1,10 +1,51 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
-import { checkStorageInterfaces, STORAGE_MIGRATION } from './check-storage-interfaces.ts'
+import {
+  archiveBaseline,
+  assertStorageMigrationExists,
+  checkStorageInterfaces,
+  STORAGE_MIGRATION,
+} from './check-storage-interfaces.ts'
+import {
+  INTERFACE_SURFACES,
+  type StorageInterfaceSnapshot,
+  storageInterfaceSnapshot,
+} from './storage-interface-snapshot.ts'
 
 const runner = readFileSync(new URL('./check-storage-interfaces.ts', import.meta.url), 'utf8')
 const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+const root = new URL('..', import.meta.url)
+const realGit = (...args: string[]) =>
+  execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+const head = realGit('rev-parse', 'HEAD')
+// Any real commit other than HEAD; CI's check job fetches the full history.
+const parent = realGit('rev-parse', 'HEAD~1')
+const SAME_AS_HEAD = 'Storage interface baseline must differ from HEAD'
+
+// Controls the event's merge base and migration diff; every other git call is real.
+const eventGit =
+  (ancestor: string, changed = STORAGE_MIGRATION, reportedHead = head) =>
+  (...args: string[]) => {
+    if (args[0] === 'merge-base') return ancestor
+    if (args[0] === 'diff') {
+      expect(args).toEqual(['diff', '--name-only', ancestor, 'HEAD', '--', STORAGE_MIGRATION])
+      return changed
+    }
+    if (args.join(' ') === 'rev-parse HEAD') return reportedHead
+    return realGit(...args)
+  }
+// Stands in for the archive build: records the requested commits and writes `snapshot`.
+const baselineOf =
+  (snapshot: StorageInterfaceSnapshot) =>
+  (ancestor: string, baselineHead: string, _directory: string, output: string) => {
+    expect([ancestor, baselineHead]).toEqual([parent, head])
+    writeFileSync(output, JSON.stringify(snapshot))
+  }
+const unreachable = () => {
+  throw new Error('Baseline must not be built')
+}
 
 function verifyWorkflow(source: string) {
   const parsed = parse(source)
@@ -18,19 +59,73 @@ function verifyWorkflow(source: string) {
 }
 
 describe('storage interface CI applicability', () => {
-  it('compares changed migration refs and skips unchanged refs', async () => {
-    // Real HEAD archive and snapshots; only git's event diff is controlled so this
-    // remains useful after the storage migration has merged into main.
-    const git = (...args: string[]) => {
-      if (args[0] === 'merge-base') return 'HEAD'
-      expect(args).toEqual(['diff', '--name-only', 'HEAD', 'HEAD', '--', STORAGE_MIGRATION])
-      return STORAGE_MIGRATION
-    }
-    await expect(checkStorageInterfaces('event-base', git)).resolves.toBe(true)
+  it('passes a merge-base baseline whose interfaces equal HEAD', async () => {
+    const writeBaseline = baselineOf(await storageInterfaceSnapshot())
     await expect(
-      checkStorageInterfaces('event-base', (...args) => (args[0] === 'merge-base' ? 'HEAD' : '')),
+      checkStorageInterfaces('event-base', eventGit(parent), { writeBaseline }),
+    ).resolves.toBe(true)
+  })
+
+  it.each(INTERFACE_SURFACES)(
+    'rejects a merge-base baseline that differs in %s',
+    async (surface) => {
+      const current = await storageInterfaceSnapshot()
+      const writeBaseline = baselineOf({ ...current, [surface]: `${current[surface]} ` })
+      await expect(
+        checkStorageInterfaces('event-base', eventGit(parent), { writeBaseline }),
+      ).rejects.toThrow(`Storage-only change altered ${surface}`)
+    },
+  )
+
+  it('skips refs that do not change the storage migration', async () => {
+    await expect(
+      checkStorageInterfaces('event-base', eventGit(parent, ''), { writeBaseline: unreachable }),
     ).resolves.toBe(false)
     await expect(checkStorageInterfaces('HEAD')).resolves.toBe(false)
+  })
+
+  it('requires the watched storage migration to exist', async () => {
+    expect(existsSync(new URL(STORAGE_MIGRATION, root))).toBe(true)
+    expect(() => assertStorageMigrationExists()).not.toThrow()
+    const misspelled = STORAGE_MIGRATION.replace('routing_forms', 'routing_form')
+    expect(() => assertStorageMigrationExists(misspelled)).toThrow(
+      `Storage migration ${misspelled} does not exist`,
+    )
+    await expect(
+      checkStorageInterfaces('event-base', eventGit(parent), {
+        migration: misspelled,
+        writeBaseline: unreachable,
+      }),
+    ).rejects.toThrow(`Storage migration ${misspelled} does not exist`)
+  })
+
+  it('refuses a baseline equal to HEAD', async () => {
+    await expect(
+      checkStorageInterfaces('event-base', eventGit(head), { writeBaseline: unreachable }),
+    ).rejects.toThrow(SAME_AS_HEAD)
+    expect(() => archiveBaseline(head, head)).toThrow(SAME_AS_HEAD)
+  })
+
+  it('archives the merge-base commit itself, never HEAD or a bare tree', () => {
+    const archive = archiveBaseline(parent, head)
+    expect(
+      execFileSync('git', ['get-tar-commit-id'], {
+        cwd: root,
+        input: archive.subarray(0, 1024),
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe(parent)
+    expect(() => archiveBaseline(`${parent}^{tree}`, head)).toThrow(
+      `Storage interface baseline archive is not a commit, expected ${parent}^{tree}`,
+    )
+  })
+
+  it('builds the real baseline from an isolated archive', async () => {
+    // HEAD's own commit is the only baseline whose interfaces equal the checkout whatever
+    // later history does, so this run reports a different HEAD to the self-check.
+    await expect(
+      checkStorageInterfaces('event-base', eventGit(head, STORAGE_MIGRATION, '0'.repeat(40))),
+    ).resolves.toBe(true)
   })
 
   it('kills a source-copy bypass of the migration applicability check', () => {
@@ -39,10 +134,12 @@ describe('storage interface CI applicability', () => {
     const scope = runner.slice(start, end)
     expect(scope).toContain('if (!changed) return false')
     const evaluate = (source: string, changed: string) =>
-      new Function('git', 'base', 'STORAGE_MIGRATION', `${source}; return true`)(
-        (...args: string[]) => (args[0] === 'merge-base' ? 'HEAD' : changed),
+      new Function('git', 'base', 'migration', 'SAME_AS_HEAD', `${source}; return true`)(
+        (...args: string[]) =>
+          args[0] === 'merge-base' ? 'base-sha' : args[0] === 'rev-parse' ? 'head-sha' : changed,
         'event-base',
         STORAGE_MIGRATION,
+        SAME_AS_HEAD,
       )
     const verify = (source: string) => {
       expect(evaluate(source, STORAGE_MIGRATION)).toBe(true)
