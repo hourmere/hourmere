@@ -26,8 +26,9 @@ const source = readFileSync(new URL('./make-template-validation.ts', import.meta
 
 // Payload fields come from running the production notifiers and delivery job, not from a
 // second schema or from parsing their source. Only the database driver is replaced: every
-// query is compiled by Kysely's PostgreSQL compiler and answered with synthetic rows. An
-// unexpected query, or a capture that does not insert exactly one delivery, fails closed.
+// query is compiled by Kysely's PostgreSQL compiler and answered with synthetic rows. Each
+// change runs in every booking state below. An unexpected query, a bookings column without a
+// synthetic value, or a capture that does not insert exactly one delivery fails closed.
 type Row = Record<string, unknown>
 function syntheticDb(answer: (query: CompiledQuery) => Row[] | undefined): Db {
   const connection: DatabaseConnection = {
@@ -78,24 +79,31 @@ const ids = {
   user: '00000000-0000-4000-8000-000000000009',
 }
 const now = Temporal.Instant.from('2026-11-09T12:00:00Z')
-async function captureDelivery(notify: (trx: Db) => Promise<void>) {
+type BookingRow = {
+  id: string
+  organization_id: string
+  event_type_id: string | null
+  start_at: Date
+  end_at: Date
+  status: string
+  source: string
+  rescheduled_from_id: string | null
+}
+async function captureDelivery(row: BookingRow, notify: (trx: Db) => Promise<void>) {
   const deliveries: Row[] = []
   const db = syntheticDb(({ sql, parameters }) => {
     // isImportedBooking: the synthetic booking is not imported.
     if (/^\s*WITH RECURSIVE connected/.test(sql)) return []
-    if (/^select .+ from "bookings" where "id" = \$1$/.test(sql))
-      return [
-        {
-          id: ids.booking,
-          organization_id: ids.organization,
-          event_type_id: ids.eventType,
-          start_at: new Date('2026-11-16T10:00:00Z'),
-          end_at: new Date('2026-11-16T10:30:00Z'),
-          status: 'confirmed',
-          source: 'web',
-          rescheduled_from_id: ids.predecessor,
-        },
-      ]
+    const select = sql.match(/^select (.+) from "bookings" where "id" = \$1$/)
+    if (select) {
+      // A column the row lacks would read as undefined and vanish from the JSON payload.
+      const columns = (select[1] ?? '').split(', ').map((column) => column.replace(/^"|"$/g, ''))
+      if (columns.sort().join() !== Object.keys(row).sort().join())
+        throw new Error(
+          `Webhook capture selects bookings columns ${columns.join(', ')}; update the Make derivation rows`,
+        )
+      return [row]
+    }
     if (/^select "id" from "webhooks" where /.test(sql)) return [{ id: ids.endpoint }]
     const insert = sql.match(/^insert into "webhook_deliveries" \(([^)]+)\) values \(([^)]+)\)/)
     if (insert) {
@@ -121,36 +129,87 @@ const queue = { enqueue: async () => 'synthetic-job' }
 const lifecycle = webhookBookingNotifier(queue, settings)
 const attendance = webhookAttendeeNoShowNotifier(queue, settings)
 const start = Temporal.Instant.from('2026-11-16T10:00:00Z')
-const captures = [
-  (trx: Db) => lifecycle(trx, { type: 'created', bookingId: ids.booking, start }, now),
-  (trx: Db) => lifecycle(trx, { type: 'rescheduled', bookingId: ids.booking, start }, now),
-  (trx: Db) => lifecycle(trx, { type: 'cancelled', bookingId: ids.booking }, now),
-  (trx: Db) =>
-    lifecycle(
-      trx,
-      { type: 'reschedule_requested', bookingId: ids.booking, requestId: ids.request },
-      now,
-    ),
-  (trx: Db) =>
-    lifecycle(
-      trx,
-      { type: 'reschedule_request_expired', bookingId: ids.booking, requestId: ids.request },
-      now,
-    ),
-  (trx: Db) =>
-    attendance(
-      trx,
-      {
-        bookingId: ids.booking,
-        attendeeId: ids.attendee,
-        noShowMarkedAt: now.toString(),
-        noShowMarkedBy: ids.user,
-      },
-      now,
-    ),
+const marked = { noShowMarkedAt: now.toString(), noShowMarkedBy: ids.user }
+const unmarked = { noShowMarkedAt: null, noShowMarkedBy: null }
+// Each change with the booking status it has when the notifier runs: cancellation updates
+// the row first, and the other changes (including attendance) apply to confirmed bookings.
+const changes: [string, string, (trx: Db) => Promise<void>][] = [
+  [
+    'created',
+    'confirmed',
+    (trx) => lifecycle(trx, { type: 'created', bookingId: ids.booking, start }, now),
+  ],
+  [
+    'rescheduled',
+    'confirmed',
+    (trx) => lifecycle(trx, { type: 'rescheduled', bookingId: ids.booking, start }, now),
+  ],
+  [
+    'cancelled',
+    'cancelled',
+    (trx) => lifecycle(trx, { type: 'cancelled', bookingId: ids.booking }, now),
+  ],
+  [
+    'reschedule requested',
+    'confirmed',
+    (trx) =>
+      lifecycle(
+        trx,
+        { type: 'reschedule_requested', bookingId: ids.booking, requestId: ids.request },
+        now,
+      ),
+  ],
+  [
+    'reschedule request expired',
+    'confirmed',
+    (trx) =>
+      lifecycle(
+        trx,
+        { type: 'reschedule_request_expired', bookingId: ids.booking, requestId: ids.request },
+        now,
+      ),
+  ],
+  [
+    'no-show marked',
+    'confirmed',
+    (trx) => attendance(trx, { bookingId: ids.booking, attendeeId: ids.attendee, ...marked }, now),
+  ],
+  [
+    'no-show unmarked',
+    'confirmed',
+    (trx) =>
+      attendance(trx, { bookingId: ids.booking, attendeeId: ids.attendee, ...unmarked }, now),
+  ],
 ]
-const deliveries: { event_type: string; payload: string }[] = []
-for (const capture of captures) deliveries.push(await captureDelivery(capture))
+// Every source a webhook can carry (bookings_source_check; imported chains never emit), with
+// and without a predecessor and an event type.
+const sources = ['web', 'embed', 'api', 'mcp']
+const captured: Record<string, { cell: string; fields: string[]; payload: string }[]> = {}
+for (const [change, status, notify] of changes)
+  for (const source of sources)
+    for (const predecessor of [null, ids.predecessor])
+      for (const eventType of [null, ids.eventType]) {
+        const delivery = await captureDelivery(
+          {
+            id: ids.booking,
+            organization_id: ids.organization,
+            event_type_id: eventType,
+            start_at: new Date('2026-11-16T10:00:00Z'),
+            end_at: new Date('2026-11-16T10:30:00Z'),
+            status,
+            source,
+            rescheduled_from_id: predecessor,
+          },
+          notify,
+        )
+        const cell = `${change}, ${source}, predecessor ${predecessor ? 'set' : 'null'}, event type ${eventType ? 'set' : 'null'}`
+        captured[delivery.event_type] ??= []
+        captured[delivery.event_type]?.push({
+          cell,
+          fields: fieldPaths(JSON.parse(delivery.payload)),
+          payload: delivery.payload,
+        })
+      }
 // Headers come from one real delivery attempt through a capturing transport.
 async function deliveryHeaders(eventType: string, payload: string) {
   const encryptionKey = Buffer.alloc(32, 7).toString('base64')
@@ -208,12 +267,22 @@ async function deliveryHeaders(eventType: string, payload: string) {
   if (!sent) throw new Error('Webhook delivery sent no request; update the Make derivation')
   return Object.keys(sent).map((name) => name.toLowerCase())
 }
-const first = deliveries[0] as { event_type: string; payload: string }
+// A recipe may rely only on fields an event sends in every captured state; a test below
+// also requires every state of an event to send the same fields.
 const webhooks: validator.WebhookContract = {
   events: Object.fromEntries(
-    deliveries.map((delivery) => [delivery.event_type, fieldPaths(JSON.parse(delivery.payload))]),
+    Object.entries(captured).map(([event, cells]) => [
+      event,
+      cells.reduce(
+        (common, { fields }) => common.filter((field) => fields.includes(field)),
+        cells[0]?.fields ?? [],
+      ),
+    ]),
   ),
-  headers: await deliveryHeaders(first.event_type, first.payload),
+  headers: await deliveryHeaders(
+    'booking.created',
+    captured['booking.created']?.[0]?.payload ?? '{}',
+  ),
 }
 // Each Make recipe document covers the events its manifest subscribes to.
 const recipes: Record<string, string> = Object.fromEntries(
@@ -370,6 +439,7 @@ function verify(check: typeof validator) {
   const markdown: [string, string][] = [
     ['booking.unknown', 'unknown inline webhook event'],
     ['`Webhook-Nonexistent`', 'unknown webhook header'],
+    ['get(map(headers; "value"; "name"; "webhook-nonexistent"); 1)', 'unknown webhook header'],
     ['{{data.nonexistentField}}', 'unknown mapped payload field'],
     [
       `${fence({ requests: [request] })}\n\`\`\`json\n{"nonexistentField":1}\n\`\`\``,
@@ -443,13 +513,25 @@ function verify(check: typeof validator) {
   ]
   for (const [raw, error] of markdown)
     expect(check.validateMakeReferences(raw, document, webhooks, recipes)).toContain(error)
+  const created = fence({ requests: [], webhookEvents: ['booking.created'] })
+  expect(check.validateMakeRecipeEvents(['booking.created'], created)).toEqual([])
+  expect(check.validateMakeRecipeEvents([], 'No webhook events.')).toEqual([])
+  for (const [events, raw] of [
+    [[noShow], created],
+    [['booking.created', 'booking.cancelled'], created],
+    [[], created],
+    [['booking.created'], 'No declaration.'],
+  ] as const)
+    expect(check.validateMakeRecipeEvents(events, raw)).toEqual([
+      'recipe events differ from manifest',
+    ])
   expect(check.validateMakeInventory(names)).toEqual([])
   expect(check.validateMakeInventory([])).toHaveLength(3)
 }
 function sourceCopy(copy: string): typeof validator {
   const body = stripTypeScriptTypes(copy).replace(/^export /gm, '')
   return new Function(
-    `${body}\nreturn { validateMakeRecipe, validateMakeReferences, validateMakeInventory, validateMakeSecrets, validateMakeFields }`,
+    `${body}\nreturn { validateMakeRecipe, validateMakeReferences, validateMakeRecipeEvents, validateMakeInventory, validateMakeSecrets, validateMakeFields }`,
   )()
 }
 
@@ -462,8 +544,33 @@ describe('Make manual recipe artifacts', () => {
     expect(Object.keys(webhooks.events).sort()).toEqual([...WEBHOOK_EVENTS].sort())
     for (const [event, fields] of Object.entries(webhooks.events))
       expect(fields, event).toEqual(expect.arrayContaining(['id', 'type', 'data.bookingId']))
-    expect(webhooks.headers).toContain('webhook-signature')
     expect(Object.keys(recipes).sort()).toEqual(['booking.cancelled', 'booking.created'])
+  })
+  it('derives the same payload fields in every booking state of an event', () => {
+    // Fields that depend on booking data (status, source, predecessor, event type or an
+    // unmarked attendee) would otherwise be missing from, or wrongly promised by, the docs.
+    for (const [event, cells] of Object.entries(captured)) {
+      expect(cells.length, event).toBeGreaterThanOrEqual(16)
+      for (const { cell, fields } of cells)
+        expect([...fields].sort(), `${event}: ${cell}`).toEqual(
+          [...(webhooks.events[event] ?? [])].sort(),
+        )
+    }
+  })
+  it('derives exactly the delivery headers the shared recipe uses', () => {
+    const readme = readFileSync(new URL('README.md', directory), 'utf8')
+    const used = new Set(
+      [...readme.matchAll(/["'`](webhook-[A-Za-z0-9-]+)["'`]/gi)].map((m) => m[1]?.toLowerCase()),
+    )
+    expect([...webhooks.headers].sort()).toEqual([...used].sort())
+    expect(used.size).toBe(4)
+  })
+  it('keeps each recipe document subscribed to the events its manifest declares', () => {
+    for (const name of names.filter((entry) => entry.endsWith('.recipe.json'))) {
+      const manifest = JSON.parse(readFileSync(new URL(name, directory), 'utf8'))
+      const raw = readFileSync(new URL(manifest.settings.documentation, directory), 'utf8')
+      expect(validator.validateMakeRecipeEvents(manifest.webhookEvents, raw), name).toEqual([])
+    }
   })
   it('validates every manifest, recipe, README and site page against real sources', async () => {
     const generated = (await openApiDocument()) as Parameters<
@@ -651,6 +758,12 @@ describe('source-copy Make validator mutation checks', () => {
     ['fields every subscribed event sends', 'events.every((event) =>', 'events.some((event) =>'],
     ['fence event context', 'events.push(...(fields.webhookEvents ?? []))', 'void fields'],
     ['shared snapshot', 'filter((field) => !shared.includes(field))', 'filter(() => false)'],
+    [
+      'quoted header names',
+      '/["\'`](webhook-[A-Za-z0-9-]+)["\'`]/gi',
+      '/`(webhook-[A-Za-z0-9-]+)`/gi',
+    ],
+    ['recipe events', "['recipe events differ from manifest']", '[]'],
   ]) {
     it(`kills removal of ${label}`, () => {
       const mutant = source.replace(original as string, replacement as string)

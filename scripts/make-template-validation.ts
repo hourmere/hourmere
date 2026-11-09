@@ -300,7 +300,8 @@ export function validateMakeReferences(
       ),
     )
   }
-  for (const match of raw.matchAll(/`(Webhook-[A-Za-z-]+)`/gi)) {
+  // Header names appear in prose (`Webhook-Id`) and in quoted lookup expressions.
+  for (const match of raw.matchAll(/["'`](webhook-[A-Za-z0-9-]+)["'`]/gi)) {
     if (!webhooks.headers.includes(match[1]?.toLowerCase() ?? ''))
       errors.push('unknown webhook header')
   }
@@ -407,6 +408,22 @@ export function validateMakeReferences(
     }
   }
   return errors
+}
+/** A recipe's Markdown must subscribe to exactly the events its manifest declares. */
+export function validateMakeRecipeEvents(manifestEvents: readonly string[], raw: string) {
+  const declared = new Set<string>()
+  for (const match of raw.matchAll(/```hourmere-fields\s*\n([\s\S]*?)\n```/g)) {
+    try {
+      for (const event of (JSON.parse(match[1] ?? '') as Fields).webhookEvents ?? [])
+        declared.add(event)
+    } catch {
+      // validateMakeReferences reports invalid declarations.
+    }
+  }
+  return declared.size === new Set(manifestEvents).size &&
+    manifestEvents.every((event) => declared.has(event))
+    ? []
+    : ['recipe events differ from manifest']
 }
 export function validateMakeInventory(names: string[]) {
   const required = [
