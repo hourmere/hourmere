@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { createRoute, z } from '@hono/zod-openapi'
 import { createDb, createPool } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { json, type RouteModule } from './openapi.ts'
 import * as server from './server.ts'
@@ -275,6 +275,10 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
     const owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
       tag: 'sso_entry',
     })
+    // onTestFinished runs after an assertion failure, a thrown error and the test timeout
+    // alike (a `finally` only covers the first two), in reverse order: the child is killed
+    // first, then its database is dropped.
+    onTestFinished(() => owned.drop())
     const env: NodeJS.ProcessEnv = {}
     for (const key of ['PATH', 'HOME', 'TMPDIR', 'NODE_OPTIONS', 'HOURMERE_OUTBOX_DB_REGISTRY'])
       if (process.env[key]) env[key] = process.env[key]
@@ -295,6 +299,15 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    const alive = () => child.exitCode === null && child.signalCode === null
+    onTestFinished(async () => {
+      // Whatever ended the test, no server process keeps listening on its port.
+      if (alive()) {
+        const exited = once(child, 'exit')
+        child.kill('SIGKILL')
+        await exited
+      }
+    })
     let output = ''
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       output += chunk
@@ -302,40 +315,52 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
       output += chunk
     })
-    try {
-      const port = await new Promise<number>((resolve, reject) => {
-        const settle = () => {
-          const match = /Hourmere listening on :(\d+)/.exec(output)
-          if (match) resolve(Number(match[1]))
-        }
-        child.stdout.on('data', settle)
-        child.once('error', reject)
-        child.once('exit', (code, signal) =>
-          reject(new Error(`entry point exited (${code ?? signal}) before listening:\n${output}`)),
-        )
-      })
-      const origin = `http://127.0.0.1:${port}`
-      const response = await fetch(`${origin}/api/v1/instance`)
-      expect(response.status).toBe(200)
-      expect(await response.json()).toMatchObject({
-        ssoOidcEnabled: false,
-        ssoSamlEnabled: false,
-      })
-      const unknown = await fetch(`${origin}/api/v1/test-only-sso/known`)
-      expect(unknown.status).toBe(404)
-      expect(await unknown.json()).toEqual({ error: 'not_found' })
-      // index.ts owns shutdown too: SIGTERM must close the server and exit cleanly.
-      const exited = once(child, 'exit')
-      child.kill('SIGTERM')
-      const [code] = (await exited) as [number | null, NodeJS.Signals | null]
-      expect(code, output).toBe(0)
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        const exited = once(child, 'exit')
-        child.kill('SIGKILL')
-        await exited
+    // Every wait has its own deadline, well inside the test's, so a stall fails with the
+    // child's output instead of the bare timeout message.
+    const port = await new Promise<number>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error(`entry point did not listen within 30 s:\n${output}`)),
+        30_000,
+      )
+      const settle = (settlement: () => void) => {
+        clearTimeout(deadline)
+        settlement()
       }
-      await owned.drop()
-    }
+      child.stdout.on('data', () => {
+        const match = /Hourmere listening on :(\d+)/.exec(output)
+        if (match) settle(() => resolve(Number(match[1])))
+      })
+      child.once('error', (err) => settle(() => reject(err)))
+      child.once('exit', (code, signal) =>
+        settle(() =>
+          reject(new Error(`entry point exited (${code ?? signal}) before listening:\n${output}`)),
+        ),
+      )
+    })
+    const origin = `http://127.0.0.1:${port}`
+    const response = await fetch(`${origin}/api/v1/instance`, {
+      signal: AbortSignal.timeout(10_000),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      ssoOidcEnabled: false,
+      ssoSamlEnabled: false,
+    })
+    const unknown = await fetch(`${origin}/api/v1/test-only-sso/known`, {
+      signal: AbortSignal.timeout(10_000),
+    })
+    expect(unknown.status).toBe(404)
+    expect(await unknown.json()).toEqual({ error: 'not_found' })
+    // index.ts owns shutdown too: SIGTERM must close the server and exit cleanly, promptly.
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(10_000) }).catch(
+      (err: unknown) => {
+        throw err instanceof Error && err.name === 'AbortError'
+          ? new Error(`entry point did not exit within 10 s of SIGTERM:\n${output}`)
+          : err
+      },
+    )
+    child.kill('SIGTERM')
+    const [code] = (await exited) as [number | null, NodeJS.Signals | null]
+    expect(code, output).toBe(0)
   }, 60_000)
 })

@@ -847,14 +847,20 @@ and the bullet for the new setting; Release docs completes the cross-protocol op
 guides, and Acceptance and defaults updates them for the on-by-default state.
 
 The Hard-off guard catalogue regression checks reject SSO names in the Hono route
-inventory of the app as `startServer` assembles it, with every optional mount present
-(SCIM, the MCP endpoint with its OAuth discovery documents and guarded authorize
-route, waitlist confirmation pages and the built web app's static files), including
-plain handlers absent from OpenAPI; in OpenAPI paths and operation IDs; in advertised
-MCP tools; and in CLI commands and targets. Names match `saml`, `oidc` and `openid`
-anywhere, `sso` as a word (after splitting camelCase, separators, digits and the
-plural or version suffix: `ssos`, `SSOv2`, `listSSOs`) and `single sign on` in any
-spelling. The one exemption is the existing MCP OAuth discovery route
+inventory of the app built from `productionAppOptions` (`apps/server/src/server.ts`),
+the options `startServer` itself passes to `createApp`, under a configuration that
+turns on every optional group (SCIM, MCP OAuth with its discovery documents and
+guarded authorize route, the built web app's static files, the Zoom event webhook and
+slot snippets; the waitlist confirmation pages are always mounted), including plain
+handlers absent from OpenAPI, and in the worker role's health app; in OpenAPI paths
+and operation IDs; in the MCP tools that the same assembly advertises to a full-scope
+API key, with only the caller resolver replaced; and in CLI commands and targets.
+Names match `saml`, `oidc` and `openid` anywhere, `sso` as a word (after splitting
+camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
+`listSSOs` — and a short list of words run together with it: `ssoconfig`,
+`ssoprovider`, `ssologin`, `ssologout`, `ssocallback`, `ssosettings`, `teamsso`,
+`orgsso`) and `single sign on` in any spelling. The one exemption is the existing MCP
+OAuth discovery route
 `/.well-known/openid-configuration/api/auth`: there Hourmere is the OAuth
 authorization server for MCP clients, not an SSO relying party; the exemption covers
 exactly that path in the route inventory and the suite checks that nothing else is

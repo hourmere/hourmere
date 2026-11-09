@@ -7,15 +7,27 @@ import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { COMMANDS, REST_COMMANDS } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
-import { mcpEndpoint } from './mcp/endpoint.ts'
+import { loadConfig } from './config.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
-import { productRoutes, productTools } from './server.ts'
+import { productionAppOptions, productRoutes } from './server.ts'
+import { createWorkerHealthApp } from './worker-health.ts'
+
+// Lower-case names that run the acronym together with a neighbouring word have no case,
+// digit or separator boundary to split on (ssoconfig, teamsso). These few words are the
+// ones the design joins to it; `sso` must still come out as a whole token, so a word that
+// merely contains the letters (lassoconfig) does not match.
+const SSO_SUFFIX_WORDS = ['config', 'provider', 'login', 'logout', 'callback', 'settings']
+const SSO_PREFIX_WORDS = ['team', 'org']
+const ssoSuffixBoundary = new RegExp(`(sso)(${SSO_SUFFIX_WORDS.join('|')})`, 'gi')
+const ssoPrefixBoundary = new RegExp(`(${SSO_PREFIX_WORDS.join('|')})(sso)`, 'gi')
 
 // Match camelCase operation ids as well as path segments, tool and command names.
 function isSsoName(name: string) {
   const tokens = name
     // A plural or version suffix on the acronym is a word break: SSOs → SSO_s, ssov2 → sso_v2.
     .replace(/(sso)(s|v\d)/gi, '$1_$2')
+    .replace(ssoSuffixBoundary, '$1_$2')
+    .replace(ssoPrefixBoundary, '$1_$2')
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
     // Digits are word breaks too: sso2 → sso_2, v2sso → v_2_sso.
@@ -47,36 +59,54 @@ function expectNoSsoRoutes(paths: string[]) {
   expectNoSso(paths.filter((path) => path !== MCP_OAUTH_DISCOVERY_PATH))
 }
 
-// Every mount startServer (apps/server/src/server.ts) adds to createApp, without listening:
-// SCIM, the MCP endpoint with OAuth (discovery documents and the guarded authorize route),
-// waitlist confirmation pages and the built web app's static files. None of them is
-// registered in openApiRouteInventory's document-only app.
+// The createApp options exactly as startServer assembles them (productionAppOptions in
+// apps/server/src/server.ts), from a configuration that turns on every optional group: MCP
+// OAuth, SCIM, the built web app, the Zoom event webhook and slot snippets. Only the
+// collaborators startServer creates from live services (Better Auth, the job queue, the
+// notifiers) are stood in for, and registering routes reaches none of them. None of these
+// mounts is registered in openApiRouteInventory's document-only app.
 const unavailable = async (): Promise<never> => {
   throw new Error('Route registration must not call the provider or the database')
 }
-function productionShapedApp(db: Db) {
-  return createApp({
-    checkDb: unavailable,
-    scim: { db, enabled: true },
-    authHandler: unavailable,
+function productionOptions(db: Db) {
+  const config = loadConfig({
+    DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
+    BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
+    PUBLIC_URL: 'http://localhost',
+    MCP_OAUTH_ENABLED: 'true',
+    SCIM_PROVISIONING_ENABLED: 'true',
+    WEB_DIST: 'web-dist-never-read',
+    ZOOM_WEBHOOK_SECRET_TOKEN: 'catalogue-test-only-zoom-secret',
+    SLOT_SNIPPETS_ENABLED: 'true',
+  })
+  return productionAppOptions({
+    config,
+    db,
+    auth: { handler: unavailable },
     resolveCaller: unavailable,
-    publicUrl: 'http://localhost',
-    webDist: 'web-dist-never-read',
+    resolveMcpOAuth: unavailable,
+    checkDb: unavailable,
     waitlist: { verify: unavailable, remove: unavailable },
-    routes: productRoutes({
-      db,
-      socialProviders: {},
-      invitationMailLimits: { secret: 'catalogue-test-only' },
-      scimProvisioningEnabled: true,
-      mcpAuth: { handler: unavailable },
-    }),
-    mcp: mcpEndpoint({
-      oauth: { resolve: unavailable, handler: unavailable },
-      tools: productTools({ db }),
-    }),
+    invitationMailLimits: { secret: 'catalogue-test-only' },
+    webhookSettings: { enabled: config.WEBHOOKS_ENABLED },
+    notify: unavailable,
+    notifyAttendeeNoShow: unavailable,
+    googleCalendar: undefined,
+    microsoftCalendar: undefined,
+    zoomConference: undefined,
+    enqueueCalendarSync: unavailable,
+    enqueueCalendarWritebackRecovery: unavailable,
   })
 }
-// One representative path per mount, so the inventory proves that it saw each of them.
+// HOURMERE_ROLE=worker serves this app instead of createApp; its routes are inventoried too.
+function workerPaths() {
+  return createWorkerHealthApp({ checkDb: unavailable, checkJobs: unavailable }).routes.map(
+    ({ path }) => path,
+  )
+}
+// One representative path per optional group, so the inventory proves that it saw each of
+// them: SCIM, MCP OAuth discovery and the guarded authorize route, the MCP endpoint, the
+// waitlist pages, the web app's static files and the Zoom event webhook.
 const productionOnlyPaths = [
   '/scim/*',
   '/.well-known/oauth-protected-resource/mcp',
@@ -88,6 +118,7 @@ const productionOnlyPaths = [
   '/app/sw.js',
   '/assets/*',
   '/hourmere-embed.js',
+  '/api/conference/zoom/events',
 ]
 
 type Document = { paths: Record<string, Record<string, { operationId?: string }>> }
@@ -149,11 +180,14 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     try {
       const { routes } = await openApiRouteInventory()
       const documentPaths = routes.map(({ path }) => path)
-      const productionPaths = productionShapedApp(db).routes.map(({ path }) => path)
+      const productionPaths = createApp(productionOptions(db)).routes.map(({ path }) => path)
       expect(productionPaths).toEqual(
         expect.arrayContaining([...documentPaths, ...productionOnlyPaths]),
       )
       expectNoSsoRoutes(productionPaths)
+      const worker = workerPaths()
+      expect(worker).toContain('/api/health')
+      expectNoSsoRoutes(worker)
     } finally {
       await db.destroy()
     }
@@ -209,12 +243,11 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
     const client = new Client({ name: 'catalogue-test', version: '1.0.0' })
     try {
+      // Production's MCP module (every tool startServer advertises, slot snippets on); only
+      // the caller resolver is replaced, so the API key below authenticates.
       const app = createApp({
-        checkDb: async () => {},
-        authHandler: async () => new Response(null, { status: 404 }),
+        ...productionOptions(db),
         resolveCaller: async () => ({ ok: true, principal, setCookie: [] }),
-        publicUrl: 'http://localhost',
-        mcp: mcpEndpoint({ tools: productTools({ db }) }),
       })
       await client.connect(
         new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
@@ -222,7 +255,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
           requestInit: { headers: { authorization: 'Bearer hm_catalogue' } },
         }),
       )
-      expectNoSso((await client.listTools()).tools.map((tool) => tool.name))
+      const tools = (await client.listTools()).tools.map((tool) => tool.name)
+      expect(tools).toEqual(expect.arrayContaining(['whoami', 'generate_open_time_snippet']))
+      expectNoSso(tools)
     } finally {
       await client.close()
       await db.destroy()
@@ -318,6 +353,15 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     ['singlesignon', 'getsinglesignon', 'singlesignon'],
     ['singleSignon', 'singleSignonMetadata', 'single_signon'],
     ['openidconnect', 'getOpenidconnect', 'openidconnect'],
+    // Run together with a neighbouring word, all lower case.
+    ['ssoconfig', 'getSsoconfig', 'ssoconfig'],
+    ['ssoprovider', 'getSsoprovider', 'ssoprovider'],
+    ['ssologin', 'postSsologin', 'ssologin'],
+    ['ssologout', 'postSsologout', 'ssologout'],
+    ['ssocallback', 'getSsocallback', 'ssocallback'],
+    ['ssosettings', 'getSsosettings', 'ssosettings'],
+    ['teamsso', 'getTeamsso', 'teamsso'],
+    ['orgsso', 'getOrgsso', 'orgsso'],
   ])('rejects %s names on every catalogue surface', (path, operationId, tool) => {
     const rejects = (check: () => void) =>
       expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
@@ -340,6 +384,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     'Missouri',
     'assortment',
     'espressos',
+    // The letters followed or preceded by a listed word, inside another word.
+    'lassoconfig',
+    'teamlasso',
   ])('allows unrelated %s names on every catalogue surface', (name) => {
     expectNoSsoOperations({
       paths: { [`/api/v1/${name}`]: { get: { operationId: `get${name}` } } },
