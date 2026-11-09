@@ -812,6 +812,10 @@ counts; receipt lifetime, encryption and admission services land in later steps.
 
 ## Planned additions (each a new migration)
 
+The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
+email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget. It is
+design only: no workflow tables, migration, API or runtime enablement exist yet.
+
 | When | Change |
 |---|---|
 | Cloud billing | `subscriptions` (organization ↔ Stripe customer/subscription, plan, seats) |
