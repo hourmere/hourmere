@@ -1,9 +1,14 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { join, relative } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parse } from '@babel/parser'
-import type { Principal } from '@hourmere/auth'
+import { createAuth, createAuthPool, MAGIC_LINK_CONFIRM_PATH, type Principal } from '@hourmere/auth'
 import { createDb, createPool, type Db } from '@hourmere/db'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { Hono } from 'hono'
+import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { COMMANDS, REST_COMMANDS } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
@@ -13,11 +18,21 @@ import { productionAppOptions, productRoutes } from './server.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
-// digit or separator boundary to split on (ssoconfig, teamsso). These few words are the
-// ones the design joins to it; `sso` must still come out as a whole token, so a word that
-// merely contains the letters (lassoconfig) does not match.
-const SSO_SUFFIX_WORDS = ['config', 'provider', 'login', 'logout', 'callback', 'settings']
-const SSO_PREFIX_WORDS = ['team', 'org']
+// digit or separator boundary to split on (ssoconfig, teamsso, getssoconfig). These few
+// words are the ones the design and the plugin's own names join to it; `sso` must still
+// come out as a whole token, so a word that merely contains the letters (lassoconfig,
+// lassoflow) does not match.
+const SSO_SUFFIX_WORDS = [
+  'config',
+  'provider',
+  'login',
+  'logout',
+  'callback',
+  'settings',
+  'flow',
+  'domain',
+]
+const SSO_PREFIX_WORDS = ['team', 'org', 'get']
 const ssoSuffixBoundary = new RegExp(`(sso)(${SSO_SUFFIX_WORDS.join('|')})`, 'gi')
 const ssoPrefixBoundary = new RegExp(`(${SSO_PREFIX_WORDS.join('|')})(sso)`, 'gi')
 
@@ -119,6 +134,99 @@ const productionOnlyPaths = [
   '/assets/*',
   '/hourmere-embed.js',
   '/api/conference/zoom/events',
+]
+
+// Better Auth serves every endpoint of its plugins behind the one `/api/auth/*` mount, which
+// the route inventory sees as a single route. Their own paths come from `auth.api` of the real
+// createAuth, with every optional plugin group on (MCP OAuth, Google and Microsoft sign-in),
+// so a plugin added there is seen with each endpoint it registers.
+// Hourmere is the OAuth authorization server for MCP clients, and this is that server's own
+// OpenID discovery document (the OAuth provider plugin in mcpOAuthPlugins, served at
+// /api/auth/.well-known/openid-configuration), not a route for signing users in through an
+// identity provider. It is the single exemption from the `openid` rule among Better Auth
+// endpoint paths; the same name fails on every other surface.
+const MCP_OAUTH_AUTH_DISCOVERY_PATH = '/.well-known/openid-configuration'
+
+function expectNoSsoAuthEndpoints(paths: string[]) {
+  expectNoSso(paths.filter((path) => path !== MCP_OAUTH_AUTH_DISCOVERY_PATH))
+}
+
+// Server-only endpoints (signJWT, verifyApiKey…) have no path and no HTTP route.
+function authEndpointPaths(api: object) {
+  return Object.values(api).flatMap((endpoint: { path?: unknown }) =>
+    typeof endpoint.path === 'string' ? [endpoint.path] : [],
+  )
+}
+
+// A pool that never opens a connection: createAuth's startup work (Better Auth's schema check
+// and the OAuth provider's resource seeding) asks for one and is refused at once, with no
+// network access. Better Auth logs both refusals.
+function neverConnecting(pool: pg.Pool) {
+  pool.connect = (() => Promise.reject(new Error('This pool never connects'))) as pg.Pool['connect']
+  return pool
+}
+
+// The installed SSO plugin, from the workspace that owns it. Only its endpoint list is read;
+// it is not registered in any Better Auth instance.
+async function ssoPluginEndpointPaths() {
+  const location = createRequire(
+    new URL('../../../packages/auth/package.json', import.meta.url),
+  ).resolve('@better-auth/sso')
+  const { sso } = (await import(pathToFileURL(location).href)) as {
+    sso: (options: { domainVerification: { enabled: boolean } }) => {
+      endpoints: Record<string, { path: string }>
+    }
+  }
+  // Domain verification adds the only optional endpoints.
+  return Object.values(sso({ domainVerification: { enabled: true } }).endpoints).map(
+    ({ path }) => path,
+  )
+}
+
+const root = new URL('../../../', import.meta.url)
+const rootPath = fileURLToPath(root)
+
+// Production source files under the src directory of every apps, packages and tools workspace.
+function productionSources(): string[] {
+  const files: string[] = []
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory)) {
+      if (entry === 'node_modules' || entry === 'dist') continue
+      const path = join(directory, entry)
+      if (statSync(path).isDirectory()) walk(path)
+      else if (/\.(ts|tsx|js|mjs)$/.test(entry) && !/\.test\.tsx?$/.test(entry))
+        files.push(relative(rootPath, path))
+    }
+  }
+  for (const group of ['apps', 'packages', 'tools'])
+    for (const name of readdirSync(new URL(group, root))) {
+      const source = new URL(`${group}/${name}/src`, root)
+      try {
+        if (statSync(source).isDirectory()) walk(fileURLToPath(source))
+      } catch {
+        // Not a workspace with sources.
+      }
+    }
+  return files.sort()
+}
+
+// Source files beside the production code that do not ship, so a path a test scenario uses
+// is not mistaken for a served route: test support and fixtures (named `test/`, `testing/`,
+// `*testing.ts`, `test-app.ts`, `*fixtures.ts`, `*-seed*.ts`, `*.test-helper.ts`) and
+// generated files (`*.d.ts`, the database table types). The same rules as the routing forms
+// Off test's scan.
+const NOT_SHIPPED: readonly RegExp[] = [
+  /(^|\/)test\//,
+  /(^|\/)testing\//,
+  /(^|[-/])testing\.tsx?$/,
+  /testing-clock\.ts$/,
+  /test-app\.ts$/,
+  /test-database-registry\.ts$/,
+  /\.test-helper\.ts$/,
+  /fixtures?\.tsx?$/,
+  /-seed(-[a-z]+)?\.ts$/,
+  /\.d\.ts$/,
+  /^packages\/db\/src\/tables\.ts$/,
 ]
 
 type Document = { paths: Record<string, Record<string, { operationId?: string }>> }
@@ -224,6 +332,132 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       rejects(() => expectNoSsoRoutes([path]))
       rejects(() => expectNoSsoRoutes([MCP_OAUTH_DISCOVERY_PATH, path]))
     }
+  })
+
+  it('registers no SSO Better Auth endpoint, with every optional plugin on', async () => {
+    const url = 'postgres://catalogue@127.0.0.1:9/catalogue'
+    const signup = { mode: 'open', allowedDomains: [] } as const
+    const authPool = neverConnecting(createAuthPool(url, signup))
+    neverConnecting((authPool as pg.Pool & { organizationLocks: pg.Pool }).organizationLocks)
+    const appPool = neverConnecting(createPool(url))
+    const client = { clientId: 'catalogue', clientSecret: 'catalogue' }
+    try {
+      const auth = createAuth({
+        pool: authPool,
+        db: createDb(appPool),
+        baseURL: 'http://localhost',
+        secret: 'catalogue-test-only-secret-at-least-32-characters',
+        mailer: { send: unavailable },
+        signup,
+        socialProviders: { google: client, microsoft: client },
+        mcpOAuth: true,
+      })
+      // Let startup settle against the refused pool before it is closed.
+      await auth.$context
+      const paths = authEndpointPaths(auth.api)
+      // One endpoint from each plugin group, so the inventory proves that it saw them: core
+      // sessions, magic links, Google/Microsoft sign-in, organizations, API keys and MCP OAuth.
+      expect(paths).toEqual(
+        expect.arrayContaining([
+          '/get-session',
+          '/sign-in/magic-link',
+          '/sign-in/social',
+          '/callback/:id',
+          '/organization/create',
+          '/api-key/create',
+          '/oauth2/authorize',
+          MCP_OAUTH_AUTH_DISCOVERY_PATH,
+        ]),
+      )
+      expectNoSsoAuthEndpoints(paths)
+    } finally {
+      await authPool.end()
+      await appPool.end()
+    }
+  })
+
+  it('recognises every endpoint the installed Better Auth SSO plugin would register', async () => {
+    const paths = await ssoPluginEndpointPaths()
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        '/sign-in/sso',
+        '/sso/callback/:providerId',
+        '/sso/callback',
+        '/sso/saml2/sp/acs/:providerId',
+        '/sso/register',
+        '/sso/verify-domain',
+      ]),
+    )
+    for (const path of paths)
+      expect(() => expectNoSsoAuthEndpoints(['/get-session', path])).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+  })
+
+  it('exempts exactly the MCP OAuth discovery endpoint among Better Auth paths', () => {
+    const rejects = (check: () => void) =>
+      expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    expectNoSsoAuthEndpoints([MCP_OAUTH_AUTH_DISCOVERY_PATH])
+    // The rule is unchanged: the same name fails on every other surface, routes included.
+    rejects(() => expectNoSso([MCP_OAUTH_AUTH_DISCOVERY_PATH]))
+    rejects(() => expectNoSsoRoutes([MCP_OAUTH_AUTH_DISCOVERY_PATH]))
+    for (const path of [
+      `${MCP_OAUTH_AUTH_DISCOVERY_PATH}/`,
+      ` ${MCP_OAUTH_AUTH_DISCOVERY_PATH}`,
+      MCP_OAUTH_AUTH_DISCOVERY_PATH.toUpperCase(),
+      `${MCP_OAUTH_AUTH_DISCOVERY_PATH}/sso`,
+      `/sso${MCP_OAUTH_AUTH_DISCOVERY_PATH}`,
+      MCP_OAUTH_DISCOVERY_PATH,
+      '/.well-known/openid-configuration/:providerId',
+      '/sso/.well-known/openid-configuration',
+    ]) {
+      rejects(() => expectNoSsoAuthEndpoints([path]))
+      rejects(() => expectNoSsoAuthEndpoints([MCP_OAUTH_AUTH_DISCOVERY_PATH, path]))
+    }
+  })
+
+  it('names no SSO path in a shipped source literal and imports no SSO plugin', () => {
+    // Backstop for a surface no inventory sees: a route registered outside the shared
+    // assembly, one behind a switch the tests leave off, or an endpoint behind /api/auth/*.
+    // Its path has to be written somewhere, so every string literal that begins with `/` in
+    // every shipped source (apps, packages and tools) is checked, wherever it lives.
+    const files = productionSources()
+    const shipped = files.filter((file) => !NOT_SHIPPED.some((pattern) => pattern.test(file)))
+    expect(shipped).toEqual(
+      expect.arrayContaining([
+        'apps/server/src/server.ts',
+        'apps/web/src/paths.ts',
+        'packages/auth/src/index.ts',
+        'tools/cli/src/cli.ts',
+      ]),
+    )
+    expect(files.filter((file) => !shipped.includes(file))).toContain(
+      'packages/auth/src/testing.ts',
+    )
+    const sources = shipped.map((file) => [file, readFileSync(new URL(file, root), 'utf8')])
+    const literals = sources.flatMap(([, source = '']) =>
+      [...source.matchAll(/(['"`])(\/[^'"`\s]*)\1/g)].map(([, , literal = '']) => literal),
+    )
+    expect(literals.length).toBeGreaterThan(500)
+    // Literals from the server, a package and the web app, and the one exempt route.
+    expect(literals).toEqual(
+      expect.arrayContaining([
+        '/api/v1/bookings/{id}',
+        MAGIC_LINK_CONFIRM_PATH,
+        '/booking',
+        MCP_OAUTH_DISCOVERY_PATH,
+      ]),
+    )
+    expectNoSsoRoutes(literals)
+    expect(() => expectNoSsoRoutes([...literals, '/sso/callback'])).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    // The SSO plugin package is a dependency for evaluation only (docs/sso.md); no shipped
+    // source imports it, so no Better Auth instance can register it.
+    const ssoPluginImport = /(['"`])@better-auth\/sso(\/[^'"`]*)?\1/
+    expect(sources.filter(([, source = '']) => ssoPluginImport.test(source))).toEqual([])
+    expect(ssoPluginImport.test("import { sso } from '@better-auth/sso'")).toBe(true)
+    expect(ssoPluginImport.test("import('@better-auth/sso/client')")).toBe(true)
   })
 
   it('keeps the MCP tools advertised to a full-scope caller', async () => {
@@ -362,6 +596,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     ['ssosettings', 'getSsosettings', 'ssosettings'],
     ['teamsso', 'getTeamsso', 'teamsso'],
     ['orgsso', 'getOrgsso', 'orgsso'],
+    ['getssoconfig', 'getssoconfig', 'getssoconfig'],
+    ['ssoflow', 'startSsoflow', 'ssoflow'],
+    ['ssodomain', 'verifySsodomain', 'ssodomain'],
   ])('rejects %s names on every catalogue surface', (path, operationId, tool) => {
     const rejects = (check: () => void) =>
       expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
@@ -387,6 +624,10 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     // The letters followed or preceded by a listed word, inside another word.
     'lassoconfig',
     'teamlasso',
+    'lassoflow',
+    'espressodomain',
+    'getlasso',
+    'gadgetssomething',
   ])('allows unrelated %s names on every catalogue surface', (name) => {
     expectNoSsoOperations({
       paths: { [`/api/v1/${name}`]: { get: { operationId: `get${name}` } } },
