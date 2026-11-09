@@ -1,6 +1,9 @@
 # SCIM provisioning design and token foundation
 
-Status: token foundation only, reviewed against official sources on **2026-11-06**.
+Status: token administration and identity storage; design sources reviewed on **2026-11-06**.
+The connection identity and User schema step now provides internal storage, including
+credential bindings, claim intents and retained resource identities. It adds no resource
+handlers or membership lifecycle behavior.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.

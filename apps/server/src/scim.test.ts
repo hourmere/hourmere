@@ -482,6 +482,40 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     expect(response.status).toBe(429)
     expect(response.headers.get('retry-after')).toBeTruthy()
   })
+  it('keeps every resource unavailable with valid credentials and detects accidental registration', async () => {
+    const issued = await issue()
+    const verify = async (mount: typeof import('./scim.ts').mountScim) => {
+      const application = new OpenAPIHono()
+      mount(application, { db, enabled: true })
+      for (const resource of [
+        'Users',
+        'Users/00000000-0000-4000-8000-000000000001',
+        'Groups',
+        'Groups/00000000-0000-4000-8000-000000000001',
+        'ServiceProviderConfig',
+        'ResourceTypes',
+        'ResourceTypes/User',
+        'Schemas',
+        'Schemas/urn:ietf:params:scim:schemas:core:2.0:User',
+      ]) {
+        for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+          const response = await application.request(`/scim/v2/${organizationId}/${resource}`, {
+            method,
+            headers: { authorization: `Bearer ${issued.secret}` },
+          })
+          expect(response.status).toBe(404)
+          expect(await response.json()).toMatchObject({ status: '404' })
+        }
+      }
+    }
+    const control = await sourceCopy<typeof import('./scim.ts')>('./scim.ts')
+    await verify(control.mountScim)
+    const mutant = await sourceCopy<typeof import('./scim.ts')>('./scim.ts', [
+      "      return respond(c, 404, 'SCIM resources are not available yet.')",
+      '      return c.json({ Resources: [] })',
+    ])
+    await expect(verify(mutant.mountScim)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
   it('detects a weakened SCIM request budget in a source copy', async () => {
     const verify = async (mount: typeof import('./scim.ts').mountScim) => {
       const application = new OpenAPIHono()

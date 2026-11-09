@@ -112,6 +112,43 @@ describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
   it('stores only digests and returns secrets only at issuance', async () => {
     await hashOnly()
   })
+  it('retains the connection and resource identity through rotation, revoke and replacement', async () => {
+    const first = await create()
+    const binding = (tokenId: string) =>
+      db
+        .selectFrom('scim_token_connections')
+        .selectAll()
+        .where('token_id', '=', tokenId)
+        .executeTakeFirstOrThrow()
+    const original = await binding(first.token.id)
+    const resource = await db
+      .insertInto('scim_users')
+      .values({
+        organization_id: actor.organizationId,
+        connection_id: original.connection_id,
+        user_name: 'rotation-identity',
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    const rotated = await service.rotateScimToken(db, {
+      ...actor,
+      tokenId: first.token.id,
+      overlapSeconds: 3600,
+    })
+    expect(rotated.token.id).toBe(first.token.id)
+    expect(await binding(first.token.id)).toEqual(original)
+    await service.revokeScimToken(db, { ...actor, tokenId: first.token.id })
+    expect(await binding(first.token.id)).toEqual(original)
+    const replacement = await create()
+    expect((await binding(replacement.token.id)).connection_id).toBe(original.connection_id)
+    expect(
+      await db
+        .selectFrom('scim_users')
+        .selectAll()
+        .where('id', '=', resource.id)
+        .executeTakeFirst(),
+    ).toEqual(resource)
+  })
   it('allows only scoped SCIM requests and tracks use', async () => {
     const issued = await create()
     expect(await auth(issued.secret)).toEqual({
