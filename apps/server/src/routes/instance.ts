@@ -38,6 +38,12 @@ const Instance = z
       description:
         'Whether hosts may copy open times; enable only after direct-slot pages are live',
     }),
+    ssoOidcEnabled: z.boolean().optional().openapi({
+      description: 'Whether OIDC SSO is enabled; absent when unknown',
+    }),
+    ssoSamlEnabled: z.boolean().optional().openapi({
+      description: 'Whether SAML SSO is enabled; absent when unknown',
+    }),
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
@@ -69,6 +75,8 @@ export function instanceRoutes({
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
+  ssoOidcEnabled = false,
+  ssoSamlEnabled = false,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -84,6 +92,8 @@ export function instanceRoutes({
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
   slotSnippetsEnabled?: boolean
+  ssoOidcEnabled?: boolean
+  ssoSamlEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -98,6 +108,8 @@ export function instanceRoutes({
     followUpHostNotesEnabled,
     ...(embedAllowedOrigins !== undefined && { embedEnabled: embedAllowedOrigins.length > 0 }),
     slotSnippetsEnabled,
+    ssoOidcEnabled,
+    ssoSamlEnabled,
     scimProvisioningEnabled,
     signIn: {
       email: true,

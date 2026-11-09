@@ -17,6 +17,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
   team administrators, with bounded streaming and spreadsheet formula protection.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
   [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
+- A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
+  available as a private integration until published.
 
 ## Repository layout
 
@@ -37,6 +39,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
+| `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
+| `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
 CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
 iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
@@ -48,10 +52,16 @@ Requires Node.js 26 and Docker.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up      # Postgres on localhost:5432
 npm run dev        # API on :3000, web app on http://localhost:5173
 ```
+
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
 
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
 In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
@@ -417,6 +427,10 @@ the stored theme yet.
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- The [n8n community node](https://hourmere.com/docs/n8n) is not yet published to npm or available on n8n Cloud.
+  Self-hosters can build and install the package from source.
+- [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
+  Self-hosters can deploy the source as a private integration using their own Zapier account.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

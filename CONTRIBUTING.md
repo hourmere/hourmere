@@ -19,17 +19,31 @@ for the development database.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up          # Postgres 18 on localhost:5432 (docker-compose.dev.yml)
 npm run dev            # API on :3000, web app on http://localhost:5173
 ```
 
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
+
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.
 
-The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with a single
-`package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
+The main npm workspace covers `apps/*`, `packages/*`, `tools/api-types`, `tools/cli`
+and `tools/e2e`, with a `package-lock.json` at the root. The separate
+`tools/zapier-hourmere` package has its own lockfile; root installs do not download its
+Zapier Platform Agreement–licensed dependencies. Add a dependency to the workspace that uses it, e.g.
 `npm install <package> --workspace @hourmere/scheduling`, and commit the updated lockfile.
+
+The standalone n8n package uses its own committed lockfile and the separate
+`n8n-compatibility` CI job. From `tools/n8n-nodes-hourmere`, run `npm ci --ignore-scripts`,
+`npm run lint`, `npm run typecheck`, `npm run build` and `npm test`. Its OpenAPI
+contract test runs in the root suite and imports only dependency-free signature code.
+Never add the n8n toolchain to the root workspaces or root dependency tree.
 
 ## Checks
 
@@ -45,6 +59,16 @@ npm run lint        # Biome: formatting and lint rules (`npm run format` fixes m
 npm run typecheck
 npm test            # Vitest; database tests are skipped unless DATABASE_URL is set (.env sets it)
 npm run build
+```
+
+These need only the root install. `npm test` includes the Zapier app's OpenAPI contract
+test, which loads the app definition without the Zapier Platform packages. Install those
+only if you change `tools/zapier-hourmere`. CI's separate `zapier-compatibility` job runs
+the commands below, plus offline validation and the build check, on Node.js 22:
+
+```sh
+npm ci --ignore-scripts --prefix tools/zapier-hourmere
+npm --prefix tools/zapier-hourmere test # Zapier runtime and packaging tests
 ```
 
 An optional clock diagnostic runs the same suite at +7, +30, +90, +400 and +1600 days:
@@ -192,7 +216,8 @@ printing the actual token strings.
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
 The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing required `check`,
-`cli-compatibility`, `docker` and `e2e` check names. Four `e2e-shard` jobs run the
+`cli-compatibility`, `docker` and `e2e` check names, alongside the standalone
+`n8n-compatibility` and `zapier-compatibility` jobs. Four `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
 web and disposable site fixture and retains the browser-artifact privacy check. The separate

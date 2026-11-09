@@ -107,7 +107,9 @@ describe('release approval visibility', () => {
     })
     expect(Object.keys(ci.jobs)).toEqual([
       'check',
+      'n8n-compatibility',
       'cli-compatibility',
+      'zapier-compatibility',
       'docker',
       'e2e-shard',
       'e2e',

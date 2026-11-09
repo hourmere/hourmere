@@ -5331,6 +5331,10 @@ export interface components {
             };
             /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
             slotSnippetsEnabled?: boolean;
+            /** @description Whether OIDC SSO is enabled; absent when unknown */
+            ssoOidcEnabled?: boolean;
+            /** @description Whether SAML SSO is enabled; absent when unknown */
+            ssoSamlEnabled?: boolean;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured
