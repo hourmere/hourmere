@@ -426,6 +426,11 @@ async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
   }
   await expect(sw.lifecycle('install')).resolves.toBeUndefined()
   expect(sw.fetch.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual(paths)
+  for (const [request] of sw.fetch.mock.calls) {
+    expect(request.credentials).toBe('omit')
+    expect(request.cache).toBe('reload')
+    expect(request.redirect).toBe('error')
+  }
   expect(await sw.store.get(asset)?.text()).toBe('static')
   expect(sw.store.size).toBe(paths.length)
   expect(sw.caches.delete).not.toHaveBeenCalled()
@@ -438,6 +443,34 @@ it.each<ReuseFailure>(['list', 'open', 'match', 'copy'])(
     await verifyReuseFailure(failure)
   },
 )
+
+it.each([false, true])(
+  'discards the partial cache when fetch rejects after cache reuse (reuse failed: %s)',
+  async (reuseFails) => {
+    const sw = harness()
+    const asset = '/assets/main-abc123.js'
+    sw.oldStore.set(asset, new Response('previous'))
+    if (reuseFails) sw.caches.keys.mockRejectedValue(new Error('old cache unavailable'))
+    sw.fetch.mockImplementation(async (request) => {
+      if (new URL(request.url).pathname === '/app/icon-192.png') throw new TypeError('offline')
+      return new Response('static')
+    })
+    await expect(sw.lifecycle('install')).rejects.toThrow('offline')
+    expect(await sw.store.get(asset)?.text()).toBe(reuseFails ? 'static' : 'previous')
+    expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+    expect(sw.skipWaiting).not.toHaveBeenCalled()
+  },
+)
+
+it('fails installation when fetching the offline notice rejects', async () => {
+  const sw = harness()
+  sw.fetch
+    .mockResolvedValueOnce(new Response('static'))
+    .mockRejectedValueOnce(new TypeError('offline'))
+  await expect(sw.lifecycle('install')).rejects.toThrow('offline')
+  expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+  expect(sw.skipWaiting).not.toHaveBeenCalled()
+})
 
 it('still rejects installation when fresh asset storage fails after reuse fails', async () => {
   const sw = harness(true)

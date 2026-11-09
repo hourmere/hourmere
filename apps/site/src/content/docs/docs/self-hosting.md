@@ -131,7 +131,16 @@ for image installs. `docker-compose.image.yml` pins the published image, ignores
 
 To convert an existing image install, first follow the backup and version-selection steps
 in [upgrade and roll back](#upgrade-and-roll-back), retaining the source checkout matching
-the deployed release. In your existing private `.env`, remove only
+the deployed release. Before editing `.env`, set the shell's `HOURMERE_VERSION` to the
+exact version of the currently running image (without the tag's leading `v`) and verify
+that the checkout is at that release tag:
+
+```sh
+test "$(git describe --tags --exact-match)" = "v$HOURMERE_VERSION"
+```
+
+Stop if the check fails: older code must not run against a newer database schema.
+After the check succeeds, in your existing private `.env`, remove only
 `docker-compose.image.yml` from `COMPOSE_FILE`, preserving the base file, proxy, worker
 and any custom overlays. Unset `HOURMERE_VERSION` in both `.env` and the shell so a
 separate worker also uses the local image; clear any shell-exported `COMPOSE_FILE` so

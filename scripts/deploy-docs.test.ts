@@ -239,6 +239,30 @@ ${log}${fail}exec /usr/bin/install "$@"
 }
 
 describe('documented deployment operations', () => {
+  it.each([
+    { tag: 'v1.2.3', version: '1.2.3', gitStatus: 0, expectedStatus: 0 },
+    { tag: 'v1.2.2', version: '1.2.3', gitStatus: 0, expectedStatus: 1 },
+    { tag: '', version: '1.2.3', gitStatus: 128, expectedStatus: 1 },
+  ])('checks the image conversion checkout ($tag, git status $gitStatus)', (scenario) => {
+    const section = guide.split('To convert an existing image install,')[1]?.split('\n## ')[0]
+    const command = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+    if (!command) throw new Error('Image conversion must include a runnable version check')
+    const result = spawnSync(
+      'sh',
+      ['-c', `git() { printf '%s\\n' "$CHECKOUT_TAG"; return "$GIT_STATUS"; }\n${command}`],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CHECKOUT_TAG: scenario.tag,
+          GIT_STATUS: String(scenario.gitStatus),
+          HOURMERE_VERSION: scenario.version,
+        },
+      },
+    )
+    expect(result.status, result.stderr).toBe(scenario.expectedStatus)
+  })
+
   it('requires a root host in every deployment and a portless HTTPS host for bundled Caddy', () => {
     expect(guide).toMatch(
       /Every deployment must serve Hourmere at the root of its own host name,\s+without a path prefix/,
