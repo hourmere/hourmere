@@ -28,6 +28,27 @@ updates:
       - dependency-name: typescript
         update-types: [version-update:semver-major]
 
+  # Standalone packages outside the root workspaces, each with its own package-lock.json.
+  - package-ecosystem: npm
+    directory: /tools/n8n-nodes-hourmere
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /tools/zapier-hourmere
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
   # Actions in .github/workflows, pinned to commit SHAs with the version in a comment.
   - package-ecosystem: github-actions
     directory: /
