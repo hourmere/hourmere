@@ -53,6 +53,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
   self-hosting, linking, enforcement and the planned implementation sequence.
   Planned SSO is available to every instance without a paid-plan requirement.
+- [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
+  can be deployed privately with your own Zapier account.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
@@ -128,6 +130,8 @@ Explore these detailed guides:
   from a terminal with an API key.
 - [Booking webhooks](/docs/webhooks):
   configure signed delivery and retries.
+- [Zapier](/docs/zapier): connect booking triggers, actions and searches through a
+  private integration.
 - Team scheduling: [collective meetings](/docs/collective-scheduling)
   and [round-robin pools](/docs/round-robin-scheduling).
 - [Automatic Google Meet](/docs/automatic-google-meet)
