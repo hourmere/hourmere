@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import {
   type Auth,
+  type AuthConfig,
   assertSignupEnforced,
   type CallerResolver,
   createAuth,
@@ -471,6 +472,59 @@ export function productionAppOptions({
   }
 }
 
+/** What the running server's Better Auth options need beyond the configuration. */
+export interface ProductionAuthDeps {
+  config: Config
+  /** createAuthPool(config.DATABASE_URL, config.signup). */
+  pool: AuthConfig['pool']
+  db: Db
+  mailer: Mailer
+  invitationDelivery: Parameters<typeof createInvitationEmailDispatcher>[0]
+  invitationMailLimits: InvitationSummaryMailLimits
+  /** The job queue sign-in emails are enqueued on. */
+  jobs: Parameters<typeof queuedSignInEmail>[0]
+}
+
+/**
+ * The createAuth options as the running server assembles them: every Better Auth plugin and
+ * endpoint that the configuration enables. startServer calls
+ * createAuth(productionAuthOptions(...)); tests that must see the production Better Auth
+ * endpoints build it the same way.
+ */
+export function productionAuthOptions({
+  config,
+  pool,
+  db,
+  mailer,
+  invitationDelivery,
+  invitationMailLimits,
+  jobs,
+}: ProductionAuthDeps): AuthConfig {
+  return {
+    pool,
+    db,
+    leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember(
+        { db, principal, now: () => Temporal.Now.instant() },
+        { teamId, expectedOrganizationId },
+      ),
+    baseURL: config.PUBLIC_URL,
+    secret: config.BETTER_AUTH_SECRET,
+    mailer,
+    enqueueInvitationEmail: createInvitationEmailDispatcher(invitationDelivery),
+    reserveInvitationEmail: (trx, input) =>
+      reserveInvitationEmailBudget(trx, input, invitationMailLimits),
+    queueSignInEmail: queuedSignInEmail(jobs, {
+      db,
+      secret: config.BETTER_AUTH_SECRET,
+      publicUrl: config.PUBLIC_URL,
+    }),
+    signup: config.signup,
+    socialProviders: config.socialProviders,
+    mcpOAuth: config.MCP_OAUTH_ENABLED,
+  }
+}
+
 export interface RunningServer {
   port: number
   /**
@@ -798,29 +852,17 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
       await webhookNotifier(trx, event, now)
     }
-    const auth = createAuth({
-      pool: authPool,
-      db,
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
-        leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
-          { teamId, expectedOrganizationId },
-        ),
-      baseURL: config.PUBLIC_URL,
-      secret: config.BETTER_AUTH_SECRET,
-      mailer: countingMailer,
-      enqueueInvitationEmail: createInvitationEmailDispatcher(invitationDeliveryDeps),
-      reserveInvitationEmail: (trx, input) =>
-        reserveInvitationEmailBudget(trx, input, invitationMailLimits),
-      queueSignInEmail: queuedSignInEmail(jobs, {
+    const auth = createAuth(
+      productionAuthOptions({
+        config,
+        pool: authPool,
         db,
-        secret: config.BETTER_AUTH_SECRET,
-        publicUrl: config.PUBLIC_URL,
+        mailer: countingMailer,
+        invitationDelivery: invitationDeliveryDeps,
+        invitationMailLimits,
+        jobs,
       }),
-      signup: config.signup,
-      socialProviders: config.socialProviders,
-      mcpOAuth: config.MCP_OAUTH_ENABLED,
-    })
+    )
     // db is closed below.
     fetch = createApp(
       productionAppOptions({
