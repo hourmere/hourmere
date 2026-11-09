@@ -10,6 +10,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,
   split workers, back up and upgrade.
+- [Cal.com / cal.diy import](/docs/calcom-import): preview and apply local-only busy records,
+  inspect limits and overlaps, and recover an incomplete selection.
 - [Install the app](/docs/install-app): add Hourmere to your home screen and understand
   its offline notice and privacy boundaries.
 - [Configuration reference](/docs/configuration): environment variables and Compose behavior.
@@ -59,6 +61,15 @@ The website at hourmere.com is separate from your Hourmere instance.
   Self-hosters can install its local package; downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
+- Booking workflows are [design only](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md).
+  Conditional email and webhook actions are not available yet, including for self-hosters.
+  During implementation, generated API-key/MCP scope tables, OpenAPI and CLI help may list
+  operations before enablement; those entries will document their disabled behavior.
+  Docker Compose may also forward workflow settings that have no effect until then.
+  Existing reminders, follow-ups and signed booking webhooks keep their current behavior.
+- [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
+  local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
+  block the batch, while daily/weekly/monthly limit differences are reported as warnings.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

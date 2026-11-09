@@ -24,6 +24,8 @@ export interface EventPlan {
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   maxBookingsPerDay: number | null
+  maxBookingsPerWeek: number | null
+  maxBookingsPerMonth: number | null
   isHidden: boolean
   isActive: false
   allowGuests: boolean
@@ -340,24 +342,36 @@ export function parseEvents(
     }
     const bookingLimits = validatedLimits(event.bookingLimits)
     const durationLimits = validatedLimits(event.durationLimits)
-    let maxBookingsPerDay: number | null = null
+    const proposedLimit = (key: string): number | null => {
+      const value = bookingLimits?.[key]
+      return value != null && value <= 1000 ? value : null
+    }
+    const maxBookingsPerDay = proposedLimit('PER_DAY')
+    const maxBookingsPerWeek = proposedLimit('PER_WEEK')
+    const maxBookingsPerMonth = proposedLimit('PER_MONTH')
     if (
       nonempty(event.bookingLimits) ||
       nonempty(event.durationLimits) ||
       event.maxActiveBookingsPerBooker != null
-    ) {
+    )
       add(
         'event_limits',
         'activation_blocker',
         'Source booking-count, duration or per-booker limits require review because their counting semantics differ from the target.',
       )
-      if (
-        record(event.bookingLimits) &&
-        Number.isSafeInteger(event.bookingLimits.PER_DAY) &&
-        (event.bookingLimits.PER_DAY as number) >= 1 &&
-        (event.bookingLimits.PER_DAY as number) <= 1000
+    try {
+      validateEventTypeRules({
+        durationMinutes: event.length,
+        maxBookingsPerDay: maxBookingsPerDay ?? undefined,
+        maxBookingsPerWeek: maxBookingsPerWeek ?? undefined,
+        maxBookingsPerMonth: maxBookingsPerMonth ?? undefined,
+      })
+    } catch {
+      add(
+        'event_limits_order',
+        'import_blocker',
+        'Proposed daily, weekly and monthly ceilings must satisfy the target ordering rules.',
       )
-        maxBookingsPerDay = event.bookingLimits.PER_DAY as number
     }
     const unsupportedFlags = [
       'requiresConfirmation',
@@ -487,6 +501,8 @@ export function parseEvents(
       minimumNoticeMinutes: event.minimumBookingNotice as number,
       bookingWindowDays: null,
       maxBookingsPerDay,
+      maxBookingsPerWeek,
+      maxBookingsPerMonth,
       isHidden: event.hidden as boolean,
       isActive: false,
       allowGuests: !event.disableGuests,
