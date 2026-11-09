@@ -144,6 +144,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/bookings/export.csv` | Session or API key | `full, read` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/{id}/organization` | Browser session only | — |
 | `POST /api/v1/bookings/{id}/calendar-copy/retry` | Session or API key | `full, bookings` |
@@ -214,6 +215,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/schedules` | Session or API key | `full, read` |
 | `POST /api/v1/schedules` | Session or API key | `full` |
 | `GET /api/v1/schedules/{id}` | Session or API key | `full, read` |
+| `GET /api/v1/schedules/{id}/availability` | Session or API key | `full, read` |
+| `PUT /api/v1/schedules/{id}/availability` | Session or API key | `full` |
 | `DELETE /api/v1/schedules/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/schedules/{id}` | Session or API key | `full` |
 | `GET /api/v1/schedules/{id}/overrides` | Session or API key | `full, read` |
@@ -263,6 +266,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -271,6 +275,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `get_schedule_availability` | — | `schedule-availability` | `full, read` |
+| `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
@@ -303,3 +309,8 @@ These routes keep their own authentication; API key scopes do not authorize them
 | `POST /api/conference/zoom/events` | Provider signature |
 
 <!-- api-key-scope-table:end -->
+
+CSV export through API keys is limited to the owner's personal organization (`read` or
+`full`). Team-wide CSV exports retain the existing browser-session-only team-admin access
+and field rules; a team key, even an owner's `full` key, receives
+`team_management_access_denied`. See [CSV booking export](https://hourmere.com/docs/booking-export).

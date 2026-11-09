@@ -21,6 +21,7 @@ const restContract = {
   other_read: [
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -31,6 +32,7 @@ const restContract = {
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
+    'GET /api/v1/schedules/{id}/availability',
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
@@ -107,6 +109,7 @@ const restContract = {
   other_write: [
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
+    'PUT /api/v1/schedules/{id}/availability',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -222,6 +225,7 @@ function verifyMinimalBookingReads(allows: Allows) {
   for (const tool of [
     'list_schedules',
     'get_schedule',
+    'get_schedule_availability',
     'list_calendar_connections',
     'list_conference_connections',
   ]) {
@@ -347,6 +351,7 @@ describe('shared API-key scope policy', () => {
       full: [
         'get_branding',
         'set_branding',
+        'save_schedule_availability',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -355,6 +360,7 @@ describe('shared API-key scope policy', () => {
         'request_reschedule',
         'cancel_booking',
         'list_bookings',
+        'export_bookings',
         'retry_conference',
         'retry_calendar_copy',
         'get_profile',
@@ -363,6 +369,7 @@ describe('shared API-key scope policy', () => {
         'set_event_type_notifications',
         'list_schedules',
         'get_schedule',
+        'get_schedule_availability',
         'create_event_type',
         'update_event_type',
         'create_one_time_link',
@@ -383,11 +390,13 @@ describe('shared API-key scope policy', () => {
         'find_available_slots',
         'generate_open_time_snippet',
         'list_bookings',
+        'export_bookings',
         'get_profile',
         'list_event_types',
         'get_event_type',
         'list_schedules',
         'get_schedule',
+        'get_schedule_availability',
         'list_one_time_links',
         'list_calendar_connections',
         'list_conference_connections',
@@ -492,6 +501,22 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "rest('GET', '/api/v1/bookings/export.csv', 'other_read'",
+      "rest('GET', '/api/v1/bookings/export.csv', 'booking_read'",
+    ],
+    ["mcp('export_bookings', 'other_read'", "mcp('export_bookings', 'booking_read'"],
+    ["cli('export', 'export_bookings')", "cli('export', 'list_bookings')"],
+  ] as const)('kills broadened export scope: %s', (before, after) => {
+    const verify = (operation: typeof apiKeyOperation) => {
+      for (const id of ['GET /api/v1/bookings/export.csv', 'mcp:export_bookings', 'cli:export'])
+        expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    }
+    verify(sourceCopyRegistry())
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow()
+  })
+
   it.each([
     [
       "mcp('get_event_type_waitlist', 'other_read'",

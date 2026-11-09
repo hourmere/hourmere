@@ -15,6 +15,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   startup failures.
 - [Compare scheduling options](/docs/comparison): deployment, agent access and the current
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
+- [Availability and working hours](/docs/availability): copy hours between days and save
+  weekly hours and date overrides together.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
 - [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
@@ -28,6 +30,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Open-time snippets for agents](/docs/open-time-snippets): draft an email with current
   alternatives and direct booking links through REST, MCP or CLI.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
+- [CSV booking export](/docs/booking-export): download a bounded date range for reporting,
+  with personal-owner and team-administrator permissions.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
   choose busy-time calendars and a booking destination.
@@ -43,6 +47,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
+- [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
+  conflict merge; use the combined API for atomic edits with version checks.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
@@ -57,6 +63,9 @@ The website at hourmere.com is separate from your Hourmere instance.
   bookings do not support requests.
 - [Branding settings](/docs/branding) store a logo and primary colour per space; public
   booking pages and emails do not apply them yet.
+- [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
+  permit one active export per organization. Files contain personal data; there is no
+  scheduled export or automatic delivery. Answers use a JSON column.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
   this limitation applies equally to self-hosted installations.
@@ -70,6 +79,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
+- [Meeting location choices](/docs/location-choices) are configured through REST, MCP or CLI;
+  the editor does not yet offer a multiple-location editor. Rescheduling preserves the choice.
 - [Multiple meeting lengths](/docs/multiple-durations) share one set of hosts, location
   and booking rules; per-length overrides are unavailable. Web rescheduling keeps the
   original length; changing it requires REST, MCP or CLI.

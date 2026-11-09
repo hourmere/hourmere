@@ -5,7 +5,11 @@ description: Use API-key booking tools from a terminal.
 
 The standalone CLI supports Node.js 22 or later; repository development still uses Node.js 26.
 It calls the existing stateless MCP tools at `/mcp` for API-key users, using Node's built-in
-HTTP client with no additional dependencies.
+HTTP client with no additional dependencies. The `export` command obtains a bounded MCP
+download pointer and streams the CSV from REST to a file or stdout; CSV rows are never
+returned in the MCP tool result. This is for personal bookings; team exports require the
+verified owner/admin browser session. Failed downloads report the API error code and remove
+an output file created by this invocation. See [CSV booking export](/docs/booking-export).
 This preserves the key's organization, permissions, idempotency scope and `mcp` audit source,
 including host rescheduling, without introducing another booking API.
 
@@ -333,6 +337,15 @@ with no validated ID remains ambiguous: retry does not issue another POST or ado
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
 requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
+`inviteePhone`, normalized to E.164 after removing common phone separators.
+CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.
 
 ## Ask an invitee to choose another time
 

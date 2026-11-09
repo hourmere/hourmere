@@ -147,6 +147,12 @@ The personal and `/api/v1/public/teams/{handle}/{slug}` endpoints share this con
 
 ## Create and manage one booking
 
+For reporting, [export bookings as CSV](/docs/booking-export) using
+`GET /api/v1/bookings/export.csv`. A `read` or `full` key and a bounded date range are
+required for personal exports. Team exports require a verified browser session and current
+owner/admin membership, and use the limited team-admin field set. Team API keys and OAuth
+credentials cannot export team data.
+
 Bookings send email to the host/invitee when workers are enabled. Additional guests require
 the host to enable `allowGuests` on the event type (off by default, at most ten). Otherwise
 nonempty `guests` return `400 guests_not_allowed`. Existing guests keep receiving updates
@@ -241,6 +247,15 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
+`inviteePhone`, normalized to E.164 after removing common phone separators.
+CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.
 
 ## Ask an invitee to choose another time
 

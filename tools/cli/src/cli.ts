@@ -1,8 +1,9 @@
 import { constants } from 'node:fs'
-import { open } from 'node:fs/promises'
+import { open, unlink } from 'node:fs/promises'
 import {
   CliError,
   callTool,
+  downloadCsv,
   endpoint,
   isObject,
   MAX_INPUT_BYTES,
@@ -28,10 +29,13 @@ export const COMMANDS = {
   'resend-waitlist-verification': 'resend_waitlist_verification',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
+  'schedule-availability': 'get_schedule_availability',
+  'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
   'open-time-snippet': 'generate_open_time_snippet',
   book: 'create_booking',
   list: 'list_bookings',
+  export: 'export_bookings',
   reschedule: 'reschedule_booking',
   'request-reschedule': 'request_reschedule',
   cancel: 'cancel_booking',
@@ -53,6 +57,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
+          schedule-availability, save-availability,
           book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
@@ -60,6 +65,8 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+           book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 After booking: create-event/update-event accept --success-redirect-url URL,
@@ -67,6 +74,8 @@ After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-include-invitee-personal-data true|false,
                --success-redirect-allow-embed-parent true|false, or --clear-success-redirect.
 Invitee name/email become visible to the target website and its analytics when enabled.
+Export: export --input FILE|- [--output FILE] streams CSV to a new private file or stdout.
+Requires read/full scope; input: from, to (maximum 366 days), timeZone, optional filters and bom.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
@@ -253,7 +262,7 @@ export async function runCli(options: {
   argv: readonly string[]
   env: NodeJS.ProcessEnv
   stdin: AsyncIterable<Uint8Array | string>
-  stdout: (text: string) => void
+  stdout: (text: string) => unknown | Promise<unknown>
   stderr: (text: string) => void
   fetch?: typeof fetch
 }): Promise<number> {
@@ -266,6 +275,7 @@ export async function runCli(options: {
     return 0
   }
   let output: Awaited<ReturnType<typeof open>> | undefined
+  let exportOutputPath: string | undefined
   let called = false
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
@@ -330,6 +340,7 @@ export async function runCli(options: {
     )
       throw new CliError('idempotency_key_required')
     // Reserve the private output before making a booking: a path error must not lose its token.
+    if (args.command === 'export') exportOutputPath = args.output
     if (args.output) output = await open(args.output, 'wx', 0o600)
     called = true
     const result =
@@ -348,6 +359,23 @@ export async function runCli(options: {
             input,
             fetch: options.fetch,
           })
+    if (args.command === 'export') {
+      await downloadCsv({
+        url,
+        key,
+        path: result.downloadPath,
+        fetch: options.fetch,
+        write: async (chunk) => {
+          if (output) await output.writeFile(chunk)
+          else await options.stdout(chunk)
+        },
+      })
+      if (output) {
+        await output.sync()
+        options.stdout('{"outputWritten":true}\n')
+      }
+      return 0
+    }
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
@@ -360,6 +388,10 @@ export async function runCli(options: {
     }
     return 0
   } catch (error) {
+    if (output && exportOutputPath) {
+      await output.close().catch(() => {})
+      await unlink(exportOutputPath).catch(() => {})
+    }
     const code = error instanceof CliError ? error.code : called ? 'output_failed' : 'file_error'
     options.stderr(
       printable(
