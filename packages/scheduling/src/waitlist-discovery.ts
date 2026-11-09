@@ -60,12 +60,13 @@ async function readEntries(db: Db, eventTypeId: string, at: Date, lock = false) 
 const PAGE_MS = 7 * 24 * 60 * 60 * 1000
 // Signal batches select their locked IDs in an uncorrelated ARRAY(...) subquery, which
 // PostgreSQL evaluates once per statement. An IN (...) subquery can be rescanned for each
-// target row (e.g. with statistics taken while the table was empty), and every rescan
-// skips rows this DELETE already removed, so one statement could exceed the limit.
+// target row, and every rescan skips rows this DELETE already removed, so one statement
+// could exceed the limit. That plan needs statistics of zero tuples on allocated pages and
+// no column statistics, as when no ANALYZE has yet seen the table holding rows.
 const SIGNAL_LIMIT = 1000
 
 /** Only scanners update work rows. Writers append independent, rollback-safe signals. */
-async function consumeSignals(db: Db, eventTypeId: string, at: Date) {
+export async function consumeSignals(db: Db, eventTypeId: string, at: Date) {
   // Delete exactly the visible selected IDs, never an ID/time high-water mark: a
   // transaction can commit an older UUID after this batch has already finished.
   await sql`WITH consumed AS (
