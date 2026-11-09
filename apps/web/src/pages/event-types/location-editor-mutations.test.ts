@@ -56,6 +56,21 @@ function detects(before: string, after: string, assertion: (values: typeof formF
 }
 
 describe('location editor production-source mutation controls', () => {
+  it('detects adding a derived durations error for an invalid first-screen duration', () => {
+    detects(
+      '!wholeNumberProblem(defaultDuration, RULES.durationMinutes, true) &&',
+      'true &&',
+      (values) => {
+        const draft = {
+          ...values.emptyDraft(),
+          title: 'Intro',
+          slug: 'intro',
+          durationMinutes: '2000',
+        }
+        expect(Object.keys(values.validateDraft(draft))).toEqual(['durationMinutes'])
+      },
+    )
+  })
   it('detects sending primary invitee collection through the rejected legacy path', () => {
     detects(
       "draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)",
