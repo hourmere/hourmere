@@ -9,16 +9,14 @@ import {
   storageInterfaceSnapshot,
 } from './storage-interface-snapshot.ts'
 
-const baselinePath = process.env.STORAGE_INTERFACE_BASELINE
-
 describe('storage-only interface gate', () => {
-  it.skipIf(!baselinePath)(
-    'keeps all four surfaces byte-identical to the supplied main snapshot',
-    async () => {
-      const baseline = JSON.parse(readFileSync(baselinePath as string, 'utf8'))
-      assertStorageInterfacesUnchanged(baseline, await storageInterfaceSnapshot())
-    },
-  )
+  it('runs the merge-base comparison in CI without an optional local snapshot', () => {
+    const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    const command = 'run: node scripts/check-storage-interfaces.ts "$HOURMERE_PARITY_BASE"'
+    const verify = (source: string) => expect(source).toContain(command)
+    verify(workflow)
+    expect(() => verify(workflow.replace(command, 'run: true'))).toThrow()
+  })
 
   it('produces complete, deterministic interface bytes without connecting to a database', async () => {
     const first = await storageInterfaceSnapshot()

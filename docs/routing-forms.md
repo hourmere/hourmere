@@ -82,7 +82,8 @@ evaluation work finite.
 
 | Limit | Value | Meaning |
 |---|---:|---|
-| forms_per_organization | 100 | Maximum retained forms, including disabled and archived forms |
+| forms_per_organization | 100 | Maximum non-archived forms, including disabled forms |
+| total_forms_per_organization | 1000 | Maximum retained forms, including archived forms |
 | versions_per_form | 1000 | Maximum retained published versions of one form |
 | questions_per_form | 20 | Maximum questions in a version |
 | options_per_question | 50 | Maximum options for a select question |
@@ -105,11 +106,15 @@ escaped as `\uXXXX`. The largest legal submission is 20 short-text answers of 50
 units keyed by question UUIDs: 30,904 bytes as ordinary UTF-8 JSON and 64,764 bytes with
 every character of every string, keys and `versionId` included, escaped as `\uXXXX`. Both
 fit the cap, so clients may send either encoding. The storage quotas above count retained
-rows, not enabled forms or the current version alone. Archiving does not free a form slot. Unreferenced old-version cleanup frees a
-version slot, but never permits reusing a version number; each form retains its greatest
-published version number. SQL serializes quota admission on the organization/form row,
-so concurrent writers cannot exceed either quota. These limits apply equally to
-self-hosted and Cloud installations. Public
+non-archived forms regardless of enabled state, with a separate total-forms cap that
+includes archived forms. Archiving frees a non-archived form slot; it does not free a total
+form slot. Unreferenced old-version cleanup frees a version slot, but never permits reusing
+a version number; each form retains its greatest published version number. SQL serializes
+form admission with a per-organization transaction advisory lock, without upgrading the
+organization share lock; version admission writes the form row. Form creation and
+unarchiving require READ COMMITTED isolation; other isolation modes fail closed with
+40001, and must restart at READ COMMITTED. Concurrent writers cannot exceed these quotas.
+These limits apply equally to self-hosted and Cloud installations. Public
 submissions and continuations use the named rate-limit buckets and admission ceilings in
 [Ownership, permissions and public security](#ownership-permissions-and-public-security);
 step c1 pins their values before any public routing write exists.
@@ -688,6 +693,9 @@ No CAPTCHA, verified lead identity, routing-only access gate or slot reservation
 share ordinary booking URLs and infer policies from repeated public outcomes. Expired
 answers may remain in operator backups; physical purge depends on working maintenance.
 
+- Archiving frees one of the 100 non-archived form slots, but retained archived forms
+  still count toward the 1000 total-forms storage cap. No public purge or unarchive
+  operation is provided by this storage step.
 - After-booking redirects are not offered for routing-continuation bookings, for listed and
   hidden targets alike and including exact replays. A host who relies on a redirect for a
   thank-you or conversion page does not get it for routed bookings; direct bookings of the

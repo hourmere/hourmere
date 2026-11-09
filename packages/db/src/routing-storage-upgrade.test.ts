@@ -45,6 +45,12 @@ describe.skipIf(!serverUrl)('routing storage upgrade', () => {
       await runMigrations(upgraded.pool, directory)
       await seedLater(upgraded.pool)
       await upgraded.pool.query(`
+        INSERT INTO scim_provisioning_tokens
+          (organization_id,name,token_hash,previous_token_hash,previous_valid_until,
+           created_by_user_id,rotated_by_user_id,rotated_at,last_used_at)
+          SELECT o.id,'Synthetic rotated provisioning credential',repeat('x',43),repeat('y',43),
+            '2030-01-01T00:00Z',u.id,u.id,'2026-11-01T00:00Z','2026-11-02T00:00Z'
+          FROM auth.organization o CROSS JOIN auth."user" u ORDER BY o.id,u.id LIMIT 1;
         UPDATE event_types SET allowed_durations_minutes=ARRAY[15,duration_minutes,60],
           success_redirect='{"url":"https://example.test/thank-you","parameters":[],"includeInviteePersonalData":false,"allowEmbedParent":false}'
           WHERE duration_minutes NOT IN (15,60);
@@ -67,6 +73,7 @@ describe.skipIf(!serverUrl)('routing storage upgrade', () => {
         'one_time_booking_links',
         'webhooks',
         'calendar_connections',
+        'scim_provisioning_tokens',
       ]) {
         const name = table.includes('.') ? table : `public.${table}`
         expect(before.rows[name]?.length, name).toBeGreaterThan(0)

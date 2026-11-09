@@ -9,7 +9,8 @@ import {
   receiptValues,
   versionValues,
 } from './routing-storage-fixtures.ts'
-import { checkQuotaRace } from './routing-storage-quota-races.ts'
+import { readRoutingStorageLimits } from './routing-storage-limits.ts'
+import { checkQuotaRace, checkSharedOrganizationLocks } from './routing-storage-quota-races.ts'
 
 export interface Protection {
   check: (f: RoutingFixture) => Promise<void>
@@ -113,65 +114,79 @@ export const routingProtections: Record<string, Protection> = {
     },
     break: drop('booking_routing', 'booking_routing_booking_id_organization_id_fkey'),
   },
-  'form quota including archived forms': {
+  'non-archived form quota and archive frees capacity': {
     check: async (f) => {
+      const max = readRoutingStorageLimits().forms_per_organization
       await f.pool.query(
-        `INSERT INTO routing_forms (organization_id,slug,created_by_user_id,draft,archived_at)
-        SELECT $1,'quota-' || n,$2,'{}',now() FROM generate_series(2,100) n`,
-        [f.organization, f.creator],
+        `INSERT INTO routing_forms (organization_id,slug,created_by_user_id,draft)
+        SELECT $1,'quota-' || n,$2,'{}' FROM generate_series(2,$3::int) n`,
+        [f.organization, f.creator, max],
       )
-      expect(
-        (
-          await f.pool.query(
-            'SELECT count(*)::int AS count FROM routing_forms WHERE organization_id=$1',
-            [f.organization],
-          )
-        ).rows,
-      ).toEqual([{ count: 100 }])
       await expect(insertRow(f.pool, 'routing_forms', formValues(f))).rejects.toMatchObject({
         ...checkViolation,
         constraint: 'routing_forms_quota',
       })
-      await f.pool.query('DELETE FROM routing_forms WHERE organization_id=$1 AND slug=$2', [
-        f.organization,
-        'quota-100',
-      ])
-      await insertRow(f.pool, 'routing_forms', formValues(f))
+      await f.pool.query(
+        'UPDATE routing_forms SET archived_at=now() WHERE organization_id=$1 AND slug=$2',
+        [f.organization, `quota-${max}`],
+      )
+      await expect(insertRow(f.pool, 'routing_forms', formValues(f))).resolves.toEqual(
+        expect.any(String),
+      )
+      await expect(insertRow(f.pool, 'routing_forms', formValues(f))).rejects.toMatchObject({
+        ...checkViolation,
+        constraint: 'routing_forms_quota',
+      })
     },
     break: (source) => source.replace('>= 100 THEN', '>= 101 THEN'),
   },
-  'retained version quota': {
+  'total retained form quota': {
     check: async (f) => {
+      const max = readRoutingStorageLimits().total_forms_per_organization
       await f.pool.query(
-        `INSERT INTO routing_form_versions
-        (organization_id,form_id,version_number,questions,rules,fallback,published_by_user_id)
-        SELECT $1,$2,n,'[]','[]','{}',$3 FROM generate_series(2,1000) n`,
-        [f.organization, f.form, f.creator],
+        `INSERT INTO routing_forms (organization_id,slug,created_by_user_id,draft,archived_at)
+        SELECT $1,'total-' || n,$2,'{}',now() FROM generate_series(2,$3::int) n`,
+        [f.organization, f.creator, max],
       )
-      expect(
-        (
-          await f.pool.query(
-            'SELECT count(*)::int AS count FROM routing_form_versions WHERE form_id=$1',
-            [f.form],
-          )
-        ).rows,
-      ).toEqual([{ count: 1000 }])
       await expect(
-        insertRow(f.pool, 'routing_form_versions', {
-          ...versionValues(f),
-          version_number: 1001,
-        }),
-      ).rejects.toMatchObject({ ...checkViolation, constraint: 'routing_form_versions_quota' })
-      await f.pool.query(
-        'DELETE FROM routing_form_versions WHERE form_id=$1 AND version_number=1000',
-        [f.form],
-      )
-      await insertRow(f.pool, 'routing_form_versions', {
-        ...versionValues(f),
-        version_number: 1001,
+        insertRow(f.pool, 'routing_forms', { ...formValues(f), archived_at: new Date() }),
+      ).rejects.toMatchObject({
+        ...checkViolation,
+        constraint: 'routing_forms_total_quota',
       })
     },
     break: (source) => source.replace('>= 1000 THEN', '>= 1001 THEN'),
+  },
+  'retained version quota per form': {
+    check: async (f) => {
+      const max = readRoutingStorageLimits().versions_per_form
+      const sibling = await insertRow(f.pool, 'routing_forms', formValues(f))
+      await insertRow(f.pool, 'routing_form_versions', { ...versionValues(f), form_id: sibling })
+      await expect(
+        f.pool.query(
+          `INSERT INTO routing_form_versions
+        (organization_id,form_id,version_number,questions,rules,fallback,published_by_user_id)
+        SELECT $1,$2,n,'[]','[]','{}',$3 FROM generate_series(2,$4::int) n`,
+          [f.organization, f.form, f.creator, max],
+        ),
+      ).resolves.toMatchObject({ rowCount: max - 1 })
+      await expect(
+        insertRow(f.pool, 'routing_form_versions', {
+          ...versionValues(f),
+          version_number: max + 1,
+        }),
+      ).rejects.toMatchObject({ ...checkViolation, constraint: 'routing_form_versions_quota' })
+      await f.pool.query(
+        'DELETE FROM routing_form_versions WHERE form_id=$1 AND version_number=$2',
+        [f.form, max],
+      )
+      await insertRow(f.pool, 'routing_form_versions', {
+        ...versionValues(f),
+        version_number: max + 1,
+      })
+    },
+    break: (source) =>
+      source.replace('AND form_id = NEW.form_id) >= 1000', 'AND form_id = NEW.form_id) >= 1001'),
   },
   'immutable version updates': {
     check: async (f) => {
@@ -519,8 +534,8 @@ routingProtections['form quota serialization'] = {
   check: (f) => checkQuotaRace(f, 'forms'),
   break: (source) =>
     source.replace(
-      'UPDATE auth.organization SET id = id WHERE id = NEW.organization_id;',
-      'PERFORM id FROM auth.organization WHERE id = NEW.organization_id;',
+      "PERFORM pg_advisory_xact_lock(hashtextextended('hourmere.routing-form-quota:' || NEW.organization_id::text, 0));",
+      'PERFORM 1;',
     ),
 }
 routingProtections['version quota serialization'] = {
@@ -529,5 +544,269 @@ routingProtections['version quota serialization'] = {
     source.replace(
       'UPDATE public.routing_forms SET last_version_number = NEW.version_number',
       'PERFORM id FROM public.routing_forms',
+    ),
+}
+
+routingProtections['unique dependency version and rule'] = {
+  check: async (f) => {
+    const row = {
+      organization_id: f.organization,
+      version_id: f.version,
+      rule_id: 'fallback',
+      event_type_id: f.event,
+    }
+    await insertRow(f.pool, 'routing_target_dependencies', row)
+    await expect(
+      insertRow(f.pool, 'routing_target_dependencies', { ...row, event_type_id: randomUUID() }),
+    ).rejects.toMatchObject({ code: '23505', constraint: 'routing_target_dependencies_pkey' })
+  },
+  break: (source) =>
+    source.replace(
+      'PRIMARY KEY (version_id, rule_id)',
+      'PRIMARY KEY (version_id, rule_id, event_type_id)',
+    ),
+}
+routingProtections['one snapshot per booking'] = {
+  check: async (f) => {
+    await insertRow(f.pool, 'booking_routing', bookingRoutingValues(f))
+    await expect(
+      insertRow(f.pool, 'booking_routing', {
+        ...bookingRoutingValues(f),
+        answers: '{"changed":true}',
+      }),
+    ).rejects.toMatchObject({ code: '23505', constraint: 'booking_routing_pkey' })
+  },
+  break: drop('booking_routing', 'booking_routing_pkey'),
+}
+routingProtections['booking deletion removes consumed receipt'] = {
+  check: async (f) => {
+    const id = await insertRow(f.pool, 'routing_receipts', {
+      ...receiptValues(f),
+      consumed_booking_id: f.booking,
+      answers_ciphertext: null,
+    })
+    await expect(
+      f.pool.query('DELETE FROM bookings WHERE id=$1', [f.booking]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+    expect((await f.pool.query('SELECT id FROM routing_receipts WHERE id=$1', [id])).rows).toEqual(
+      [],
+    )
+  },
+  break: (source) =>
+    source.replace(
+      'FOREIGN KEY (consumed_booking_id, organization_id)\n    REFERENCES bookings (id, organization_id) ON DELETE CASCADE',
+      'FOREIGN KEY (consumed_booking_id, organization_id)\n    REFERENCES bookings (id, organization_id)',
+    ),
+}
+routingProtections['consumed receipt cannot rebind same organization booking'] = {
+  check: async (f) => {
+    const booking = await insertRow(f.pool, 'bookings', {
+      organization_id: f.organization,
+      event_type_id: f.event,
+      start_at: '2030-02-01T09:00Z',
+      end_at: '2030-02-01T09:30Z',
+      title: 'Second booking',
+      source: 'web',
+      status: 'confirmed',
+    })
+    const id = await insertRow(f.pool, 'routing_receipts', {
+      ...receiptValues(f),
+      consumed_booking_id: f.booking,
+      answers_ciphertext: null,
+    })
+    await expect(
+      f.pool.query('UPDATE routing_receipts SET consumed_booking_id=$1 WHERE id=$2', [booking, id]),
+    ).rejects.toMatchObject({ code: '23514', constraint: 'routing_receipts_consumed_immutable' })
+  },
+  break: (source) =>
+    source.replace(
+      'OLD.consumed_booking_id IS NOT NULL AND NEW IS DISTINCT FROM OLD',
+      'OLD.consumed_booking_id IS NOT NULL AND NEW.consumed_booking_id IS NULL',
+    ),
+}
+routingProtections['receipt expiry strictly follows creation'] = {
+  check: async (f) => {
+    await expect(
+      insertRow(f.pool, 'routing_receipts', {
+        ...receiptValues(f),
+        created_at: '2030-01-01T00:00Z',
+        expires_at: '2030-01-01T00:00Z',
+      }),
+    ).rejects.toMatchObject({ code: '23514', constraint: 'routing_receipts_expiry' })
+  },
+  break: (source) =>
+    source.replace('CHECK (expires_at > created_at)', 'CHECK (expires_at >= created_at)'),
+}
+routingProtections['dependency health code vocabulary'] = {
+  check: async (f) => {
+    for (const health of ['ok', 'unavailable', 'unknown']) {
+      await insertRow(f.pool, 'routing_target_dependencies', {
+        organization_id: f.organization,
+        version_id: f.version,
+        rule_id: randomUUID(),
+        event_type_id: f.event,
+        health_code: health,
+      })
+    }
+    await expect(
+      insertRow(f.pool, 'routing_target_dependencies', {
+        organization_id: f.organization,
+        version_id: f.version,
+        rule_id: 'fallback',
+        event_type_id: f.event,
+        health_code: 'anything goes',
+      }),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'routing_target_dependencies_health_code_check',
+    })
+  },
+  break: drop('routing_target_dependencies', 'routing_target_dependencies_health_code_check'),
+}
+routingProtections['dependency target identity immutable'] = {
+  check: async (f) => {
+    await insertRow(f.pool, 'routing_target_dependencies', {
+      organization_id: f.organization,
+      version_id: f.version,
+      rule_id: 'fallback',
+      event_type_id: f.event,
+    })
+    await expect(
+      f.pool.query('UPDATE routing_target_dependencies SET event_type_id=$1 WHERE version_id=$2', [
+        randomUUID(),
+        f.version,
+      ]),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'routing_target_dependencies_identity_immutable',
+    })
+    await expect(
+      f.pool.query(
+        "UPDATE routing_target_dependencies SET health_code='ok',health_checked_at=now() WHERE version_id=$1",
+        [f.version],
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 })
+  },
+  break: noTrigger('routing_target_dependencies', 'routing_target_dependencies_guard'),
+}
+routingProtections['form slug shape'] = {
+  check: async (f) => {
+    for (const slug of ['', 'Sales', '-sales', 'sales-', 'a'.repeat(65)])
+      await expect(
+        insertRow(f.pool, 'routing_forms', { ...formValues(f), slug }),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'routing_forms_slug_check' })
+  },
+  break: drop('routing_forms', 'routing_forms_slug_check'),
+}
+// Backstops intentionally remain independently enforced even if sequence triggers regress.
+for (const [name, table, trigger, constraint, values] of [
+  [
+    'nonnegative high water backstop',
+    'routing_forms',
+    'routing_forms_guard',
+    'routing_forms_last_version_number_check',
+    (f: RoutingFixture) => ({ ...formValues(f), last_version_number: -1 }),
+  ],
+  [
+    'positive version backstop',
+    'routing_form_versions',
+    'routing_form_versions_guard',
+    'routing_form_versions_version_number_check',
+    (f: RoutingFixture) => ({ ...versionValues(f), version_number: 0 }),
+  ],
+  [
+    'unique version number backstop',
+    'routing_form_versions',
+    'routing_form_versions_guard',
+    'routing_form_versions_form_id_version_number_key',
+    versionValues,
+  ],
+] as const) {
+  routingProtections[name] = {
+    check: async (f) => {
+      const client = await f.pool.connect()
+      try {
+        await client.query('BEGIN')
+        await client.query(`ALTER TABLE ${table} DISABLE TRIGGER ${trigger}`)
+        await expect(insertRow(client, table, values(f))).rejects.toMatchObject({
+          code: name.startsWith('unique') ? '23505' : '23514',
+          constraint,
+        })
+      } finally {
+        await client.query('ROLLBACK')
+        client.release()
+      }
+    },
+    break: drop(table, constraint),
+  }
+}
+routingProtections['version quota is not organization scoped'] = {
+  check: async (f) => {
+    const protection = routingProtections['retained version quota per form']
+    if (!protection) throw new Error('Missing per-form quota protection')
+    await protection.check(f)
+  },
+  break: (source) => source.replace('AND form_id = NEW.form_id) >= 1000', ') >= 1000'),
+}
+routingProtections['archived forms do not consume active quota'] = {
+  check: async (f) => {
+    const protection = routingProtections['non-archived form quota and archive frees capacity']
+    if (!protection) throw new Error('Missing active quota protection')
+    await protection.check(f)
+  },
+  break: (source) => source.replace('AND archived_at IS NULL) >= 100', ') >= 100'),
+}
+
+for (const booking of [false, true]) {
+  routingProtections[
+    booking
+      ? 'booking share lock permits form admission'
+      : 'concurrent share holders create forms without escalation'
+  ] = {
+    check: (f) => checkSharedOrganizationLocks(f, booking),
+    break: (source) =>
+      source.replace(
+        "PERFORM pg_advisory_xact_lock(hashtextextended('hourmere.routing-form-quota:' || NEW.organization_id::text, 0));",
+        'UPDATE auth.organization SET id = id WHERE id = NEW.organization_id;',
+      ),
+  }
+}
+
+routingProtections['stale snapshot form admission requires retry'] = {
+  check: (f) => checkQuotaRace(f, 'forms', true),
+  break: (source) =>
+    source.replace("current_setting('transaction_isolation') <> 'read committed'", 'false'),
+}
+routingProtections['total form quota serialization'] = {
+  check: (f) => checkQuotaRace(f, 'totalForms'),
+  break: (source) =>
+    source.replace(
+      "PERFORM pg_advisory_xact_lock(hashtextextended('hourmere.routing-form-quota:' || NEW.organization_id::text, 0));",
+      'PERFORM 1;',
+    ),
+}
+routingProtections['unarchive obeys active form quota'] = {
+  check: async (f) => {
+    const max = readRoutingStorageLimits().forms_per_organization
+    await f.pool.query(
+      `INSERT INTO routing_forms (organization_id,slug,created_by_user_id,draft) SELECT $1,'active-' || n,$2,'{}' FROM generate_series(2,$3::int) n`,
+      [f.organization, f.creator, max],
+    )
+    const archived = await insertRow(f.pool, 'routing_forms', {
+      ...formValues(f),
+      archived_at: new Date(),
+    })
+    await expect(
+      f.pool.query('UPDATE routing_forms SET archived_at=NULL WHERE id=$1', [archived]),
+    ).rejects.toMatchObject({ code: '23514', constraint: 'routing_forms_quota' })
+    await f.pool.query('UPDATE routing_forms SET archived_at=now() WHERE id=$1', [f.form])
+    await expect(
+      f.pool.query('UPDATE routing_forms SET archived_at=NULL WHERE id=$1', [archived]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+  },
+  break: (source) =>
+    source.replace(
+      "IF TG_OP = 'INSERT' OR (OLD.archived_at IS NOT NULL AND NEW.archived_at IS NULL) THEN",
+      "IF TG_OP = 'INSERT' THEN",
     ),
 }

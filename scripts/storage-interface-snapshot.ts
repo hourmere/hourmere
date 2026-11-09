@@ -1,6 +1,5 @@
-// An opt-in storage-only acceptance gate. Capture this script's output at the chosen
-// main commit, then pass that file as STORAGE_INTERFACE_BASELINE to the focused test.
-// Deliberately no permanent product snapshot: later interface steps may add surfaces.
+// Captures storage-only interface evidence without starting servers or opening a DB.
+// check-storage-interfaces.ts runs it against the event merge base in CI.
 import { strict as assert } from 'node:assert'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createDb, createPool } from '@hourmere/db'

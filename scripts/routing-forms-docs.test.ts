@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_BODY_LIMIT } from '../apps/server/src/body-limit.ts'
+import { assertRoutingStorageLimits } from '../packages/db/src/routing-storage-limits.ts'
 
 const document = readFileSync(new URL('../docs/routing-forms.md', import.meta.url), 'utf8')
 // Prose checks ignore line wrapping.
 const prose = document.replaceAll(/\s+/g, ' ')
 const limits = {
   forms_per_organization: 100,
+  total_forms_per_organization: 1000,
   versions_per_form: 1000,
   questions_per_form: 20,
   options_per_question: 50,
@@ -56,6 +58,36 @@ function escapeEveryCharacter(value: unknown): string {
 }
 
 describe('routing design numeric contract', () => {
+  it('binds storage limits to the data model', () => {
+    const dataModel = readFileSync(new URL('../docs/data-model.md', import.meta.url), 'utf8')
+    assertRoutingStorageLimits(document, dataModel)
+    for (const phrase of [
+      '100 non-archived forms',
+      '1000 total forms',
+      '1000 published versions',
+    ]) {
+      expect(dataModel).toContain(`**${phrase}**`)
+      expect(() =>
+        assertRoutingStorageLimits(document, dataModel.replace(`**${phrase}**`, `**9${phrase}**`)),
+      ).toThrow()
+      assertRoutingStorageLimits(document, dataModel)
+    }
+    for (const key of [
+      'forms_per_organization',
+      'total_forms_per_organization',
+      'versions_per_form',
+    ] as const) {
+      const anchor = `| ${key} | ${limits[key]} |`
+      expect(() =>
+        assertRoutingStorageLimits(
+          document.replace(anchor, `| ${key} | ${limits[key] + 1} |`),
+          dataModel,
+        ),
+      ).toThrow()
+      assertRoutingStorageLimits(document, dataModel)
+    }
+  })
+
   it('pins the complete numeric limit register for later implementation', () => {
     verifyLimits(document)
   })

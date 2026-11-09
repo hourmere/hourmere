@@ -2,7 +2,7 @@
 CREATE TABLE routing_forms (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   organization_id uuid NOT NULL REFERENCES auth.organization (id) ON DELETE CASCADE,
-  slug text NOT NULL,
+  slug text NOT NULL CHECK (slug ~ '^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$'),
   created_by_user_id uuid NOT NULL,
   draft jsonb NOT NULL CHECK (jsonb_typeof(draft) = 'object'),
   draft_revision integer NOT NULL DEFAULT 1 CHECK (draft_revision > 0),
@@ -47,7 +47,7 @@ CREATE TABLE routing_target_dependencies (
   rule_id text NOT NULL CHECK (rule_id = 'fallback' OR rule_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
   -- Historical UUID: deleting the target must not destroy immutable routing history.
   event_type_id uuid NOT NULL,
-  health_code text NOT NULL DEFAULT 'unknown',
+  health_code text NOT NULL DEFAULT 'unknown' CHECK (health_code IN ('ok', 'unavailable', 'unknown')),
   health_checked_at timestamptz,
   PRIMARY KEY (version_id, rule_id),
   FOREIGN KEY (organization_id, version_id)
@@ -115,11 +115,22 @@ BEGIN
       RAISE EXCEPTION 'routing version sequence cannot decrease'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'routing_forms_version_sequence';
     END IF;
-  ELSE
-    -- A real parent-row write serializes concurrent inserts, including at repeatable
-    -- read (where a stale transaction must retry). Count archived forms as well.
-    UPDATE auth.organization SET id = id WHERE id = NEW.organization_id;
-    IF (SELECT count(*) FROM public.routing_forms WHERE organization_id = NEW.organization_id) >= 100 THEN
+  END IF;
+  IF TG_OP = 'INSERT' OR (OLD.archived_at IS NOT NULL AND NEW.archived_at IS NULL) THEN
+    -- Advisory serialization needs a fresh snapshot after waiting. Reject isolation
+    -- modes that retain an old snapshot; callers must use READ COMMITTED admission.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'routing form admission requires READ COMMITTED'
+        USING ERRCODE = 'serialization_failure';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('hourmere.routing-form-quota:' || NEW.organization_id::text, 0));
+    IF TG_OP = 'INSERT' AND (SELECT count(*) FROM public.routing_forms
+        WHERE organization_id = NEW.organization_id) >= 1000 THEN
+      RAISE EXCEPTION 'total routing form quota exceeded'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'routing_forms_total_quota';
+    END IF;
+    IF NEW.archived_at IS NULL AND (SELECT count(*) FROM public.routing_forms
+        WHERE organization_id = NEW.organization_id AND archived_at IS NULL) >= 100 THEN
       RAISE EXCEPTION 'routing form quota exceeded'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'routing_forms_quota';
     END IF;
@@ -194,3 +205,16 @@ BEGIN
 END $$;
 CREATE TRIGGER routing_receipts_guard BEFORE UPDATE ON routing_receipts
   FOR EACH ROW EXECUTE FUNCTION guard_routing_receipt();
+
+CREATE FUNCTION guard_routing_target_dependency() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF ROW(NEW.organization_id, NEW.version_id, NEW.rule_id, NEW.event_type_id)
+     IS DISTINCT FROM ROW(OLD.organization_id, OLD.version_id, OLD.rule_id, OLD.event_type_id) THEN
+    RAISE EXCEPTION 'routing dependency identity is immutable'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'routing_target_dependencies_identity_immutable';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER routing_target_dependencies_guard BEFORE UPDATE ON routing_target_dependencies
+  FOR EACH ROW EXECUTE FUNCTION guard_routing_target_dependency();
