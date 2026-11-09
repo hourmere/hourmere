@@ -210,11 +210,10 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
-- **Coordinate the attendee no-show upgrade (migration 0070).** Stop every old web/all
-  and worker process, apply the migration, then start all roles together with the new code.
-  The migration replaces the webhook delivery uniqueness constraint with a partial index that
-  excludes attendance changes; old webhook writes fail with PostgreSQL `42P10` after
-  migration and can roll back booking changes. See the
+- **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
+  apply while the previous version is still running: it adds nullable attendee columns and
+  only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply
+  it before starting the new version (automatic with `AUTO_MIGRATE=true`). See the
   [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#private-attendee-no-show-markers).
 - **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
   and worker process before applying the migration, then restart every role with the new

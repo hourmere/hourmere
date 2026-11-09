@@ -1584,21 +1584,26 @@ Actual booking hosts may change each attendee independently. Current team owners
 may manage bookings they do not host only through a browser session; API keys of any scope
 and MCP OAuth retain host-only read and write access. Changes are allowed strictly after
 the scheduled start, never on cancelled or imported read-only bookings.
+Payment holds follow host booking reads: pending, expired and unpaid-cancelled holds return
+`booking_not_found`; confirmed paid bookings stay readable but refuse changes with
+`paid_booking_management_unavailable`, as host cancellation and rescheduling do.
 Collective hosts share the attendee state; round-robin authority belongs to the assigned
 host, not every pool member. Serialized changes preserve idempotent replay attribution.
 Rescheduling creates fresh attendee rows; cancellation retains historical marks.
 Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com/docs/no-shows).
 
-The migration adds `booking.attendee_no_show_changed` to webhook subscriptions and delivery
-types. Migration 0064's delivery key (webhook, booking, event type and request identity,
-with NULLs equal) becomes the partial unique index `webhook_deliveries_booking_lifecycle`,
-which still deduplicates lifecycle and reschedule-request receipts. Attendance changes are
-outside it and can emit multiple transitions for the same booking. Existing subscription
-arrays and delivery snapshots are preserved. This upgrade is not rolling-safe: stop every
-old web/all/worker process, apply migration 0070, then start all roles together with
-upgraded code. Old webhook capture names the previous unique constraint's columns without
-the index predicate and fails with PostgreSQL `42P10` after migration, potentially rolling
-back booking changes.
+The migration only widens the webhook subscription and delivery event checks to add
+`booking.attendee_no_show_changed`. Migration 0064's unique delivery key
+`(webhook_id, booking_id, event_type, request_id)` with NULLs equal stays unchanged, and so
+does capture's `ON CONFLICT` target. Attendance deliveries reuse `request_id` (a plain
+`uuid` without a foreign key) as a per-change receipt identity: capture stores the change's
+fresh event ID there, in the transaction that changes the marker. Every transition therefore
+gets its own delivery, while lifecycle receipts (NULL request) and reschedule-request receipts
+(the request's ID) deduplicate exactly as before. The stored value is only a receipt key; it
+does not identify a reschedule request and attendance payloads never include
+`data.requestId`. Existing subscription arrays and delivery snapshots are preserved. The
+migration is safe to apply while the previous version runs: old code writes only the five
+older events and keeps its arbiter. Apply it before starting the new version.
 
 ## Group slots and independent seats
 

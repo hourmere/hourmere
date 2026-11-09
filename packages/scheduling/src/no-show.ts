@@ -23,9 +23,13 @@ export async function setAttendeeNoShow(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     const booking = await authorizeBookingNoShow(trx, ctx, bookingId)
+    // Confirmed paid bookings: paid_booking_management_unavailable, as for other host actions.
     await assertBookingLocallyManaged(trx, bookingId)
+    // Only confirmed and cancelled rows are visible; anything else stays booking_not_found.
     if (booking.status !== 'confirmed')
-      throw new DomainError('conflict', 'booking_cancelled', 'This booking is cancelled')
+      throw booking.status === 'cancelled'
+        ? new DomainError('conflict', 'booking_cancelled', 'This booking is cancelled')
+        : missing()
     const now = ctx.now()
     if (Temporal.Instant.compare(now, Temporal.Instant.from(booking.start_at.toISOString())) <= 0)
       throw new DomainError(
@@ -86,11 +90,20 @@ export async function authorizeBookingNoShow(
     .$if(lock, (query) => query.forShare('member'))
     .executeTakeFirst()
   if (!member) throw missing()
+  // Same visibility as host booking reads: pending, expired and unpaid-cancelled payment
+  // holds do not exist for their hosts (booking_not_found).
   const booking = await trx
     .selectFrom('bookings')
     .select(['id', 'status', 'start_at'])
     .where('id', '=', bookingId)
     .where('organization_id', '=', ctx.principal.organization.id)
+    .where('status', 'in', ['confirmed', 'cancelled'])
+    .where((eb) =>
+      eb.or([
+        eb('payment_hold_expires_at', 'is', null),
+        eb('payment_confirmed_at', 'is not', null),
+      ]),
+    )
     .$if(lock, (query) => query.forUpdate())
     .executeTakeFirst()
   if (!booking) throw missing()

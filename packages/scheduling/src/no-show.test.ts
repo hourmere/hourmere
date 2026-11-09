@@ -221,6 +221,58 @@ describe.skipIf(!serverUrl)('private attendee no-show', () => {
         ).rejects.toMatchObject({ code })
     }
   })
+  it('hides unconfirmed payment holds and refuses paid bookings like other host actions', async () => {
+    const holdExpiresAt = '2026-11-01T09:00:00Z'
+    const unconfirmed = [
+      ['pending_payment'],
+      ['pending_payment', 'expired'],
+      ['pending_payment', 'cancelled'],
+    ] as const
+    for (const states of unconfirmed) {
+      const s = await setup()
+      for (const status of states)
+        await db
+          .updateTable('bookings')
+          .set({
+            status,
+            ...(status === 'pending_payment' ? { payment_hold_expires_at: holdExpiresAt } : {}),
+            ...(status === 'cancelled' ? { cancelled_at: holdExpiresAt } : {}),
+          })
+          .where('id', '=', s.bookingId)
+          .execute()
+      await expect(listBookingAttendeeNoShows(s.ctx, s.bookingId)).rejects.toMatchObject({
+        code: 'booking_not_found',
+      })
+      for (const marked of [true, false])
+        await expect(
+          setAttendeeNoShow(s.ctx, s.bookingId, s.attendeeId, marked),
+        ).rejects.toMatchObject({ code: 'booking_not_found' })
+      // Host booking detail reads agree.
+      await expect(getHostBooking(s.ctx, s.bookingId)).rejects.toMatchObject({
+        code: 'booking_not_found',
+      })
+    }
+    // A confirmed paid booking stays readable but, like cancel/reschedule, is not managed.
+    const paid = await setup()
+    await db
+      .updateTable('bookings')
+      .set({ payment_hold_expires_at: holdExpiresAt, payment_reference: 'pi_noshow_paid' })
+      .where('id', '=', paid.bookingId)
+      .execute()
+    const row = await db
+      .selectFrom('bookings')
+      .select(['status', 'payment_confirmed_at'])
+      .where('id', '=', paid.bookingId)
+      .executeTakeFirstOrThrow()
+    expect(row.status).toBe('confirmed')
+    expect(row.payment_confirmed_at).toBeInstanceOf(Date)
+    expect(
+      (await listBookingAttendeeNoShows(paid.ctx, paid.bookingId)).map((attendee) => attendee.id),
+    ).toContain(paid.attendeeId)
+    await expect(
+      setAttendeeNoShow(paid.ctx, paid.bookingId, paid.attendeeId, true),
+    ).rejects.toMatchObject({ code: 'paid_booking_management_unavailable' })
+  })
   it('serializes concurrent marks and persists exactly one transition', async () => {
     const s = await setup()
     const changed = vi.fn()

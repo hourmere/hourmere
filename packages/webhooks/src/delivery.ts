@@ -93,6 +93,12 @@ async function captureBookingWebhook(
     .execute()
   if (!endpoints.length) return
   const eventId = randomUUID()
+  // Attendance changes reuse request_id (a plain uuid without a foreign key, added by 0064)
+  // as a per-change receipt identity: this capture's fresh event ID, created in the same
+  // transaction as the change. The 0064 key (webhook, booking, event type, request) then
+  // gives every transition its own delivery, while lifecycle and reschedule-request receipts
+  // deduplicate exactly as before. The value is never sent as data.requestId.
+  const receiptId = event.type === 'attendee_no_show_changed' ? eventId : requestId
   const payload = JSON.stringify({
     id: eventId,
     type: eventType,
@@ -123,17 +129,12 @@ async function captureBookingWebhook(
         booking_id: booking.id,
         event_id: eventId,
         event_type: eventType,
-        request_id: requestId,
+        request_id: receiptId,
         payload,
         created_at: new Date(now.epochMilliseconds),
       })
-      // Lifecycle receipts are unique per endpoint/booking/event/request; each attendance
-      // change is its own receipt, so the arbiter is the partial lifecycle index.
       .onConflict((oc) =>
-        oc
-          .columns(['webhook_id', 'booking_id', 'event_type', 'request_id'])
-          .where(sql<boolean>`event_type <> 'booking.attendee_no_show_changed'`)
-          .doNothing(),
+        oc.columns(['webhook_id', 'booking_id', 'event_type', 'request_id']).doNothing(),
       )
       .returning('id')
       .executeTakeFirst()

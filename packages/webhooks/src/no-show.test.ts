@@ -61,6 +61,8 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     const deliveries = await rows(webhook.id)
     expect(deliveries).toHaveLength(3)
     expect(new Set(deliveries.map((row) => row.event_id)).size).toBe(3)
+    // Each change's event ID is its receipt identity under 0064's unchanged unique key.
+    for (const row of deliveries) expect(row.request_id).toBe(row.event_id)
     expect(queue.enqueue).toHaveBeenCalledTimes(3)
     expect(
       deliveries.filter((row) => JSON.parse(row.payload).data.noShowMarkedAt === null),
@@ -83,6 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
           'status',
         ].sort(),
       )
+      expect(payload.data).not.toHaveProperty('requestId')
       expect(payload.data.attendeeId).toBe(event.attendeeId)
       expect([null, event.noShowMarkedAt]).toContain(payload.data.noShowMarkedAt)
     }
@@ -109,20 +112,24 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     expect(await rows(webhook.id)).toEqual([])
   })
 
-  it('source-copy negative control detects a missing global capture guard', async () => {
+  function captureCopy(before: string, after: string) {
     const source = readFileSync(new URL('./delivery.ts', import.meta.url), 'utf8')
     const start = source.indexOf('async function captureBookingWebhook(')
     const end = source.indexOf('export function webhookDeliveryJob', start)
     const original = source.slice(start, end)
-    expect(original).toContain('if (!settings.enabled) return')
-    const mutant = stripTypeScriptTypes(original.replace('if (!settings.enabled) return', ''))
-    const capture = new Function(
+    expect(original).toContain(before)
+    const mutant = stripTypeScriptTypes(original.replace(before, after))
+    return new Function(
       'randomUUID',
       'isImportedBooking',
       'sql',
       'WEBHOOK_DELIVERY_JOB',
       `${mutant}; return captureBookingWebhook`,
     )(randomUUID, isImportedBooking, sql, 'webhook-delivery')
+  }
+
+  it('source-copy negative control detects a missing global capture guard', async () => {
+    const capture = captureCopy('if (!settings.enabled) return', '')
     const { webhook, event } = await fixture()
     await db
       .transaction()
@@ -137,5 +144,27 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
       )
     const actual = await rows(webhook.id)
     expect(() => expect(actual).toEqual([])).toThrow()
+  })
+
+  it('source-copy negative control detects a missing per-change receipt identity', async () => {
+    const capture = captureCopy(
+      "event.type === 'attendee_no_show_changed' ? eventId : requestId",
+      'requestId',
+    )
+    const { webhook, event } = await fixture()
+    for (const change of [event, { ...event, noShowMarkedAt: null, noShowMarkedBy: null }])
+      await db
+        .transaction()
+        .execute((trx) =>
+          capture(
+            { enqueue: async () => randomUUID() },
+            settings,
+            trx,
+            { type: 'attendee_no_show_changed', ...change },
+            now,
+          ),
+        )
+    const actual = await rows(webhook.id)
+    expect(() => expect(actual).toHaveLength(2)).toThrow()
   })
 })
