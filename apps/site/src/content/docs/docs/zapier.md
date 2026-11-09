@@ -25,7 +25,7 @@ Use separate connections for different jobs so each key has the least privilege 
 |---|---|---|
 | Test connection, find booking, find slots, event-type dropdown | `read` | Existing booking and event visibility |
 | Create, cancel or reschedule a booking | `bookings` | Existing booking permissions; cancellation and rescheduling use host authority |
-| Booking Created, Booking Cancelled, Booking Rescheduled triggers | `full` | Personal organization owner or team owner/admin; webhooks enabled |
+| Booking Created, Booking Cancelled, Booking Rescheduled, Attendee No-Show Changed triggers | `full` | Personal organization owner or team owner/admin; webhooks enabled |
 
 `bookings` and `full` also support the connection test and scheduling reads. Use `read`
 for read-only workflows, `bookings` for booking actions, and reserve `full` for the hook
@@ -56,6 +56,10 @@ registration are not backfilled.
   ID and emits one reschedule event; it does not emit a separate cancellation event.
 - **Booking Cancelled → close a task:** match by booking ID. Events can arrive out of
   order, so reconcile their timestamps and the booking chain before overwriting newer state.
+- **Attendee No-Show Changed → update attendance:** match by booking ID and `attendeeId`.
+  A null `noShowMarkedAt` means a host removed the mark. Each actual mark or unmark is a
+  separate event; use `occurredAt` to keep the latest state. The trigger carries no
+  attendee name or email. See [no-shows](/docs/no-shows).
 - **Incoming request → find slots → create a booking:** choose the event type, search a
   bounded range and map an exact returned UTC start. Use the same duration in both steps.
   Supply the invitee's IANA time zone, such as `Europe/Berlin`; do not convert local wall
@@ -106,7 +110,8 @@ setup aid, not a complete historical change feed or an outage-recovery poller. O
 hooks can include bookings the connected administrator does not host, which the sample
 list and Find Booking cannot read. Webhook samples are projected to the same minimal
 fields as live events, with `organizationId: null` because host booking reads omit that
-field. Live deliveries include the organization ID. Disable and re-enable the Zap to
+field. Live deliveries include the organization ID. No-show samples list only attendees
+currently marked on those bookings, timed at the mark; unmarking leaves no sample. Disable and re-enable the Zap to
 register a fresh subscription
 after signing-secret rotation; a manually rotated secret cannot be recovered by the app.
 See [webhook delivery limits](/docs/webhooks#delivery-and-operational-limits) for bounded

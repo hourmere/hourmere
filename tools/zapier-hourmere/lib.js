@@ -1,5 +1,8 @@
 const { createHmac, timingSafeEqual } = require('node:crypto')
 
+// Attendance changes add attendee and marker fields; unmarking sets both markers to null.
+const NO_SHOW_EVENT = 'booking.attendee_no_show_changed'
+
 function baseUrl(z, bundle) {
   let url
   try {
@@ -121,7 +124,8 @@ async function verifyDelivery(z, bundle, eventType) {
     !event.id ||
     event.type !== eventType ||
     !event.data ||
-    typeof event.data.bookingId !== 'string'
+    typeof event.data.bookingId !== 'string' ||
+    (eventType === NO_SHOW_EVENT && typeof event.data.attendeeId !== 'string')
   )
     return reject()
   try {
@@ -153,8 +157,13 @@ async function verifyDelivery(z, bundle, eventType) {
       status: event.data.status,
       source: event.data.source,
       rescheduledFromId: event.data.rescheduledFromId,
+      ...(eventType === NO_SHOW_EVENT && {
+        attendeeId: event.data.attendeeId,
+        noShowMarkedAt: event.data.noShowMarkedAt,
+        noShowMarkedBy: event.data.noShowMarkedBy,
+      }),
     },
   ]
 }
 
-module.exports = { baseUrl, request, publicPath, verifyDelivery }
+module.exports = { NO_SHOW_EVENT, baseUrl, request, publicPath, verifyDelivery }

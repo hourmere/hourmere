@@ -74,7 +74,7 @@ requests `GET /api/v1/me`; the connection label identifies the instance.
 |---|---|
 | Connection test, find booking, find slots, event-type dropdown | `read`, `bookings`, `full` |
 | Create booking, cancel booking, reschedule booking | `bookings`, `full` |
-| Subscribe/unsubscribe all three booking triggers | `full` |
+| Subscribe/unsubscribe all four booking triggers, including attendee no-show changes | `full` |
 
 Use `read` for read-only workflows and `bookings` for booking actions. Reserve `full`
 for a separate hook connection. Hook management additionally requires organization

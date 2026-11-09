@@ -292,7 +292,11 @@ describe('Hourmere Zapier writes', () => {
   })
 })
 
-function delivery(type = 'booking.created', offsetSeconds = 0) {
+const noShowEvent = 'booking.attendee_no_show_changed'
+const attendeeId = '00000000-0000-4000-8000-000000000003'
+const marked = { noShowMarkedAt: '2027-03-14T09:45:00Z', noShowMarkedBy: nextId }
+
+function delivery(type = 'booking.created', offsetSeconds = 0, extra: object = {}) {
   const event = {
     id: nextId,
     type,
@@ -306,6 +310,8 @@ function delivery(type = 'booking.created', offsetSeconds = 0) {
       status: type === 'booking.cancelled' ? 'cancelled' : 'confirmed',
       source: 'api',
       rescheduledFromId: type === 'booking.rescheduled' ? id : null,
+      ...(type === noShowEvent && { attendeeId, ...marked }),
+      ...extra,
     },
   }
   // Whitespace exercises exact raw bytes, not reserialized cleanedRequest.
@@ -326,7 +332,7 @@ function delivery(type = 'booking.created', offsetSeconds = 0) {
 }
 
 describe('Hourmere REST hooks', () => {
-  it.each(['created', 'cancelled', 'rescheduled'])(
+  it.each(['created', 'cancelled', 'rescheduled', 'attendee_no_show_changed'])(
     'subscribes, accepts, samples and unsubscribes booking.%s',
     async (suffix) => {
       const operation = App.triggers[`booking_${suffix}`].operation
@@ -350,6 +356,7 @@ describe('Hourmere REST hooks', () => {
         ...booking,
         status: suffix === 'cancelled' ? 'cancelled' : 'confirmed',
         rescheduledFromId: suffix === 'rescheduled' ? nextId : null,
+        attendees: [{ id: attendeeId, ...marked }],
       }
       api()
         .get('/api/v1/bookings')
@@ -393,6 +400,60 @@ describe('Hourmere REST hooks', () => {
       expect(result[0].organizationId).toBeNull()
     },
   )
+
+  it('samples only current no-show marks that carry attendee IDs', async () => {
+    const unmarked = { id: nextId, noShowMarkedAt: null, noShowMarkedBy: null }
+    const legacy = { noShowMarkedAt: marked.noShowMarkedAt }
+    api()
+      .get('/api/v1/bookings')
+      .query({ limit: 25, order: 'desc' })
+      .reply(200, {
+        data: [
+          { ...booking, attendees: [{ id: attendeeId, ...marked }, unmarked, legacy] },
+          { ...booking, id: nextId, attendees: [unmarked] },
+        ],
+        nextCursor: null,
+      })
+    const operation = App.triggers.booking_attendee_no_show_changed.operation
+    const result = await run(operation.performList)
+    expect(result).toEqual([
+      {
+        id: `sample:${noShowEvent}:${id}:${attendeeId}`,
+        type: noShowEvent,
+        occurredAt: marked.noShowMarkedAt,
+        bookingId: id,
+        organizationId: null,
+        eventTypeId: booking.eventTypeId,
+        start: booking.start,
+        end: booking.end,
+        status: 'confirmed',
+        source: 'api',
+        rescheduledFromId: null,
+        attendeeId,
+        ...marked,
+      },
+    ])
+    expect(Object.keys(result[0]).sort()).toEqual(Object.keys(operation.sample).sort())
+  })
+
+  it('passes unmarking through and drops attendance events without an attendee ID', async () => {
+    const perform = App.triggers.booking_attendee_no_show_changed.operation.perform
+    const unmark = delivery(noShowEvent, 0, { noShowMarkedAt: null, noShowMarkedBy: null })
+    await expect(perform(hookContext(), unmark.bundle)).resolves.toEqual([
+      expect.objectContaining({ attendeeId, noShowMarkedAt: null, noShowMarkedBy: null }),
+    ])
+    const z = hookContext()
+    await expect(
+      perform(z, delivery(noShowEvent, 0, { attendeeId: null }).bundle),
+    ).resolves.toEqual([])
+    expect(z.console.log.mock.calls).toEqual([['Hourmere webhook: invalid_webhook_signature']])
+    expect(z.cache.set).not.toHaveBeenCalled()
+    const created = await App.triggers.booking_created.operation.perform(
+      hookContext(),
+      delivery().bundle,
+    )
+    expect(created[0]).not.toHaveProperty('attendeeId')
+  })
   // Core's appTester cache mock persists but ignores nx and always reports a write. This
   // mock honours nx, and with `stores: false` it returns false without writing, which
   // zapier-platform-core's own tests expect when the app's cache rate limit applies.
