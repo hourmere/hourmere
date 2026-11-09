@@ -115,6 +115,11 @@ import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
+// Hard-off until each protocol completes its rollout. Production never overrides these;
+// only in-process tests inject enabled capabilities into productRoutes.
+const ssoOidcEnabled = false
+const ssoSamlEnabled = false
+
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
  * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
@@ -141,6 +146,8 @@ export function productRoutes({
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
+  ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
+  ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
@@ -158,6 +165,10 @@ export function productRoutes({
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
   slotSnippetsEnabled?: boolean
+  /** In-process test injection only; no operator setting exists during hard-off. */
+  ssoOidcEnabled?: boolean
+  /** In-process test injection only; no operator setting exists during hard-off. */
+  ssoSamlEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -196,6 +207,8 @@ export function productRoutes({
       embedAllowedOrigins,
       privacyPolicyUrl,
       termsUrl,
+      ssoOidcEnabled: oidcEnabled,
+      ssoSamlEnabled: samlEnabled,
     }),
     calendarRoutes({
       db,
