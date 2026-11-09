@@ -1,6 +1,9 @@
 # SCIM provisioning design and token foundation
 
-Status: token foundation only, reviewed against official sources on **2026-11-06**.
+Status: token administration and identity storage; design sources reviewed on **2026-11-06**.
+The connection identity and User schema step now provides internal storage, including
+credential bindings, claim intents and retained resource identities. It adds no resource
+handlers or membership lifecycle behavior.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -26,8 +29,8 @@ through a separately chosen plugin are future test targets, not verified integra
 The RFC Editor pages list later updates to these RFCs; this first implementation
 explicitly targets the bounded RFC 7643/7644 subset below, not every newer extension.
 
-The SSO proposal in [PR #247](https://github.com/hourmere/hourmere/pull/247)
-(`docs/sso.md` on that branch, inspected 2026-11-06) is still subject to acceptance.
+The accepted [SSO design](sso.md) defines shared admission tombstones and identity
+linking; its authentication and admission implementation remains a prerequisite.
 SCIM controls membership lifecycle; SSO controls authentication proof. Before enabling
 Users, reconcile its exact linking, admission tombstones and revocation transactions
 with the accepted SSO implementation. Token administration does not depend on SSO.
@@ -197,6 +200,94 @@ manual reactivation. Both controls must explicitly clear their own blocker befor
 returns. Existing management interfaces must display the managed state and refuse bypasses
 on the server, including native Better Auth routes. SSO JIT cannot recreate a suspended
 SCIM membership; SSO enforcement still requires a valid team proof after provisioning.
+
+The storage foundation retains local and SCIM blockers, including cleared history,
+after account deletion. `scim_membership_blocks.user_id` becomes null through its FK;
+the account-deletion trigger first captures the account's normalized mailbox in
+`identity_email`, on that account's rows only. This is the team-local admission tombstone
+shared with the SSO design, not an additional SSO-only tombstone store. It identifies a
+removal decision, never an account link or authentication proof. Captured mailbox identity
+is immutable and cannot be redirected or attached to another account; explicit reinstatement
+clears the appropriate blocker rather than deleting or rewriting its identity. The database
+also freezes the captured decision itself: its authority, kind, resource reference and
+creation time cannot change, `cleared_at` moves from null to a timestamp exactly once, the
+row cannot be deleted while its organization exists (whole-organization deletion still
+cascades), and the account reference may only become null once that account no longer
+exists. One live tombstone exists per organization, normalized mailbox, authority and
+kind, mirroring the per-account rule for live blockers.
+
+The later shared SSO/SCIM admission service must check live blockers by both current
+account ID and proven normalized mailbox under the organization lock. A newly registered
+account with the same proven mailbox must therefore still encounter the retained local
+removal decision. It cannot gain access merely by claiming a fresh SCIM resource or
+receiving `active:true`. A new current invitation can explicitly clear local removal as
+specified by SSO; SCIM suspension still needs its own authority's reactivation. Mailbox
+matching happens only after independent proof and cannot auto-link accounts. The retained
+mailbox is organization-local personal data, limited to 320 characters, not exposed through
+SCIM resources or logged; whole-organization deletion removes it, and any later purge
+requires the audited retention policy. This foundation adds storage only, not admission
+handlers or enforcement.
+
+Retired resource rows are immutable, including their profile and timestamps. Native
+account/member deletion may only clear their nullable links; it cannot relink a retired
+resource. Stored userName and claim mailbox values are bounded before trimming as well
+as checked for nonblank normalized values. Referencing-column indexes cover cleanup and
+FK checks over live rows and history.
+
+Migration 0073 takes transaction-scoped table locks before it reads anything, in the
+[documented lock order](data-model.md#team-membership-and-host-lock-order): first
+`auth."user"` and then `auth.organization` in `SHARE ROW EXCLUSIVE` mode (reads and
+`FOR UPDATE`/`FOR SHARE` row locks continue; inserts, updates and deletes wait), then
+`auth.member` and `auth.invitation` in `ACCESS EXCLUSIVE` mode, then
+`scim_provisioning_tokens` in `ACCESS EXCLUSIVE` mode. Each lock is taken directly in the
+mode the migration's DDL needs, never upgraded, and held to commit. The connection
+backfill runs before the organization foreign key is added, so the migration takes no
+organization row locks; a team-administration transaction that holds its organization
+row `FOR UPDATE` only delays the migration through the member lock it takes next, and
+then completes. A concurrent token therefore belongs either to the backfill snapshot or
+to the installed trigger, closing the new-organization token creation window.
+
+This lock set serializes the following writers, each of which commits before the
+migration or starts after it: token administration (a writer that already counted
+tokens, one holding the user, organization and member locks, one caught between its
+organization and member locks, and the first token of an organization), team creation,
+sign-up, personal-organization creation and invitation creation. It does not serialize
+every team write. Two mechanisms still form a deadlock with the migration. A writer that
+locks member rows and then writes the organization row: the team-settings update
+(`/organization/update` locks the user, organization and member rows, then updates the
+organization row while the migration holds the organization table lock and waits for the
+member lock). And a writer that reads an invitation row before its member access, while
+the migration holds the member lock and waits for the invitation lock: invitation
+acceptance (a plain invitation read, then the organization and invitation row locks and
+member reads) and invitation cancellation from the team page
+(`/organization/cancel-invitation` from a session reads the invitation to find its
+organization, then takes the user, organization and member locks; the REST route takes
+those locks first and serializes). PostgreSQL resolves such a cycle after
+`deadlock_timeout` by aborting one side with `40P01`: either that request fails, or the
+migration rolls back whole, is not recorded, and is reapplied on the next start.
+
+Migration 0073 is therefore meant to run with the application stopped, which the
+documented Compose upgrade does (`docker compose stop app`, or `app worker`, before the
+new version starts with `AUTO_MIGRATE=true`). The migration also bounds every lock wait
+with `SET LOCAL lock_timeout = '5s'`: while it waits for the member, invitation or token
+lock it already holds the account and organization table locks, so sign-up, email
+verification and team writes would otherwise stall behind it for as long as the blocking
+transaction lives. After the timeout the migration fails with `55P03`, records nothing,
+and the process start fails; the restarted process retries it. The regression tests drive
+the serialized writer shapes against the migration and against each weakened lock order,
+and hold a conflicting lock on each table the migration locks (derived from the migration
+source) against the bounded wait and its retry.
+
+## Known limitations
+
+- Account deletion is the privacy path and is never refused by admission storage. A
+  blocker whose mailbox cannot be stored as a tombstone (empty, or longer than 320
+  characters after lower-casing and trimming) is dropped with the account instead of being
+  captured, so that removal decision is not retained. The same applies to a blocker whose
+  decision is already recorded as a live tombstone for the same organization, mailbox,
+  authority and kind; the existing tombstone remains. Sign-up and sign-in do not yet cap
+  account mailbox length; invitations cap it at 254 characters.
+
 
 ## Groups to teams: required schema decision
 

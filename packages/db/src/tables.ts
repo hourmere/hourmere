@@ -1080,6 +1080,25 @@ export interface Schedules {
   weekly_hours: Json;
 }
 
+export interface ScimConnections {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  organization_id: string;
+}
+
+export interface ScimMembershipBlocks {
+  cleared_at: Timestamp | null;
+  connection_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  identity_email: string | null;
+  kind: string;
+  organization_id: string;
+  scim_user_id: string | null;
+  source: string;
+  user_id: string | null;
+}
+
 export interface ScimProvisioningTokens {
   created_at: Generated<Timestamp>;
   created_by_user_id: string | null;
@@ -1093,6 +1112,56 @@ export interface ScimProvisioningTokens {
   rotated_at: Timestamp | null;
   rotated_by_user_id: string | null;
   token_hash: string | null;
+}
+
+export interface ScimTokenConnections {
+  connection_id: string;
+  organization_id: string;
+  token_id: string;
+}
+
+export interface ScimUserClaims {
+  completed_at: Timestamp | null;
+  connection_id: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  invalidated_at: Timestamp | null;
+  invitation_id: string | null;
+  organization_id: string;
+  scim_user_id: string;
+  work_email: string;
+}
+
+export interface ScimUsers {
+  active: Generated<boolean>;
+  connection_id: string;
+  cost_center: string | null;
+  created_at: Generated<Timestamp>;
+  department: string | null;
+  display_name: string | null;
+  division: string | null;
+  employee_number: string | null;
+  enterprise_organization: string | null;
+  external_id: string | null;
+  family_name: string | null;
+  formatted_name: string | null;
+  given_name: string | null;
+  id: Generated<string>;
+  linked_member_id: string | null;
+  linked_user_id: string | null;
+  locale: string | null;
+  manager_id: string | null;
+  nick_name: string | null;
+  normalized_user_name: Generated<string | null>;
+  organization_id: string;
+  retired_at: Timestamp | null;
+  timezone: string | null;
+  title: string | null;
+  updated_at: Generated<Timestamp>;
+  user_name: string;
+  user_type: string | null;
+  work_email: string | null;
 }
 
 export interface SignInEmails {
@@ -1337,7 +1406,12 @@ export interface DB {
   routing_target_dependencies: RoutingTargetDependencies;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
+  scim_connections: ScimConnections;
+  scim_membership_blocks: ScimMembershipBlocks;
   scim_provisioning_tokens: ScimProvisioningTokens;
+  scim_token_connections: ScimTokenConnections;
+  scim_user_claims: ScimUserClaims;
+  scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
