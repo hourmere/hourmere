@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { revealEventSetting } from '../event-settings.ts'
 import { selectPublicLanguage } from '../public-language.ts'
 import {
   expect,
@@ -41,6 +42,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
       .getByRole('combobox', { name: /^(Interface language|界面语言)$/ })
       .selectOption(locale)
     const editor = page.locator('.notifications-editor')
+    await revealEventSetting(editor)
     const reminder = editor.locator('fieldset[id="notifications.reminders"] .notification-card')
     await reminder.getByLabel(zh ? '预设时间' : 'Timing preset', { exact: true }).selectOption('')
     await reminder

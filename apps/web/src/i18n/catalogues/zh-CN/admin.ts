@@ -1,5 +1,20 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Location options': '地点选项',
+  'Default location': '默认地点',
+  'Location label': '地点名称',
+  'Add location option': '添加地点选项',
+  'Remove location option': '移除地点选项',
+  'Move location up': '上移地点',
+  'Move location down': '下移地点',
+  'Choose each location type only once.': '每种地点类型只能选择一次。',
+  'Invitee provides a phone number': '由受邀人提供电话号码',
+
+  'Description and visibility': '说明与显示设置',
+  'Additional durations': '更多时长',
+  'Location options and conferencing': '地点选项与视频会议',
+  'Duration (minutes)': '时长（分钟）',
+
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   'Loading logo preview…': '正在加载标志预览…',

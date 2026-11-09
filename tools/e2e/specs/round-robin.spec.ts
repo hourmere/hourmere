@@ -1,3 +1,4 @@
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 for (const selected of ['en', 'zh-CN'] as const) {
@@ -10,6 +11,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await app.authorizeHost('owner')
     await page.goto(`${app.url}/app/event-types/new`)
     await page.getByLabel(zh ? '标题' : 'Title', { exact: true }).fill('Rotating introduction')
+    await revealEventSetting(page.getByLabel(zh ? '排期方式' : 'Scheduling', { exact: true }))
     await page
       .getByLabel(zh ? '排期方式' : 'Scheduling', { exact: true })
       .selectOption('round_robin')

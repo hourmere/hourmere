@@ -1,4 +1,5 @@
 import { icsHasLocation } from '../../../packages/mail/src/booking-link-testing.ts'
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 test.use({ automaticMeet: true })
@@ -15,6 +16,7 @@ test('a host explicitly enables automatic Meet and language switching preserves 
     name: 'Create a unique Google Meet link for each booking',
     exact: true,
   })
+  await revealEventSetting(optIn)
   await expect(optIn).not.toBeChecked()
   await optIn.check()
   await page

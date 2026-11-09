@@ -1,5 +1,5 @@
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
-import { type FormEvent, useCallback, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
@@ -39,6 +39,7 @@ import { DurationsEditor } from './DurationsEditor.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
 import {
+  changeLocationKind,
   comparable,
   draftFromEventType,
   type EventTypeDraft,
@@ -57,6 +58,7 @@ import { HostAssignment } from './HostAssignment.tsx'
 import { NotificationsEditor } from './NotificationsEditor.tsx'
 import { pruneNotificationErrors } from './notifications-form.ts'
 import { OneTimeLinks } from './OneTimeLinks.tsx'
+import { OrderedLocationsEditor } from './OrderedLocationsEditor.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -186,6 +188,23 @@ function EventTypeForm({
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<UiText>(message ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
+  // Fields stay mounted in disclosures, so opening a group cannot reset its values.
+  // Run after ErrorSummary's effect: a hidden invalid field takes focus once revealed.
+  useEffect(() => {
+    if (!attempt) return
+    let hiddenField: HTMLElement | null = null
+    for (const id of Object.keys(errors)) {
+      const field = document.getElementById(id) ?? document.getElementById(`${id}-error`)
+      if (!field || !formRef.current?.contains(field)) continue
+      const group = field.closest('details')
+      if (group && !group.open) {
+        group.open = true
+        hiddenField ??= field
+      }
+    }
+    hiddenField?.focus()
+  }, [attempt, errors])
   const mounted = useMounted()
   const [readiness, retryReadiness, invalidateReadiness, shareReadiness] = useEditorReadiness(
     me,
@@ -209,6 +228,7 @@ function EventTypeForm({
     setDraft((d) => ({
       ...d,
       [name]: value,
+      ...(name === 'locationKind' && changeLocationKind(d, value as LocationKind | '')),
       ...(name === 'durationMinutes' &&
         !slugTouched && {
           slug: suggestedBookingSlug(d.title, String(value)),
@@ -397,6 +417,10 @@ function EventTypeForm({
             ? 'Configuration check failed'
             : 'Configuration not checked'
       : null
+  const defaults = emptyDraft()
+  const changed = (...fields: (keyof EventTypeDraft)[]) =>
+    editing &&
+    fields.some((field) => JSON.stringify(baseline[field]) !== JSON.stringify(defaults[field]))
   const duration = parseWhole(draft.durationMinutes)
   const suggestedSlug = slugSuffix
     ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
@@ -423,7 +447,20 @@ function EventTypeForm({
           retryReadiness={retryReadiness}
         />
       )}
-      <form className="editor" onSubmit={submit} noValidate>
+      <form
+        className="editor"
+        ref={formRef}
+        onSubmit={submit}
+        noValidate
+        onClickCapture={(event) => {
+          const link = (event.target as HTMLElement).closest('a[href^="#"]')
+          const id = link?.getAttribute('href')?.slice(1)
+          if (!id) return
+          const field = document.getElementById(id) ?? document.getElementById(`${id}-error`)
+          const group = field?.closest('details')
+          if (group) group.open = true
+        }}
+      >
         <ErrorSummary
           errors={errors}
           labels={fieldLabels(draft)}
@@ -561,6 +598,45 @@ function EventTypeForm({
                 )}
               </div>
               <Field
+                id="durationMinutes"
+                label={t('Duration (minutes)')}
+                error={errors.durationMinutes}
+              >
+                {(props) =>
+                  draft.allowedDurationsMinutes.length > 1 ? (
+                    <select
+                      {...props}
+                      value={draft.durationMinutes}
+                      onChange={(event) => set('durationMinutes', event.target.value)}
+                    >
+                      {draft.allowedDurationsMinutes.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {formatMinutes(minutes, displayLocale)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.durationMinutes}
+                      onChange={(event) => {
+                        set('durationMinutes', event.target.value)
+                        set('allowedDurationsMinutes', [Number(event.target.value)])
+                      }}
+                    />
+                  )
+                }
+              </Field>
+              <LocationFields draft={draft} errors={errors} set={set} />
+            </div>
+          </section>
+          <SettingsGroup
+            label="Description and visibility"
+            initiallyOpen={changed('description', 'position', 'isActive', 'isHidden')}
+          >
+            <div className="stack">
+              <Field
                 id="description"
                 label={t('Description')}
                 optional
@@ -576,16 +652,6 @@ function EventTypeForm({
                   />
                 )}
               </Field>
-              <DurationsEditor
-                durations={draft.allowedDurationsMinutes}
-                defaultDuration={draft.durationMinutes}
-                errors={errors}
-                onChange={(durations, defaultDuration) => {
-                  set('allowedDurationsMinutes', durations)
-                  set('durationMinutes', defaultDuration)
-                }}
-                onDefaultChange={(value) => set('durationMinutes', value)}
-              />
               <div className="field-grid">
                 <Field
                   id="position"
@@ -659,99 +725,121 @@ function EventTypeForm({
                 </div>
               )}
             </div>
-          </section>
+          </SettingsGroup>
 
-          {!me.organization.personal && canAssignHosts && (
-            <HostAssignment
-              organizationId={me.organization.id}
-              currentUserId={me.user.id}
-              role={role}
-              draft={draft}
-              error={errors.hosts}
-              organizerError={errors.conferenceOrganizer}
-              set={set}
+          <SettingsGroup
+            label="Additional durations"
+            initiallyOpen={editing && baseline.allowedDurationsMinutes.length > 1}
+          >
+            <DurationsEditor
+              showDefault={false}
+              durations={draft.allowedDurationsMinutes}
+              defaultDuration={draft.durationMinutes}
+              errors={errors}
+              onChange={(durations, defaultDuration) => {
+                set('allowedDurationsMinutes', durations)
+                set('durationMinutes', defaultDuration)
+              }}
+              onDefaultChange={(value) => set('durationMinutes', value)}
             />
-          )}
-          {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
-            <section className="panel" aria-labelledby="hosts-heading">
-              <h2 id="hosts-heading">{t('Hosts')}</h2>
-              {access.status === 'loading' ? (
-                <p role="status">{t('Loading your team role…')}</p>
-              ) : (
-                <div role="alert">
-                  <p>{t('Could not load your team role.')}</p>
-                  <button type="button" onClick={access.reload}>
-                    {t('Try again')}
-                  </button>
-                </div>
+          </SettingsGroup>
+          {!me.organization.personal && (
+            <SettingsGroup label="Hosts" initiallyOpen={editing}>
+              {!me.organization.personal && canAssignHosts && (
+                <HostAssignment
+                  organizationId={me.organization.id}
+                  currentUserId={me.user.id}
+                  role={role}
+                  draft={draft}
+                  error={errors.hosts}
+                  organizerError={errors.conferenceOrganizer}
+                  set={set}
+                />
               )}
-            </section>
-          )}
-          {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
-            <ReadOnlyHosts draft={draft} me={me} role={role} onReload={confirmReload} />
-          )}
-
-          {!me.organization.personal &&
-            (saved?.schedulingType === 'round_robin' ||
-              (canAssignHosts && draft.schedulingType === 'round_robin')) && (
-              <section className="panel" aria-labelledby="round-robin-heading">
-                <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
-                <p>
-                  {t(
-                    saved?.roundRobinActive && saved.schedulingType === 'round_robin'
-                      ? 'Active'
-                      : 'Needs activation',
-                  )}
-                </p>
-                <p>
-                  {t(
-                    'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
-                  )}
-                </p>
-                {access.status === 'ready' && !canAssignHosts && (
-                  <p>{t('Only team owners and admins can change host assignments.')}</p>
-                )}
-                {canAssignHosts &&
-                  saved?.schedulingType === 'round_robin' &&
-                  !saved.roundRobinActive && (
-                    <>
-                      <p>
-                        {t(
-                          'This uses each selected host’s current default availability. Activation is a separate action.',
-                        )}
-                      </p>
-                      <button
-                        type="button"
-                        disabled={dirty || saving}
-                        onClick={() => roundRobinAction('defaults')}
-                      >
-                        {t('Use hosts’ default availability')}
+              {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
+                <section className="panel" aria-labelledby="hosts-heading">
+                  <h2 id="hosts-heading">{t('Hosts')}</h2>
+                  {access.status === 'loading' ? (
+                    <p role="status">{t('Loading your team role…')}</p>
+                  ) : (
+                    <div role="alert">
+                      <p>{t('Could not load your team role.')}</p>
+                      <button type="button" onClick={access.reload}>
+                        {t('Try again')}
                       </button>
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        disabled={dirty || saving}
-                        onClick={() => roundRobinAction('activate')}
-                      >
-                        {t('Activate round robin')}
-                      </button>
-                      {dirty && <p>{t('Save your changes before using these actions.')}</p>}
-                    </>
+                    </div>
                   )}
-              </section>
-            )}
+                </section>
+              )}
+              {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
+                <ReadOnlyHosts draft={draft} me={me} role={role} onReload={confirmReload} />
+              )}
 
-          <section className="panel" aria-labelledby="location-heading">
-            <h2 id="location-heading">{t('Location')}</h2>
-            {(saved?.locations?.length ?? 0) > 1 && (
-              <p className="hint">
-                {t(
-                  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
-                  { '0': saved?.locations?.length ?? 0 },
+              {!me.organization.personal &&
+                (saved?.schedulingType === 'round_robin' ||
+                  (canAssignHosts && draft.schedulingType === 'round_robin')) && (
+                  <section className="panel" aria-labelledby="round-robin-heading">
+                    <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
+                    <p>
+                      {t(
+                        saved?.roundRobinActive && saved.schedulingType === 'round_robin'
+                          ? 'Active'
+                          : 'Needs activation',
+                      )}
+                    </p>
+                    <p>
+                      {t(
+                        'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
+                      )}
+                    </p>
+                    {access.status === 'ready' && !canAssignHosts && (
+                      <p>{t('Only team owners and admins can change host assignments.')}</p>
+                    )}
+                    {canAssignHosts &&
+                      saved?.schedulingType === 'round_robin' &&
+                      !saved.roundRobinActive && (
+                        <>
+                          <p>
+                            {t(
+                              'This uses each selected host’s current default availability. Activation is a separate action.',
+                            )}
+                          </p>
+                          <button
+                            type="button"
+                            disabled={dirty || saving}
+                            onClick={() => roundRobinAction('defaults')}
+                          >
+                            {t('Use hosts’ default availability')}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={dirty || saving}
+                            onClick={() => roundRobinAction('activate')}
+                          >
+                            {t('Activate round robin')}
+                          </button>
+                          {dirty && <p>{t('Save your changes before using these actions.')}</p>}
+                        </>
+                      )}
+                  </section>
                 )}
-              </p>
-            )}
-            <LocationFields draft={draft} errors={errors} set={set} />
+            </SettingsGroup>
+          )}
+          <SettingsGroup
+            label="Location options and conferencing"
+            initiallyOpen={
+              editing &&
+              ((saved?.locations?.length ?? 0) > 1 ||
+                saved?.locations?.some((option) => Boolean(option.label)) ||
+                baseline.autoCreateZoom ||
+                baseline.autoCreateMeet)
+            }
+          >
+            <h2 id="location-heading" tabIndex={-1}>
+              {t('Location')}
+            </h2>
+            <OrderedLocationsEditor draft={draft} errors={errors} set={set} />
             {draft.locationKind === 'zoom' && (
               <ZoomMeetingFields
                 draft={draft}
@@ -783,252 +871,280 @@ function EventTypeForm({
                 </p>
               </div>
             )}
-          </section>
+          </SettingsGroup>
 
-          <WaitlistEditor
-            enabled={draft.waitlistEnabled}
-            supported={
-              draft.schedulingType === 'individual' &&
-              (me.organization.personal
-                ? draft.hostUserIds.length <= 1
-                : draft.hostUserIds.length === 1)
-            }
-            eventTypeId={saved?.id}
-            savedVersion={shareFocusVersion}
-            errors={errors}
-            disabled={contextChanged}
-            onChange={(enabled) => set('waitlistEnabled', enabled)}
-          />
-
-          <NotificationsEditor
-            notifications={draft.notifications}
-            errors={errors}
-            hostNotesEnabled={followUpHostNotesEnabled}
-            onChange={(notifications) => {
-              set('notifications', notifications)
-              setErrors((current) => pruneNotificationErrors(current, notifications))
-            }}
-          />
-
-          <section className="panel" aria-labelledby="questions-heading">
-            <h2 id="questions-heading">{t('Booking form')}</h2>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={draft.allowGuests}
-                onChange={(e) => set('allowGuests', e.target.checked)}
-                aria-describedby="guests-hint"
-              />
-              {t('Allow invitees to add guests')}
-            </label>
-            <p className="hint" id="guests-hint">
-              {t(
-                'Guests receive confirmation emails and calendar invitations. Off by default; changing this does not remove guests from existing bookings.',
-              )}
-            </p>
-            <QuestionsEditor
-              questions={draft.questions}
-              onChange={(questions) => set('questions', questions)}
+          <SettingsGroup label="Booking waitlist" initiallyOpen={changed('waitlistEnabled')}>
+            <WaitlistEditor
+              enabled={draft.waitlistEnabled}
+              supported={
+                draft.schedulingType === 'individual' &&
+                (me.organization.personal
+                  ? draft.hostUserIds.length <= 1
+                  : draft.hostUserIds.length === 1)
+              }
+              eventTypeId={saved?.id}
+              savedVersion={shareFocusVersion}
               errors={errors}
+              disabled={contextChanged}
+              onChange={(enabled) => set('waitlistEnabled', enabled)}
             />
-          </section>
+          </SettingsGroup>
+          <SettingsGroup label="Reminders and follow-ups" initiallyOpen={changed('notifications')}>
+            <NotificationsEditor
+              notifications={draft.notifications}
+              errors={errors}
+              hostNotesEnabled={followUpHostNotesEnabled}
+              onChange={(notifications) => {
+                set('notifications', notifications)
+                setErrors((current) => pruneNotificationErrors(current, notifications))
+              }}
+            />
+          </SettingsGroup>
+          <SettingsGroup label="Booking form" initiallyOpen={changed('questions', 'allowGuests')}>
+            <section className="panel" aria-labelledby="questions-heading">
+              <h2 id="questions-heading">{t('Booking form')}</h2>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={draft.allowGuests}
+                  onChange={(e) => set('allowGuests', e.target.checked)}
+                  aria-describedby="guests-hint"
+                />
+                {t('Allow invitees to add guests')}
+              </label>
+              <p className="hint" id="guests-hint">
+                {t(
+                  'Guests receive confirmation emails and calendar invitations. Off by default; changing this does not remove guests from existing bookings.',
+                )}
+              </p>
+              <QuestionsEditor
+                questions={draft.questions}
+                onChange={(questions) => set('questions', questions)}
+                errors={errors}
+              />
+            </section>
+          </SettingsGroup>
+          <SettingsGroup
+            label="After booking"
+            initiallyOpen={changed(
+              'successRedirectUrl',
+              'successRedirectParameters',
+              'includeInviteePersonalData',
+              'allowEmbedParent',
+            )}
+          >
+            <SuccessRedirectEditor draft={draft} errors={errors} set={set} />
+          </SettingsGroup>
 
-          <SuccessRedirectEditor draft={draft} errors={errors} set={set} />
-
-          <section className="panel" aria-labelledby="rules-heading">
-            <h2 id="rules-heading">{t('When people can book')}</h2>
-            <div className="stack">
-              {draft.schedulingType === 'round_robin' ? (
-                <p>
-                  {t(
-                    'Each pool member uses their current default availability. An available member is assigned when someone books.',
-                  )}
-                </p>
-              ) : draft.schedulingType === 'collective' ? (
-                <p>
-                  {t(
-                    'Each required host uses their current default schedule. Times are offered only when every host offers the same start and end.',
-                  )}
-                </p>
-              ) : !me.organization.personal && draft.hostUserIds.length === 0 ? (
-                <p>{t('Choose exactly one required host.')}</p>
-              ) : !ownSchedule ? (
-                <p>
-                  {t(
-                    'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
-                  )}{' '}
-                  <Link to={`${PATHS.settings}#team-members`}>{t('Review member setup')}</Link>
-                </p>
-              ) : (
-                <Field
-                  id="scheduleId"
-                  label={t('Schedule')}
-                  error={errors.scheduleId}
-                  hint={
-                    schedules.length === 0 ? (
-                      <>
-                        {noScheduleHint[0]}
-                        <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>
-                        {noScheduleHint[1]}
-                      </>
-                    ) : (
-                      <>
-                        {scheduleHint[0]}
-                        <Link to={PATHS.availability}>{t('Manage schedules')}</Link>
-                        {scheduleHint[1]}
-                      </>
-                    )
-                  }
-                >
-                  {(props) => (
-                    <select
-                      {...props}
-                      value={draft.scheduleId}
-                      onChange={(e) => set('scheduleId', e.target.value)}
-                    >
-                      <option value="">
-                        {t('Your default schedule')}
-                        {defaultName(schedules)
-                          ? t(' ({detail})', { detail: defaultName(schedules) ?? '' })
-                          : ''}
-                      </option>
-                      {schedules.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
+          <SettingsGroup
+            label="When people can book"
+            initiallyOpen={changed(
+              'scheduleId',
+              'slotStepMinutes',
+              'minimumNoticeMinutes',
+              'bookingWindowDays',
+              'maxBookingsPerDay',
+              'maxBookingsPerWeek',
+              'maxBookingsPerMonth',
+              'bufferBeforeMinutes',
+              'bufferAfterMinutes',
+            )}
+          >
+            <section className="panel" aria-labelledby="rules-heading">
+              <h2 id="rules-heading">{t('When people can book')}</h2>
+              <div className="stack">
+                {draft.schedulingType === 'round_robin' ? (
+                  <p>
+                    {t(
+                      'Each pool member uses their current default availability. An available member is assigned when someone books.',
+                    )}
+                  </p>
+                ) : draft.schedulingType === 'collective' ? (
+                  <p>
+                    {t(
+                      'Each required host uses their current default schedule. Times are offered only when every host offers the same start and end.',
+                    )}
+                  </p>
+                ) : !me.organization.personal && draft.hostUserIds.length === 0 ? (
+                  <p>{t('Choose exactly one required host.')}</p>
+                ) : !ownSchedule ? (
+                  <p>
+                    {t(
+                      'Ask this member to review their personal working hours and calendars. Only they can change their private schedule.',
+                    )}{' '}
+                    <Link to={`${PATHS.settings}#team-members`}>{t('Review member setup')}</Link>
+                  </p>
+                ) : (
+                  <Field
+                    id="scheduleId"
+                    label={t('Schedule')}
+                    error={errors.scheduleId}
+                    hint={
+                      schedules.length === 0 ? (
+                        <>
+                          {noScheduleHint[0]}
+                          <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>
+                          {noScheduleHint[1]}
+                        </>
+                      ) : (
+                        <>
+                          {scheduleHint[0]}
+                          <Link to={PATHS.availability}>{t('Manage schedules')}</Link>
+                          {scheduleHint[1]}
+                        </>
+                      )
+                    }
+                  >
+                    {(props) => (
+                      <select
+                        {...props}
+                        value={draft.scheduleId}
+                        onChange={(e) => set('scheduleId', e.target.value)}
+                      >
+                        <option value="">
+                          {t('Your default schedule')}
+                          {defaultName(schedules)
+                            ? t(' ({detail})', { detail: defaultName(schedules) ?? '' })
+                            : ''}
                         </option>
-                      ))}
-                      {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
-                        <option value={draft.scheduleId}>
-                          {t('A schedule that no longer exists')}
-                        </option>
-                      )}
-                    </select>
-                  )}
-                </Field>
-              )}
-              <div className="field-grid">
-                <MinutesField
-                  id="slotStepMinutes"
-                  label={t('Start times every')}
-                  optional
-                  value={draft.slotStepMinutes}
-                  error={errors.slotStepMinutes}
-                  onChange={(v) => set('slotStepMinutes', v)}
-                  rule={RULES.slotStepMinutes}
-                  empty={
-                    duration
-                      ? t('every {0} (the duration)', {
-                          '0': formatMinutes(duration, displayLocale),
-                        })
-                      : t('the duration')
-                  }
-                />
-                <MinutesField
-                  id="minimumNoticeMinutes"
-                  label={t('Minimum notice')}
-                  value={draft.minimumNoticeMinutes}
-                  error={errors.minimumNoticeMinutes}
-                  onChange={(v) => set('minimumNoticeMinutes', v)}
-                  rule={RULES.minimumNoticeMinutes}
-                  extra="How far ahead a meeting must be booked."
-                />
-                <Field
-                  id="bookingWindowDays"
-                  label={t('Booking window')}
-                  optional
-                  error={errors.bookingWindowDays}
-                  hint={t('Days ahead people can book, {0}–{1}. Empty: no limit.', {
-                    '0': RULES.bookingWindowDays.min,
-                    '1': RULES.bookingWindowDays.max,
-                  })}
-                >
-                  {(props) => (
-                    <input
-                      {...props}
-                      inputMode="numeric"
-                      value={draft.bookingWindowDays}
-                      onChange={(e) => set('bookingWindowDays', e.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field
-                  id="maxBookingsPerDay"
-                  label={t('Daily limit')}
-                  optional
-                  error={errors.maxBookingsPerDay}
-                  hint={t('Bookings per day, {0}–{1}. Empty: no limit.', {
-                    '0': RULES.maxBookingsPerDay.min,
-                    '1': RULES.maxBookingsPerDay.max,
-                  })}
-                >
-                  {(props) => (
-                    <input
-                      {...props}
-                      inputMode="numeric"
-                      value={draft.maxBookingsPerDay}
-                      onChange={(e) => set('maxBookingsPerDay', e.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field
-                  id="maxBookingsPerWeek"
-                  label={t('Weekly limit')}
-                  optional
-                  error={errors.maxBookingsPerWeek}
-                  hint={t('Bookings per week, {0}–{1}. Empty: no limit.', {
-                    '0': RULES.maxBookingsPerWeek.min,
-                    '1': RULES.maxBookingsPerWeek.max,
-                  })}
-                >
-                  {(props) => (
-                    <input
-                      {...props}
-                      inputMode="numeric"
-                      value={draft.maxBookingsPerWeek}
-                      onChange={(e) => set('maxBookingsPerWeek', e.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field
-                  id="maxBookingsPerMonth"
-                  label={t('Monthly limit')}
-                  optional
-                  error={errors.maxBookingsPerMonth}
-                  hint={t('Bookings per month, {0}–{1}. Empty: no limit.', {
-                    '0': RULES.maxBookingsPerMonth.min,
-                    '1': RULES.maxBookingsPerMonth.max,
-                  })}
-                >
-                  {(props) => (
-                    <input
-                      {...props}
-                      inputMode="numeric"
-                      value={draft.maxBookingsPerMonth}
-                      onChange={(e) => set('maxBookingsPerMonth', e.target.value)}
-                    />
-                  )}
-                </Field>
-                <MinutesField
-                  id="bufferBeforeMinutes"
-                  label={t('Buffer before')}
-                  value={draft.bufferBeforeMinutes}
-                  error={errors.bufferBeforeMinutes}
-                  onChange={(v) => set('bufferBeforeMinutes', v)}
-                  rule={RULES.bufferBeforeMinutes}
-                  extra="Free time kept before each meeting."
-                />
-                <MinutesField
-                  id="bufferAfterMinutes"
-                  label={t('Buffer after')}
-                  value={draft.bufferAfterMinutes}
-                  error={errors.bufferAfterMinutes}
-                  onChange={(v) => set('bufferAfterMinutes', v)}
-                  rule={RULES.bufferAfterMinutes}
-                  extra="Free time kept after each meeting."
-                />
+                        {schedules.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                        {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
+                          <option value={draft.scheduleId}>
+                            {t('A schedule that no longer exists')}
+                          </option>
+                        )}
+                      </select>
+                    )}
+                  </Field>
+                )}
+                <div className="field-grid">
+                  <MinutesField
+                    id="slotStepMinutes"
+                    label={t('Start times every')}
+                    optional
+                    value={draft.slotStepMinutes}
+                    error={errors.slotStepMinutes}
+                    onChange={(v) => set('slotStepMinutes', v)}
+                    rule={RULES.slotStepMinutes}
+                    empty={
+                      duration
+                        ? t('every {0} (the duration)', {
+                            '0': formatMinutes(duration, displayLocale),
+                          })
+                        : t('the duration')
+                    }
+                  />
+                  <MinutesField
+                    id="minimumNoticeMinutes"
+                    label={t('Minimum notice')}
+                    value={draft.minimumNoticeMinutes}
+                    error={errors.minimumNoticeMinutes}
+                    onChange={(v) => set('minimumNoticeMinutes', v)}
+                    rule={RULES.minimumNoticeMinutes}
+                    extra="How far ahead a meeting must be booked."
+                  />
+                  <Field
+                    id="bookingWindowDays"
+                    label={t('Booking window')}
+                    optional
+                    error={errors.bookingWindowDays}
+                    hint={t('Days ahead people can book, {0}–{1}. Empty: no limit.', {
+                      '0': RULES.bookingWindowDays.min,
+                      '1': RULES.bookingWindowDays.max,
+                    })}
+                  >
+                    {(props) => (
+                      <input
+                        {...props}
+                        inputMode="numeric"
+                        value={draft.bookingWindowDays}
+                        onChange={(e) => set('bookingWindowDays', e.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    id="maxBookingsPerDay"
+                    label={t('Daily limit')}
+                    optional
+                    error={errors.maxBookingsPerDay}
+                    hint={t('Bookings per day, {0}–{1}. Empty: no limit.', {
+                      '0': RULES.maxBookingsPerDay.min,
+                      '1': RULES.maxBookingsPerDay.max,
+                    })}
+                  >
+                    {(props) => (
+                      <input
+                        {...props}
+                        inputMode="numeric"
+                        value={draft.maxBookingsPerDay}
+                        onChange={(e) => set('maxBookingsPerDay', e.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    id="maxBookingsPerWeek"
+                    label={t('Weekly limit')}
+                    optional
+                    error={errors.maxBookingsPerWeek}
+                    hint={t('Bookings per week, {0}–{1}. Empty: no limit.', {
+                      '0': RULES.maxBookingsPerWeek.min,
+                      '1': RULES.maxBookingsPerWeek.max,
+                    })}
+                  >
+                    {(props) => (
+                      <input
+                        {...props}
+                        inputMode="numeric"
+                        value={draft.maxBookingsPerWeek}
+                        onChange={(e) => set('maxBookingsPerWeek', e.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    id="maxBookingsPerMonth"
+                    label={t('Monthly limit')}
+                    optional
+                    error={errors.maxBookingsPerMonth}
+                    hint={t('Bookings per month, {0}–{1}. Empty: no limit.', {
+                      '0': RULES.maxBookingsPerMonth.min,
+                      '1': RULES.maxBookingsPerMonth.max,
+                    })}
+                  >
+                    {(props) => (
+                      <input
+                        {...props}
+                        inputMode="numeric"
+                        value={draft.maxBookingsPerMonth}
+                        onChange={(e) => set('maxBookingsPerMonth', e.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <MinutesField
+                    id="bufferBeforeMinutes"
+                    label={t('Buffer before')}
+                    value={draft.bufferBeforeMinutes}
+                    error={errors.bufferBeforeMinutes}
+                    onChange={(v) => set('bufferBeforeMinutes', v)}
+                    rule={RULES.bufferBeforeMinutes}
+                    extra="Free time kept before each meeting."
+                  />
+                  <MinutesField
+                    id="bufferAfterMinutes"
+                    label={t('Buffer after')}
+                    value={draft.bufferAfterMinutes}
+                    error={errors.bufferAfterMinutes}
+                    onChange={(v) => set('bufferAfterMinutes', v)}
+                    rule={RULES.bufferAfterMinutes}
+                    extra="Free time kept after each meeting."
+                  />
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          </SettingsGroup>
         </fieldset>
 
         <div className="form-actions">
@@ -1200,7 +1316,10 @@ function LocationFields({
           </select>
         )}
       </Field>
-      {draft.locationKind === 'phone' && (
+      {draft.locationKind === 'phone' && draft.phoneAskInvitee && draft.phone === '' && (
+        <p className="hint">{t('Invitee provides a phone number')}</p>
+      )}
+      {draft.locationKind === 'phone' && !(draft.phoneAskInvitee && draft.phone === '') && (
         <Field
           id="location-phone"
           label={t('Your phone number')}
@@ -1254,5 +1373,25 @@ function LocationFields({
         </Field>
       )}
     </div>
+  )
+}
+
+/** Native disclosure: keyboard activation and expanded state are provided by the browser. */
+function SettingsGroup({
+  label,
+  initiallyOpen,
+  children,
+}: {
+  label: MessageKey
+  initiallyOpen: boolean
+  children: ReactNode
+}) {
+  const { t } = useI18n()
+  const [open] = useState(initiallyOpen)
+  return (
+    <details className="panel event-settings-group" open={open}>
+      <summary>{t(label)}</summary>
+      <div className="stack">{children}</div>
+    </details>
   )
 }

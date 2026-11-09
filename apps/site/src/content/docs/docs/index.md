@@ -40,6 +40,30 @@ The website at hourmere.com is separate from your Hourmere instance.
   receive notification when a matching time opens; manage entries in the editor, REST,
   MCP or CLI. Available in full to self-hosters.
 
+## Create an event type
+
+Open **Event types**, then **New event type** in your Hourmere instance. Start with four
+things: **Title**, **Link**, **Duration** and **Location**. The link follows your title and
+meeting length until you edit it yourself. A location can be left unset; phone, address
+and meeting-link choices ask for the details needed for that choice.
+
+The other settings are grouped in closed disclosures. Open a group to configure
+availability, booking limits, notice and buffers, multiple meeting lengths, additional
+locations, hosts, questions, guests, notifications, waitlists or the after-booking redirect.
+You can create immediately using the existing defaults, then adjust these settings later.
+A team event initially selects you as its host. Availability still depends on the host's
+configured working hours; creating an event does not create a schedule.
+
+When editing, groups with saved non-default values open automatically so you can review
+them. Closing a group keeps its values. A validation error in a closed group opens that
+group and moves focus to the affected field. Saving a title change preserves other saved
+configuration, including settings configured through REST, MCP or CLI.
+
+After saving, use **View and share** to open or copy the saved booking link. Round-robin
+pools still require explicit activation. These form changes are included in self-hosting;
+REST, MCP and CLI defaults and permissions are unchanged. Group seats and paid-booking
+configuration remain unavailable in the editor, as described below.
+
 ## Known limitations
 
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
@@ -75,8 +99,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
-- [Meeting location choices](/docs/location-choices) are configured through REST, MCP or CLI;
-  the editor does not yet offer a multiple-location editor. Rescheduling preserves the choice.
+- [Meeting location choices](/docs/location-choices) support up to five distinct kinds
+  in the editor, REST, MCP and CLI. Rescheduling preserves the original choice.
 - [Multiple meeting lengths](/docs/multiple-durations) share one set of hosts, location
   and booking rules; per-length overrides are unavailable. Web rescheduling keeps the
   original length; changing it requires REST, MCP or CLI.

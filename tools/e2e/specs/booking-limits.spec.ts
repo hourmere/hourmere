@@ -1,3 +1,4 @@
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, test } from '../fixtures.ts'
 
 test('a weekly limit saved in the editor closes the rest of that week on the public page', async ({
@@ -7,6 +8,7 @@ test('a weekly limit saved in the editor closes the rest of that week on the pub
   await app.auditSignIn(true)
   await page.goto(`${app.url}/app/event-types`)
   await page.getByRole('link', { name: 'Edit Fixture call', exact: true }).click()
+  await revealEventSetting(page.getByLabel(/^Weekly limit/))
   await page.getByLabel(/^Weekly limit/).fill('1')
   const saving = page.waitForResponse(
     (response) =>

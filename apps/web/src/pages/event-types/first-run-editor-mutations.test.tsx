@@ -332,27 +332,19 @@ describe('first-run editor production-source negative controls', () => {
   })
 })
 
-it('detects hiding the additional location options notice', () => {
-  const start = editor.indexOf('            {(saved?.locations?.length ?? 0) > 1 && (')
-  const end = editor.indexOf('            <LocationFields', start)
-  expect(start).toBeGreaterThan(0)
-  const notice = editor.slice(start, end)
-  detects(notice, '(saved?.locations?.length ?? 0) > 1', 'false', (code) => {
-    const Component = copy<() => react.ReactNode>(
-      `function Notice() { return <>${code}</> }`,
-      'Notice',
-      {
-        saved: { locations: [{ id: 'a' }, { id: 'b' }] },
-        t: (text: string, args: Record<string, number>) => text.replace('{0}', String(args['0'])),
-      },
-    )
-    const view = render(<Component />)
-    try {
-      expect(view.container.textContent?.trim()).toBe(
-        '2 location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
-      )
-    } finally {
-      view.unmount()
-    }
+it('detects hiding configured location options in a closed group', () => {
+  const start = editor.indexOf('label="Location options and conferencing"')
+  const opening = editor.slice(start, editor.indexOf('<h2 id="location-heading"', start))
+  const expression = opening.slice(
+    opening.indexOf('initiallyOpen={') + 'initiallyOpen={'.length,
+    opening.lastIndexOf('}'),
+  )
+  detects(expression, '(saved?.locations?.length ?? 0) > 1', 'false', (code) => {
+    const isOpen = copy<() => boolean>(`function isOpen() { return (${code}) }`, 'isOpen', {
+      editing: true,
+      baseline: { autoCreateZoom: false, autoCreateMeet: false },
+      saved: { locations: [{ id: 'a' }, { id: 'b' }] },
+    })
+    expect(isOpen()).toBe(true)
   })
 })

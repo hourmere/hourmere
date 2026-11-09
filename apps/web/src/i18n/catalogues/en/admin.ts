@@ -1,5 +1,20 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Location options': 'Location options',
+  'Default location': 'Default location',
+  'Location label': 'Location label',
+  'Add location option': 'Add location option',
+  'Remove location option': 'Remove location option',
+  'Move location up': 'Move location up',
+  'Move location down': 'Move location down',
+  'Choose each location type only once.': 'Choose each location type only once.',
+  'Invitee provides a phone number': 'Invitee provides a phone number',
+
+  'Description and visibility': 'Description and visibility',
+  'Additional durations': 'Additional durations',
+  'Location options and conferencing': 'Location options and conferencing',
+  'Duration (minutes)': 'Duration (minutes)',
+
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
   'Loading logo preview…': 'Loading logo preview…',

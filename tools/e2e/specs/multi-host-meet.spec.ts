@@ -1,4 +1,5 @@
 import type { FrameLocator, Page } from '@playwright/test'
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 test.use({ automaticMeet: true, multiHostMeet: true })
@@ -21,10 +22,17 @@ for (const language of ['en', 'zh-CN'] as const) {
     await app.authorizeHost('owner')
     await page.goto(`${app.url}/app/event-types/new`)
     await page.getByLabel('Title', { exact: true }).fill('Multi browser Meet')
+    await revealEventSetting(page.getByLabel('Scheduling', { exact: true }))
     await page.getByLabel('Scheduling', { exact: true }).selectOption('collective')
     await page.getByLabel('Second Required Host', { exact: true }).check()
     await page.getByLabel('Third Unconnected Host', { exact: true }).check()
     await page.getByLabel('Where the meeting happens', { exact: true }).selectOption('google_meet')
+    await revealEventSetting(
+      page.getByRole('checkbox', {
+        name: 'Create a unique Google Meet link for each booking',
+        exact: true,
+      }),
+    )
     await page
       .getByRole('checkbox', {
         name: 'Create a unique Google Meet link for each booking',

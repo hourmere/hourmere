@@ -12,6 +12,8 @@ const words = {
   en: {
     title: 'Title',
     default: 'Default duration',
+    primaryDuration: 'Duration (minutes)',
+    durationsGroup: 'Additional durations',
     addInput: 'Duration to add (minutes)',
     add: 'Add duration',
     preset: 'Add 45 min',
@@ -30,6 +32,8 @@ const words = {
   'zh-CN': {
     title: '标题',
     default: '默认时长',
+    primaryDuration: '时长（分钟）',
+    durationsGroup: '更多时长',
     addInput: '要添加的时长（分钟）',
     add: '添加时长',
     preset: '添加 45 分钟',
@@ -119,7 +123,7 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
       })
       const user = userEvent.setup()
       const view = renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-      const select = await screen.findByLabelText<HTMLSelectElement>(copy.default)
+      const select = await screen.findByLabelText<HTMLSelectElement>(copy.primaryDuration)
       expect(select.value).toBe('30')
       expect([...select.options].map(({ value }) => value)).toEqual(['15', '30', '60'])
       await user.click(screen.getByRole('button', { name: copy.preset }))
@@ -142,7 +146,7 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
       expect(screen.getByRole('region', { name: copy.share })).toBeDefined()
       view.unmount()
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-      const reloaded = await screen.findByLabelText<HTMLSelectElement>(copy.default)
+      const reloaded = await screen.findByLabelText<HTMLSelectElement>(copy.primaryDuration)
       expect(reloaded.value).toBe('45')
       expect([...reloaded.options].map(({ value }) => value)).toEqual(['15', '45', '60', '75'])
     },
@@ -165,8 +169,9 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
     const user = userEvent.setup()
     renderApp('/app/event-types/new')
     await user.type(await screen.findByLabelText(copy.title, { exact: true }), 'Intro')
+    await user.click(screen.getByText(copy.durationsGroup, { selector: 'summary' }))
     await user.click(screen.getByRole('button', { name: copy.preset }))
-    await user.selectOptions(screen.getByLabelText(copy.default), '45')
+    await user.selectOptions(screen.getByLabelText(copy.primaryDuration), '45')
     await user.click(screen.getByRole('button', { name: copy.create }))
     expect(await screen.findByRole('region', { name: copy.share })).toBeDefined()
     expect(api.to('POST /api/v1/event-types')[0]?.body).toMatchObject({

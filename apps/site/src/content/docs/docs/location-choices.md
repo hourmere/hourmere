@@ -14,10 +14,10 @@ self-hosted installations without an additional setting or subscription.
 
 Use REST `POST /api/v1/event-types` or `PATCH /api/v1/event-types/{id}`, MCP
 `create_event_type` / `update_event_type`, or CLI `create-event` / `update-event`.
-Configuration writes require a **Full account access** API key and the existing owner or
-team permissions. The web event editor shows a read-only notice when multiple options
-are configured, with instructions to manage them through REST, MCP or CLI. It preserves
-those options when saving unchanged legacy location settings.
+API configuration writes require a **Full account access** API key and the existing owner
+or team permissions. In the web event editor, choose one location in the initial form.
+Expand the location settings to add, edit or reorder choices and choose the default.
+Saving another setting preserves the ordered choices and their identities.
 
 `locations` is an ordered list of 1–5 options, or `null` to clear it. Each option needs a
 stable `id` and a distinct kind. IDs contain 1–64 ASCII letters, digits, underscores or

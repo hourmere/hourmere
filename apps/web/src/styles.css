@@ -2629,3 +2629,19 @@ h3:lang(zh) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.event-settings-group > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding-block: 0.25rem;
+}
+
+.event-settings-group[open] > summary {
+  margin-bottom: 1rem;
+}
+
+.event-settings-group > .stack > .panel {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
