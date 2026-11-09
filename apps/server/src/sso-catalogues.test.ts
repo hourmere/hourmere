@@ -14,7 +14,7 @@ import { COMMANDS, REST_COMMANDS } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
-import { productionAppOptions, productRoutes } from './server.ts'
+import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -74,26 +74,32 @@ function expectNoSsoRoutes(paths: string[]) {
   expectNoSso(paths.filter((path) => path !== MCP_OAUTH_DISCOVERY_PATH))
 }
 
-// The createApp options exactly as startServer assembles them (productionAppOptions in
-// apps/server/src/server.ts), from a configuration that turns on every optional group: MCP
-// OAuth, SCIM, the built web app, the Zoom event webhook and slot snippets. Only the
-// collaborators startServer creates from live services (Better Auth, the job queue, the
-// notifiers) are stood in for, and registering routes reaches none of them. None of these
-// mounts is registered in openApiRouteInventory's document-only app.
+// The createApp and createAuth options exactly as startServer assembles them
+// (productionAppOptions and productionAuthOptions in apps/server/src/server.ts), from a
+// configuration that turns on every optional group: MCP OAuth, SCIM, the built web app, the
+// Zoom event webhook, slot snippets, and Google and Microsoft sign-in. Only the collaborators
+// startServer creates from live services (Better Auth, the job queue, the notifiers, the
+// mailer) are stood in for, and registering routes or endpoints reaches none of them. None of
+// these mounts is registered in openApiRouteInventory's document-only app.
 const unavailable = async (): Promise<never> => {
   throw new Error('Route registration must not call the provider or the database')
 }
+const productionConfig = loadConfig({
+  DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
+  BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
+  PUBLIC_URL: 'http://localhost',
+  MCP_OAUTH_ENABLED: 'true',
+  SCIM_PROVISIONING_ENABLED: 'true',
+  WEB_DIST: 'web-dist-never-read',
+  ZOOM_WEBHOOK_SECRET_TOKEN: 'catalogue-test-only-zoom-secret',
+  SLOT_SNIPPETS_ENABLED: 'true',
+  GOOGLE_CLIENT_ID: 'catalogue-google',
+  GOOGLE_CLIENT_SECRET: 'catalogue-test-only-google-secret',
+  MICROSOFT_CLIENT_ID: 'catalogue-microsoft',
+  MICROSOFT_CLIENT_SECRET: 'catalogue-test-only-microsoft-secret',
+})
 function productionOptions(db: Db) {
-  const config = loadConfig({
-    DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
-    BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
-    PUBLIC_URL: 'http://localhost',
-    MCP_OAUTH_ENABLED: 'true',
-    SCIM_PROVISIONING_ENABLED: 'true',
-    WEB_DIST: 'web-dist-never-read',
-    ZOOM_WEBHOOK_SECRET_TOKEN: 'catalogue-test-only-zoom-secret',
-    SLOT_SNIPPETS_ENABLED: 'true',
-  })
+  const config = productionConfig
   return productionAppOptions({
     config,
     db,
@@ -137,9 +143,11 @@ const productionOnlyPaths = [
 ]
 
 // Better Auth serves every endpoint of its plugins behind the one `/api/auth/*` mount, which
-// the route inventory sees as a single route. Their own paths come from `auth.api` of the real
-// createAuth, with every optional plugin group on (MCP OAuth, Google and Microsoft sign-in),
-// so a plugin added there is seen with each endpoint it registers.
+// the route inventory sees as a single route. Their own paths come from `auth.api` of
+// createAuth(productionAuthOptions(...)), the call startServer makes, with every input
+// startServer passes supplied and every optional group of the configuration on. A plugin or
+// endpoint that createAuth registers for any of those inputs is seen, wherever its path
+// string comes from; one gated on an input or setting startServer does not pass is not.
 // Hourmere is the OAuth authorization server for MCP clients, and this is that server's own
 // OpenID discovery document (the OAuth provider plugin in mcpOAuthPlugins, served at
 // /api/auth/.well-known/openid-configuration), not a route for signing users in through an
@@ -338,26 +346,33 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
   })
 
-  it('registers no SSO Better Auth endpoint, with every optional plugin on', async () => {
-    const url = 'postgres://catalogue@127.0.0.1:9/catalogue'
-    const signup = { mode: 'open', allowedDomains: [] } as const
-    const authPool = neverConnecting(createAuthPool(url, signup))
+  it('registers no SSO Better Auth endpoint, as startServer assembles createAuth', async () => {
+    const config = productionConfig
+    const authPool = neverConnecting(createAuthPool(config.DATABASE_URL, config.signup))
     neverConnecting((authPool as pg.Pool & { organizationLocks: pg.Pool }).organizationLocks)
-    const appPool = neverConnecting(createPool(url))
-    const client = { clientId: 'catalogue', clientSecret: 'catalogue' }
+    const appPool = neverConnecting(createPool(config.DATABASE_URL))
     try {
-      const auth = createAuth({
-        pool: authPool,
-        db: createDb(appPool),
-        baseURL: 'http://localhost',
-        secret: 'catalogue-test-only-secret-at-least-32-characters',
-        mailer: { send: unavailable },
-        signup,
-        socialProviders: { google: client, microsoft: client },
-        mcpOAuth: true,
-      })
+      const db = createDb(appPool)
+      const auth = createAuth(
+        productionAuthOptions({
+          config,
+          pool: authPool,
+          db,
+          mailer: { send: unavailable },
+          invitationDelivery: {
+            db,
+            queue: {
+              enqueue: unavailable,
+              retireExpiredInvitationEmailJobs: unavailable,
+              hasLiveInvitationEmailJob: unavailable,
+            },
+          },
+          invitationMailLimits: { secret: 'catalogue-test-only' },
+          jobs: { enqueue: unavailable },
+        }),
+      )
       // Let startup settle against the refused pool before it is closed.
-      await auth.$context
+      const context = await auth.$context
       const paths = authEndpointPaths(auth.api)
       // One endpoint from each plugin group, so the inventory proves that it saw them: core
       // sessions, magic links, Google/Microsoft sign-in, organizations, API keys and MCP OAuth.
@@ -374,6 +389,11 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
         ]),
       )
       expectNoSsoAuthEndpoints(paths)
+      // An OAuth/OIDC relying party for any other identity provider reuses /sign-in/social and
+      // /callback/:id (Better Auth's genericOAuth adds no endpoint), so no name check sees it:
+      // the sign-in providers must be exactly Google and Microsoft.
+      expect(context.socialProviders.map(({ id }) => id).sort()).toEqual(['google', 'microsoft'])
+      expect(auth.options.plugins.map(({ id }) => id)).not.toContain('generic-oauth')
     } finally {
       await authPool.end()
       await appPool.end()

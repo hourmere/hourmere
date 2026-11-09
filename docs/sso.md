@@ -33,7 +33,7 @@ Official sources: [SSO docs](https://better-auth.com/docs/plugins/sso), [OIDC](h
 
 ### Recommendation
 
-Do not expose stock plugin routes or ship SSO with the 1.7.16 plugin unchanged. Reuse established protocol parsing/crypto and Better Auth's account/session integration; Hourmere owns organization/provider policy, encrypted configuration, exact identity binding, domain lifecycle, enforcement and audit. The 1.7.12 evaluation left open whether the plugin's pre-session hook could carry Hourmere's checks; the Upgrade step answered it at 1.7.16 (see Pre-session hook and plugin paths below). The hook exists, but the plugin offers no seam for OIDC algorithm policy, a JWKS cache or the guarded transport, reaches an OIDC nonce only if Hourmere rewrites the plugin's authorization URL, and cannot stop the SAML ACS from minting a session on the cross-site POST. Hourmere therefore keeps Better Auth for local sessions and replaces the OIDC and SAML federation paths with narrow adapters over the same maintained libraries (jose; samlify with xml-crypto and @xmldom/xmldom), writing no new cryptography or XML signature code. Merely adding a /api/v1 facade over the plugin could not supply these seams. The first SAML release rejects encrypted assertions and missing assertion or response IDs outright. Each protocol stays hard-off in code until its complete path exists and its negative protocol and egress checks have passed (see Rollout gating). An upstream patch for a missing seam (for example [12081](https://github.com/better-auth/better-auth/issues/12081) or [10625](https://github.com/better-auth/better-auth/issues/10625)) brings a plugin path back only after a new evaluation at the patched version.
+Do not expose stock plugin routes or ship SSO with the 1.7.16 plugin unchanged. Reuse established protocol parsing/crypto and Better Auth's account/session integration; Hourmere owns organization/provider policy, encrypted configuration, exact identity binding, domain lifecycle, enforcement and audit. The 1.7.12 evaluation left open whether the plugin's pre-session hook could carry Hourmere's checks; the Upgrade step answered it at 1.7.16 (see Pre-session hook and plugin paths below). The hook exists, but the plugin offers no seam for a JWKS cache or the guarded transport, leaves OIDC algorithm policy to an after-the-fact header check in Better Auth's account database hook, reaches an OIDC nonce only if Hourmere rewrites the plugin's authorization URL, and cannot stop the SAML ACS from minting a session on the cross-site POST. Hourmere therefore keeps Better Auth for local sessions and replaces the OIDC and SAML federation paths with narrow adapters over the same maintained libraries (jose; samlify with xml-crypto and @xmldom/xmldom), writing no new cryptography or XML signature code. Merely adding a /api/v1 facade over the plugin could not supply these seams. The first SAML release rejects encrypted assertions and missing assertion or response IDs outright. Each protocol stays hard-off in code until its complete path exists and its negative protocol and egress checks have passed (see Rollout gating). An upstream patch for a missing seam (for example [12081](https://github.com/better-auth/better-auth/issues/12081) or [10625](https://github.com/better-auth/better-auth/issues/10625)) brings a plugin path back only after a new evaluation at the patched version.
 
 ### Source evidence matrix
 
@@ -87,7 +87,7 @@ parser over unauthenticated XML is the signature-wrapping risk the design rules 
 | Requirement | Plugin behaviour at 1.7.16 | Enforceable before the session? |
 |---|---|---|
 | OIDC nonce bound to the attempt | Never generated or sent; core drops `nonce` from `additionalParams` as reserved (`create-authorization-url.mjs` 9–18, 54–56); `validateOIDCIdToken` passes no nonce (580–589) | Not by the resolver alone: it sees the claim, but the nonce would first have to be added to the plugin's `/sign-in/sso` URL by an after hook. Not adopted: Hourmere would be rewriting the plugin's protocol output |
-| OIDC algorithm allowlist (RS256) | No `algorithms` passed (582–586) | No: the resolver gets the payload, not the header, and the token is not in the request |
+| OIDC algorithm allowlist (RS256) | No `algorithms` passed (582–586) | Not in the resolver: it gets the payload, not the header, and the token is not in the request. Better Auth's account database hooks (`databaseHooks.account.create.before` / `update.before`) do receive the raw ID token in the sign-in, before `createSession`, when the account is created or linked and on every later sign-in while `updateAccountOnSignIn` is not `false` (`link-account.mjs` 191–197, 242–259, 358). Such a hook could decode the protected header and throw for an algorithm outside the allowlist, so no session is created. It cannot narrow what the plugin's verifier already accepted, and it adds no nonce, JWKS cache or transport; it is a second parse of the token outside the verifier. Not adopted |
 | OIDC `iat` age and future `iat`, `auth_time` | Not checked: no `maxTokenAge` | Yes: the claims are passed |
 | Bounded JWKS cache | `createRemoteJWKSet` on every callback (581) | No plugin seam; a process-wide fetch dispatcher would change every outbound request |
 | Pinned outbound transport | Global fetch after one unpinned DNS lookup (478–571); no fetch option ([10625](https://github.com/better-auth/better-auth/issues/10625)) | No plugin seam; same as the JWKS cache |
@@ -98,8 +98,8 @@ parser over unauthenticated XML is the signature-wrapping risk the design rules 
 | SAML response Destination required | Checked only when present (1458–1464) | Only by re-parse |
 | Encrypted SAML assertions refused with a clear result | Decrypted when a key is configured (2822–2826) | Partly, by configuration: without a decryption key the response fails as invalid (2884–2892, 2916–2931), and `saml.algorithms` with empty encryption allow-lists refuses it (1126–1148); neither gives a clear unsupported result |
 
-The decision rests on the rows with no seam at all (algorithm policy, JWKS cache, pinned
-transport, the session minted in the SAML POST). The OIDC adapter replaces the whole
+The decision rests on the rows with no seam at all (JWKS cache, pinned transport, the
+session minted in the SAML POST). The OIDC adapter replaces the whole
 callback anyway, and the SAML adapter replaces the ACS, so the partial answers above are
 not used.
 
@@ -149,7 +149,7 @@ Read the upstream GitHub advisory API again on 2026-11-09: 49 published advisori
 | [CVE-2026-53514 / GHSA-fmh4-wcc4-5jm3](https://github.com/better-auth/better-auth/security/advisories/GHSA-fmh4-wcc4-5jm3) | high: invitation acceptance by an unverified account | 1.7.16 | patched: affected range `>= 1.6.14, < 1.7.16` ends below it |
 | [GHSA-hwq2-v29r-p69r](https://github.com/better-auth/better-auth/security/advisories/GHSA-hwq2-v29r-p69r) | email-change links act on a later owner of the old address | 1.7.16 | patched: affected range `>= 1.4.0, < 1.7.16` ends below it |
 
-The upstream API reports no CVE ID for the first three rows or for GHSA-hwq2; do not invent them. The highest patch listed is 1.7.16, so the pinned family is at or above every listed patch. This is a dated inventory, not a security certification.
+The upstream API reports no CVE ID for the first three rows or for GHSA-hwq2; do not invent them. No listed affected range contains 1.7.16, and 1.7.16 is the highest patch on the stable 1.7 line; 13 of the 49 advisories also list 1.8.0-beta.5, the patch for the 1.8 beta line. This is a dated inventory, not a security certification.
 
 **Newer core issues matter despite SSO-specific patches:** November 3 advisories [GHSA-9hm7-xhfp-cx58](https://github.com/better-auth/better-auth/security/advisories/GHSA-9hm7-xhfp-cx58) (unverified OAuth email), [GHSA-fvxx-76fc-893x](https://github.com/better-auth/better-auth/security/advisories/GHSA-fvxx-76fc-893x) (revoked sessions cached/secondary storage) and [GHSA-c85h-5mrr-mgx4](https://github.com/better-auth/better-auth/security/advisories/GHSA-c85h-5mrr-mgx4) (padded owner invitation role) list stable patch 1.7.16, and their ranges include 1.7.12 but not the installed 1.7.16. This design evaluation does not establish Hourmere's exploitability; the family upgrade to 1.7.16 records that assessment in its release notes.
 
@@ -937,16 +937,24 @@ handlers absent from OpenAPI, and in the worker role's health app; in OpenAPI pa
 and operation IDs; in the MCP tools that the same assembly advertises to a full-scope
 API key, with only the caller resolver replaced; and in CLI commands and targets.
 From the Upgrade step on they also check the endpoint paths of every Better Auth plugin,
-which the route inventory sees only as the single `/api/auth/*` mount: the real
-`createAuth` is built with MCP OAuth and both social providers on, against a database pool
+which the route inventory sees only as the single `/api/auth/*` mount: `createAuth` is
+built from `productionAuthOptions` (`apps/server/src/server.ts`), the options `startServer`
+itself passes, with every input `startServer` supplies and the same all-groups-on
+configuration (including MCP OAuth and both social providers), against a database pool
 that never connects, and every `auth.api` endpoint path is checked; the suite also
-confirms that every endpoint path of the installed SSO plugin would be caught. As a
+confirms that every endpoint path of the installed SSO plugin would be caught. A relying
+party that reuses the social sign-in endpoints adds no endpoint name (Better Auth's
+`genericOAuth` does this), so the suite also requires the sign-in providers to be exactly
+Google and Microsoft and no `genericOAuth` plugin to be registered. As a
 backstop for a surface no inventory sees, every string literal that begins with `/` in
 the `src` directory of each apps, packages and tools workspace is checked too, leaving out
 only an explicit list of test-support and generated files, and no such source may import
-`@better-auth/sso`. These checks are by name: a neutrally named relying-party endpoint, a
-path assembled from pieces, or shipped code outside a `src` directory (the web service
-worker, the site worker, Astro page routes) is not seen.
+`@better-auth/sso`. These checks are by name. A path assembled from pieces escapes the
+literal scan, although the route and endpoint inventories still see it once it is
+registered for the production configuration; an endpoint behind an input or setting
+`startServer` does not pass, a run-together name outside the word list, and shipped code
+outside a `src` directory (the web service worker, the site worker, Astro page routes) are
+not seen.
 Names match `saml`, `oidc` and `openid` anywhere, `sso` as a word (after splitting
 camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
 `listSSOs` — and a short list of words run together with it: `ssoconfig`,
@@ -1104,7 +1112,8 @@ proof expiry bounds that delay. Private IdP reachability remains operator-contro
 A successful provider test does not prove all accounts have valid immutable identifiers.
 
 The Upgrade step found that the upgraded plugin's pre-session hook cannot carry the
-OIDC algorithm, JWKS and transport requirements or the SAML completion hop (see
+OIDC JWKS and transport requirements or the SAML completion hop, and that OIDC algorithm
+policy is reachable only as an after-the-fact header check (see
 Pre-session hook and plugin paths). Better Auth is retained for local sessions, and the
 OIDC and SAML federation paths are replaced by maintained-library adapters; the OIDC
 verifier and SAML verifier steps record their negative tests before either protocol
