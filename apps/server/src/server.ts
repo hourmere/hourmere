@@ -122,6 +122,10 @@ import { createWorkerHealthApp } from './worker-health.ts'
 // only in-process tests inject enabled capabilities into productRoutes.
 const ssoOidcEnabled = false
 const ssoSamlEnabled = false
+// Routing forms are hard-off in code until their operator setting lands
+// (docs/routing-forms.md, Rollout gating): no environment variable or other setting reads
+// this, and production never overrides it; only in-process tests inject `true`.
+const routingFormsEnabled = false
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -151,6 +155,7 @@ export function productRoutes({
   slotSnippetsEnabled = false,
   ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
   ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
+  routingFormsEnabled: routingEnabled = routingFormsEnabled,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
@@ -172,6 +177,8 @@ export function productRoutes({
   ssoOidcEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
   ssoSamlEnabled?: boolean
+  /** In-process test injection only; no operator setting exists during hard-off. */
+  routingFormsEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -212,6 +219,7 @@ export function productRoutes({
       termsUrl,
       ssoOidcEnabled: oidcEnabled,
       ssoSamlEnabled: samlEnabled,
+      routingFormsEnabled: routingEnabled,
     }),
     calendarRoutes({
       db,

@@ -23,6 +23,11 @@ export function routeBodyLimit(maxBytes: number): MiddlewareHandler {
   return Object.assign(declaration, { [DECLARED]: maxBytes })
 }
 
+/** Whether a route middleware is a routeBodyLimit declaration, which reads nothing. */
+export function isRouteBodyLimit(handler: unknown): boolean {
+  return typeof handler === 'function' && DECLARED in handler
+}
+
 /** A check run on a request body while it is read; it throws an HTTPException to refuse it. */
 export interface BodyCheck {
   /** Sees each chunk as it is read. */
