@@ -58,6 +58,10 @@ async function readEntries(db: Db, eventTypeId: string, at: Date, lock = false) 
 }
 
 const PAGE_MS = 7 * 24 * 60 * 60 * 1000
+// Signal batches select their locked IDs in an uncorrelated ARRAY(...) subquery, which
+// PostgreSQL evaluates once per statement. An IN (...) subquery can be rescanned for each
+// target row (e.g. with statistics taken while the table was empty), and every rescan
+// skips rows this DELETE already removed, so one statement could exceed the limit.
 const SIGNAL_LIMIT = 1000
 
 /** Only scanners update work rows. Writers append independent, rollback-safe signals. */
@@ -65,10 +69,10 @@ async function consumeSignals(db: Db, eventTypeId: string, at: Date) {
   // Delete exactly the visible selected IDs, never an ID/time high-water mark: a
   // transaction can commit an older UUID after this batch has already finished.
   await sql`WITH consumed AS (
-    DELETE FROM waitlist_scan_signals WHERE id IN (
+    DELETE FROM waitlist_scan_signals WHERE id = ANY(ARRAY(
       SELECT id FROM waitlist_scan_signals WHERE event_type_id=${eventTypeId}
       ORDER BY id LIMIT ${SIGNAL_LIMIT} FOR UPDATE SKIP LOCKED
-    ) RETURNING id
+    )) RETURNING id
   ) UPDATE waitlist_scan_work SET dirty_generation=dirty_generation+1,
       next_due_at=least(next_due_at,${at}),updated_at=${at}
     WHERE event_type_id=${eventTypeId} AND EXISTS(SELECT FROM consumed)`.execute(db)
@@ -320,7 +324,7 @@ export async function cleanupWaitlistSignals(
           ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
         )
         const { rows } = await sql<{ count: number }>`WITH discarded AS (
-          DELETE FROM waitlist_scan_signals WHERE id IN (
+          DELETE FROM waitlist_scan_signals WHERE id = ANY(ARRAY(
             SELECT s.id FROM waitlist_scan_signals s
             WHERE NOT EXISTS(SELECT FROM event_types et
               WHERE et.id=s.event_type_id AND et.waitlist_enabled AND et.is_active
@@ -328,7 +332,7 @@ export async function cleanupWaitlistSignals(
                   WHERE e.event_type_id=et.id AND e.status IN ('active','notified')
                     AND e.verified_at IS NOT NULL AND e.expires_at>${at}))
             ORDER BY s.id LIMIT ${SIGNAL_LIMIT} FOR UPDATE OF s SKIP LOCKED
-          ) RETURNING id
+          )) RETURNING id
         ) SELECT count(*)::int AS count FROM discarded`.execute(trx)
         return rows[0]?.count ?? 0
       })
