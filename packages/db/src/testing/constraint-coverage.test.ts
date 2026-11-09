@@ -5,6 +5,38 @@ import pg from 'pg'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { checkConstraintCoverage, openRelatedPool } from './constraint-coverage.ts'
 
+// Copy database name → its place in the order the helper requested clones of its template.
+// The helper requests "the baseline" copy before "the second baseline" copy, but the two
+// clone in parallel and either may finish (and reach the suite) first, so only the request
+// order says which baseline a suite run is on. The wrapper changes nothing else.
+const cloneRequests = vi.hoisted(() => new Map<string, number>())
+vi.mock('../testing.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../testing.ts')>()
+  return {
+    ...actual,
+    createTestDatabaseTemplate: async (
+      ...args: Parameters<typeof actual.createTestDatabaseTemplate>
+    ) => {
+      const template = await actual.createTestDatabaseTemplate(...args)
+      let requested = 0
+      return {
+        ...template,
+        clone: (...cloneArgs: Parameters<typeof template.clone>) => {
+          requested += 1
+          const request = requested
+          return template.clone(...cloneArgs).then((copy) => {
+            cloneRequests.set(new URL(copy.url).pathname.slice(1), request)
+            return copy
+          })
+        },
+      }
+    },
+  }
+})
+/** 1 on "the baseline" copy, 2 on "the second baseline" copy, higher on dropped copies. */
+const cloneRequest = (pool: pg.Pool) =>
+  cloneRequests.get(new URL(pool.options.connectionString as string).pathname.slice(1))
+
 const serverUrl = process.env.DATABASE_URL
 
 /** A driver error with the given SQLSTATE, as pg raises it (its name is 'error'). */
@@ -795,24 +827,33 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
     120_000,
   )
 
-  // The two baselines clone in parallel, so either label can receive either call: one of
-  // these two cases always lands on "the second baseline", and both must abort.
-  it.each([1, 2])(
-    'aborts when the unmodified suite fails on baseline call %i only, before any drop',
-    async (failing) => {
+  // The two baselines clone in parallel, so the order of the suite's calls is the order in
+  // which the clones finish, which varies; the failing run is chosen by clone request instead,
+  // so each case fails on the same baseline every time, whichever clone finishes first.
+  it.each([
+    ['the baseline', 1, /^The assertion suite fails on the unmodified schema$/],
+    [
+      'the second baseline',
+      2,
+      /^The assertion suite fails on the unmodified schema \(on the second baseline run only\)$/,
+    ],
+  ] as const)(
+    'aborts when the unmodified suite fails on %s only, before any drop',
+    async (_label, failing, message) => {
       await writeExpectation()
-      let calls = 0
+      const runs: (number | undefined)[] = []
       await expect(
         coverage({
           concurrency: 1,
           assertions: async (pool) => {
-            calls += 1
-            if (calls === failing) expect('this run').toBe('stable')
+            const request = cloneRequest(pool)
+            runs.push(request)
+            if (request === failing) expect('this run').toBe('stable')
             await fullSuite(pool)
           },
         }),
-      ).rejects.toThrow(/The assertion suite fails on the unmodified schema/)
-      expect(calls).toBe(2)
+      ).rejects.toThrow(message)
+      expect([...runs].sort()).toEqual([1, 2])
     },
     120_000,
   )
