@@ -5320,6 +5320,8 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
+            /** @description Whether routing forms are enabled; absent when unknown */
+            routingFormsEnabled?: boolean;
             /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
             scimProvisioningEnabled?: boolean;
             /** @description The sign-in methods people can use on this instance */
