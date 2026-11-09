@@ -1,3 +1,4 @@
+import '@hono/zod-openapi'
 // Independent accepted operation table, exercised through real key authentication and
 // every composed REST route. Providers use the repository transport fake only.
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -17,6 +18,7 @@ import {
 } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { getScheduleAvailability } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { createWebhook } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -38,6 +40,7 @@ const classes = {
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
+    'GET /api/v1/bookings/{id}/attendees',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
     'GET /api/v1/bookings/manage',
@@ -58,6 +61,7 @@ const classes = {
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
+    'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/{id}/request-reschedule',
@@ -71,6 +75,9 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
@@ -81,11 +88,14 @@ const classes = {
     'GET /api/v1/event-types/{id}/waitlist/entries',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
+    'GET /api/v1/schedules/{id}/availability',
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -102,6 +112,7 @@ const classes = {
     'POST /api/v1/schedules',
     'DELETE /api/v1/schedules/{id}',
     'PATCH /api/v1/schedules/{id}',
+    'PUT /api/v1/schedules/{id}/availability',
     'PUT /api/v1/schedules/{id}/overrides/{date}',
     'DELETE /api/v1/schedules/{id}/overrides/{date}',
     'POST /api/v1/schedules/default',
@@ -111,6 +122,10 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
@@ -186,6 +201,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let date: string
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
+    const personalKeys = new Map<ApiKeyScope, string>()
 
     beforeAll(async () => {
       database = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -231,6 +247,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
             })
           ).key,
         )
+      // Exports permit scoped keys only for the owner's personal organization.
+      for (const scope of scopes)
+        personalKeys.set(
+          scope,
+          (
+            await auth.api.createApiKey({
+              body: {
+                userId: owner.user.id,
+                metadata: { scope, organizationId: owner.organization.id },
+              },
+            })
+          ).key,
+        )
       const resolveCaller = createCallerResolver({ auth, db })
       const resolved = await resolveCaller(
         new Headers({ authorization: `Bearer ${keys.get('full')}` }),
@@ -272,6 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          scimProvisioningEnabled: true,
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -302,6 +332,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
         path = path
           .replaceAll('{id}', randomUUID())
@@ -309,6 +340,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
+          .replaceAll('{organizationId}', teamId)
         const error =
           template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
@@ -352,6 +384,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('id', '=', id)
           .execute()
         headers['x-manage-token'] = token
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (template.endsWith('/request-reschedule')) payload = { idempotencyKey: randomUUID() }
         if (template.endsWith('/reschedule')) payload = { start: `${date}T10:00:00Z` }
@@ -396,6 +442,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         cleanupOneTimeLink = link.id
         path = path.replace('{token}', link.token)
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (method === 'POST') {
           payload = {
@@ -409,6 +469,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
         path = path
           .replace('{handle}', team ? 'rest-scoped-team' : 'rest-scoped-host')
           .replace('{slug}', 'intro')
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (method === 'POST') {
           cleanupEvent = await f.eventType(
@@ -467,6 +541,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 201
         }
         if (operation === 'PATCH /api/v1/schedules/{id}') payload = { name: nonce }
+        if (operation === 'PUT /api/v1/schedules/{id}/availability') {
+          const snapshot = await getScheduleAvailability(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            id,
+          )
+          payload = {
+            name: nonce,
+            timeZone: snapshot.schedule.timeZone,
+            weeklyHours: { monday: [{ start: '10:00', end: '16:00' }] },
+            overrides: [{ date, intervals: [] }],
+            expectedVersion: snapshot.version,
+          }
+        }
         if (operation === 'PUT /api/v1/schedules/{id}/overrides/{date}') {
           payload = { intervals: [] }
           expectedStatus = 201
@@ -602,6 +689,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         expectedStatus = 204
       }
+      if (operation === 'PATCH /api/v1/branding') payload = { brandPrimaryColor: '#123456' }
+      if (
+        operation === 'POST /api/v1/branding/logo' ||
+        operation === 'GET /api/v1/branding/logo/{hash}'
+      ) {
+        const { default: sharp } = await import('sharp')
+        const image = await sharp({
+          create: { width: 2, height: 2, channels: 4, background: '#123456' },
+        })
+          .png()
+          .toBuffer()
+        if (method === 'POST') {
+          payload = image
+          headers['content-type'] = 'image/png'
+        } else {
+          const { uploadBrandLogo } = await import('@hourmere/scheduling')
+          const branding = await uploadBrandLogo(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            image,
+            'image/png',
+          )
+          path = path.replace('{hash}', branding.brandLogo as string)
+        }
+      }
       path = path.replace('{id}', id).replace('{date}', date)
       return {
         method,
@@ -617,14 +728,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 101-operation contract and all 303 scope combinations', () => {
+    it('covers the exact 114-operation contract and all 342 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(101)
-      expect(new Set(ids).size).toBe(101)
+      expect(ids).toHaveLength(114)
+      expect(new Set(ids).size).toBe(114)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(303)
+      expect(cases).toHaveLength(342)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -636,11 +747,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
           {
             method: fixture.method,
             headers: {
-              authorization: `Bearer ${keys.get(scope)}`,
+              authorization: `Bearer ${(operation === 'GET /api/v1/bookings/export.csv' ? personalKeys : keys).get(scope)}`,
               'content-type': 'application/json',
               ...fixture.headers,
             },
-            ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
+            ...(fixture.payload === undefined
+              ? {}
+              : {
+                  body: Buffer.isBuffer(fixture.payload)
+                    ? new Uint8Array(fixture.payload)
+                    : JSON.stringify(fixture.payload),
+                }),
           },
           { incoming: { socket: { remoteAddress: `192.0.2.${(sequence % 250) + 1}` } } },
         )
@@ -656,14 +773,49 @@ describe.skipIf(!process.env.DATABASE_URL)(
         } else if (!allowed[kind].includes(scope)) {
           expect(response.status).toBe(403)
           expect(await response.json()).toEqual(denied)
+          if (operation === 'PUT /api/v1/schedules/{id}/availability') {
+            const snapshot = await getScheduleAvailability(
+              { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+              fixture.cleanupSchedule as string,
+            )
+            expect(snapshot.version).toBe(
+              (fixture.payload as { expectedVersion: string }).expectedVersion,
+            )
+          }
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
-          if (response.status !== 204) {
+          if (operation === 'GET /api/v1/branding/logo/{hash}') {
+            expect(response.headers.get('content-type')).toBe('image/png')
+          } else if (operation === 'GET /api/v1/bookings/export.csv') {
+            expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+            expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
             if (operation === 'PUT /api/v1/event-types/{id}/notifications')
               expect(data).toMatchObject(fixture.payload as { notifications: unknown })
+            if (operation === 'PUT /api/v1/schedules/{id}/availability') {
+              const input = fixture.payload as {
+                name: string
+                weeklyHours: unknown
+                overrides: unknown
+                expectedVersion: string
+              }
+              expect(data).toMatchObject({
+                schedule: { name: input.name, weeklyHours: input.weeklyHours },
+                overrides: input.overrides,
+              })
+              expect(data).toHaveProperty('version', expect.stringMatching(/^[a-f0-9]{64}$/))
+              expect(data).not.toHaveProperty('version', input.expectedVersion)
+            }
+            if (operation === 'GET /api/v1/schedules/{id}/availability') {
+              expect(data).toMatchObject({
+                schedule: { id: fixture.cleanupSchedule },
+                overrides: [],
+                version: expect.stringMatching(/^[a-f0-9]{64}$/),
+              })
+            }
             if (operation === 'POST /api/v1/schedules')
               await db
                 .deleteFrom('schedules')
@@ -700,7 +852,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe(
-          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+          operation === 'GET /api/v1/instance/embed' ||
+            operation.includes('/provisioning-tokens') ||
+            (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
+            ? 'private, no-store'
+            : 'no-store',
         )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link

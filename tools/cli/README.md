@@ -277,6 +277,61 @@ for argument tables, private results, pagination and recovery, and the
 [MCP guide](https://hourmere.com/docs/mcp) for tool semantics.
 Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 
+### Mark attendee no-shows
+
+`set-no-show` uses JSON input with `bookingId`, `attendeeId` and `noShow` (`true`
+to mark, `false` to unmark). Read attendee IDs from authenticated booking lists.
+It requires `bookings` or `full` scope and booked-host authority in the current organization.
+Only bookings whose scheduled start has passed can be changed; cancelled and imported
+records refuse changes. Repeating the same state preserves its timestamp and actor.
+No invitee email or manage-page indicator is added, and existing follow-ups remain scheduled.
+
+`booking-attendees` takes `{ "bookingId": "…" }` and returns attendee IDs and
+markers. It accepts `read`, `bookings` or `full` keys with the same booked-host
+permission. Team owner/admin status does not grant CLI access to bookings hosted by
+other members: these return `booking_not_found`, just as missing bookings do. Non-host
+team administration requires a browser session. Reads are available before the start
+and after cancellation.
+
 ## License
 
 GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
+
+### Export bookings
+
+`hourmere export --input export.json --output bookings.csv` streams CSV into a new
+0600 file. Omit `--output` to stream CSV to stdout (including pipes); output writes
+apply backpressure. Existing files are refused. A failed download can leave a partial
+file; remove that file before retrying. The command never retries automatically.
+
+Example `export.json`:
+
+```json
+{"from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","timeZone":"America/Los_Angeles","bom":true}
+```
+
+The range is at most 366 days. Optional `status`, `eventTypeId`, `hostUserId`,
+`endAfter`, `endTo` and `order` match export/list filtering. `bom` defaults to false;
+choose true for Excel. Requires a `read` or `full` key and personal ownership or
+team owner/admin permissions. The MCP call returns a small pointer; the CLI streams
+its same-instance authenticated REST download without buffering the CSV in memory.
+Files contain attendee personal data; store and share them privately. See
+[CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
+## Organization branding
+
+```sh
+hourmere branding get
+printf '%s' '{"brandPrimaryColor":"#123456"}' | hourmere branding set --input -
+hourmere branding upload --file logo.png --content-type image/png
+```
+
+Reads require `read` or `full` API key scope; writes require `full`. The personal owner
+or team owner/admin must own the key. `branding set` accepts an uploaded `brandLogo`
+SHA-256 reference and/or `brandPrimaryColor` (`#RRGGBB`); omission preserves a field,
+and `null` clears it. Black or white button text is chosen for readable contrast.
+
+`branding upload` sends raw bytes over REST, immediately attaches the image and prints
+the saved settings. PNG, JPEG and WebP are accepted, at most 512 KiB and 2048 pixels per
+side; images are decoded and re-encoded as PNG. SVG and animation are rejected. The
+server enforces all limits. These settings are stored only; public booking pages and
+emails do not yet apply the theme.

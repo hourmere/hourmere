@@ -10,6 +10,7 @@ import {
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
   redactLogDetails,
+  ScimTokenError,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
 import {
@@ -38,6 +39,7 @@ import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
+import { mountScim, type ScimOptions } from './scim.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
   securityHeaders,
@@ -55,6 +57,7 @@ import { registerWaitlistConfirmation } from './waitlist-confirm.ts'
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
   checkDb: () => Promise<void>
+  scim?: ScimOptions | undefined
   /** Minimal confirmation transports for emailed waitlist capabilities. */
   waitlist?:
     | {
@@ -154,6 +157,7 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (c.req.path.includes('/provisioning-tokens')) return c.json({ error: 'invalid_request' }, 400)
   const message = result.error.issues
     .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
     .join('; ')
@@ -327,6 +331,12 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
 // URL logger, including malformed tokens and refused embed attempts.
 const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
+  if (c.req.path.includes('/provisioning-tokens')) {
+    await next()
+    const managementRoute = routePath(c)
+    console.log(escapeControlCharacters(`--> ${c.req.method} ${managementRoute} ${c.res.status}`))
+    return
+  }
   if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
   await next()
   console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
@@ -334,6 +344,7 @@ const requestLogger = createMiddleware(async (c, next) => {
 
 export function createApp({
   checkDb,
+  scim,
   authHandler,
   resolveCaller,
   publicUrl,
@@ -362,7 +373,9 @@ export function createApp({
       : isOneTimeLinkPath(c.req.path)
         ? routePath(c)
         : c.req.path
-    const message = `${c.req.method} ${path}: ${text}`
+    const message = c.req.path.includes('/provisioning-tokens')
+      ? 'Provisioning credential request failed'
+      : `${c.req.method} ${path}: ${text}`
     const write = level === 'ERROR' ? console.error : console.warn
     write(
       `${new Date().toISOString()} ${level} ${
@@ -400,6 +413,8 @@ export function createApp({
         err.status,
       )
     }
+    if (err instanceof ScimTokenError)
+      return c.json({ error: `scim_token_${err.code}` }, err.status)
     if (err instanceof ApiKeyScopeError) {
       return c.json({ error: err.error, message: err.message }, 403)
     }
@@ -435,6 +450,18 @@ export function createApp({
     '*',
     securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge), embedOrigins }),
   )
+  // Provisioning credentials never fall back to a browser cookie on another surface.
+  app.use('*', async (c, next) => {
+    if (
+      /^Bearer[ \t]+scim_/i.test(c.req.header('authorization') ?? '') &&
+      !c.req.path.startsWith('/scim/v2/')
+    ) {
+      c.header('Cache-Control', 'no-store')
+      c.header('WWW-Authenticate', 'Bearer')
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    await next()
+  })
   app.use('/embed/*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
@@ -545,6 +572,7 @@ export function createApp({
 
   for (const register of routes) register({ app, caller })
   mcp?.mount({ app, resolveCaller, publicUrl })
+  mountScim(app, scim, trustedProxies)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:
