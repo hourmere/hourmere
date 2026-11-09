@@ -67,10 +67,15 @@ The website at hourmere.com is separate from your Hourmere instance.
   this limitation applies equally to self-hosted installations. Existing occurrences retain
   their shared location, schedule and conference settings when event settings change, and
   continue accepting seats until full, subject to current booking cutoffs and usable pinned
-  conference resources. New occurrences use the edited settings. A full occurrence gives
+  conference resources. Later time off, external-calendar conflicts and stale calendar sync
+  do not block additional seats or moves into an existing occurrence; the host must cancel
+  it to stop admission. New occurrences check current time off, calendar conflicts and sync
+  freshness as well as the edited settings. A full occurrence gives
   the same error for existing and unknown email addresses; exact request replays still work.
   With spare capacity, duplicate-email rejection does not guarantee membership privacy:
-  booking with a different email address creates a real seat and its notifications.
+  a different email address can create a real seat and its notifications, or receive a
+  distinct pinned-Zoom failure without a committed seat. Mismatched location options
+  return the same error regardless of whether the email address already holds a seat.
   Host occurrence mail drains batches of four for up to 230 seconds per worker run;
   remaining due messages stay durable for the next run, subject to reminder expiry,
   the instance email abuse budget and delivery retries.

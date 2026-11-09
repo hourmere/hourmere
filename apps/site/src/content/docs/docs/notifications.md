@@ -37,7 +37,9 @@ and superseded requests are skipped. Existing mail budgets and retries apply.
 Group occurrence host mail is drained in batches during each minute's worker run;
 the batch size does not limit an instance to four messages per minute. The worker
 starts new attempts for up to 230 seconds, leaving time for a bounded SMTP attempt
-before its five-minute job expiry. Remaining rows stay durable for the next run.
+before its five-minute job expiry. A batch that makes no progress (for example, because
+all selected rows are locked by another transaction) ends the run instead of repeatedly
+polling those rows. Remaining rows stay durable for the next run.
 Shared instance hourly mail limits (including the host reserve), per-message receipts,
 coalesced calendar updates, and finite retry limits still apply. Reminders expire at
 the occurrence start, so an SMTP outage or a backlog exceeding the worker's time

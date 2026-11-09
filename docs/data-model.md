@@ -1605,7 +1605,11 @@ location option and immutable logistics snapshot; seats cannot select different 
 Changes to the event location, default location option, assigned schedule or selected Zoom
 connection apply to new occurrences. Existing open occurrences continue accepting seats
 with their original logistics; their already reserved interval is not recalculated against
-the edited schedule. New seats and moves into them inherit the shared location and option.
+the edited schedule. Later host time-off overrides, external-calendar busy blocks and
+calendar-sync staleness are not rechecked for additional seats or moves into that occurrence.
+To stop admission after such a change, the host must cancel the occurrence. New occurrences
+still check current schedules, time off, calendar conflicts and sync freshness. New seats
+and moves into existing occurrences inherit the shared location and option.
 Current event activation, host identity, allowed duration, minimum notice and booking window
 still apply (the window uses the occurrence's snapshotted host time zone), and automatic
 conferences still require their pinned resources to remain usable. Retiring the last seat
@@ -1616,6 +1620,9 @@ unknown mailboxes before checking mailbox duplication. An exact authorized idemp
 still returns its original seat without consuming capacity or sending another notification.
 For occurrences with spare capacity, duplicate-mailbox rejection is not a non-enumeration
 guarantee: a different mailbox can create a real booking and trigger its notifications.
+A later failure of the pinned Zoom resource can also return a different error to a new
+mailbox while rolling back its tentative seat. Snapshot location-option mismatches are
+checked before mailbox duplication and return the same error to both callers.
 
 Moving one seat cancels its predecessor and creates a successor in the same transaction,
 so capacity is released/taken atomically and surviving source seats retain their resources.

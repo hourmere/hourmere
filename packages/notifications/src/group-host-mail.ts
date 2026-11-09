@@ -200,14 +200,14 @@ export async function deliverGroupHostMail(
       await sql`UPDATE group_slot_host_messages SET state='skipped',claim_token=NULL,lease_until=NULL WHERE id=${id}`.execute(
         trx,
       )
-      return
+      return 'changed' as const
     }
     if (row.next_attempt_at > asDate(clock(deps)) || row.due_at > asDate(clock(deps))) return
     if (row.attempts >= 13) {
       await sql`UPDATE group_slot_host_messages SET state='failed',claim_token=NULL,lease_until=NULL WHERE id=${id}`.execute(
         trx,
       )
-      return
+      return 'changed' as const
     }
     const token = randomUUID()
     await sql`UPDATE group_slot_host_messages SET state='processing',attempts=attempts+1,claim_token=${token},lease_until=clock_timestamp()+interval '90 seconds' WHERE id=${id}`.execute(
@@ -215,7 +215,8 @@ export async function deliverGroupHostMail(
     )
     return { ...row, token, attempt: row.attempts + 1 }
   })
-  if (!claim) return
+  if (!claim) return false
+  if (claim === 'changed') return true
   let state = 'sent'
   try {
     // Pin calendar organizer outside SMTP; no seat or slot lock is held during delivery.
@@ -289,6 +290,7 @@ export async function deliverGroupHostMail(
   await sql`UPDATE group_slot_host_messages SET state=${state},claim_token=NULL,lease_until=NULL,
     next_attempt_at=${asDate(clock(deps).add({ milliseconds: Math.min(60_000 * 2 ** (claim.attempt - 1), 3_600_000) }))}
     WHERE id=${id} AND claim_token=${claim.token} AND attempts=${claim.attempt}`.execute(deps.db)
+  return true
 }
 
 /** Durable due rows are the queue; a crash never needs to reconstruct policy from a seat. */
@@ -315,11 +317,14 @@ export function groupHostMailJob(deps: NotificationDeps) {
           )
         ).rows
         if (rows.length === 0) return
+        let progressed = false
         for (const row of rows) {
           signal.throwIfAborted()
           if (performance.now() >= deadline) return
-          await deliverGroupHostMail(deps, row.id, signal)
+          if (await deliverGroupHostMail(deps, row.id, signal)) progressed = true
         }
+        // Locked rows stay durable for the next scheduled run; do not busy-poll them.
+        if (!progressed) return
       }
     },
   })

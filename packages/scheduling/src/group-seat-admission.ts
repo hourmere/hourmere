@@ -130,6 +130,17 @@ export async function admitGroupSlot(
       new DomainError('conflict', 'slot_taken', 'Someone else just booked this time'),
       { errorAlias: 'group_slot_full' },
     )
+  // Reject caller-selected logistics before looking up mailbox membership.
+  if (
+    slot &&
+    q.locationOptionId !== undefined &&
+    (slot.location_option as { id?: string } | null)?.id !== q.locationOptionId
+  )
+    throw new DomainError(
+      'conflict',
+      'location_unavailable',
+      'Group seats share the configured location.',
+    )
   if (
     slot &&
     (await db
@@ -146,15 +157,6 @@ export async function admitGroupSlot(
   if (slot && !q.preserveDurationBookingId && !config.allowed_durations_minutes.includes(duration))
     throw groupUnavailable()
   if (slot) {
-    if (
-      q.locationOptionId !== undefined &&
-      (slot.location_option as { id?: string } | null)?.id !== q.locationOptionId
-    )
-      throw new DomainError(
-        'conflict',
-        'location_unavailable',
-        'Group seats share the configured location.',
-      )
     // This interval already reserves the host. Logistics edits govern new occurrences,
     // not additional seats in an immutable existing occurrence.
     if (
@@ -171,6 +173,7 @@ export async function admitGroupSlot(
     )
       throw groupUnavailable()
     return {
+      existing: true,
       id: slot.id,
       location: parseLocation(slot.location),
       locationOption: slot.location_option,
@@ -228,6 +231,7 @@ export async function admitGroupSlot(
     .values({ group_slot_id: created.id, user_id: hostId })
     .execute()
   return {
+    existing: false,
     id: created.id,
     location: parseLocation(config.location),
     locationOption: option as Json | null,

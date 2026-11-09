@@ -208,6 +208,50 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       verifyWorkerDeadline(['if (performance.now() >= deadline) return', 'if (false) return']),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
+  async function verifyLockedBatch(change?: [string, string]) {
+    const f = await dueReminders(1)
+    const reminder = must((await rows(f.slot)).find((row) => row.kind === 'reminder'))
+    const blocker = await owned.pool.connect()
+    let clockReads = 0
+    let elapsed = 0
+    const job = sourceCopy(change, {
+      performance: {
+        now: () => {
+          // Bound a broken drain loop without sleeps or a real 230-second wait.
+          if (++clockReads > 10) elapsed = 230_000
+          return elapsed
+        },
+      },
+    }).groupHostMailJob(f.deps)
+    try {
+      await blocker.query('BEGIN')
+      await blocker.query('SELECT id FROM group_slot_host_messages WHERE id=$1 FOR UPDATE', [
+        reminder.id,
+      ])
+      await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
+      expect(elapsed, 'a locked batch must stop before exhausting the worker deadline').toBe(0)
+      expect(f.sent).toHaveLength(0)
+      expect((await rows(f.slot)).find((row) => row.id === reminder.id)).toMatchObject({
+        state: 'pending',
+        attempts: 0,
+      })
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    await groupHostMailJob(f.deps).handler(
+      {},
+      { id: randomUUID(), attempt: 1, signal: new AbortController().signal },
+    )
+    expect(f.sent).toHaveLength(1)
+  }
+  it('stops a drain with no progress and retries locked rows on the next run', () =>
+    verifyLockedBatch())
+  it('kills busy-polling a locked batch with a real assertion', async () => {
+    await expect(
+      verifyLockedBatch(['if (!progressed) return', 'if (false) return']),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
   it('keeps one immutable host schedule per slot and gives calendar only the shared UID', async () => {
     const f = await fixture()
     for (const booking of f.bookings) await enqueueGroupHostMail(db, booking, f.now)

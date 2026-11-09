@@ -1510,7 +1510,7 @@ async function publicBooking(
           now: ctx.now,
         })
       }
-      if (groupSlot) await prepareBookingConference(ctx, trx, id)
+      if (groupSlot?.existing) await prepareBookingConference(ctx, trx, id)
       else
         await prepareChosenBookingConference(
           ctx,
@@ -2306,7 +2306,7 @@ export async function cancelTeamBookingInTransaction(
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
-  await lockGroupBooking(trx, id)
+  await lockGroupBooking(trx, id, undefined, undefined, actor.organizationId)
   const row = await trx
     .selectFrom('bookings')
     .select(['id', 'organization_id', 'status', 'start_at'])
