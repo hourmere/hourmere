@@ -15,8 +15,8 @@
  * 2. The enumerated objects and their definitions must equal the committed expectation file,
  *    so adding, removing or redefining an object needs a reviewed expectation change. Rewrite
  *    it after review with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`.
- * 3. The assertion suite must pass on two unmodified copies of the template (a check that
- *    fails only sometimes would make dropped objects look covered).
+ * 3. The assertion suite must pass on two unmodified copies of the template: a check that
+ *    fails on either unmodified run aborts the run before any object is judged.
  * 4. For every object, a fresh `CREATE DATABASE … TEMPLATE` copy drops exactly that object and
  *    runs the suite again. Each object that is not allow-listed must fail; an allow-listed
  *    object must not (otherwise the entry is stale).
@@ -24,8 +24,10 @@
  * What makes a failure count as coverage is what the database did, not how the suite
  * asserted it. Every rejected `query` on the pool handed to the suite, on the clients it
  * hands out through `connect()`, on `connect()` itself, and on pools opened through
- * `openRelatedPool`, is recorded with its SQLSTATE. On every copy, baseline or dropped,
- * passing or failing:
+ * `openRelatedPool`, is recorded with its SQLSTATE. Only the promise form is supported: a
+ * `query` or `connect` call with a callback throws a TypeError, which aborts the run, because
+ * a callback would receive the error without the ledger seeing it. On every copy, baseline or
+ * dropped, passing or failing:
  * - a recorded error of any class other than 23 (integrity constraint), 22 (data exception)
  *   or P0 (raised by a trigger or function), or without a SQLSTATE at all (lost connection,
  *   socket or driver error), aborts the whole run and names the object and the error. This
@@ -41,8 +43,9 @@
  * - what remains, an assertion about an integrity rejection or a plain value mismatch with
  *   no unrelated database error behind it, counts.
  * A check that must provoke a non-integrity error therefore cannot be part of a coverage
- * suite. Open additional pools only with `openRelatedPool(pool, url)`, so that their errors
- * are recorded too; errors on other pools are invisible to the verdict.
+ * suite. Suites must reach the database only through the handed pool or through pools
+ * opened with `openRelatedPool(pool, url)`: a pool, client or Kysely instance a suite builds
+ * on its own is invisible to the verdict, and nothing guards against that but review.
  *
  * What the helper does not see, and what must be guarded by behavioural checks, source-copy
  * mutations or other tests instead:
@@ -302,15 +305,24 @@ function recordQueryErrors(pool: pg.Pool, ledger: RecordedQueryError[]): pg.Pool
       sql: typeof text === 'string' ? text.slice(0, 160) : undefined,
     })
   }
+  // The callback form of `query` delivers its error to the callback, which the ledger cannot
+  // see, so it is refused outright (synchronously, so a callback-style caller cannot hang).
+  const refuseCallbacks = (method: string, args: unknown[]) => {
+    if (args.some((argument) => typeof argument === 'function'))
+      throw new TypeError(
+        `coverage suites use the promise form of ${method}: a callback bypasses the query-error ledger`,
+      )
+  }
   const recordingQuery =
     (target: pg.Pool | pg.PoolClient) =>
-    async (...args: unknown[]) => {
-      try {
-        return await (target.query as (...a: unknown[]) => Promise<unknown>)(...args)
-      } catch (error) {
-        record(error, args[0])
-        throw error
-      }
+    (...args: unknown[]) => {
+      refuseCallbacks('query', args)
+      return (target.query as (...a: unknown[]) => Promise<unknown>)(...args).catch(
+        (error: unknown) => {
+          record(error, args[0])
+          throw error
+        },
+      )
     }
   const wrapClient = (client: pg.PoolClient): pg.PoolClient =>
     new Proxy(client, {
@@ -325,13 +337,13 @@ function recordQueryErrors(pool: pg.Pool, ledger: RecordedQueryError[]): pg.Pool
       if (property === ledgerKey) return ledger
       if (property === 'query') return recordingQuery(target)
       if (property === 'connect')
-        return async () => {
-          try {
-            return wrapClient(await target.connect())
-          } catch (error) {
+        return (...args: unknown[]) => {
+          // Checked before the async body, so a callback-style caller gets a synchronous throw.
+          refuseCallbacks('connect', args)
+          return target.connect().then(wrapClient, (error: unknown) => {
             record(error, undefined)
             throw error
-          }
+          })
         }
       const value = Reflect.get(target, property, target)
       return typeof value === 'function' ? value.bind(target) : value
@@ -536,20 +548,24 @@ export async function checkConstraintCoverage(
     for (const key of Object.keys(allowList))
       if (!Object.hasOwn(definitions, key)) problems.push(`allow-list entry is not created: ${key}`)
 
-    // Twice: a check that fails only sometimes would make dropped objects look covered.
-    for (const [first, second] of [
-      await Promise.all([
-        runOnCopy(template, options.assertions, timeoutMs, 'the baseline'),
-        runOnCopy(template, options.assertions, timeoutMs, 'the second baseline'),
-      ]),
-    ]) {
-      const baseline = first.failure ? first : second
-      if (baseline.failure)
-        throw new Error(
-          `The assertion suite fails on the unmodified schema${first.failure ? '' : ' (on the second baseline run only)'}`,
-          { cause: baseline.failure },
-        )
-    }
+    // Twice: a check that fails on either unmodified run aborts the run (a check that fails
+    // only sometimes may still pass both; this catches the ones that fail at least that often).
+    // Settle both before the template can be dropped, then surface the first abort.
+    const baselines = await Promise.allSettled([
+      runOnCopy(template, options.assertions, timeoutMs, 'the baseline'),
+      runOnCopy(template, options.assertions, timeoutMs, 'the second baseline'),
+    ])
+    const rejected = baselines.find((outcome) => outcome.status === 'rejected')
+    if (rejected) throw rejected.reason
+    const [first, second] = baselines.map((outcome) =>
+      outcome.status === 'fulfilled' ? outcome.value : {},
+    ) as [{ failure?: unknown }, { failure?: unknown }]
+    const baseline = first.failure ? first : second
+    if (baseline.failure)
+      throw new Error(
+        `The assertion suite fails on the unmodified schema${first.failure ? '' : ' (on the second baseline run only)'}`,
+        { cause: baseline.failure },
+      )
 
     const results: CoverageResult[] = []
     const pending = [...objects]

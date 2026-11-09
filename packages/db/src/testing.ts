@@ -244,13 +244,20 @@ export function reuseConnectionsAfterErrors(pool: pg.Pool): pg.Pool {
   return new Proxy(pool, {
     get(target, property) {
       if (property === 'query')
-        return async (text: string, values?: unknown[]) => {
-          const client = await target.connect()
-          try {
-            return await client.query(text, values)
-          } finally {
-            client.release()
-          }
+        return (text: string, values?: unknown[]) => {
+          // Refused synchronously: a callback-style caller would otherwise wait forever.
+          if (typeof values === 'function')
+            throw new TypeError(
+              'pools with connection reuse use the promise form of query: callbacks are not supported',
+            )
+          return (async () => {
+            const client = await target.connect()
+            try {
+              return await client.query(text, values)
+            } finally {
+              client.release()
+            }
+          })()
         }
       const value = Reflect.get(target, property, target)
       return typeof value === 'function' ? value.bind(target) : value

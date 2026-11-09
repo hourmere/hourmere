@@ -795,7 +795,29 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
     120_000,
   )
 
-  it('runs the baseline twice and aborts when either run fails', async () => {
+  // The two baselines clone in parallel, so either label can receive either call: one of
+  // these two cases always lands on "the second baseline", and both must abort.
+  it.each([1, 2])(
+    'aborts when the unmodified suite fails on baseline call %i only, before any drop',
+    async (failing) => {
+      await writeExpectation()
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            if (calls === failing) expect('this run').toBe('stable')
+            await fullSuite(pool)
+          },
+        }),
+      ).rejects.toThrow(/The assertion suite fails on the unmodified schema/)
+      expect(calls).toBe(2)
+    },
+    120_000,
+  )
+
+  it('records a refused connection on a related pool, however the suite asserts it', async () => {
     await writeExpectation()
     let calls = 0
     await expect(
@@ -803,11 +825,125 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         concurrency: 1,
         assertions: async (pool) => {
           calls += 1
-          if (calls === 2) expect('flaky').toBe('stable')
+          if (calls > 2) {
+            const url = new URL(pool.options.connectionString as string)
+            url.pathname = '/hourmere_test_coverage_missing_database'
+            const related = openRelatedPool(pool, url.toString())
+            try {
+              const code = await related.connect().then(
+                (client) => {
+                  client.release()
+                  return undefined
+                },
+                (error: unknown) => (error as { code?: string }).code,
+              )
+              expect(code).toBe('23514')
+            } finally {
+              await related.end()
+            }
+          }
           await fullSuite(pool)
         },
       }),
-    ).rejects.toThrow(/The assertion suite fails on the unmodified schema/)
-    expect(calls).toBe(2)
+    ).rejects.toThrow(
+      /could not evaluate constraint public\.child\.child_amount_check: the database reported 1 error\(s\) that are not integrity rejections: code 3D000: database "hourmere_test_coverage_missing_database" does not exist/,
+    )
   }, 120_000)
+
+  it('keeps one ledger per copy when copies run concurrently', async () => {
+    await writeExpectation()
+    let calls = 0
+    let started = 0
+    await expect(
+      coverage({
+        concurrency: 4,
+        assertions: async (pool) => {
+          calls += 1
+          if (calls <= 2) {
+            await fullSuite(pool)
+            return
+          }
+          started += 1
+          const injected =
+            (
+              await pool.query<{ n: number }>(
+                "SELECT count(*)::int AS n FROM pg_constraint WHERE conname='child_amount_check'",
+              )
+            ).rows[0]?.n === 0
+          if (injected) {
+            const code = await realTimeout(pool).catch(
+              (error: unknown) => (error as { code?: string }).code,
+            )
+            // Fail only after other copies have started (and finished) their own runs, so a
+            // ledger shared between copies would have lost this entry by now.
+            const deadline = Date.now() + 15_000
+            while (started < 6 && Date.now() < deadline)
+              await new Promise((resolve) => setTimeout(resolve, 50))
+            expect(code).toBe('23514')
+          }
+          await fullSuite(pool)
+        },
+      }),
+    ).rejects.toThrow(
+      /could not evaluate constraint public\.child\.child_amount_check: the database reported 1 error\(s\) that are not integrity rejections: code 57014: canceling statement/,
+    )
+    expect(started).toBeGreaterThanOrEqual(6)
+  }, 120_000)
+
+  it('refuses the callback form of query and connect, which would bypass the ledger', async () => {
+    await writeExpectation()
+    type Callback = (error: unknown, value?: unknown) => void
+    const missing = 'SELECT * FROM missing_relation'
+    const uses: [name: string, use: (pool: pg.Pool) => Promise<unknown>][] = [
+      [
+        'pool.query(sql, callback)',
+        (pool) =>
+          new Promise((resolve) => {
+            ;(pool.query as unknown as (text: string, callback: Callback) => void)(
+              missing,
+              (error) => resolve((error as { code?: string } | null)?.code),
+            )
+          }),
+      ],
+      [
+        'client.query(sql, callback)',
+        async (pool) => {
+          const client = await pool.connect()
+          try {
+            return await new Promise((resolve) => {
+              ;(client.query as unknown as (text: string, callback: Callback) => void)(
+                missing,
+                (error) => resolve((error as { code?: string } | null)?.code),
+              )
+            })
+          } finally {
+            client.release()
+          }
+        },
+      ],
+      [
+        'pool.connect(callback)',
+        (pool) =>
+          new Promise((resolve) => {
+            ;(pool.connect as unknown as (callback: Callback) => void)((error) => resolve(error))
+          }),
+      ],
+    ]
+    for (const [name, use] of uses) {
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            if (calls > 2) expect(await use(pool)).toBe('23514')
+            await fullSuite(pool)
+          },
+        }),
+        name,
+      ).rejects.toThrow(
+        /could not evaluate constraint public\.child\.child_amount_check: .*got TypeError: .*promise form of (query|connect)/,
+      )
+    }
+  }, 240_000)
 })
