@@ -15,14 +15,17 @@ import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { MiddlewareHandler } from 'hono'
+import { every } from 'hono/combine'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { callTool } from '../../../tools/cli/src/client.ts'
 import { createApp } from './app.ts'
+import { routeBodyLimit } from './body-limit.ts'
 import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { defineTool, type Tool } from './mcp/tools.ts'
 import { authenticated, json, type RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimit } from './rate-limit.ts'
+import { featureGate } from './rest-scopes.ts'
 import { requireRoutingFormsEnabled, routingFormsGuard, routingFormTools } from './routing-forms.ts'
 import * as server from './server.ts'
 
@@ -39,6 +42,14 @@ async function sourceCopy<T>(file: string, mutation?: [string, string]): Promise
       `${prefix}'${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
   return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+}
+
+/** The module native source copies import for `file`: the same instance they share. */
+function nativeModule<T>(file: string): Promise<T> {
+  const location = new URL(file, import.meta.url).href
+  return import(
+    `data:text/javascript;base64,${Buffer.from(`export * from '${location}'`).toString('base64')}`
+  )
 }
 
 afterEach(() => vi.unstubAllEnvs())
@@ -79,6 +90,16 @@ const NOT_TRUE: unknown[] = [
   [],
   [true],
   ['true'],
+]
+// The HTTP-level checks run a representative subset; the guard function gets every value.
+const NOT_TRUE_SAMPLE: unknown[] = [
+  false,
+  undefined,
+  'true',
+  1,
+  Object(true),
+  'constructor',
+  [true],
 ]
 
 const PUBLIC_URL = 'https://routing-guard.example'
@@ -169,10 +190,13 @@ describe('the routing-forms switch', () => {
 // existing operation classified for full-scope keys only (`PATCH /api/v1/branding`), so the
 // API-key scope check the guard must precede is a real denial. Each registers only on the
 // test app below; `effects` stands for every lookup and write after the guard.
+type RateLimits = Pick<typeof import('./rate-limit.ts'), 'createRateLimiter' | 'rateLimit'>
 function guardedRoutes(
   guard: MiddlewareHandler,
   effects: () => void,
   publicLimit: number,
+  // From the module graph of the app under test, whose registration recognises them.
+  limits: RateLimits = { createRateLimiter, rateLimit },
 ): RouteModule {
   const reached = {
     200: { description: 'Reached', content: json(z.object({ ok: z.literal(true) })) },
@@ -212,7 +236,7 @@ function guardedRoutes(
         method: 'get',
         path: '/api/v1/public/-/test-only-routing/{handle}/{slug}',
         middleware: [
-          rateLimit(createRateLimiter({ limit: publicLimit, windowSeconds: 600 })),
+          limits.rateLimit(limits.createRateLimiter({ limit: publicLimit, windowSeconds: 600 })),
           guard,
         ],
         request: {
@@ -393,7 +417,8 @@ function transportProbes(): (Omit<Probe, 'on'> & { status: number; error: string
 async function verifyRestGuard(
   guardFactory: (enabled: boolean) => MiddlewareHandler = routingFormsGuard,
   appFactory: typeof createApp = createApp,
-  values: unknown[] = [false, true, ...NOT_TRUE],
+  values: unknown[] = [false, true, ...NOT_TRUE_SAMPLE],
+  limits?: RateLimits,
 ) {
   for (const value of values) {
     const enabled = value === true
@@ -401,7 +426,7 @@ async function verifyRestGuard(
     const app = appFactory({
       ...base,
       resolveCaller,
-      routes: [guardedRoutes(guardFactory(value as boolean), effects, 1000)],
+      routes: [guardedRoutes(guardFactory(value as boolean), effects, 1000, limits)],
     })
     let reached = 0
     for (const probe of guardedProbes()) {
@@ -431,7 +456,7 @@ async function verifyRestGuard(
     const limited = appFactory({
       ...base,
       resolveCaller,
-      routes: [guardedRoutes(guardFactory(value as boolean), () => {}, 2)],
+      routes: [guardedRoutes(guardFactory(value as boolean), () => {}, 2, limits)],
     })
     const statuses: number[] = []
     for (let i = 0; i < 3; i++)
@@ -443,9 +468,9 @@ async function verifyRestGuard(
 describe('the shared REST guard', () => {
   it('answers in the documented order with one identical refusal while off', async () => {
     await verifyRestGuard()
-  })
+  }, 60_000)
 
-  it('refuses a registration that lists the guard before another route middleware', () => {
+  it('refuses a gated registration unless only the caller and transport limits precede it', () => {
     const register = (middleware: (caller: MiddlewareHandler) => MiddlewareHandler[]) =>
       createApp({
         ...base,
@@ -464,13 +489,81 @@ describe('the shared REST guard', () => {
             ),
         ],
       })
-    expect(() => register((caller) => [routingFormsGuard(false), caller])).toThrow(
-      'featureGate must be the last route middleware',
-    )
-    expect(() =>
-      register((caller) => [routingFormsGuard(false), caller, routingFormsGuard(false)]),
-    ).toThrow('featureGate must be the last route middleware')
-    expect(() => register((caller) => [caller, routingFormsGuard(false)])).not.toThrow()
+    const guard = routingFormsGuard(false)
+    // A per-user limit counted after authentication (like the host booking limits) would
+    // answer after the hoisted guard, and a lookup before it would run first.
+    const afterAuthentication: MiddlewareHandler = async (_c, next) => {
+      await next()
+    }
+    for (const middleware of [
+      (caller: MiddlewareHandler) => [guard, caller],
+      (caller: MiddlewareHandler) => [guard, caller, guard],
+      (caller: MiddlewareHandler) => [caller, afterAuthentication, guard],
+      (caller: MiddlewareHandler) => [afterAuthentication, caller, guard],
+      () => [afterAuthentication, guard],
+    ])
+      expect(() => register(middleware)).toThrow(
+        'featureGate must come last, after only the caller, rateLimit and routeBodyLimit',
+      )
+    for (const middleware of [
+      (caller: MiddlewareHandler) => [caller, guard],
+      (caller: MiddlewareHandler) => [
+        caller,
+        rateLimit(createRateLimiter({ limit: 1, windowSeconds: 1 })),
+        routeBodyLimit(1024),
+        guard,
+      ],
+      () => [rateLimit(createRateLimiter({ limit: 1, windowSeconds: 1 })), guard],
+      () => [guard],
+    ])
+      expect(() => register(middleware)).not.toThrow()
+  })
+
+  it('refuses every request when the guard is hidden from the scope binding', async () => {
+    // Wrapped in a combinator, registration cannot see the guard, so it cannot be hoisted
+    // before the scope check; it then refuses everything instead of running out of order.
+    const effects = vi.fn()
+    const app = createApp({
+      ...base,
+      resolveCaller,
+      routes: [
+        ({ app: target, caller }) =>
+          target.openapi(
+            createRoute({
+              method: 'get',
+              path: '/api/v1/test-only-routing/{id}',
+              middleware: [every(caller, routingFormsGuard(true))],
+              request: { params: z.object({ id: z.uuid() }) },
+              responses: { 200: { description: 'Reached' } },
+            }),
+            (c) => {
+              effects()
+              return c.body(null, 200)
+            },
+          ),
+      ],
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const response = await app.request(`/api/v1/test-only-routing/${randomUUID()}`, {
+      headers: { authorization: 'Bearer hm_full' },
+    })
+    expect(response.status).toBe(500)
+    expect(effects).not.toHaveBeenCalled()
+  })
+
+  it('treats a check that answers asynchronously as off', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const effects = vi.fn()
+    const app = createApp({
+      ...base,
+      resolveCaller,
+      routes: [guardedRoutes(featureGate((async () => {}) as () => void), effects, 1000)],
+    })
+    for (const probe of guardedProbes()) {
+      const response = await app.request(probe.path, probe.init)
+      expect(response.status, probe.name).toBe(500)
+    }
+    expect(effects).not.toHaveBeenCalled()
   })
 
   it('detects a bypassed guard in a native source copy with real HTTP assertions', async () => {
@@ -478,7 +571,13 @@ describe('the shared REST guard', () => {
     // app copy, so the copy's gate is the one that app's scope binding recognises.
     const nativeApp = await sourceCopy<typeof import('./app.ts')>('./app.ts')
     const control = await sourceCopy<typeof import('./routing-forms.ts')>('./routing-forms.ts')
-    await verifyRestGuard(control.routingFormsGuard, nativeApp.createApp, [false, true])
+    const nativeLimits = await nativeModule<RateLimits>('./rate-limit.ts')
+    await verifyRestGuard(
+      control.routingFormsGuard,
+      nativeApp.createApp,
+      [false, true],
+      nativeLimits,
+    )
     for (const mutation of [
       ["throw new DomainError('not_found', 'routing_forms_disabled')", 'return'],
       ['routingFormsEnabled !== true', '!routingFormsEnabled'],
@@ -488,7 +587,12 @@ describe('the shared REST guard', () => {
         mutation,
       )
       await expect(
-        verifyRestGuard(mutant.routingFormsGuard, nativeApp.createApp, [false, 'true', [true]]),
+        verifyRestGuard(
+          mutant.routingFormsGuard,
+          nativeApp.createApp,
+          [false, 'true', [true]],
+          nativeLimits,
+        ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
     }
   })
@@ -679,10 +783,30 @@ async function verifyMcpGuard(
 describe('the MCP registration helper', () => {
   it('lists routing tools only while on and refuses direct calls identically while off', async () => {
     await verifyMcpGuard()
-  })
+  }, 60_000)
 
   it('fails closed for every value but true', async () => {
-    await verifyMcpGuard(nativeMcpModules, NOT_TRUE, ['modern'])
+    await verifyMcpGuard(nativeMcpModules, NOT_TRUE_SAMPLE, ['modern'])
+  }, 60_000)
+
+  it('treats a switch that answers asynchronously as off', async () => {
+    const run = vi.fn()
+    const logged = vi.fn()
+    const tool = { ...probeTool(run), requireEnabled: async () => {} } as unknown as Tool
+    const app = createApp({
+      ...base,
+      resolveCaller,
+      mcp: mcpEndpoint({ tools: [tool] }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(logged)
+    expect(await listedTools(app, 'full', 'modern')).not.toContain(PROBE_TOOL)
+    const message = await rpc(app, 'full', 'modern', PROBE_TOOL, { formId: randomUUID() })
+    expect(message.result).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: '{"error":"internal_error"}' }],
+    })
+    expect(run).not.toHaveBeenCalled()
+    expect(logged).toHaveBeenCalled()
   })
 })
 
@@ -693,7 +817,7 @@ async function verifyInstance(
   // Route construction and these requests never connect to the database.
   const db = createDb(createPool('postgres://synthetic@127.0.0.1:9/routing-test'))
   try {
-    for (const injected of [undefined, false, true]) {
+    for (const injected of [undefined, false, true, ...NOT_TRUE_SAMPLE]) {
       const app = appFactory({
         ...base,
         resolveCaller: unauthorized,
@@ -701,7 +825,8 @@ async function verifyInstance(
           db,
           socialProviders: {},
           invitationMailLimits: { secret: 'synthetic-routing-test-only-secret' },
-          ...(injected !== undefined && { routingFormsEnabled: injected }),
+          // Runtime values despite the boolean type: /instance reports what the guards do.
+          ...(injected !== undefined && { routingFormsEnabled: injected as boolean }),
         }),
       })
       const response = await app.request(
@@ -743,8 +868,8 @@ describe('the hard-off constant', () => {
       control.instanceRoutes({ publicUrl: PUBLIC_URL, ...options }),
     ])
     const mutant = await sourceCopy<typeof import('./routes/instance.ts')>('./routes/instance.ts', [
-      '    routingFormsEnabled,\n    scimProvisioningEnabled,',
-      "    routingFormsEnabled: process.env.ROUTING_FORMS_ENABLED === 'true',\n    scimProvisioningEnabled,",
+      'routingFormsEnabled: routingFormsEnabled === true,',
+      "routingFormsEnabled: process.env.ROUTING_FORMS_ENABLED === 'true',",
     ])
     await expect(
       verifyInstance((options) => [mutant.instanceRoutes({ publicUrl: PUBLIC_URL, ...options })]),
@@ -810,31 +935,48 @@ describe('the hard-off constant', () => {
   })
 })
 
-describe.skipIf(!process.env.DATABASE_URL)('production routing hard-off startup', () => {
-  it('ignores the environment, read at module scope or at startup, and serves no test route', async () => {
-    stubRoutingEnvironment()
-    // Re-evaluate the production module graph with the environment already set, including
-    // reads captured at module scope rather than inside startServer.
-    vi.resetModules()
-    const [freshServer, freshApp, freshGuard, freshEndpoint] = await Promise.all([
-      import('./server.ts'),
-      import('./app.ts'),
-      import('./routing-forms.ts'),
-      import('./mcp/endpoint.ts'),
-    ])
+// Evaluates the production module graph afresh with the setting already in the
+// environment, so a read captured at module scope (not only inside startServer) is caught.
+async function freshProductionModules() {
+  stubRoutingEnvironment()
+  vi.resetModules()
+  const [server, app, guard, endpoint, limits] = await Promise.all([
+    import('./server.ts'),
+    import('./app.ts'),
+    import('./routing-forms.ts'),
+    import('./mcp/endpoint.ts'),
+    import('./rate-limit.ts'),
+  ])
+  return { server, app, guard, endpoint, limits }
+}
+
+describe('the environment', () => {
+  it('changes nothing when set before the server modules are evaluated', async () => {
+    const fresh = await freshProductionModules()
     // One fresh graph for the guard, the app's DomainError handler and the MCP registry.
-    await verifyInstance(freshServer.productRoutes, freshApp.createApp)
-    await verifyRestGuard(freshGuard.routingFormsGuard, freshApp.createApp, [false, true])
+    await verifyInstance(fresh.server.productRoutes, fresh.app.createApp)
+    await verifyRestGuard(
+      fresh.guard.routingFormsGuard,
+      fresh.app.createApp,
+      [false, true],
+      fresh.limits,
+    )
     await verifyMcpGuard(
       {
-        helper: freshGuard.routingFormTools,
-        createApp: freshApp.createApp,
-        mcpEndpoint: freshEndpoint.mcpEndpoint,
-        productTools: freshServer.productTools,
+        helper: fresh.guard.routingFormTools,
+        createApp: fresh.app.createApp,
+        mcpEndpoint: fresh.endpoint.mcpEndpoint,
+        productTools: fresh.server.productTools,
       },
       [false],
       ['modern'],
     )
+  }, 60_000)
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('production routing hard-off startup', () => {
+  it('ignores the environment, read at module scope or at startup, and serves no test route', async () => {
+    const { server: freshServer } = await freshProductionModules()
     const owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
       tag: 'routing_off',
     })

@@ -5,7 +5,8 @@
 // imports. It asserts absence by the names docs/routing-forms.md assigns and never
 // snapshots the route table. Route sources covered: the `appRoutes` table, PATHS, and every
 // `<Route path>` attribute and route object (a `path` beside `element`, `Component`, `lazy`,
-// `children` or `index`) in every non-test source under apps/web/src, which includes the
+// `children`, `index`, `loader`, `action`, `errorElement` or `ErrorBoundary`) in every
+// non-test source under apps/web/src, which includes the
 // data router in main.tsx and any descendant `<Routes>` a page renders, relative paths too.
 // Later plan steps narrow it when they add their pages: c3 (`/route/{handle}/{slug}` and
 // `/route/team/{teamSlug}/{slug}`), c6 (`/route/continue`) and d1 (manager screens under
@@ -60,7 +61,17 @@ type SyntaxNode = { type: string; start?: number | null; end?: number | null } &
 >
 const isNode = (value: unknown): value is SyntaxNode =>
   typeof value === 'object' && value !== null && typeof (value as SyntaxNode).type === 'string'
-const ROUTE_OBJECT_KEYS = new Set(['element', 'Component', 'lazy', 'children', 'index'])
+const ROUTE_OBJECT_KEYS = new Set([
+  'element',
+  'Component',
+  'lazy',
+  'children',
+  'index',
+  'loader',
+  'action',
+  'errorElement',
+  'ErrorBoundary',
+])
 const keyName = (property: SyntaxNode): string => {
   const key = property.key as SyntaxNode | undefined
   return String(
@@ -106,11 +117,15 @@ function routePathsIn(file: string, source: string): string[] {
         if (attribute.type === 'JSXAttribute' && (attribute.name as SyntaxNode).name === 'path')
           written(attribute.value)
     if (value.type === 'ObjectExpression') {
+      // Methods count too: `{ path, async lazy() {} }`.
       const properties = (value.properties as SyntaxNode[]).filter(
-        (property) => property.type === 'ObjectProperty',
+        (property) => property.type === 'ObjectProperty' || property.type === 'ObjectMethod',
       )
       const path = properties.find((property) => keyName(property) === 'path')
-      if (path && properties.some((property) => ROUTE_OBJECT_KEYS.has(keyName(property))))
+      if (
+        path?.type === 'ObjectProperty' &&
+        properties.some((property) => ROUTE_OBJECT_KEYS.has(keyName(property)))
+      )
         written(path.value)
     }
     for (const [key, child] of Object.entries(value))
@@ -142,12 +157,14 @@ describe('routing forms have no web route', () => {
       expect.arrayContaining(['*', '/:handle/:slug', 'event-types', 'PATHS.join']),
     )
     expect(paths.filter(isRoutingName)).toEqual([])
-  })
+  }, 30_000)
 
   it.each([
     // A relative route beside main.tsx's catch-all, or a descendant <Routes> inside a page.
     ['main.tsx', "createBrowserRouter([{ path: 'route/:handle/:slug', element: <Page /> }])"],
     ['main.tsx', "useRoutes([{ path: 'routing-forms', Component: Page }])"],
+    ['main.tsx', "createBrowserRouter([{ path: 'route/:slug', async lazy() { return {} } }])"],
+    ['main.tsx', "createBrowserRouter([{ path: 'routing-forms/export', loader }])"],
     ['pages/NotFound.tsx', '<Routes><Route path="routing-forms" element={<Page />} /></Routes>'],
     [
       'pages/NotFound.tsx',

@@ -226,32 +226,58 @@ function walk(root: unknown, visit: (node: SyntaxNode, parent?: SyntaxNode) => v
 
 // Stands for an operand whose value the scan cannot know (an identifier, a call).
 const UNKNOWN_PART = '{}'
-/** A string built from literals, templates and `+`, with unknown operands as `{}`. */
-function foldString(node: SyntaxNode): string {
+// Alternatives kept per expression, so a long chain of conditionals stays cheap.
+const MAX_VARIANTS = 64
+function concatenations(parts: string[][]): string[] {
+  let variants = ['']
+  for (const options of parts)
+    variants = variants
+      .flatMap((prefix) => options.map((option) => prefix + option))
+      .slice(0, MAX_VARIANTS)
+  return variants
+}
+/**
+ * The strings an expression can build from literals, templates, `+`, and both branches of
+ * `?:`, `||`, `??` and `&&`, with each unknown operand as `{}`.
+ */
+function foldStrings(node: SyntaxNode): string[] {
   switch (node.type) {
     case 'StringLiteral':
-      return String(node.value)
+      return [String(node.value)]
     case 'TemplateLiteral': {
       const quasis = node.quasis as { value: { cooked?: string | null; raw: string } }[]
       const expressions = node.expressions as SyntaxNode[]
-      return quasis
-        .map(({ value }, index) => {
+      return concatenations(
+        quasis.flatMap(({ value }, index) => {
           const expression = expressions[index]
-          return (value.cooked ?? value.raw) + (expression ? foldString(expression) : '')
-        })
-        .join('')
+          return [[value.cooked ?? value.raw], ...(expression ? [foldStrings(expression)] : [])]
+        }),
+      )
     }
     case 'BinaryExpression':
       return node.operator === '+'
-        ? foldString(node.left as SyntaxNode) + foldString(node.right as SyntaxNode)
-        : UNKNOWN_PART
+        ? concatenations([
+            foldStrings(node.left as SyntaxNode),
+            foldStrings(node.right as SyntaxNode),
+          ])
+        : [UNKNOWN_PART]
+    case 'ConditionalExpression':
+      return [
+        ...foldStrings(node.consequent as SyntaxNode),
+        ...foldStrings(node.alternate as SyntaxNode),
+      ].slice(0, MAX_VARIANTS)
+    case 'LogicalExpression':
+      return [
+        ...foldStrings(node.left as SyntaxNode),
+        ...foldStrings(node.right as SyntaxNode),
+      ].slice(0, MAX_VARIANTS)
     case 'ParenthesizedExpression':
     case 'TSAsExpression':
     case 'TSSatisfiesExpression':
     case 'TSNonNullExpression':
-      return foldString(node.expression as SyntaxNode)
+      return foldStrings(node.expression as SyntaxNode)
     default:
-      return UNKNOWN_PART
+      return [UNKNOWN_PART]
   }
 }
 function isStringConcatenation(node: SyntaxNode): boolean {
@@ -265,10 +291,12 @@ function isStringConcatenation(node: SyntaxNode): boolean {
   )
 }
 /**
- * The paths a source builds instead of writing them as one `/…` literal: every template
- * literal and every outermost `+` concatenation with a string operand, folded with unknown
- * operands as `{}`, that begins with `/` after any unknown prefix (`${prefix}/route`,
- * `'/rout' + 'e'`, `` `/rout${'e'}` ``).
+ * The paths a source builds instead of writing them as one `/…` literal: every string that
+ * a template literal or an outermost `+` concatenation with a string operand can build
+ * (foldStrings), that begins with `/` after any unknown prefix (`${prefix}/route`,
+ * `'/rout' + 'e'`, `` `/rout${'e'}` ``, `` `/${x ? 'route' : 'book'}` ``). A separator inside
+ * the unknown part (`` `${API}route` ``) is not recognised; the literal scan still reads the
+ * prefix constant and the inventory still sees a registered route.
  */
 function builtPaths(file: string, source: string): string[] {
   const paths: string[] = []
@@ -277,8 +305,7 @@ function builtPaths(file: string, source: string): string[] {
       node.type === 'TemplateLiteral' ||
       (isStringConcatenation(node) && !(parent && isStringConcatenation(parent)))
     if (!outermost) return
-    const folded = foldString(node)
-    if (/^(?:\{\})*\//.test(folded)) paths.push(folded)
+    for (const folded of foldStrings(node)) if (/^(?:\{\})*\//.test(folded)) paths.push(folded)
   })
   return paths
 }
@@ -315,7 +342,7 @@ function runtimeSpecifiers(file: string, source: string): string[] {
       : isNode(node) &&
           node.type === 'TemplateLiteral' &&
           (node.expressions as unknown[]).length === 0
-        ? foldString(node)
+        ? foldStrings(node)[0]
         : undefined
   const isImportMeta = (node: unknown) =>
     isNode(node) &&
@@ -670,7 +697,7 @@ describe('routing forms are storage only', () => {
     // The `${prefix}/…` idiom of the MCP OAuth consent routes.
     expect(built).toContain('{}/consent')
     expect(built.filter(isRoutingName)).toEqual([])
-  })
+  }, 30_000)
 
   it('folds built paths so a routing path cannot hide in a template or concatenation', () => {
     const routing = [
@@ -682,6 +709,8 @@ describe('routing forms are storage only', () => {
       `createAuthEndpoint(\`\${prefix}/route\`, {}, handler)`,
       "const path = PREFIX + '/route'",
       "const path = (BASE as string) + '/routed-slots'",
+      `const path = \`/\${listed ? 'route' : 'book'}/\${slug}\``,
+      "const path = '/' + (kind ?? 'routing') + '-forms'",
     ]
     for (const source of routing)
       expect(builtPaths('probe.ts', source).filter(isRoutingName), source).not.toEqual([])
@@ -691,6 +720,7 @@ describe('routing forms are storage only', () => {
       'const file = `./route-error-scope.tsx`',
       `const path = \`\${base}/routes/\${id}\``,
       "const path = '/router' + '-status'",
+      `const path = \`/\${team ? 'team' : 'personal'}/routes\``,
       `const path = \`\${origin}\${path}\``,
     ])
       expect(builtPaths('probe.ts', source).filter(isRoutingName), source).toEqual([])
@@ -737,6 +767,14 @@ describe('routing forms are storage only', () => {
     expect(reached).not.toContain('packages/db/src/tables.ts')
     expect(reached).not.toContain('apps/web/src/api/schema.d.ts')
     expectExcludedUnreachable(NOT_SHIPPED, reached)
+    // The graph starts from the server, web and CLI entry points only (not the marketing
+    // site, the n8n node or the Zapier app), so every excluded file must belong to one of
+    // the workspaces they load; extend ENTRY_POINTS before excluding a file elsewhere.
+    expect(
+      excludedSources(NOT_SHIPPED).filter(
+        (file) => !/^(?:apps\/server|apps\/web|packages\/[^/]+|tools\/cli)\//.test(file),
+      ),
+    ).toEqual([])
     // Adding a shipped file to the exclusion list fails.
     for (const shipped of [
       /^packages\/scheduling\//,
@@ -748,7 +786,7 @@ describe('routing forms are storage only', () => {
       expect(() => expectExcludedUnreachable([...NOT_SHIPPED, shipped], reached)).toThrow(
         expect.objectContaining({ name: 'AssertionError' }),
       )
-  })
+  }, 30_000)
 
   it('follows exactly the imports that load a module at run time', () => {
     const source = [

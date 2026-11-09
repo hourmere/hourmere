@@ -9,30 +9,52 @@ import {
 import type { Context, Handler, MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { matchedRoutes } from 'hono/route'
+import { isRouteBodyLimit } from './body-limit.ts'
 import { withClientIpHeader } from './client-ip.ts'
 import { ErrorBody, json } from './openapi.ts'
+import { isRouteRateLimit } from './rate-limit.ts'
 
 // Bound from the declared route at registration, never from a caller-controlled URL.
 const operations = new WeakMap<Context, string>()
 // The check of each featureGate middleware, and the gate of the route a request matched.
 const gateChecks = new WeakMap<object, () => void>()
 const routeGates = new WeakMap<Context, () => void>()
+// requireCaller's middleware: the only one that validates credentials before a featureGate.
+const credentialMiddlewares = new WeakSet<object>()
+
+/** Marks requireCaller's middleware, which may precede a featureGate. */
+export function credentialMiddleware<T extends object>(middleware: T): T {
+  credentialMiddlewares.add(middleware)
+  return middleware
+}
+
+/** Runs a feature check, which must answer synchronously: anything it returns means off. */
+function runCheck(check: () => void) {
+  const result: unknown = check()
+  if (result === undefined) return
+  // A promise's rejection would otherwise go unhandled; its outcome is never waited for.
+  if (result instanceof Promise) result.catch(() => {})
+  throw new Error('A feature check must be synchronous')
+}
 
 /**
  * Route middleware for an operation of a feature that can be switched off: `check` throws
  * the feature's error (a DomainError) while it is off. List it last in the route's
- * `middleware`; registration refuses any other position. The route's scope binding then
- * also runs `check` right after credential validation and before the API-key scope check:
- * in requireCaller, and where the binding validates a supplied bearer itself (public and
- * unclassified operations). The middleware runs it where it is listed, which is what meets
- * an anonymous request. So the transport checks createApp runs first (body limit, rate
- * limits) and credential validation are unchanged, and every caller with valid credentials,
- * or none, gets the same refusal before any scope or role check, lookup, body read or input
- * validation. OpenAPI routes only (`app.openapi`).
+ * `middleware`, after nothing but the caller, rateLimit and routeBodyLimit (createApp counts
+ * and enforces those two up front); registration refuses anything else. The route's scope
+ * binding then also runs `check` right after credential validation and before the API-key
+ * scope check: in requireCaller, and where the binding validates a supplied bearer itself
+ * (public and unclassified operations). The middleware runs it where it is listed, which is
+ * what meets an anonymous request. So the transport checks (body limit, rate limits) and
+ * credential validation are unchanged, and every caller with valid credentials, or none,
+ * gets the same refusal before any scope or role check, lookup, body read or input
+ * validation. OpenAPI routes only (`app.openapi`): run anywhere else, it refuses every
+ * request with an error.
  */
 export function featureGate(check: () => void): MiddlewareHandler {
-  const gate = createMiddleware(async (_c, next) => {
-    check()
+  const gate = createMiddleware(async (c, next) => {
+    if (!routeGates.has(c)) throw new Error('featureGate is only for app.openapi routes')
+    runCheck(check)
     await next()
   })
   gateChecks.set(gate, check)
@@ -66,14 +88,15 @@ async function checkBearer(
     c.header('WWW-Authenticate', 'Bearer')
     return c.json({ error: 'unauthorized' }, 401)
   }
-  gate?.()
+  if (gate) runCheck(gate)
   requireApiKeyOperation(result.principal, operationId)
 }
 
 /** Called after authentication, before validation or any resource lookup. */
 export function requireRestApiKeyOperation(c: Context, principal: Principal) {
   // A switched-off feature answers before the scope decision (see featureGate).
-  routeGates.get(c)?.()
+  const gate = routeGates.get(c)
+  if (gate) runCheck(gate)
   const operationId = operations.get(c) ?? ''
   // Native session-only services retain their existing credential-boundary errors.
   if (restPolicies.get(operationId)?.authentication === 'session_only') return
@@ -98,12 +121,27 @@ export function installRestApiKeyScopes(
     const middleware = route.middleware
     const routeMiddleware = Array.isArray(middleware) ? middleware : middleware ? [middleware] : []
     const firstGate = routeMiddleware.findIndex((entry) => gateChecks.has(entry))
-    if (firstGate !== -1 && !routeMiddleware.slice(firstGate).every((e) => gateChecks.has(e)))
-      throw new Error(`${operationId}: featureGate must be the last route middleware`)
+    if (
+      firstGate !== -1 &&
+      !(
+        routeMiddleware.slice(firstGate).every((entry) => gateChecks.has(entry)) &&
+        routeMiddleware
+          .slice(0, firstGate)
+          .every(
+            (entry) =>
+              credentialMiddlewares.has(entry) ||
+              isRouteRateLimit(entry) ||
+              isRouteBodyLimit(entry),
+          )
+      )
+    )
+      throw new Error(
+        `${operationId}: featureGate must come last, after only the caller, rateLimit and routeBodyLimit`,
+      )
     const checks = routeMiddleware.flatMap((entry) => gateChecks.get(entry) ?? [])
     const gate = checks.length
       ? () => {
-          for (const check of checks) check()
+          for (const check of checks) runCheck(check)
         }
       : undefined
     const scope = createMiddleware(async (c, next) => {

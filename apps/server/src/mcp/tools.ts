@@ -159,10 +159,19 @@ function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
 /** Logs one line about a failed call; the endpoint escapes it (see endpoint.ts). */
 export type ToolErrorLog = (label: string, detail: unknown) => void
 
+/** Runs a tool's feature switch, which must answer synchronously: a return value is off. */
+function checkFeature(tool: Tool) {
+  const result: unknown = tool.requireEnabled?.()
+  if (result === undefined) return
+  // A promise's rejection would otherwise go unhandled; its outcome is never waited for.
+  if (result instanceof Promise) result.catch(() => {})
+  throw new Error(`${tool.name}: a feature switch must be synchronous`)
+}
+
 /** Whether the tool's feature is on (see Tool.requireEnabled); anything thrown means off. */
 function featureEnabled(tool: Tool): boolean {
   try {
-    tool.requireEnabled?.()
+    checkFeature(tool)
     return true
   } catch {
     return false
@@ -175,7 +184,7 @@ function featureEnabled(tool: Tool): boolean {
  */
 function disabledResult(tool: Tool, logError: ToolErrorLog): CallToolResult | undefined {
   try {
-    tool.requireEnabled?.()
+    checkFeature(tool)
     return undefined
   } catch (err) {
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind))

@@ -116,7 +116,8 @@ export function instanceRoutes({
     slotSnippetsEnabled,
     ssoOidcEnabled,
     ssoSamlEnabled,
-    routingFormsEnabled,
+    // Reported as the guards decide it: only the boolean true is on.
+    routingFormsEnabled: routingFormsEnabled === true,
     scimProvisioningEnabled,
     signIn: {
       email: true,

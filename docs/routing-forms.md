@@ -531,8 +531,9 @@ The constant is `routingFormsEnabled` in `apps/server/src/server.ts`, passed to
 `productRoutes`; tests inject `true` there. The shared guard is
 `apps/server/src/routing-forms.ts`: `requireRoutingFormsEnabled` for services, the REST
 middleware `routingFormsGuard` and the MCP registration helper `routingFormTools`. Only the
-boolean `true` enables. A REST operation lists the middleware last in its route middleware
-(registration refuses any other position), and the scope binding in
+boolean `true` enables. A REST operation lists the middleware last in its route middleware,
+after nothing but the caller, `rateLimit` and `routeBodyLimit` (registration refuses anything
+else, such as a per-user limit counted after authentication). The scope binding in
 `apps/server/src/rest-scopes.ts` then runs it right after credential validation (including
 the existing Origin/Referer check on cookie-authenticated writes) and before the API-key
 scope check, also for a bearer supplied to a public route; anonymous requests meet it before
