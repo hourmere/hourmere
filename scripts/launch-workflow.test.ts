@@ -110,6 +110,7 @@ describe('release approval visibility', () => {
       'cli-compatibility',
       'zapier-compatibility',
       'docker',
+      'e2e-shard',
       'e2e',
     ])
     expect(permissionScopes(ci)).toEqual({ permissions: { contents: 'read' } })

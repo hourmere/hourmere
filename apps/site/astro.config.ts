@@ -85,9 +85,11 @@ export default defineConfig({
         {
           label: 'Scheduling',
           items: [
+            { label: 'Availability', link: '/docs/availability' },
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
+            { label: 'Meeting location choices', link: '/docs/location-choices' },
             { label: 'Booking limits', link: '/docs/booking-limits' },
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Booking waitlists', link: '/docs/booking-waitlist' },
@@ -95,9 +97,11 @@ export default defineConfig({
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'Request another time', link: '/docs/request-reschedule' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },
+            { label: 'Marking no-shows', link: '/docs/no-shows' },
             { label: 'Booking page branding', link: '/docs/branding' },
             { label: 'Notifications', link: '/docs/notifications' },
             { label: 'Analytics', link: '/docs/analytics' },
+            { label: 'CSV booking export', link: '/docs/booking-export' },
             { label: 'Interface languages', link: '/docs/interface-languages' },
           ],
         },
@@ -119,6 +123,7 @@ export default defineConfig({
           items: [
             { label: 'REST quickstart', link: '/docs/rest' },
             { label: 'API keys', link: '/docs/api-keys' },
+            { label: 'SCIM provisioning tokens', link: '/docs/scim' },
             { label: 'API conventions', link: '/docs/api-conventions' },
             { label: 'MCP quickstart', link: '/docs/mcp' },
             { label: 'CLI', link: '/docs/cli' },

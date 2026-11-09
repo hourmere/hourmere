@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { cimd } from '@better-auth/cimd'
 import { fetchClientMetadataResource } from '@better-auth/cimd/node'
 import { mcp } from '@better-auth/mcp'
-import type { Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import type { BetterAuthPlugin } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import {
@@ -17,7 +17,7 @@ import {
   verifyJwsAccessToken,
 } from 'better-auth/oauth2'
 import { jwt } from 'better-auth/plugins/jwt'
-import { sql } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import type { Auth } from './index.ts'
 import { isUuid } from './organizations.ts'
@@ -40,10 +40,18 @@ export interface BoundMcpOAuthIntent {
   organizationId: string
   grantId: string
 }
-const intents = new AsyncLocalStorage<Readonly<BoundMcpOAuthIntent>>()
+const intents = new AsyncLocalStorage<
+  Readonly<BoundMcpOAuthIntent & { transaction: Transaction<Database> | undefined }>
+>()
 
-export function withMcpOAuthIntent<T>(intent: BoundMcpOAuthIntent, fn: () => T): T {
-  return intents.run(Object.freeze({ ...intent }), fn)
+export function withMcpOAuthIntent<T>(
+  intent: BoundMcpOAuthIntent,
+  fn: () => T,
+  transaction?: Transaction<Database>,
+): T {
+  // The broker already holds an app-pool client while invoking the native provider.
+  // Its membership callback must reuse that client rather than wait for a second one.
+  return intents.run(Object.freeze({ ...intent, transaction }), fn)
 }
 
 export function hasMcpOAuthIntent(): boolean {
@@ -212,7 +220,7 @@ export function mcpOAuthPlugins(
           const intent = intents.getStore()
           if (!intent || intent.userId !== user.id || intent.sessionId !== session.id)
             throw refused()
-          await requireMembership(db, user.id, intent.organizationId)
+          await requireMembership(intent.transaction ?? db, user.id, intent.organizationId)
           return intent.grantId
         },
       },

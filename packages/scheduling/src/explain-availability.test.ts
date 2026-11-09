@@ -13,6 +13,7 @@ import { DomainError } from './errors.ts'
 import { activateRoundRobin, assertCanExplainEventType, createEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { LOCATION_KINDS } from './location-kinds.ts'
+import { selectLocationOption } from './location-options.ts'
 import { parseQuestions } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import {
@@ -56,6 +57,7 @@ function sourceCopy(
     publicAvatarImage,
     DomainError,
     LOCATION_KINDS,
+    selectLocationOption,
     assertHosts,
     hasValidHostShape,
     parseQuestions,
@@ -140,6 +142,109 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     if (mode === 'round_robin') event = await activateRoundRobin(ctx, event.id)
     return { owner, member, team, ctx, event, query: { eventTypeId: event.id, ...range } }
   }
+
+  it.each([
+    ['individual', 'zoom'],
+    ['individual', 'google_meet'],
+    ['round_robin', 'google_meet'],
+  ] as const)(
+    'keeps %s explanation aligned with omitted-choice slots when default %s is unavailable',
+    async (mode, kind) => {
+      const s = await team(mode)
+      await db
+        .updateTable('event_types')
+        .set({
+          locations: JSON.stringify([
+            { id: 'video', kind, autoCreate: true, isDefault: true },
+            { id: 'office', kind: 'in_person', address: 'Private office' },
+          ]),
+        })
+        .where('id', '=', s.event.id)
+        .execute()
+      await expect(
+        listPublicTeamSlots(
+          { db, now },
+          {
+            handle: s.ctx.principal.organization.slug,
+            slug: s.event.slug,
+            start: range.rangeStart,
+            end: range.rangeEnd,
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'location_unavailable' })
+      const verify = async (read: Explain) => {
+        await expect(read(s.ctx, s.query)).rejects.toMatchObject({ code: 'location_unavailable' })
+      }
+      await verify(explainEventAvailability)
+      await verify(sourceCopy().explainEventAvailability)
+      await expect(
+        verify(
+          sourceCopy([
+            '  const eligibleHostUserIds = await requireLocationAvailability(ctx, et)\n',
+            '  const eligibleHostUserIds = et.eligibleHostUserIds // Mutation: skip readiness.\n',
+          ]).explainEventAvailability,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await verify(explainEventAvailability)
+    },
+  )
+
+  it('explains only the Meet-ready round-robin hosts that omitted-choice public slots use', async () => {
+    const s = await team('round_robin')
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify([
+          { id: 'video', kind: 'google_meet', autoCreate: true, isDefault: true },
+          { id: 'office', kind: 'in_person', address: 'Private office' },
+        ]),
+      })
+      .where('id', '=', s.event.id)
+      .execute()
+    // Only the owner can host Meet, and is busy after 10:00; the member is free all morning.
+    await f.meetDestination(s.owner.id)
+    await f.calendarBusy(s.owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']])
+    const meet = { db, now, automaticMeet: true }
+    const ctx = { ...s.ctx, automaticMeet: true }
+    const publicQuery = {
+      handle: s.ctx.principal.organization.slug,
+      slug: s.event.slug,
+      start: range.rangeStart,
+      end: range.rangeEnd,
+    }
+    const listed = (slots: readonly { start: string; end: string }[]) =>
+      slots.map((slot) => ({
+        start: instant(slot.start).toString(),
+        end: instant(slot.end).toString(),
+      }))
+    const omitted = listed(await listPublicTeamSlots(meet, publicQuery))
+    expect(omitted.map((slot) => slot.start)).toEqual([
+      '2026-11-02T09:00:00Z',
+      '2026-11-02T09:30:00Z',
+    ])
+    // The member still offers the later morning for the office, so the filter is what hides it.
+    expect(
+      listed(await listPublicTeamSlots(meet, { ...publicQuery, locationOptionId: 'office' })).map(
+        (slot) => slot.start,
+      ),
+    ).toContain('2026-11-02T10:00:00Z')
+    const verify = async (read: Explain) => {
+      const explained = await read(ctx, s.query)
+      expect(views(explained.filter((slot) => slot.status === 'available'))).toEqual(omitted)
+      expect(at(explained, '10:00')?.status).not.toBe('available')
+    }
+    await verify(explainEventAvailability)
+    await verify(sourceCopy().explainEventAvailability)
+    await expect(
+      verify(
+        sourceCopy([
+          "  const hosts = et.schedulingType === 'round_robin' ? eligibleHostUserIds : et.hostUserIds\n",
+          "  const hosts = et.schedulingType === 'round_robin' ? et.eligibleHostUserIds : et.hostUserIds\n",
+        ]).explainEventAvailability,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(explainEventAvailability)
+  })
 
   it('keeps cross-event bookings distinct from calendars and excludes them from this event daily count', async () => {
     const s = await personal({ maxBookingsPerDay: 1 })

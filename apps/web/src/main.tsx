@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router'
+import { createBrowserRouter, RouterProvider } from 'react-router'
 import { App } from './App.tsx'
 import { installPreloadRecovery } from './preload-recovery.ts'
 import './styles.css'
@@ -10,10 +10,10 @@ installPreloadRecovery()
 const root = document.getElementById('root')
 if (!root) throw new Error('#root is missing from index.html')
 
+const router = createBrowserRouter([{ path: '*', element: <App /> }])
+
 createRoot(root).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <RouterProvider router={router} />
   </StrictMode>,
 )

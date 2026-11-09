@@ -35,6 +35,7 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
+| `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
 
@@ -198,6 +199,7 @@ but no email.
 | `HSTS_MAX_AGE` | `31536000` | Whole non-negative seconds. Sent only for HTTPS `PUBLIC_URL` outside localhost; `0` asks browsers to forget the policy. Configure subdomains/preload at the proxy if desired. |
 | `HTTP_HEADERS_TIMEOUT` | `20` | Whole seconds, 1–3600, to receive request headers. Must not exceed request timeout. |
 | `HTTP_REQUEST_TIMEOUT` | `60` | Whole seconds, 1–3600, to receive the request. |
+| `BOOKING_EXPORT_MAX_CONCURRENT` | `2` | Process-wide CSV export cap, 1–8; invalid values use 2. The export service refuses excess requests with `409 export_busy` before acquiring a connection. Keep pool headroom for other requests. Streams close after 30 seconds without reader progress and after five minutes overall. See [CSV exports](/docs/booking-export). |
 | `HTTP_KEEP_ALIVE_TIMEOUT` | `125` | Whole seconds, 1–3600, for an idle HTTP connection. Keep above the proxy's upstream idle timeout. |
 
 ## Social sign-in

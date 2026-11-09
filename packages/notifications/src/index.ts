@@ -17,6 +17,7 @@ import {
   bookingEmail,
   bookingHostName,
   bookingHostNames,
+  bookingLocationForRecipient,
   calendarBookingDescription,
   calendarResponseDescription,
   calendarSummary,
@@ -329,6 +330,7 @@ export interface NotificationData {
     end: Temporal.Instant
     eventName: string
     location: MeetingLocation | null
+    inviteePhone: boolean
     questions: Json | null
     responses: Json
     cancelReason: string | null
@@ -397,6 +399,7 @@ export function loadNotificationData(
         sql<Json | null>`CASE WHEN b.group_slot_id IS NULL THEN b.location ELSE gs.location END`.as(
           'location',
         ),
+        'b.location_option',
         'b.responses',
         'b.cancel_reason',
         'b.rescheduled_from_id',
@@ -518,6 +521,7 @@ export function loadNotificationData(
               ? meetingLocation({ ...b.location, url: conference.join_url })
               : null
             : meetingLocation(b.location),
+        inviteePhone: isRecord(b.location_option) && b.location_option.askInvitee === true,
         questions: b.questions,
         responses: b.responses,
         cancelReason: b.cancel_reason,
@@ -941,7 +945,15 @@ async function deliverBookingNotification(
             ]
               .filter(Boolean)
               .join('\n\n') || undefined,
-          location: booking.location ? meetingLocationText(booking.location) : undefined,
+          location: (() => {
+            const location = bookingLocationForRecipient(
+              booking.location,
+              booking.inviteePhone,
+              role,
+              language,
+            )
+            return location ? meetingLocationText(location) : undefined
+          })(),
           organizer: {
             ...calendarOrganizer,
             sentBy:
@@ -983,7 +995,15 @@ async function deliverBookingNotification(
     message: (token: string | undefined) =>
       email(
         kind,
-        meeting,
+        {
+          ...meeting,
+          location: bookingLocationForRecipient(
+            meeting.location,
+            booking.inviteePhone,
+            attendee === invitee ? 'invitee' : 'guest',
+            bookingLanguage,
+          ),
+        },
         {
           role: 'attendee',
           email: attendee.email,
@@ -1017,7 +1037,15 @@ async function deliverBookingNotification(
         message: () =>
           email(
             kind,
-            meeting,
+            {
+              ...meeting,
+              location: bookingLocationForRecipient(
+                meeting.location,
+                booking.inviteePhone,
+                'host',
+                host.locale,
+              ),
+            },
             {
               role: 'host',
               email: host.email,

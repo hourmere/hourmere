@@ -166,9 +166,13 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.worker.yml down --remove-orphans
 
-  e2e:
+  e2e-shard:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:18-alpine
@@ -211,5 +215,18 @@ jobs:
           writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
           NODE
           npm run build --workspace @hourmere/site
-          npm run test:e2e
+          npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/4
       - run: npm run test:e2e:privacy
+
+  # Keep the branch-protection and merge-queue check name stable. A skipped or
+  # cancelled shard must not turn this required check into a successful skip.
+  e2e:
+    needs: e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      SHARD_RESULT: ${{ needs.e2e-shard.result }}
+    steps:
+      - name: Require every browser shard to succeed
+        run: test "$SHARD_RESULT" = success
