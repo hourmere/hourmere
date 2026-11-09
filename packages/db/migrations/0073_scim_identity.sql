@@ -1,10 +1,20 @@
 -- Storage only: no SCIM resource handler is registered by this migration.
 -- Lock order follows docs/data-model.md: account and organization tables before member
 -- and invitation tables, then the provisioning-token resource. Every table lock is taken
--- directly in its final mode (no upgrade) and held to commit, so concurrent sign-up, team
--- creation, team administration and token administration either run before the migration
--- or after it, never interleaved with the backfill. SHARE ROW EXCLUSIVE lets row share
--- locks (FOR UPDATE/FOR SHARE) and reads continue while writes to those tables wait.
+-- directly in its final mode (no upgrade) and held to commit. SHARE ROW EXCLUSIVE lets
+-- row share locks (FOR UPDATE/FOR SHARE) and reads continue while writes to those tables
+-- wait. Token administration, team creation, sign-up, personal-organization creation and
+-- invitation creation serialize against this lock set: each commits before the migration
+-- or starts after it. Team writers that read member or invitation rows before writing the
+-- organization (team-settings updates, invitation acceptance) can still form a deadlock
+-- with it; PostgreSQL then aborts one side with 40P01, and an aborted migration rolls back
+-- whole and is reapplied on the next start. This migration is meant to run with the
+-- application stopped, which the documented Compose upgrade does. Every lock wait is
+-- bounded: while the migration waits for the member, invitation or token lock it already
+-- holds the account and organization locks, so sign-up and team writes would stall behind
+-- it; after lock_timeout it fails with 55P03 instead, nothing is recorded, and the next
+-- process start retries it.
+SET LOCAL lock_timeout = '5s';
 LOCK TABLE auth."user" IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE auth.organization IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE auth.member, auth.invitation IN ACCESS EXCLUSIVE MODE;

@@ -724,49 +724,81 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     ['scim_user_id', `'${user}'`],
     ['created_at', "now()-interval '9 years'"],
   ])(
-    'captured tombstone %s is immutable while clearing stays possible; removing only its comparison fails',
+    'captured tombstone %s is immutable, live or cleared, while clearing stays possible; removing its comparison or freezing only live rows fails',
     async (column, value) => {
-      const protection = check(
+      const live = check(
         `captured ${column}`,
         `UPDATE scim_membership_blocks SET ${column}=${value} WHERE id='${block}'`,
         tombstoneInsert(',id', `,'${block}'`),
       )
+      // Cleared history is frozen as well: the same mailbox and kind may coexist with the
+      // live row because the live-identity index covers only uncleared tombstones.
+      const cleared = check(
+        `cleared captured ${column}`,
+        `UPDATE scim_membership_blocks SET ${column}=${value} WHERE id='${id(17)}'`,
+        tombstoneInsert(',id,cleared_at', `,'${id(17)}',now()`),
+      )
       // The resource-shape CHECK would mask a lone authority or resource change. Drop it
       // only in this private fixture to isolate each column of the decision tuple.
       const fixture = `${source}\nALTER TABLE scim_membership_blocks DROP CONSTRAINT scim_blocks_resource;`
-      await transaction(fixture, async (client) => {
-        await rejected(client, protection)
+      const verify = async (client: pg.PoolClient) => {
+        await rejected(client, live)
+        await rejected(client, cleared)
         await succeeds(
           client,
           `UPDATE scim_membership_blocks SET cleared_at=now() WHERE id='${block}'`,
         )
-      })
-      const mutant = dropTupleColumn(fixture, column)
-      expect(mutant).not.toBe(fixture)
-      await transaction(mutant, async (client) => {
-        await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
-      })
+      }
+      await transaction(fixture, verify)
+      for (const mutant of [
+        dropTupleColumn(fixture, column),
+        // The decision tuple frozen only while the tombstone is live.
+        fixture.replace(
+          '    (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM\n    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at) OR',
+          '    (OLD.cleared_at IS NULL AND (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM\n    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at)) OR',
+        ),
+      ]) {
+        expect(mutant).not.toBe(fixture)
+        await transaction(mutant, async (client) => {
+          await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+        })
+      }
     },
   )
 
-  it.each([
-    ['NULL', 'uncleared again'],
-    ["cleared_at+interval '1 second'", 'moved'],
-  ])('a captured tombstone cleared once cannot be %s; removing the clause fails', async (value) => {
-    const protection = check(
-      'cleared_at once',
-      `UPDATE scim_membership_blocks SET cleared_at=${value} WHERE id='${block}'`,
-      `${tombstoneInsert(',id', `,'${block}'`)}; UPDATE scim_membership_blocks SET cleared_at=now() WHERE id='${block}'`,
-    )
-    await transaction(source, (client) => rejected(client, protection))
-    const mutant = source.replace(
-      '(OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS DISTINCT FROM OLD.cleared_at)',
+  it('a captured tombstone cleared once cannot be uncleared, postponed or backdated; removing or narrowing the clause fails', async () => {
+    const verify = async (client: pg.PoolClient) => {
+      await client.query(
+        `${tombstoneInsert(',id', `,'${block}'`)}; UPDATE scim_membership_blocks SET cleared_at=now() WHERE id='${block}'`,
+      )
+      for (const [value, change] of [
+        ['NULL', 'uncleared'],
+        ["cleared_at+interval '1 second'", 'postponed'],
+        ["cleared_at-interval '1 second'", 'backdated'],
+      ])
+        await rejected(
+          client,
+          check(
+            `cleared_at ${change}`,
+            `UPDATE scim_membership_blocks SET cleared_at=${value} WHERE id='${block}'`,
+          ),
+        )
+    }
+    await transaction(source, verify)
+    const clause = '(OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS DISTINCT FROM OLD.cleared_at)'
+    for (const replacement of [
       'false',
-    )
-    expect(mutant).not.toBe(source)
-    await transaction(mutant, async (client) => {
-      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
-    })
+      // Only unclearing refused.
+      '(OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS NULL)',
+      // Only unclearing and postponing refused: a clearance could be backdated.
+      '(OLD.cleared_at IS NOT NULL AND (NEW.cleared_at IS NULL OR NEW.cleared_at > OLD.cleared_at))',
+    ]) {
+      const mutant = source.replace(clause, replacement)
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    }
   })
 
   it('captured tombstones, live or cleared, cannot be deleted while their organization exists; disabling the guard fails', async () => {
@@ -857,44 +889,63 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       await client.query(blockInsert('', '', 'local', 'removal'))
       await client.query(blockInsert(',cleared_at', ',now()', 'local', 'removal'))
       await client.query(blockInsert())
-      for (const deleted of [id(61), id(62), id(63), account])
+      // Exactly 320 normalized characters: the longest mailbox a tombstone can store.
+      await client.query(accountInsert(id(66), "repeat('x',307)||'@example.test'"))
+      await client.query(blockFor(id(66)))
+      // Another team's live tombstone for the same mailbox must not swallow this team's
+      // removal: deduplication is organization-local.
+      await client.query(accountInsert(id(64), "'team-a@example.test'"))
+      await client.query(blockFor(id(64)))
+      await client.query(
+        `INSERT INTO scim_membership_blocks (id,organization_id,user_id,identity_email,source,kind) VALUES ('${id(19)}','${otherOrg}',NULL,'team-a@example.test','local','removal')`,
+      )
+      // A live local tombstone must not swallow the SCIM authority's same-kind decision,
+      // and both authorities' live tombstones coexist for one mailbox. The account's own
+      // local removal duplicates the tombstone and is dropped.
+      await client.query(accountInsert(id(65), "'both@example.test'"))
+      await client.query(tombstoneInsert(',id', `,'${id(20)}'`, 'removal', 'both@example.test'))
+      await client.query(blockFor(id(65)))
+      await client.query(
+        blockFor(
+          id(65),
+          'removal',
+          ',connection_id,scim_user_id',
+          `,'${connection}','${user}'`,
+        ).replace("'local'", "'scim'"),
+      )
+      for (const deleted of [id(61), id(62), id(63), account, id(66), id(64), id(65)])
         await succeeds(client, `DELETE FROM auth."user" WHERE id='${deleted}'`)
+      const row = (
+        identity_email: string,
+        kind: string,
+        cleared = false,
+        source = 'local',
+        organization_id = org,
+      ) => ({ organization_id, user_id: null, identity_email, source, kind, cleared })
       expect(
         (
           await client.query(
-            `SELECT id,identity_email,source,kind,cleared_at IS NOT NULL AS cleared FROM scim_membership_blocks WHERE organization_id='${org}' ORDER BY identity_email,kind,cleared`,
+            `SELECT organization_id,user_id,identity_email,source,kind,cleared_at IS NOT NULL AS cleared FROM scim_membership_blocks ORDER BY organization_id,identity_email,source,kind,cleared`,
           )
         ).rows,
       ).toEqual([
-        {
-          id: expect.any(String),
-          identity_email: 'mixed.case@example.test',
-          source: 'local',
-          kind: 'removal',
-          cleared: false,
-        },
-        {
-          id: block,
-          identity_email: 'one@example.test',
-          source: 'local',
-          kind: 'removal',
-          cleared: false,
-        },
-        {
-          id: expect.any(String),
-          identity_email: 'one@example.test',
-          source: 'local',
-          kind: 'removal',
-          cleared: true,
-        },
-        {
-          id: expect.any(String),
-          identity_email: 'one@example.test',
-          source: 'local',
-          kind: 'suspension',
-          cleared: false,
-        },
+        row('both@example.test', 'removal'),
+        row('both@example.test', 'removal', false, 'scim'),
+        row('mixed.case@example.test', 'removal'),
+        row('one@example.test', 'removal'),
+        row('one@example.test', 'removal', true),
+        row('one@example.test', 'suspension'),
+        row('team-a@example.test', 'removal'),
+        row(`${'x'.repeat(307)}@example.test`, 'removal'),
+        row('team-a@example.test', 'removal', false, 'local', otherOrg),
       ])
+      expect(
+        (
+          await client.query(
+            `SELECT id,connection_id,scim_user_id FROM scim_membership_blocks WHERE source='scim'`,
+          )
+        ).rows,
+      ).toEqual([{ id: expect.any(String), connection_id: connection, scim_user_id: user }])
     }
     await transaction(source, verify)
     for (const mutant of [
@@ -903,9 +954,30 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
         '',
       ),
       source.replace('IF char_length(mailbox) BETWEEN 1 AND 320 THEN', 'IF true THEN'),
+      // Capture bound off by one: the 320-character mailbox is dropped.
+      source.replace(
+        'IF char_length(mailbox) BETWEEN 1 AND 320 THEN',
+        'IF char_length(mailbox) BETWEEN 1 AND 319 THEN',
+      ),
       source.replace(
         'b.identity_email IS NULL AND (b.cleared_at IS NOT NULL OR',
         'b.identity_email IS NULL AND (true OR',
+      ),
+      // Deduplication ignores the organization: another team's tombstone swallows a removal.
+      source.replace(
+        'WHERE t.organization_id = b.organization_id AND t.identity_email = mailbox AND',
+        'WHERE t.identity_email = mailbox AND',
+      ),
+      // Deduplication ignores the authority: a local tombstone swallows the SCIM removal.
+      source.replace(
+        ' AND\n            t.source = b.source AND t.kind = b.kind AND t.cleared_at IS NULL));',
+        ' AND\n            t.kind = b.kind AND t.cleared_at IS NULL));',
+      ),
+      // Live-identity index without the authority: the SCIM capture collides with the local
+      // tombstone and the account deletion is refused with 23505.
+      source.replace(
+        '(organization_id, identity_email, source, kind)\n  WHERE cleared_at IS NULL;',
+        '(organization_id, identity_email, kind)\n  WHERE cleared_at IS NULL;',
       ),
     ]) {
       expect(mutant).not.toBe(source)
@@ -913,7 +985,7 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
         await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
       })
     }
-  }, 30_000)
+  }, 60_000)
 
   it.each([
     ['scim_token_connections_connection_idx', 'organization_id, connection_id'],

@@ -452,6 +452,69 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
     60_000,
   )
 
+  it('bounds every lock wait: a held member write lock fails the migration with 55P03, records nothing, and the next start applies it; removing the bound fails', async () => {
+    const source = await readFile(join(migrationsDir, migration), 'utf8')
+    const bound = "SET LOCAL lock_timeout = '5s';\n"
+    expect(source.includes(bound)).toBe(true)
+    for (const mutated of [false, true]) {
+      const { directory, database } = await predecessor()
+      // An in-flight membership write holds ROW EXCLUSIVE on auth.member for as long as its
+      // transaction lives; the migration's ACCESS EXCLUSIVE lock waits behind it.
+      const holder = await database.pool.connect()
+      let attempt: Promise<string[]> = Promise.resolve([])
+      try {
+        await writeFile(join(directory, migration), mutated ? source.replace(bound, '') : source)
+        await holder.query('BEGIN')
+        await holder.query('LOCK TABLE auth.member IN ROW EXCLUSIVE MODE')
+        const started = Date.now()
+        attempt = runMigrations(database.pool, directory)
+        attempt.catch(() => {})
+        const verify = async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const outcome = await Promise.race([
+            attempt.then(
+              () => 'applied',
+              (error: unknown) =>
+                `failed ${(error as { cause?: { code?: string } }).cause?.code ?? 'without a code'}`,
+            ),
+            new Promise<string>((resolve) => {
+              timer = setTimeout(() => resolve('still waiting'), 15_000)
+            }),
+          ])
+          clearTimeout(timer)
+          expect(outcome).toBe('failed 55P03')
+          expect(Date.now() - started).toBeLessThan(15_000)
+          expect(
+            (
+              await database.pool.query('SELECT name FROM schema_migrations WHERE name=$1', [
+                migration,
+              ])
+            ).rows,
+          ).toEqual([])
+        }
+        if (mutated) await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
+        else await verify()
+        // The blocking transaction ends; the next process start applies the migration.
+        await holder.query('ROLLBACK')
+        await attempt.catch(() => {})
+        if (!mutated) expect(await runMigrations(database.pool, directory)).toEqual([migration])
+        expect(
+          (
+            await database.pool.query('SELECT name FROM schema_migrations WHERE name=$1', [
+              migration,
+            ])
+          ).rows,
+        ).toEqual([{ name: migration }])
+      } finally {
+        await holder.query('ROLLBACK').catch(() => {})
+        holder.release()
+        await attempt.catch(() => {})
+        await database.drop()
+        await rm(directory, { recursive: true, force: true })
+      }
+    }
+  }, 90_000)
+
   it.each(['preservation', 'credential binding backfill'])(
     'detects %s source-copy mutation and restores the original assertion',
     async (protection) => {

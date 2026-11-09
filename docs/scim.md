@@ -242,13 +242,36 @@ Migration 0073 takes transaction-scoped table locks before it reads anything, in
 `scim_provisioning_tokens` in `ACCESS EXCLUSIVE` mode. Each lock is taken directly in the
 mode the migration's DDL needs, never upgraded, and held to commit. The connection
 backfill runs before the organization foreign key is added, so the migration takes no
-organization row locks and never waits behind a team-administration transaction that
-holds its organization row `FOR UPDATE`. Token writers that already hold a share lock on
-the token table finish first; every other sign-up, team-creation, team-administration or
-token-administration transaction either commits before the migration or starts after it.
-A concurrent token therefore belongs either to the backfill snapshot or to the installed
-trigger, closing the new-organization token creation window. The regression test drives
-these writer shapes against the migration and against each weakened lock order.
+organization row locks; a team-administration transaction that holds its organization
+row `FOR UPDATE` only delays the migration through the member lock it takes next, and
+then completes. A concurrent token therefore belongs either to the backfill snapshot or
+to the installed trigger, closing the new-organization token creation window.
+
+This lock set serializes the following writers, each of which commits before the
+migration or starts after it: token administration (a writer that already counted
+tokens, one holding the user, organization and member locks, one caught between its
+organization and member locks, and the first token of an organization), team creation,
+sign-up, personal-organization creation and invitation creation. It does not serialize
+every team write. A writer that reads member or invitation rows before it writes the
+organization can still form a deadlock with the migration: the team-settings update
+(`/organization/update` locks the user, organization and member rows, then updates the
+organization row while the migration holds the organization table lock and waits for the
+member lock) and invitation acceptance (a plain invitation read before the organization
+and invitation row locks, then member reads, while the migration holds the member lock
+and waits for the invitation lock). PostgreSQL resolves such a cycle after
+`deadlock_timeout` by aborting one side with `40P01`: either that request fails, or the
+migration rolls back whole, is not recorded, and is reapplied on the next start.
+
+Migration 0073 is therefore meant to run with the application stopped, which the
+documented Compose upgrade does (`docker compose stop app`, or `app worker`, before the
+new version starts with `AUTO_MIGRATE=true`). The migration also bounds every lock wait
+with `SET LOCAL lock_timeout = '5s'`: while it waits for the member, invitation or token
+lock it already holds the account and organization table locks, so sign-up, email
+verification and team writes would otherwise stall behind it for as long as the blocking
+transaction lives. After the timeout the migration fails with `55P03`, records nothing,
+and the process start fails; the restarted process retries it. The regression tests drive
+the serialized writer shapes against the migration and against each weakened lock order,
+and drive a held member lock against the bounded wait and its retry.
 
 ## Known limitations
 
