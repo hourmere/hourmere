@@ -3,11 +3,12 @@ import { parse } from '@babel/parser'
 import type { Principal } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { COMMANDS, REST_COMMANDS } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
-import { openApiDocument } from './openapi-document.ts'
+import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productRoutes, productTools } from './server.ts'
 
 // Match camelCase operation ids as well as path segments, tool and command names.
@@ -17,7 +18,11 @@ function isSsoName(name: string) {
     .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-  return tokens.some((token) => ['sso', 'saml', 'oidc'].includes(token))
+  return (
+    /saml|oidc|openid/i.test(name) ||
+    tokens.some((token) => /^sso\d*$/.test(token)) ||
+    tokens.join('_').includes('single_sign_on')
+  )
 }
 const design = await readFile(new URL('../../../docs/sso.md', import.meta.url), 'utf8')
 const ssoOperationIds = [
@@ -41,6 +46,10 @@ function expectNoSsoOperations(document: Document) {
 // Parse syntax rather than hashing source: unrelated routes, formatting and comments
 // can evolve. Inspect route attributes (including component names/expressions) and
 // the shared path definitions, so both literal and PATHS-based SSO routes are caught.
+// Scope: JSX <Route> attributes in apps/web/src/App.tsx (including nested <Routes>)
+// and strings/template parts/identifiers in apps/web/src/paths.ts. This does not
+// inspect imported route components, other files, or route-object definitions;
+// extend this inventory when the web routing sources change.
 function webRouteNames(app: string, paths: string) {
   const names: string[] = []
   for (const [file, source] of [
@@ -76,6 +85,18 @@ function webRouteNames(app: string, paths: string) {
 describe('SSO hard-off excludes only SSO from the published catalogues', () => {
   it('publishes no SSO OpenAPI paths or designed operation ids', async () => {
     expectNoSsoOperations((await openApiDocument()) as Document)
+  })
+
+  it('registers no SSO route, including handlers omitted from OpenAPI', async () => {
+    const { routes } = await openApiRouteInventory()
+    expectNoSso(routes.map(({ path }) => path))
+    const plainRoutes = new Hono()
+    plainRoutes.get('/api/v1/associations', (c) => c.json({}))
+    expectNoSso(plainRoutes.routes.map(({ path }) => path))
+    plainRoutes.get('/api/v1/saml2/metadata', (c) => c.json({}))
+    expect(() => expectNoSso(plainRoutes.routes.map(({ path }) => path))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 
   it('keeps the MCP tools advertised to a full-scope caller', async () => {
@@ -163,7 +184,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
   })
 
   it('allows unrelated operations but rejects SSO paths and every designed operation id', async () => {
-    expect(ssoOperationIds.length).toBeGreaterThan(0)
+    expect(ssoOperationIds).toHaveLength(19)
     const document = (await openApiDocument()) as Document
     const withOperation = (path: string, operationId: string): Document => ({
       paths: { ...document.paths, [path]: { get: { operationId } } },
@@ -187,6 +208,42 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
     expectNoSso(['list_associations', 'associations list'])
   })
+
+  it.each([
+    ['saml2/metadata', 'getSaml2Metadata', 'saml2_metadata'],
+    ['single-sign-on', 'getSingleSignOn', 'single_sign_on'],
+    ['singleSignOn', 'singleSignOnMetadata', 'singleSignOn'],
+    ['openid-connect', 'getOpenidConnect', 'openid_connect'],
+    ['sso2', 'getSso2Metadata', 'sso2_metadata'],
+    ['customSAMLmetadata', 'getCustomSAMLmetadata', 'customSAMLmetadata'],
+    ['customOIDCmetadata', 'getCustomOIDCmetadata', 'customOIDCmetadata'],
+  ])('rejects %s names on every catalogue surface', (path, operationId, tool) => {
+    const rejects = (check: () => void) =>
+      expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    rejects(() => expectNoSsoOperations({ paths: { [`/api/v1/${path}`]: { get: {} } } }))
+    rejects(() => expectNoSsoOperations({ paths: { '/api/v1/reports': { get: { operationId } } } }))
+    rejects(() => expectNoSso([tool]))
+    rejects(() => expectNoSso([`${path} metadata`]))
+    rejects(() => expectNoSso([`GET /api/v1/${path}`]))
+    rejects(() => expectNoSso(webRouteNames(`<Routes><Route path="/app/${path}" /></Routes>`, '')))
+    rejects(() => expectNoSso(webRouteNames('', `export const nextPath = '/app/${path}'`)))
+  })
+
+  it.each(['associations', 'lasso', 'associated', 'blossom'])(
+    'allows unrelated %s names on every catalogue surface',
+    (name) => {
+      expectNoSsoOperations({
+        paths: { [`/api/v1/${name}`]: { get: { operationId: `get${name}` } } },
+      })
+      expectNoSso([`list_${name}`, `${name} list`, `GET /api/v1/${name}`])
+      expectNoSso(
+        webRouteNames(
+          `<Routes><Route path="/app/${name}" /></Routes>`,
+          `export const nextPath = '/app/${name}'`,
+        ),
+      )
+    },
+  )
 
   it('reports both SSO capabilities false at /instance', async () => {
     const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))

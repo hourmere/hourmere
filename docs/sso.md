@@ -846,6 +846,16 @@ Public user guides for a protocol land in its setting step, which also rewrites 
 and the bullet for the new setting; Release docs completes the cross-protocol operator
 guides, and Acceptance and defaults updates them for the on-by-default state.
 
+The Hard-off guard catalogue regression checks reject SSO names in the full Hono
+registered route inventory (including plain handlers absent from OpenAPI), OpenAPI
+paths and operation IDs, advertised MCP tools, and CLI commands and targets. The web
+source check covers JSX `<Route>` attributes in `apps/web/src/App.tsx`, including
+nested `<Routes>`, and strings, template parts and identifiers in
+`apps/web/src/paths.ts`. It does not inspect imported route components, other files
+or route-object definitions; extend that inventory if routing moves to those sources.
+The designed REST operation-ID table currently has exactly 19 entries, checked by
+the regression suite. Unrelated catalogue additions remain allowed.
+
 **Hard-off behaviour.** Every SSO path of that protocol is unreachable; while both
 protocols are hard-off, so are the protocol-neutral SSO operations (policy, domains,
 recovery, mailbox proof, links and delegations). Each REST operation, MCP tool, CLI

@@ -135,6 +135,9 @@ async function verifyGuard(guard = requireSsoEnabled, appFactory = createApp) {
         'oidc',
         'saml',
         '',
+        'saml ',
+        'SAML',
+        ' oidc',
         'OIDC',
         'oauth',
         null,
@@ -208,11 +211,21 @@ it('detects guard bypass and protocol cross-enablement using real HTTP assertion
 describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', () => {
   it('ignores environment settings and never exposes the test route', async () => {
     stubSsoEnvironment()
+    // Re-evaluate the production module graph with the environment already set,
+    // including reads captured at module scope rather than inside startServer.
+    vi.resetModules()
+    const [freshServer, freshApp, freshGuard] = await Promise.all([
+      import('./server.ts'),
+      import('./app.ts'),
+      import('./sso.ts'),
+    ])
+    // Use the same fresh module graph for the guard and app's DomainError handler.
+    await verifyGuard(freshGuard.requireSsoEnabled, freshApp.createApp)
     const owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
       tag: 'sso_off',
     })
     try {
-      const running = await server.startServer({
+      const running = await freshServer.startServer({
         DATABASE_URL: owned.url,
         BETTER_AUTH_SECRET: 'synthetic-sso-startup-secret-at-least-32-characters',
         PUBLIC_URL: 'http://localhost',
