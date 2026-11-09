@@ -70,7 +70,7 @@ export const admin = {
   'Download CSV': '下载 CSV',
 
   'Past date overrides ({0})': '过去的特定日期安排（{0}）',
-  'Times are in {0}.': '时间均以{0}时区显示。',
+  'Times are in {0}.': '时间均按{0}显示。',
   'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
     '此日程已在其他标签页中或通过 API、MCP 或 CLI 客户端更改。你的更改仍保留在此页面。请先查看最新版本，再重新应用你的草稿。',
   'Review latest version': '查看最新版本',

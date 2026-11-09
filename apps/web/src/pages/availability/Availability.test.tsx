@@ -887,7 +887,7 @@ it.each([
   {
     locale: 'zh-CN' as const,
     zone: '时区',
-    hint: '时间均以北美东部时间时区显示。',
+    hint: '时间均按北美东部时间显示。',
     from: '2030年12月24日周二，时间段 1，从',
     until: '2030年12月24日周二，时间段 1，至',
   },
@@ -908,7 +908,7 @@ it.each([
       target: { value: 'Asia/Shanghai' },
     })
     const changedHint =
-      locale === 'en' ? 'Times are in China Standard Time.' : '时间均以中国标准时间时区显示。'
+      locale === 'en' ? 'Times are in China Standard Time.' : '时间均按中国标准时间显示。'
     expect(screen.getByText(changedHint)).toBeDefined()
     fireEvent.change(screen.getByRole('combobox', { name: zone }), { target: { value: 'Asia/' } })
     expect(screen.getByText(changedHint)).toBeDefined()
