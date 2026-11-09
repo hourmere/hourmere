@@ -20,6 +20,8 @@ interface Step {
   env?: Record<string, string>
 }
 interface Job {
+  name?: string
+  'timeout-minutes'?: number
   needs?: string
   if?: string
   'continue-on-error'?: boolean
@@ -165,6 +167,7 @@ describe('UI measurement CI contract', () => {
       'cli-compatibility',
       'docker',
       'e2e',
+      'e2e-shard',
     ])
     expect(requiredSource).not.toContain('ui-checks.yml')
     expect(releaseSource).not.toContain('ui-checks.yml')
@@ -180,9 +183,9 @@ describe('UI measurement CI contract', () => {
     // Also run the isolated Caddy upgrade integration; PostgreSQL limits stay unchanged.
     ['check', '108d0bfde8853d30249ccbb817b61152784571bb04f1c623a465b5371b7896f4'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
-    // PR #58 builds a disposable documentation-site fixture before the browser regressions.
-    // The owner approved a 20-minute job limit because the suite now runs close to 10 minutes.
-    ['e2e', 'dc8078e78f6723dd71fa1c0e3769aee6b6a32dc0d8cb40e9cd6a315592fee208'],
+    // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
+    ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
+    ['e2e-shard', '8fc33ea788e61cc91c79d7b1e525624ce0120c5c4ce50def5ccf14e3dd6cb43e'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
@@ -411,4 +414,117 @@ describe('report-only browser command', () => {
       rmSync(directory, { recursive: true, force: true })
     }
   })
+})
+
+describe('required browser shards', () => {
+  it('runs four complete shards on pull requests and merge groups without fail-fast cancellation', () => {
+    expect(Object.keys(requiredWorkflow.on).sort()).toEqual([
+      'merge_group',
+      'pull_request',
+      'push',
+      'workflow_call',
+    ])
+    const job = requiredWorkflow.jobs['e2e-shard']
+    expect(job).toBeDefined()
+    expect(job?.if).toBeUndefined()
+    expect(job?.['continue-on-error']).toBeUndefined()
+    expect(job?.['timeout-minutes']).toBe(12)
+    expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    expect(job?.services?.postgres.options).not.toContain('max_connections')
+    const browser = job?.steps.find(
+      (step) => step.name === 'Build a disposable site fixture and run browser regressions',
+    )
+    expect(browser?.if).toBeUndefined()
+    expect(browser?.['continue-on-error']).toBeUndefined()
+    expect(browser?.run).toContain('npm run build --workspace @hourmere/site')
+    expect(browser?.run).toContain('trap restore_legal_source EXIT')
+    expect(browser?.run?.split('\n').filter((line) => line.includes('npm run test'))).toEqual([
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      'npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/4',
+    ])
+    expect(job?.steps.filter((step) => step.run === 'npm run test:e2e:privacy')).toHaveLength(1)
+    expect(
+      job?.steps.find((step) => step.run === 'npm run test:e2e:privacy')?.['continue-on-error'],
+    ).toBeUndefined()
+  })
+
+  it('keeps the required e2e check unconditional and dependent on every shard', () => {
+    const job = requiredWorkflow.jobs.e2e
+    expect(job?.name ?? 'e2e').toBe('e2e')
+    expect(job?.needs).toBe('e2e-shard')
+    expect(job?.if).toBe('always()')
+    expect(job?.['timeout-minutes']).toBe(2)
+    expect(job?.['continue-on-error']).toBeUndefined()
+    expect(job?.steps).toHaveLength(1)
+    expect(job?.steps[0]?.if).toBeUndefined()
+    expect(job?.steps[0]?.['continue-on-error']).toBeUndefined()
+    expect({ ...job?.env, ...job?.steps[0]?.env }).toEqual({
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      SHARD_RESULT: '${{ needs.e2e-shard.result }}',
+    })
+  })
+
+  it.each(['success', 'failure', 'cancelled', 'skipped', ''])(
+    'accepts the aggregated shard result only when successful (%s)',
+    (result) => {
+      const script = requiredWorkflow.jobs.e2e?.steps[0]?.run
+      expect(script).toBeTypeOf('string')
+      const execution = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script ?? 'exit 99'], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, SHARD_RESULT: result },
+      })
+      expect(execution.error).toBeUndefined()
+      expect(execution.status, execution.stderr).toBe(result === 'success' ? 0 : 1)
+    },
+  )
+
+  it('lists exactly the unsharded tests once across the actual four shard commands', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hourmere-e2e-shard-list-'))
+    try {
+      const reporter = join(directory, 'identities.mjs')
+      writeFileSync(
+        reporter,
+        `export default class {
+        onBegin(config, suite) {
+          console.log(JSON.stringify(suite.allTests().map(test => test.id)))
+        }
+      }`,
+      )
+      const list = (command: string) => {
+        // --list only collects tests; it never launches browsers or fixtures.
+        const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', command], {
+          cwd: root,
+          encoding: 'utf8',
+          timeout: 60_000,
+        })
+        expect(result.status, result.stderr).toBe(0)
+        const line = result.stdout.trim().split('\n').at(-1)
+        return JSON.parse(line ?? '') as string[]
+      }
+      const baseline = list(
+        `"${process.execPath}" "${fileURLToPath(import.meta.resolve('@playwright/test/cli'))}" test --config tools/e2e/playwright.config.ts --list --reporter "${reporter}"`,
+      )
+      const job = requiredWorkflow.jobs['e2e-shard']
+      const command = job?.steps
+        .flatMap((step) => step.run?.split('\n') ?? [])
+        .find((line) => line.includes('--shard='))
+      expect(command).toBeDefined()
+      const shards = (job?.strategy?.matrix?.shard ?? []).map((shard) => {
+        const selected = list(
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+          `${command?.replace('${{ matrix.shard }}', String(shard))} --list --reporter "${reporter}"`,
+        )
+        expect(selected.length).toBeGreaterThan(0)
+        expect(selected.length).toBeLessThan(baseline.length)
+        return selected
+      })
+      const combined = shards.flat()
+      expect(baseline.length).toBeGreaterThan(0)
+      expect(new Set(baseline).size).toBe(baseline.length)
+      expect(new Set(combined).size).toBe(combined.length)
+      expect(combined.sort()).toEqual(baseline.sort())
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }, 120_000)
 })
