@@ -3293,7 +3293,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set the hours of one date */
+        /**
+         * Set the hours of one date
+         * @description Schedules accept at most 10,000 date overrides, including past dates. Adding another date at the limit returns too_many_overrides without changes. Existing dates may still be replaced or removed.
+         */
         put: operations["setScheduleOverride"];
         post?: never;
         /**
@@ -10514,7 +10517,7 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOverride"];
                 };
             };
-            /** @description invalid_request, invalid_date or invalid_intervals */
+            /** @description invalid_request, invalid_date, invalid_intervals or too_many_overrides */
             400: {
                 headers: {
                     [name: string]: unknown;

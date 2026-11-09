@@ -569,8 +569,8 @@ describe('one availability save', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Choose a date')
     fireEvent.change(input('Date'), { target: { value: '2030-12-31' } })
     await user.click(screen.getByRole('checkbox', { name: 'Unavailable all day' }))
-    await user.click(screen.getByRole('button', { name: 'Add hours on 2030-12-31' }))
-    fireEvent.change(input('2030-12-31, hours 2, from'), { target: { value: '16:00' } })
+    await user.click(screen.getByRole('button', { name: 'Add hours on Tue, Dec 31, 2030' }))
+    fireEvent.change(input('Tue, Dec 31, 2030, hours 2, from'), { target: { value: '16:00' } })
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     expect(screen.getByRole('alert').textContent).toContain('These hours overlap')
     const overlap = within(screen.getByRole('alert')).getByRole('link', {
@@ -719,7 +719,7 @@ it('returns focus to the unavailable control when the final override interval is
     overrides: [{ date: '2030-12-24', intervals: [{ start: '09:00', end: '17:00' }] }],
   })
   renderApp(`/app/availability/${SCHEDULE_ID}`)
-  await user.click(await screen.findByRole('button', { name: 'Remove 2030-12-24, hours 1' }))
+  await user.click(await screen.findByRole('button', { name: 'Remove Tue, Dec 24, 2030, hours 1' }))
   expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Unavailable all day' }))
   expect(document.activeElement).toHaveProperty('checked', true)
 })
@@ -754,7 +754,7 @@ it('keeps a long override history collapsed and read-only with add first at 320p
     ),
   ).toEqual(['2030-12-24', '2030-12-25'])
   expect(section.textContent).toContain('Times are in')
-  expect(section.textContent).toContain(schedule().timeZone)
+  expect(section.textContent).toContain('Central European Time')
   await user.click(add)
   const date = section.querySelector<HTMLInputElement>('input[type="date"]')
   if (!date) throw new Error('Missing new date')
@@ -810,6 +810,10 @@ it('reviews latest changes and reapplies the retained draft with the new version
   await user.click(screen.getByRole('button', { name: 'Apply my draft to this version' }))
   expect(input('Name').value).toBe('My draft')
   expect(input('Date').value).toBe('2030-12-31')
+  expect(document.activeElement?.getAttribute('role')).toBe('status')
+  expect(document.activeElement?.textContent).toBe(
+    'Draft applied to the latest version. Save changes to submit it.',
+  )
   await user.click(screen.getByRole('button', { name: 'Save changes' }))
   await screen.findByText('Saved.')
   expect(api.to(`PUT /api/v1/schedules/${SCHEDULE_ID}/availability`)[1]?.body).toMatchObject({
@@ -831,4 +835,89 @@ it('keeps out-of-range native date drafts renderable for validation', async () =
     'Choose a date in the years 0001 to 9999.',
   )
   expect(api.to(`PUT /api/v1/schedules/${SCHEDULE_ID}/availability`)).toHaveLength(0)
+})
+
+it('keeps saved and newly added override rows in place until save', async () => {
+  const user = userEvent.setup()
+  scheduleServer([schedule()], {
+    overrides: [
+      { date: '2030-12-25', intervals: [] },
+      { date: '2030-12-24', intervals: [] },
+    ],
+  })
+  renderApp(`/app/availability/${SCHEDULE_ID}`)
+  const add = await screen.findByRole('button', { name: 'Add a date override' })
+  const dates = () => screen.getAllByLabelText<HTMLInputElement>('Date')
+  const saved = dates()
+  expect(saved.map((field) => field.value)).toEqual(['2030-12-24', '2030-12-25'])
+  if (!saved[0]) throw new Error('Missing saved row')
+  fireEvent.change(saved[0], { target: { value: '2030-12-30' } })
+  expect(dates()).toEqual(saved)
+  await user.click(add)
+  const firstNew = dates()[0]
+  if (!firstNew) throw new Error('Missing first new row')
+  expect(document.activeElement).toBe(firstNew)
+  fireEvent.change(firstNew, { target: { value: '2030-12-31' } })
+  expect(dates()).toEqual([firstNew, ...saved])
+  expect(firstNew.closest('fieldset')?.querySelector('legend')?.textContent).toBe('Date override 1')
+  await user.click(add)
+  const secondNew = dates()[1]
+  if (!secondNew) throw new Error('Missing second new row')
+  fireEvent.change(secondNew, { target: { value: '2030-12-29' } })
+  expect(dates()).toEqual([firstNew, secondNew, ...saved])
+  expect(document.activeElement).toBe(secondNew)
+  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByText('Saved.')
+  expect(dates().map((field) => field.value)).toEqual([
+    '2030-12-25',
+    '2030-12-29',
+    '2030-12-30',
+    '2030-12-31',
+  ])
+})
+
+it.each([
+  {
+    locale: 'en' as const,
+    zone: 'Time zone',
+    hint: 'Times are in Eastern Time.',
+    from: 'Tue, Dec 24, 2030, hours 1, from',
+    until: 'Tue, Dec 24, 2030, hours 1, until',
+  },
+  {
+    locale: 'zh-CN' as const,
+    zone: '时区',
+    hint: '时间均以北美东部时间时区显示。',
+    from: '2030年12月24日周二，时间段 1，从',
+    until: '2030年12月24日周二，时间段 1，至',
+  },
+])(
+  'localizes override zone hints and interval names in $locale',
+  async ({ locale, zone, hint, from, until }) => {
+    chooseLanguage(locale)
+    scheduleServer([schedule({ timeZone: 'America/New_York' })], {
+      overrides: [{ date: '2030-12-24', intervals: [{ start: '09:00', end: '17:00' }] }],
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    expect(await screen.findByText(hint)).toBeDefined()
+    expect(input(from).value).toBe('09:00')
+    expect(input(until).value).toBe('17:00')
+    fireEvent.change(screen.getByRole('combobox', { name: zone }), { target: { value: 'Ame' } })
+    expect(screen.getByText(hint)).toBeDefined()
+    fireEvent.change(screen.getByRole('combobox', { name: zone }), {
+      target: { value: 'Asia/Shanghai' },
+    })
+    const changedHint =
+      locale === 'en' ? 'Times are in China Standard Time.' : '时间均以中国标准时间时区显示。'
+    expect(screen.getByText(changedHint)).toBeDefined()
+    fireEvent.change(screen.getByRole('combobox', { name: zone }), { target: { value: 'Asia/' } })
+    expect(screen.getByText(changedHint)).toBeDefined()
+  },
+)
+
+it('keeps an unsupported saved zone renderable for correction', async () => {
+  scheduleServer([schedule({ timeZone: 'Future/Example_City' })])
+  renderApp(`/app/availability/${SCHEDULE_ID}`)
+  expect(await screen.findByText('Times are in Future/Example City.')).toBeDefined()
+  expect(input('Time zone').value).toBe('Future/Example_City')
 })
