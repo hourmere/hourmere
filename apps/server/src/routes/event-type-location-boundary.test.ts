@@ -146,11 +146,35 @@ async function verifyPublishedLocation(schemas: Schemas) {
   )
 }
 
-describe('internal event location options transport schemas', () => {
-  it('keeps option writes out of the shared REST and MCP schemas', () => {
-    expect(routes.EventTypeInput.safeParse({ ...base, locations: options }).success).toBe(false)
-    expect(routes.EventTypeUpdate.safeParse({ locations: options }).success).toBe(false)
-    expect(routes.EventType.shape).not.toHaveProperty('locations')
+describe('event location options transport schemas', () => {
+  it('accepts option writes in the shared REST and MCP schemas', () => {
+    expect(routes.EventTypeInput.safeParse({ ...base, locations: options }).success).toBe(true)
+    expect(routes.EventTypeUpdate.safeParse({ locations: options }).success).toBe(true)
+    expect(routes.EventType.shape).toHaveProperty('locations')
+  })
+  async function verifyOptionInputs(schemas: Schemas) {
+    expect(schemas.EventTypeInput.safeParse({ ...base, locations: options }).success).toBe(true)
+    expect(schemas.EventTypeUpdate.safeParse({ locations: options }).success).toBe(true)
+    expect(
+      schemas.EventTypeInput.safeParse({
+        ...base,
+        locations: [{ id: 'call', kind: 'phone', askInvitee: true }],
+      }).success,
+    ).toBe(true)
+    expect(
+      schemas.EventTypeInput.safeParse({ ...base, locations: [{ id: 'call', kind: 'phone' }] })
+        .success,
+    ).toBe(false)
+    expect(
+      schemas.EventTypeUpdate.safeParse({ locations: [{ ...options[0], typo: true }] }).success,
+    ).toBe(false)
+  }
+  it('validates option request shapes and detects removed option write support', async () => {
+    await verifyOptionInputs(routes)
+    await expect(
+      verifyOptionInputs(await sourceCopy(['locations: LocationsInput.optional(),', ''])),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verifyOptionInputs(await sourceCopy())
   })
   it('accepts either phone mode while rejecting missing, mixed and unknown settings', () =>
     verifyPhoneInput(routes))
@@ -298,7 +322,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
         const created = await s.create(locations)
         const read = await s.read(mode, created.id)
         expect(read.status).toBe(200)
-        expect(read.body).not.toHaveProperty('locations')
+        expect(read.body.locations).toEqual(locations)
         expect(
           await s.update(mode, created.id, { title: 'Renamed', location: read.body.location }),
         ).toMatchObject({ status: 200, body: { title: 'Renamed' } })
@@ -446,9 +470,46 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     },
   )
 
+  it.each(['REST', 'MCP'] as const)(
+    'writes and validates ordered options through %s',
+    async (mode) => {
+      const s = await setup()
+      const created =
+        mode === 'REST'
+          ? await s.rest('POST', '/api/v1/event-types', {
+              ...base,
+              slug: randomUUID(),
+              locations: options,
+            })
+          : await s.mcp('create_event_type', { ...base, slug: randomUUID(), locations: options })
+      expect(created.isError).toBe(false)
+      expect(created.body.locations).toEqual(options)
+      const id = created.body.id as string
+      for (const changes of [
+        { locations: [options[0], options[0]] },
+        { locations: [{ id: 'phone', kind: 'phone' }] },
+        { locations: options, location: null },
+      ]) {
+        expect((await s.update(mode, id, changes)).isError).toBe(true)
+        expect(await s.stored(id)).toEqual({ locations: options })
+      }
+      expect((await s.update(mode, id, { locations: null })).body.locations).toBeNull()
+    },
+  )
+
+  // The documented response fields; anything else in a response is a leak, whatever its name.
+  // team-dto-security-audit.test.ts pins the same set for team event types.
+  const declared = Object.keys(routes.EventType.shape)
+  const undeclared = (body: unknown) =>
+    Object.keys(body as object).filter((key) => !declared.includes(key))
   async function verifyBoundary(schemas: Schemas = routes) {
     const s = await setup(schemas)
     const created = await s.create(options)
+    // Soft-deletion metadata is internal, unlike location choices and booking limits.
+    expect(schemas.EventType.parse({ ...created, deleted_at: null })).not.toHaveProperty(
+      'deleted_at',
+    )
+    expect(declared).toEqual(expect.arrayContaining(['locations', 'maxBookingsPerMonth']))
     const notifications = { reminders: [], followUps: [] }
     const restCreated = await s.rest('POST', '/api/v1/event-types', {
       ...base,
@@ -456,7 +517,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
       location: created.location,
     })
     expect(restCreated.status).toBe(201)
-    expect(restCreated.body).not.toHaveProperty('locations')
+    expect(restCreated.body).toHaveProperty('locations')
     const responses = [
       await s.read('REST', created.id),
       await s.update('REST', created.id, { title: 'REST save' }),
@@ -475,29 +536,50 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     for (const response of responses) {
       expect(response.status).toBe(200)
       expect(response.isError).toBe(false)
-      expect(response.body).not.toHaveProperty('locations')
+      expect(response.body).toHaveProperty('locations')
+      expect(response.body).toHaveProperty('maxBookingsPerWeek', null)
+      expect(response.body).toHaveProperty('maxBookingsPerMonth', null)
+      expect(response.body).not.toHaveProperty('deleted_at')
+      expect(undeclared(response.body)).toEqual([])
       expect(response.body).toHaveProperty('successRedirect', null)
     }
-    for (const item of list.body.data as unknown[]) expect(item).not.toHaveProperty('locations')
+    for (const item of list.body.data as unknown[]) {
+      expect(item).toHaveProperty('locations')
+      expect(undeclared(item)).toEqual([])
+    }
     expect(await s.stored(created.id)).toEqual({ locations: options })
   }
-  it('keeps options out of actual REST and MCP responses regardless of projection helpers', () =>
+  it('exposes options in REST and MCP responses and public limits without exposing internal metadata', () =>
     verifyBoundary())
-  it('detects removal of the REST location projection', async () => {
+  it('detects stripping location choices from REST responses', async () => {
     await verifyBoundary(await sourceCopy())
-    const mutant = await sourceCopy(['  locations: _locations,\n', ''])
+    const mutant = await sourceCopy([
+      '(eventType: ServiceEventType) => eventType',
+      '({ locations: _locations, ...eventType }: ServiceEventType) => eventType',
+    ])
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())
   })
-  it('detects a REST response leak introduced after its projection', async () => {
-    await verifyBoundary(await sourceCopy())
-    const mutant = await sourceCopy([
-      'return ({ app, caller }) => {',
-      `return ({ app, caller }) => {
+  it.each(['deleted_at', 'zoomCredentialCiphertext'])(
+    'detects a REST response leak of %s introduced after its projection',
+    async (field) => {
+      await verifyBoundary(await sourceCopy())
+      const mutant = await sourceCopy([
+        'return ({ app, caller }) => {',
+        `return ({ app, caller }) => {
       app.use('/api/v1/event-types*', async (c, next) => {
         await next()
-        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), locations: [] })
+        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), ${field}: null })
       })`,
+      ])
+      await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
+      await verifyBoundary(await sourceCopy())
+    },
+  )
+  it('detects an undeclared field added to the REST projection', async () => {
+    const mutant = await sourceCopy([
+      '(eventType: ServiceEventType) => eventType',
+      '(eventType: ServiceEventType) => ({ ...eventType, zoomCredentialCiphertext: null })',
     ])
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())

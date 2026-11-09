@@ -62,6 +62,7 @@ const classes = {
     'POST /api/v1/bookings/{id}/cancel',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
+    'POST /api/v1/bookings/{id}/request-reschedule',
     'POST /api/v1/bookings/manage/cancel',
     'POST /api/v1/bookings/manage/reschedule',
     'POST /api/v1/public/{handle}/{slug}/bookings',
@@ -72,6 +73,9 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
+    'GET /api/v1/bookings/export.csv',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
@@ -88,6 +92,8 @@ const classes = {
     'GET /api/v1/webhooks/{id}/deliveries',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -189,6 +195,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let date: string
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
+    const personalKeys = new Map<ApiKeyScope, string>()
 
     beforeAll(async () => {
       database = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -231,6 +238,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           (
             await auth.api.createApiKey({
               body: { userId: owner.user.id, metadata: { scope, organizationId: teamId } },
+            })
+          ).key,
+        )
+      // Exports permit scoped keys only for the owner's personal organization.
+      for (const scope of scopes)
+        personalKeys.set(
+          scope,
+          (
+            await auth.api.createApiKey({
+              body: {
+                userId: owner.user.id,
+                metadata: { scope, organizationId: owner.organization.id },
+              },
             })
           ).key,
         )
@@ -305,6 +325,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
         path = path
           .replaceAll('{id}', randomUUID())
@@ -356,6 +377,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .execute()
         headers['x-manage-token'] = token
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
+        if (template.endsWith('/request-reschedule')) payload = { idempotencyKey: randomUUID() }
         if (template.endsWith('/reschedule')) payload = { start: `${date}T10:00:00Z` }
         if (template.endsWith('/retry')) {
           await db
@@ -617,6 +639,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         expectedStatus = 204
       }
+      if (operation === 'PATCH /api/v1/branding') payload = { brandPrimaryColor: '#123456' }
+      if (
+        operation === 'POST /api/v1/branding/logo' ||
+        operation === 'GET /api/v1/branding/logo/{hash}'
+      ) {
+        const { default: sharp } = await import('sharp')
+        const image = await sharp({
+          create: { width: 2, height: 2, channels: 4, background: '#123456' },
+        })
+          .png()
+          .toBuffer()
+        if (method === 'POST') {
+          payload = image
+          headers['content-type'] = 'image/png'
+        } else {
+          const { uploadBrandLogo } = await import('@hourmere/scheduling')
+          const branding = await uploadBrandLogo(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            image,
+            'image/png',
+          )
+          path = path.replace('{hash}', branding.brandLogo as string)
+        }
+      }
       path = path.replace('{id}', id).replace('{date}', date)
       return {
         method,
@@ -632,14 +678,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 102-operation contract and all 306 scope combinations', () => {
+    it('covers the exact 108-operation contract and all 324 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(102)
-      expect(new Set(ids).size).toBe(102)
+      expect(ids).toHaveLength(108)
+      expect(new Set(ids).size).toBe(108)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(306)
+      expect(cases).toHaveLength(324)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -651,11 +697,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
           {
             method: fixture.method,
             headers: {
-              authorization: `Bearer ${keys.get(scope)}`,
+              authorization: `Bearer ${(operation === 'GET /api/v1/bookings/export.csv' ? personalKeys : keys).get(scope)}`,
               'content-type': 'application/json',
               ...fixture.headers,
             },
-            ...(fixture.payload === undefined ? {} : { body: JSON.stringify(fixture.payload) }),
+            ...(fixture.payload === undefined
+              ? {}
+              : {
+                  body: Buffer.isBuffer(fixture.payload)
+                    ? new Uint8Array(fixture.payload)
+                    : JSON.stringify(fixture.payload),
+                }),
           },
           { incoming: { socket: { remoteAddress: `192.0.2.${(sequence % 250) + 1}` } } },
         )
@@ -683,7 +735,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
-          if (response.status !== 204) {
+          if (operation === 'GET /api/v1/branding/logo/{hash}') {
+            expect(response.headers.get('content-type')).toBe('image/png')
+          } else if (operation === 'GET /api/v1/bookings/export.csv') {
+            expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+            expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
             if (operation === 'PUT /api/v1/event-types/{id}/notifications')
@@ -745,7 +802,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe(
-          operation === 'GET /api/v1/instance/embed' ? 'private, no-store' : 'no-store',
+          operation === 'GET /api/v1/instance/embed' ||
+            (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
+            ? 'private, no-store'
+            : 'no-store',
         )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link

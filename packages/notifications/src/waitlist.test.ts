@@ -305,9 +305,37 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   })
 
   it('detects source-copy removal of the cross-worker budget fence', async () => {
-    await expect(
-      budgetScenario(sourceCopy('await lockNotificationEmailBudget(db)', '')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    // Without the fence, both workers must read the remaining budget before either charges
+    // it. A barrier after the read makes that interleaving certain instead of timing-
+    // dependent; the 1.5 s fallback only prevents a hang if one worker never reaches it.
+    const barrier = globalThis as { __waitlistBudgetBarrier?: () => Promise<void> }
+    let arrived = 0
+    let release = () => {}
+    const both = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    barrier.__waitlistBudgetBarrier = async () => {
+      arrived += 1
+      if (arrived >= 2) release()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([both, new Promise((resolve) => (timer = setTimeout(resolve, 1_500)))])
+      clearTimeout(timer)
+    }
+    try {
+      await expect(
+        budgetScenario(
+          sourceCopy('await lockNotificationEmailBudget(db)', '', [
+            [
+              'const suppressed = await notificationEmailBudget(db, deps, hash, true, at)',
+              'const suppressed = await notificationEmailBudget(db, deps, hash, true, at)\n      await globalThis.__waitlistBudgetBarrier()',
+            ],
+          ]),
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      expect(arrived).toBe(2)
+    } finally {
+      delete barrier.__waitlistBudgetBarrier
+    }
   })
 
   it('shares booking-recipient budgets for verification and notification across events', async () => {

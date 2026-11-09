@@ -76,6 +76,8 @@ notifications and trigger configured integrations.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -84,6 +86,7 @@ notifications and trigger configured integrations.
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |
@@ -91,6 +94,7 @@ notifications and trigger configured integrations.
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -679,6 +683,60 @@ a known meeting ID without selecting another account or creating a replacement. 
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
 ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.
+
+CSV export through API keys is limited to the owner's personal organization (`read` or
+`full`). Team-wide CSV exports retain the existing browser-session-only team-admin access
+and field rules; a team key, even an owner's `full` key, receives
+`team_management_access_denied`. See [CSV booking export](https://hourmere.com/docs/booking-export).
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
+`inviteePhone`, normalized to E.164 after removing common phone separators.
+CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.
+
+## Ask an invitee to choose another time
+
+Hosts can send `POST /api/v1/bookings/{id}/request-reschedule` with
+`{"idempotencyKey":"<random UUID>","note":"Could you choose another time?"}`.
+The MCP equivalent is `request_reschedule` with `bookingId` and the same fields;
+CLI users run `hourmere request-reschedule --input request.json`.
+A `bookings` or `full` API key and existing host permission are required.
+The optional plain-text note is limited to 2000 UTF-16 code units and appears only
+in the email body. Retain the UUID and identical input for safe retries; use a new
+UUID to replace the outstanding request.
+
+The returned booking stays `confirmed`, with optional `pendingReschedule` containing
+`id`, `expiresAt` and `note`. The original time stays booked and blocks availability
+until the invitee uses their normal manage link to pick another time or cancel.
+The request expires after 48 hours or when the original meeting starts, whichever
+comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+cannot receive a request. Picking uses the normal availability rules and reschedule
+limit, calendar updates, conference handling and reminders.
+
+When answering a request through REST or MCP, include `rescheduleRequestId` from
+`pendingReschedule.id` with the managed pick or cancel input. This rejects stale
+replaced requests and makes identical retries safe; a replayed pick returns the
+same successor with `manageToken: null`. Without that field, existing ordinary
+reschedule retry semantics remain unchanged.
+
+## Configure booking limits
+
+MCP `create_event_type` and `update_event_type` accept `maxBookingsPerDay`,
+`maxBookingsPerWeek` and `maxBookingsPerMonth`; `get_event_type` returns all three
+settings. Updates take a flat object with `id` alongside changed fields.
+Configuration writes require a `full` API key and the usual ownership or team
+owner/admin permissions; MCP OAuth retains its organization and role checks.
+
+Each ceiling is a whole number from 1 to 1000, or `null` for no ceiling. Omitted
+update fields preserve the saved setting. Configured allowances must satisfy
+day ≤ week ≤ month, comparing each pair that is set, including day/month without a
+weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
+time zones, Monday-based weeks, calendar months and counting rules. Lowering a
+ceiling does not cancel existing bookings.
 
 ## Booking waitlists
 

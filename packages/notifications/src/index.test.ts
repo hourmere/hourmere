@@ -174,6 +174,118 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       .orderBy('recipient')
       .execute()
 
+  it.each([
+    {
+      id: 'call',
+      option: { id: 'call', kind: 'phone', askInvitee: true },
+      phone: '+14155550123',
+      expected: '+14155550123',
+    },
+    {
+      id: 'host-call',
+      option: { id: 'host-call', kind: 'phone', number: '+14155550987' },
+      phone: undefined,
+      expected: '+14155550987',
+    },
+    {
+      id: 'office',
+      option: { id: 'office', kind: 'in_person', address: '100 Example Street' },
+      phone: undefined,
+      expected: '100 Example Street',
+    },
+    {
+      id: 'link',
+      option: { id: 'link', kind: 'link', url: 'https://meeting.example.test/chosen' },
+      phone: undefined,
+      expected: 'https://meeting.example.test/chosen',
+    },
+  ])(
+    'keeps the chosen $id in host/invitee email and ICS after configuration edits and rescheduling',
+    async ({ id, option, phone, expected }) => {
+      const host = await f.host({ name: 'Location host' })
+      await f.schedule(host.userId)
+      const event = await f.eventType(host.organizationId, host.userId, {
+        slug: 'choice',
+        allowGuests: true,
+      })
+      await db
+        .updateTable('event_types')
+        .set({ locations: JSON.stringify([{ id: 'default', kind: 'google_meet' }, option]) })
+        .where('id', '=', event)
+        .execute()
+      const created = await createPublicBooking(ctx, {
+        handle: host.handle,
+        slug: 'choice',
+        start: instant(START),
+        invitee: {
+          name: 'Location invitee',
+          email: 'location-invitee@example.com',
+          timeZone: 'UTC',
+        },
+        guests: [
+          { name: 'Guest one', email: 'guest-one@example.com' },
+          { name: 'Guest two', email: 'guest-two@example.com' },
+        ],
+        locationOptionId: id,
+        ...(phone ? { inviteePhone: phone } : {}),
+      })
+      await db
+        .updateTable('event_types')
+        .set({
+          locations: JSON.stringify([
+            { id: 'replacement', kind: 'phone', number: '+442079460123' },
+          ]),
+        })
+        .where('id', '=', event)
+        .execute()
+      const { mailer, sent } = testMailer()
+      const check = (cancelled = false, reminder = false) => {
+        expect(sent).toHaveLength(4)
+        for (const message of sent) {
+          const guest = message.to.startsWith('guest-')
+          const invitee = message.to === 'location-invitee@example.com'
+          const phoneWording =
+            id === 'call'
+              ? guest
+                ? 'Phone call — the host will call the invitee'
+                : invitee
+                  ? `Phone call — the host will call you at ${expected}`
+                  : `Phone call — call the invitee at ${expected}`
+              : id === 'host-call'
+                ? invitee || guest
+                  ? `Phone call — call the host at ${expected}`
+                  : `Phone call — the invitee will call you at ${expected}`
+                : expected
+          if (!cancelled || id !== 'link') {
+            expect(message.text).toContain(phoneWording)
+            expect(message.html).toContain(phoneWording)
+          }
+          if (reminder) expect(message.attachments).toBeUndefined()
+          else expect(invitation(message)?.location).toBe(phoneWording)
+          if (id === 'call' && guest) expect(JSON.stringify(message)).not.toContain(expected)
+          expect(JSON.stringify(message)).not.toContain('+442079460123')
+        }
+        sent.length = 0
+      }
+      await sendBookingNotification(deps(mailer), created.booking.id, 'confirmed')
+      check()
+      await sendBookingNotification(
+        deps(mailer, instant(START).subtract({ hours: 24 })),
+        created.booking.id,
+        'reminder',
+      )
+      check(false, true)
+      const moved = await rescheduleManagedBooking(ctx, created.manageToken as string, {
+        start: instant('2026-11-03T13:00:00Z'),
+      })
+      await sendBookingNotification(deps(mailer), moved.booking.id, 'rescheduled')
+      check()
+      await cancelManagedBooking(ctx, moved.manageToken as string, {})
+      await sendBookingNotification(deps(mailer), moved.booking.id, 'cancelled')
+      check(true)
+    },
+  )
+
   it.each(['en', 'zh-CN'] as const)(
     'links every host notification to its admin booking in %s without sharing invitee links',
     async (locale) => {

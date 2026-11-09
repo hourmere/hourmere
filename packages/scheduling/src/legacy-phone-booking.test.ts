@@ -3,8 +3,14 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { selectBookableLocationOption } from './availability.ts'
 import { createOneTimeBooking, createPublicBooking, createPublicTeamBooking } from './bookings.ts'
 import { DomainError } from './errors.ts'
+import {
+  isPreservedSingleton,
+  resolveLocationChoice,
+  selectLocationOption,
+} from './location-options.ts'
 import { createOneTimeBookingLink } from './one-time-links.ts'
 import { createFixtures } from './testing.ts'
 
@@ -52,6 +58,7 @@ describe.skipIf(!serverUrl)('legacy booking paths with invitee phone configurati
         .execute()
       const ctx = { db, now }
       let attempt: Promise<unknown>
+      let bookWithPhone: () => Promise<{ booking: { location: unknown } }>
       if (path === 'one-time') {
         const principal = {
           kind: 'session' as const,
@@ -66,6 +73,8 @@ describe.skipIf(!serverUrl)('legacy booking paths with invitee phone configurati
         }
         const link = await createOneTimeBookingLink({ ...ctx, principal }, { eventTypeId: event })
         attempt = createOneTimeBooking(ctx, { ...input, token: link.token })
+        bookWithPhone = () =>
+          createOneTimeBooking(ctx, { ...input, token: link.token, inviteePhone: '+14155550123' })
       } else if (path === 'team') {
         const org = await db
           .selectFrom('auth.organization')
@@ -73,8 +82,22 @@ describe.skipIf(!serverUrl)('legacy booking paths with invitee phone configurati
           .where('id', '=', host.organizationId)
           .executeTakeFirstOrThrow()
         attempt = createPublicTeamBooking(ctx, { ...input, handle: org.slug, slug: 'phone' })
+        bookWithPhone = () =>
+          createPublicTeamBooking(ctx, {
+            ...input,
+            handle: org.slug,
+            slug: 'phone',
+            inviteePhone: '+14155550123',
+          })
       } else {
         attempt = createPublicBooking(ctx, { ...input, handle: host.handle, slug: 'phone' })
+        bookWithPhone = () =>
+          createPublicBooking(ctx, {
+            ...input,
+            handle: host.handle,
+            slug: 'phone',
+            inviteePhone: '+14155550123',
+          })
       }
       await expect(attempt).rejects.toMatchObject(expectedError)
       expect(
@@ -87,6 +110,10 @@ describe.skipIf(!serverUrl)('legacy booking paths with invitee phone configurati
           .where('event_type_id', '=', event)
           .execute(),
       ).toEqual(path === 'one-time' ? [{ state: 'active' }] : [])
+      expect((await bookWithPhone()).booking.location).toEqual({
+        kind: 'phone',
+        number: '+14155550123',
+      })
       expect(owned.pool.totalCount).toBeLessThanOrEqual(2)
     },
   )
@@ -96,12 +123,12 @@ describe.skipIf(!serverUrl)('legacy booking paths with invitee phone configurati
 // the call site as well as the guard without making any external provider calls.
 function copiedBooking(change?: readonly [string, string]) {
   const source = readFileSync(new URL('./bookings.ts', import.meta.url), 'utf8')
-  const guardStart = source.indexOf('function requireCollectedPhone(')
+  const guardStart = source.indexOf('async function resolveBookingLocation(')
   const bodyStart = source.indexOf('async function publicBooking(')
   expect(guardStart).toBeGreaterThan(-1)
   expect(bodyStart).toBeGreaterThan(-1)
   let copy =
-    source.slice(guardStart, source.indexOf('/**', guardStart)) +
+    source.slice(guardStart, source.indexOf('/**\n * Serializes', guardStart)) +
     source.slice(bodyStart, source.indexOf('// --- Invitee links', bodyStart))
   if (change) {
     expect(copy).toContain(change[0])
@@ -110,6 +137,12 @@ function copiedBooking(change?: readonly [string, string]) {
   const noop = async () => {}
   const bindings = {
     DomainError,
+    isPreservedSingleton,
+    resolveLocationChoice,
+    selectLocationOption,
+    selectBookableLocationOption,
+    automaticMeet: () => false,
+    automaticZoom: () => false,
     eventTypeNotFound: () => new DomainError('not_found', 'event_type_not_found'),
     bookingIdempotency: () => undefined,
     validateResponses: () => ({}),
@@ -141,6 +174,8 @@ async function verifyLockedPhoneGuard(book: ReturnType<typeof copiedBooking>) {
     schedulingType: 'individual',
     hostUserIds: ['host'],
     location: { kind: 'phone', number: '+14155550123' },
+    locations: [{ id: 'phone', kind: 'phone', number: '+14155550123' }],
+    conferenceOrganizerUserId: null,
     questions: [],
     title: 'Call',
     hosts: [{ name: 'Host' }],
@@ -159,7 +194,9 @@ async function verifyLockedPhoneGuard(book: ReturnType<typeof copiedBooking>) {
   }
   await expect(
     book(ctx, input, { source: 'api' }, async (_db: unknown, options?: { lock?: boolean }) =>
-      options?.lock ? { ...initial, location: { kind: 'phone', askInvitee: true } } : initial,
+      options?.lock
+        ? { ...initial, locations: [{ id: 'phone', kind: 'phone', askInvitee: true }] }
+        : initial,
     ),
   ).rejects.toMatchObject(expectedError)
   await expect(book(ctx, input, { source: 'api' }, async () => initial)).resolves.toMatchObject({
@@ -170,15 +207,14 @@ async function verifyLockedPhoneGuard(book: ReturnType<typeof copiedBooking>) {
 describe('invitee phone booking source-copy controls', () => {
   it.each([
     [
-      'phone collection guard',
-      "location?.kind === 'phone' && location.askInvitee === true",
-      'false',
-    ],
-    ['guard call before persistence', '      requireCollectedPhone(current.location)\n', ''],
-    [
       'locked configuration check',
-      'requireCollectedPhone(current.location)',
-      'requireCollectedPhone(et.location)',
+      'resolveBookingLocation(ctx, trx, current, selectedHostIds, input)',
+      'resolveBookingLocation(ctx, trx, et, selectedHostIds, input)',
+    ],
+    [
+      'choice resolution before persistence',
+      'const choice = await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)',
+      'const choice = { location: null, locationOption: null }',
     ],
   ])('detects removal of %s', async (_name, before, after) => {
     await verifyLockedPhoneGuard(copiedBooking())

@@ -5,6 +5,7 @@ import {
   type BookingNotifier,
   cancelHostBooking,
   cancelManagedBooking,
+  exportBookingsCsv,
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
@@ -14,7 +15,9 @@ import {
   MAX_PAGE_SIZE,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  RescheduleRequestNoteSchema,
   ResponsesSchema,
+  requestReschedule,
   rescheduleHostBooking,
   rescheduleManagedBooking,
   resolveBookingOrganization,
@@ -100,6 +103,21 @@ export const Booking = z
     id: z.uuid(),
     eventTypeId: z.uuid().nullable(),
     status: z.enum(['confirmed', 'cancelled']),
+    isGroupSeat: z.boolean().optional().openapi({
+      description:
+        'True for a group-seat booking, which does not support host reschedule requests.',
+    }),
+    pendingReschedule: z
+      .object({
+        id: z.uuid(),
+        expiresAt: Instant,
+        note: z.string().nullable(),
+      })
+      .optional()
+      .openapi({
+        description:
+          'An outstanding host request to choose another time. The original booking stays confirmed and blocks its slot; expiry keeps the original time.',
+      }),
     start: Instant,
     end: Instant,
     title: z.string(),
@@ -208,6 +226,32 @@ export const CancelBody = z
 export const RescheduleBody = z
   .strictObject({ start: Instant, durationMinutes: SelectedDurationMinutes.optional() })
   .openapi('Reschedule')
+
+export const RescheduleRequestId = z.uuid().optional().openapi({
+  description:
+    'The pendingReschedule.id being answered. Fences replaced requests and makes a matching pick or cancellation safe to replay.',
+})
+export const ManagedCancelBody = z.strictObject({
+  ...CancelBody.shape,
+  rescheduleRequestId: RescheduleRequestId,
+})
+export const ManagedRescheduleBody = z.strictObject({
+  ...RescheduleBody.shape,
+  rescheduleRequestId: RescheduleRequestId,
+})
+
+export const RequestRescheduleBody = z
+  .strictObject({
+    idempotencyKey: z.uuid().openapi({
+      description:
+        'Retain this random UUID for retries. A new key replaces the current request; changed input with an existing key is refused.',
+    }),
+    note: RescheduleRequestNoteSchema.optional().openapi({
+      description:
+        'Optional plain text, at most 2000 UTF-16 code units, normalized like follow-up host notes. Included only in the email body.',
+    }),
+  })
+  .openapi('RequestReschedule')
 
 export const BookingPage = z
   .object({
@@ -342,6 +386,48 @@ export function bookingRoutes({
       automaticZoom,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
+
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/bookings/{id}/request-reschedule',
+        operationId: 'requestReschedule',
+        summary: 'Ask the invitee to choose another time',
+        description:
+          'For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused.',
+        security: authenticated,
+        middleware: hostManage,
+        tags: ['Bookings'],
+        request: {
+          params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+          body: { required: true, content: json(RequestRescheduleBody) },
+        },
+        responses: {
+          200: {
+            description: 'Booking with its outstanding request, or the current booking on replay',
+            content: json(Booking),
+          },
+          400: error('Invalid input or note (`invalid_request`)'),
+          401: unauthorized,
+          403: crossOrigin,
+          404: hostNotFound,
+          409: error(
+            'Booking cancelled, already started, imported read-only, group-seat unsupported, idempotency key reused or organization context changed',
+          ),
+          429: hostRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await requestReschedule(
+            context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({
@@ -499,7 +585,7 @@ export function bookingRoutes({
         middleware: manageLimit,
         request: {
           headers: ManageToken,
-          body: { content: json(CancelBody), required: false },
+          body: { content: json(ManagedCancelBody), required: false },
         },
         responses: {
           200: { description: 'The cancelled booking', content: json(Booking) },
@@ -512,11 +598,12 @@ export function bookingRoutes({
         },
       }),
       async (c) => {
-        const { reason } = (c.req.valid('json') as z.infer<typeof CancelBody> | undefined) ?? {}
+        const { reason, rescheduleRequestId } =
+          (c.req.valid('json') as z.infer<typeof ManagedCancelBody> | undefined) ?? {}
         const booking = await cancelManagedBooking(
           publicContext,
           c.req.valid('header')['x-manage-token'],
-          { reason },
+          { reason, rescheduleRequestId },
         )
         return c.json(booking, 200)
       },
@@ -534,7 +621,7 @@ export function bookingRoutes({
         request: {
           headers: ManageToken,
           body: {
-            content: json(RescheduleBody),
+            content: json(ManagedRescheduleBody),
             required: true,
           },
         },
@@ -557,6 +644,7 @@ export function bookingRoutes({
           {
             start: Temporal.Instant.from(c.req.valid('json').start),
             durationMinutes: c.req.valid('json').durationMinutes,
+            rescheduleRequestId: c.req.valid('json').rescheduleRequestId,
           },
         )
         return c.json(result, 200)
@@ -681,6 +769,63 @@ export function bookingRoutes({
           cursor: q.cursor,
         })
         return c.json(page, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/export.csv',
+        operationId: 'exportBookingsCsv',
+        summary: 'Download bookings as CSV',
+        description:
+          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
+        security: authenticated,
+        middleware: caller,
+        request: {
+          query: ListBookingsQuery.omit({ limit: true, cursor: true })
+            .extend({
+              from: Instant,
+              to: Instant,
+              timeZone: z.string().optional(),
+              eventTypeId: z.uuid().optional(),
+              hostUserId: z.uuid().optional(),
+              expectedOrganizationId: z.uuid().optional(),
+              bom: z.enum(['true', 'false']).optional(),
+            })
+            .strict(),
+        },
+        responses: {
+          200: {
+            description: 'CSV download with RFC 4180 quoting and formula protection',
+            content: { 'text/csv': { schema: z.string() } },
+          },
+          400: error('Invalid export filters or range'),
+          401: unauthorized,
+          403: error(
+            'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
+          ),
+          409: error(
+            'export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
+          ),
+          429: keyRateLimited,
+        },
+      }),
+      async (c) => {
+        const q = c.req.valid('query')
+        const body = await exportBookingsCsv(
+          context(c.var.principal),
+          { ...q, bom: q.bom === 'true' },
+          c.req.raw.signal,
+        )
+        return new Response(body, {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': 'attachment; filename="bookings.csv"',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
       },
     )
 

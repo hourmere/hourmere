@@ -1,9 +1,17 @@
 export const common = {
+  'Meeting location': 'Besprechungsort',
+  'Your phone number': 'Ihre Telefonnummer',
+  'Choose one of the available locations.': 'Wählen Sie einen der verfügbaren Orte.',
+  'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
+    'Geben Sie + und insgesamt 7–15 Ziffern einschließlich Ländervorwahl ein. Leerzeichen, Klammern, Punkte und Bindestriche sind erlaubt.',
+  'This request has expired or changed. Reload your booking to choose what to do next.':
+    'Diese Anfrage ist abgelaufen oder wurde geändert. Laden Sie Ihre Buchung neu, um den nächsten Schritt zu wählen.',
+  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
+    'Ihr Gastgeber bittet Sie, eine neue Zeit auszuwählen. Die ursprüngliche Buchung bleibt bestehen, bis Sie sie verschieben oder stornieren.',
   'This waitlist is full (100 entries). Please check available times later.':
     'Diese Warteliste ist voll (100 Einträge). Bitte prüfen Sie die verfügbaren Zeiten später erneut.',
   'Waitlist email is unavailable. Please contact the host.':
     'E-Mails zur Warteliste sind nicht verfügbar. Bitte kontaktieren Sie den Gastgeber.',
-
   'This imported booking is read-only and managed in the original system.':
     'Diese importierte Buchung ist schreibgeschützt und wird im ursprünglichen System verwaltet.',
   'This location is unavailable. Contact the host to book.':

@@ -1,8 +1,19 @@
 import { constants } from 'node:fs'
-import { open } from 'node:fs/promises'
-import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version } from './client.ts'
+import { open, unlink } from 'node:fs/promises'
+import {
+  CliError,
+  callTool,
+  downloadCsv,
+  endpoint,
+  isObject,
+  MAX_INPUT_BYTES,
+  uploadLogo,
+  version,
+} from './client.ts'
 
 export const COMMANDS = {
+  'branding get': 'get_branding',
+  'branding set': 'set_branding',
   whoami: 'whoami',
   profile: 'get_profile',
   catalog: 'list_event_types',
@@ -24,7 +35,9 @@ export const COMMANDS = {
   'open-time-snippet': 'generate_open_time_snippet',
   book: 'create_booking',
   list: 'list_bookings',
+  export: 'export_bookings',
   reschedule: 'reschedule_booking',
+  'request-reschedule': 'request_reschedule',
   cancel: 'cancel_booking',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
@@ -33,32 +46,44 @@ export const COMMANDS = {
   'one-time-links revoke': 'revoke_one_time_link',
 } as const
 
+export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' } as const
+
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
+       hourmere branding get|set [--input FILE|-]
+       hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           schedule-availability, save-availability,
-          book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
+          book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+           book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
+Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
+                integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-parameters NAME,... (empty string clears the list),
                --success-redirect-include-invitee-personal-data true|false,
                --success-redirect-allow-embed-parent true|false, or --clear-success-redirect.
 Invitee name/email become visible to the target website and its analytics when enabled.
+Export: export --input FILE|- [--output FILE] streams CSV to a new private file or stdout.
+Requires read/full scope; input: from, to (maximum 366 days), timeZone, optional filters and bom.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
 stdout is JSON with management capabilities redacted (--json makes this explicit). --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
+request-reschedule requires bookingId, an explicit idempotencyKey and optional plain-text note.
+The original slot remains booked until the invitee moves or cancels; expiry keeps it booked.
 Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
 Cancel, reschedule and retry commands refuse them with imported_booking_read_only.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
@@ -72,7 +97,9 @@ See https://hourmere.com/docs/cli for complete usage.
 `
 
 interface Options {
-  command: keyof typeof COMMANDS
+  command: keyof typeof COMMANDS | keyof typeof REST_COMMANDS
+  file?: string
+  contentType?: string
   input?: string
   output?: string
   url?: string
@@ -84,9 +111,11 @@ interface Options {
 function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
-  const command = first === 'one-time-links' ? `${first} ${parts.shift() ?? ''}` : first
+  const command =
+    first === 'one-time-links' || first === 'branding' ? `${first} ${parts.shift() ?? ''}` : first
   const rest = parts
-  if (!command || !Object.hasOwn(COMMANDS, command)) throw new CliError('invalid_command')
+  if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
+    throw new CliError('invalid_command')
   const options: Options = { command: command as keyof typeof COMMANDS }
   const seen = new Set<string>()
   for (let i = 0; i < rest.length; i += 1) {
@@ -94,6 +123,8 @@ function parse(argv: readonly string[]): Options {
     if (
       !flag ||
       ![
+        '--file',
+        '--content-type',
         '--json',
         '--input',
         '--output',
@@ -125,6 +156,11 @@ function parse(argv: readonly string[]): Options {
       (value.startsWith('-') && !(flag === '--input' && value === '-'))
     )
       throw new CliError('invalid_options')
+    if (flag === '--file' || flag === '--content-type') {
+      if (command !== 'branding upload') throw new CliError('invalid_options')
+      if (flag === '--file') options.file = value
+      else options.contentType = value
+    }
     if (flag === '--input') options.input = value
     if (flag === '--output') options.output = value
     if (flag === '--url') options.url = value
@@ -158,6 +194,13 @@ function parse(argv: readonly string[]): Options {
     throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
     throw new CliError('one_time_link_output_forbidden')
+  if (
+    command === 'branding upload' &&
+    (!options.file ||
+      options.input ||
+      !['image/png', 'image/jpeg', 'image/webp'].includes(options.contentType ?? ''))
+  )
+    throw new CliError('invalid_options')
   return options
 }
 
@@ -219,7 +262,7 @@ export async function runCli(options: {
   argv: readonly string[]
   env: NodeJS.ProcessEnv
   stdin: AsyncIterable<Uint8Array | string>
-  stdout: (text: string) => void
+  stdout: (text: string) => unknown | Promise<unknown>
   stderr: (text: string) => void
   fetch?: typeof fetch
 }): Promise<number> {
@@ -232,6 +275,7 @@ export async function runCli(options: {
     return 0
   }
   let output: Awaited<ReturnType<typeof open>> | undefined
+  let exportOutputPath: string | undefined
   let called = false
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
@@ -296,15 +340,42 @@ export async function runCli(options: {
     )
       throw new CliError('idempotency_key_required')
     // Reserve the private output before making a booking: a path error must not lose its token.
+    if (args.command === 'export') exportOutputPath = args.output
     if (args.output) output = await open(args.output, 'wx', 0o600)
     called = true
-    const result = await callTool({
-      url,
-      key,
-      tool: COMMANDS[args.command],
-      input,
-      fetch: options.fetch,
-    })
+    const result =
+      args.command === 'branding upload'
+        ? await uploadLogo({
+            url,
+            key,
+            path: args.file ?? '',
+            contentType: args.contentType ?? '',
+            fetch: options.fetch,
+          })
+        : await callTool({
+            url,
+            key,
+            tool: COMMANDS[args.command],
+            input,
+            fetch: options.fetch,
+          })
+    if (args.command === 'export') {
+      await downloadCsv({
+        url,
+        key,
+        path: result.downloadPath,
+        fetch: options.fetch,
+        write: async (chunk) => {
+          if (output) await output.writeFile(chunk)
+          else await options.stdout(chunk)
+        },
+      })
+      if (output) {
+        await output.sync()
+        options.stdout('{"outputWritten":true}\n')
+      }
+      return 0
+    }
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
@@ -317,6 +388,10 @@ export async function runCli(options: {
     }
     return 0
   } catch (error) {
+    if (output && exportOutputPath) {
+      await output.close().catch(() => {})
+      await unlink(exportOutputPath).catch(() => {})
+    }
     const code = error instanceof CliError ? error.code : called ? 'output_failed' : 'file_error'
     options.stderr(
       printable(

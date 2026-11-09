@@ -1488,6 +1488,12 @@ input[type="radio"] {
   cursor: pointer;
 }
 
+/* Keep the actual export control at least 24px even with fractional root font sizes. */
+.booking-export input[type="checkbox"] {
+  min-width: 24px;
+  min-height: 24px;
+}
+
 .editor input:is([type="checkbox"], [type="radio"]) {
   width: 1.5rem;
   height: 1.5rem;

@@ -31,6 +31,10 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
+The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
+occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
+available in this foundation release.
+
 ## Principles
 
 - **Two schemas.** `auth` belongs to [Better Auth](https://www.better-auth.com) and keeps
@@ -56,6 +60,34 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   Temporal handles DST when these dates and rules become instants.
 
 ## Tables
+
+### Organization branding
+
+Migration `0063_organization_branding.sql` adds `organization_branding`, keyed by organization, with nullable
+`brand_logo` and `brand_primary_color`. Keeping these settings outside `auth.organization`
+preserves the native Better Auth response boundary. A missing row means both settings
+are unset. Existing organizations keep their data and receive no custom
+branding. Colours are normalized to uppercase `#RRGGBB`, with a database format constraint.
+The logo reference is a SHA-256 digest of normalized PNG bytes in
+`organization_brand_logos`. A composite foreign key binds the reference to the same
+organization; each organization has at most one image row, capped at 524,288 bytes.
+The reference constraint is deferred so replacement can update the image and reference
+atomically. Clearing a logo removes its stored bytes; deleting an organization cascades
+to its image. Replaced hashes are not retained as a history or public asset catalogue.
+
+The upload service accepts bounded PNG, JPEG and WebP, decodes and re-encodes pixels,
+and refuses animation, unsupported types, mismatched media types and oversized images.
+Protected image reads serve only normalized PNG with restrictive browser headers.
+Personal owners and team owners/admins manage branding through REST, MCP and CLI;
+binary uploads use REST or CLI. Writes serialize on the organization, preserve omitted
+fields and recheck access before committing. Repeating the same input produces the same
+stored settings; concurrent writes are ordered, with the last committed value winning
+for a field changed by both callers.
+
+Contrast calculations select black or white text with the greater WCAG 2.x ratio and
+report the primary colour's ratio against white separately. These settings do not yet
+change public pages, bookings or mail. See [branding](https://hourmere.com/docs/branding)
+for limits and client instructions.
 
 ### `auth` (Better Auth: core + organization + api-key plugins)
 
@@ -157,8 +189,9 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   are allowed (ranges are half-open). `period` and `active` are never trusted from the
   application: a `BEFORE INSERT OR UPDATE` trigger derives them from the booking (locking
   it `FOR SHARE` against a concurrent reschedule), and a trigger on `bookings` re-derives
-  them when the time or status changes. Every status except `cancelled` occupies the
-  host. A multi-host booking is inserted in one transaction, so one taken host rolls back
+  them when the time or status changes. `confirmed` and `pending_payment` occupy the
+  host; `cancelled` and `expired` do not. The slot engine ignores holds past their deadline,
+  and booking admission releases due holds before checking the exclusion constraint. A multi-host booking is inserted in one transaction, so one taken host rolls back
   the whole booking. Buffers are enforced by the availability engine, not the constraint.
 - **Rescheduling** cancels the booking and inserts a new one with `rescheduled_from_id`,
   in one transaction (cancel first, so the new time may overlap the old one).
@@ -190,6 +223,8 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   commit (deferred), so the open transaction never locks the booking against a cancel.
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
+  The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
+  discovery foundation; CalDAV is not yet enabled in the product.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
   `event_type_id`. A rescheduled booking is a new row linked by `rescheduled_from_id`.
 - **Deleting an account** cascades to the user's own data (profile, schedules,
@@ -389,9 +424,10 @@ members receive a null label, rendered as a neutral unknown member in the editor
 `event_types.max_bookings_per_day`, `max_bookings_per_week` and
 `max_bookings_per_month` are independent optional integer ceilings from 1 to 1000;
 NULL means that period has no limit. Migration 0057 adds the weekly and monthly
-columns as NULL without changing existing event types or bookings. Weekly and monthly
-writes are internal service configuration in this slice; REST, MCP, CLI and editor
-controls follow separately.
+columns as NULL without changing existing event types or bookings. The editor, REST,
+MCP and CLI expose all three ceilings as `maxBookingsPerDay`, `maxBookingsPerWeek` and
+`maxBookingsPerMonth`. Omitted update fields preserve saved values; explicit null
+removes a ceiling. See [booking limits](https://hourmere.com/docs/booking-limits).
 
 Configured ceilings must not descend as periods get longer: day ≤ week, week ≤ month,
 and day ≤ month whenever each pair is set. The last rule also applies when week is
@@ -480,7 +516,7 @@ for host steps, invitee selection and the shared-rule limitations.
 
 ## Event location options contract
 
-`event_types.locations` / internal service `locations` is an ordered list of 1–5
+`event_types.locations` / REST, MCP and service `locations` is an ordered list of 1–5
 location options, or SQL/service null for no location. An empty list is invalid.
 Each option has a stable `id` (1–64 ASCII letters, digits, `_` or `-`, excluding
 `__proto__`, as for question and reminder rule IDs), a `kind`,
@@ -505,7 +541,7 @@ constraints also enforce the list envelope, identities, kinds and default count.
 Option IDs survive settings edits within the same kind and reordering. A kind change
 replaces the option identity. Removing and recreating an option must allocate a new ID
 so a stale page cannot accidentally select a different option under the old ID.
-Internal complete-list writers are responsible for these identity rules.
+Complete-list writers are responsible for these identity rules.
 
 `event_types.location` and service `location` remain compatibility fields derived
 from the explicit default, or first/only option, with `id`, `label` and `isDefault`
@@ -519,7 +555,7 @@ initially uses `legacy`, as does historical backfill.
 A different value, including null, for several options or an option with a label returns
 conflict `location_options_conflict` (REST 409; MCP tool error), instructing the client to
 use `locations`. Rejecting the ambiguous edit avoids guessing a target or dropping data.
-Internal writes supply `locations` as a complete replacement; specifying both fields in
+Configuration writes supply `locations` as a complete replacement; specifying both fields in
 one service write is invalid. Unrelated edits preserve the list and its order. Migration 0056 wraps every existing non-null
 event location in `{ id: "legacy", ...location }` without normalizing its settings
 or changing timestamps; existing nulls stay null. A compatibility trigger also
@@ -529,61 +565,52 @@ lists take precedence in SQL. Later data migrations that echo `location` are har
 ones that intentionally change a multi-option or labelled configuration must update
 `locations` explicitly instead.
 
-The additive transport contract for later work is `locations` beside the existing
-`location`; configuration REST, MCP and CLI must introduce writes together. Future
-booking requests use `locationOptionId` and, only for `askInvitee`, `inviteePhone`.
-Omitting the option chooses the effective default; an unknown/removed ID returns
-`invalid_location_choice`, never silently falls back. Invalid or missing collected
-phone data returns `invalid_invitee_phone`. The pure `resolveLocationChoice` helper
-performs this resolution without database or provider I/O. This migration/model
-slice does not expose `locations` through REST/OpenAPI, MCP or CLI, add booking
-request fields, or enable public choice or per-choice conference creation.
-The existing protected event-type response's `location` schema additionally accepts
-`{ kind: "phone", askInvitee: true }` so reads of internal configuration remain
-well-typed. Legacy service, REST, MCP and CLI writes accept this phone value only as
-an unchanged echo of an existing saved location. Creating or changing to it returns
-`invalid_location` until public booking can collect the invitee’s phone number. New phone
-configuration requires the host’s number; a host number and `askInvitee` together remain
-invalid. The published `EventType.location` retains its discriminated `oneOf` shape, with optional
-`number`/`askInvitee` fields on its single phone branch. The current editor preserves this
-configuration and omits an unchanged location when saving unrelated settings.
-Until the booking follow-up adds phone collection, existing personal, team and one-time
-booking paths reject an effective default `askInvitee` location with
-`invalid_invitee_phone` before persistence, rechecking under the booking locks. They
-cannot create a phone booking without a number from this configuration; exact replays
-of existing bookings retain their previous result.
+REST, MCP and CLI expose `locations` beside the existing `location`. Configuration
+writes use the same validation and conflict rules in every transport. Booking creation
+accepts `locationOptionId` and, only for `askInvitee`, `inviteePhone`. Omitting the option
+chooses the effective default; an unknown or removed ID returns `invalid_location_choice`,
+never silently falls back. Invalid or missing collected phone data returns
+`invalid_invitee_phone`. Public personal, team, embedded and one-time booking forms
+collect the number when required. The pure `resolveLocationChoice` helper performs
+selection without provider I/O; booking-time readiness is rechecked under the locks.
+Legacy `location` writes still reject new `askInvitee` configuration with
+`invalid_location`; use the complete `locations` list to configure collection. An unchanged
+legacy echo remains accepted. The editor preserves that configuration on unrelated edits.
+See [meeting location choices](https://hourmere.com/docs/location-choices) for configuration,
+public discovery and booking examples.
 
-A new booking will store its chosen configuration snapshot in
+A new booking stores its chosen configuration snapshot in
 `bookings.location_option`, including its ID, kind, label/default marker and settings.
 `bookings.location` remains the resolved values used by current protected booking
 reads, notifications and calendars: host or collected invitee phone, saved address
 or link, or the conference kind/opt-in until its ready join URL is added by existing
 conference reconciliation. The resolver returns both `locationOption` and `location`;
 for invitee phone, the configuration snapshot retains `askInvitee: true` and the
-resolved location contains the supplied number. Neither configuration edits nor
+resolved location contains the normalized E.164 number. Common spaces, parentheses,
+hyphens and periods are removed before validating 7–15 total digits including the country
+code. Host and invitee notifications can show that number; guest email and ICS payloads
+use neutral phone-call wording without it. Neither configuration edits nor
 conference URL updates rewrite the chosen snapshot. Snapshot storage is private,
 just like resolved contact details, and follows the booking's retention policy.
 Migration 0056 backfills each existing non-null resolved booking location as
 `{ id: "legacy", ...location }`, including any historical ready URL; null remains
 null. These historical snapshots cannot recover the original option settings or
 labels. Compatibility inserts that omit a snapshot similarly capture their resolved
-location; the next booking task will explicitly persist the resolver's snapshot.
+location; booking creation explicitly persists the resolver's snapshot.
 Historical resolved booking payloads with custom kinds remain intact in snapshots;
 this storage compatibility does not admit those kinds into new event options.
 
 Rescheduling keeps the original option snapshot and resolved phone/address/link,
 even if the host removes or edits that option. Automatic conferences retain existing
 same-conference reschedule behavior and pinned organizer/destination identities.
-Changing the location on reschedule is outside this contract. The booking follow-up
-must copy `location_option` to successors, including a legacy snapshot, and include
-explicit choice and collected phone in the existing idempotency fingerprint; exact
+Changing the location on reschedule is outside this contract. Successors copy `location_option`, including a legacy snapshot. Explicit choice and
+collected phone participate in the existing idempotency fingerprint; exact
 replays must return the original snapshot and resolved result without reevaluation.
 
 Public option discovery is a whitelist of `id`, `kind`, optional public `label` and
 default marker, plus `askInvitee: true` when a phone must be collected. It never
 exposes host numbers, addresses, saved link URLs, connection IDs, organizer account
-details, credentials or generated URLs. Existing public catalog projections remain
-kind-only in this slice. Hosts must treat option labels as public text. Protected
+details, credentials or generated URLs. Public discovery adds this whitelist beside the existing kind-only compatibility field. Hosts must treat option labels as public text. Protected
 booking results reveal resolved location details under today's access rules; raw
 configuration snapshots are not added to public responses.
 
@@ -592,14 +619,19 @@ write permissions stay unchanged. Every automatic option is checked on configura
 writes, including non-default options. Booking-time readiness must be checked again
 under the existing booking locks: individual Meet uses that host's capable destination;
 collective Meet uses an explicitly selected required host as organizer; round-robin
-Meet uses the actually assigned host and its own capable destination. Do not borrow
+Meet filters candidates to Meet-eligible hosts before slot listing and fair assignment
+for the selected option, then uses the assigned host and its own capable destination. Do not borrow
 another host's account. Automatic Zoom remains limited to individual scheduling with
 one explicitly authorized host and that host's pinned meeting-mode connection;
 collective and round-robin Zoom are rejected even as non-default choices. The pure
 resolver consumes a trusted readiness snapshot rather than querying accounts. If the
 chosen automatic option cannot be honored for the actual assigned host/organizer,
 return conflict `location_unavailable`, without provider or private account details;
-do not substitute a location or a different host after assignment. Existing service
+do not substitute a location or a different host after assignment. An event type with
+exactly one option, queried or booked without an explicit choice, keeps the
+single-location contract whatever the option ID (adding a location or changing its kind
+allocates a new one): provider readiness codes such as `automatic_meet_unavailable`
+remain, and the booking snapshot stores that option's settings without normalization. Existing service
 configuration errors and conference readiness rules remain in force. No readiness
 failure is presented as proof that the host has not configured an account.
 
@@ -1466,6 +1498,79 @@ always read the reschedule-chain root's fields. A new root atomically pins its c
 sending mailbox before its first SMTP invitation; later versions reuse that identity.
 See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
 legacy compatibility, recipient policy and reply limitations.
+
+## Host requests for another time
+
+Migration 0064 adds `booking_reschedule_requests`. A host of a confirmed future booking
+may ask its booker to choose another time, optionally including a plain-text note.
+Imported read-only records and group-seat bookings refuse this action. Authorization is
+identical to host rescheduling; being a team administrator alone does not grant it.
+
+Pending reschedule is an overlay (`Booking.pendingReschedule`), not a new booking status:
+the booking remains `confirmed`, its original time remains blocked, and calendar entries,
+conferences and reminders remain in force. Releasing the slot immediately would silently
+remove an agreed meeting before the invitee accepts a replacement. A request therefore
+never promises that any alternative slot is reserved.
+
+`RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48` bounds a request's life to the earlier of 48 elapsed
+hours after creation and the original booking's start. Elapsed time makes the timeout
+unambiguous across DST changes. Expiry leaves the original booking intact and queues a host
+notice; it never cancels or moves the booking. Workers may deliver the notice later. A
+second request replaces the first; superseded jobs cannot send a new obsolete invitation.
+
+The invitee uses the ordinary private management link to select an available time or
+cancel. Picks use the existing transactional reschedule path and all its current rules:
+notice, window, limits, buffers, calendar conflicts and required collective/round-robin
+hosts. Calendar writeback, conferences, reminders and host pick confirmations consequently
+follow the same path as any invitee reschedule. Requests add no exception to reschedule
+limits. A host can still cancel or move the original booking while a request is pending.
+
+Request rows record `pending`, `replaced`, `picked`, `cancelled` or `expired`; terminal
+states retain their identity for replay. Requests serialize with booking mutations. A
+request's UUID idempotency key is scoped to its booking: the same normalized input returns
+the current booking without another email; changed input fails with
+`idempotency_key_reused`. Replaying an old key never replaces a newer request.
+The optional `rescheduleRequestId` on managed pick/cancel identifies the displayed request.
+The web interface submits it. A matching pick replay returns its saved successor without a
+new token; a matching cancellation replay returns the cancelled booking. A replaced,
+expired or differently answered request fails with `reschedule_request_changed`. Keep the
+existing private email link when replay returns `manageToken: null`.
+
+Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
+controls are removed, other controls (including tabs) are rejected, and the result must be
+well-formed Unicode of at most 2000 UTF-16 code units. The sender defensively normalizes
+stored text and HTML-escapes it. Notes appear only in the request email body, never its
+subject, headers or webhook payload. Request mail uses existing invitee mail budgets and
+bounded retry/deduplication rules. The follow-up-note feature switch does not disable this
+separate request capability. Self-hosting includes the complete feature.
+
+Webhook subscriptions add `booking.reschedule_requested` and
+`booking.reschedule_request_expired`. Their payload retains `status: confirmed` and includes
+`requestId`; delivery uniqueness includes this identity so replacing a request can produce
+another event. Existing subscriptions and retained deliveries are preserved by migration.
+Deploy web and worker code together after applying the migration; old writers use the
+previous delivery uniqueness constraint.
+
+## Pending-payment foundation
+
+Migration `0065_payment_holds.sql` adds `pending_payment` and `expired` booking states,
+nullable `payment_hold_expires_at`, `payment_reference`, `payment_confirmed_at`,
+`payment_idempotency_key`, `payment_pii_erased_at`, and a default-false
+`payment_refund_required` marker. Existing bookings retain their state and data. The
+PaymentIntent reference is unique when present; credentials and card data are never stored.
+An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy atomically;
+confirmation after the deadline records refund intent without reviving the booking.
+The transition guard prevents changing retained deadlines/references or resurrecting terminal
+holds. Group seats and imported bookings cannot carry payment holds. See the
+[paid-booking design](payments.md) for the internal-only rollout boundary, future refund
+ledger/retention and operator responsibilities. Stop old app and worker processes before
+migration and restart all roles together.
+
+Paid hold confirmation records an immutable `payment_confirmed_at` timestamp through a database
+trigger. Booking lists, details and activity include hold-backed rows only after this marker
+is present, including paid bookings later cancelled. Unconfirmed terminal holds remain hidden.
+Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
+unique index, so they cannot collide with ordinary booking idempotency keys.
 
 ## Group slots and independent seats
 

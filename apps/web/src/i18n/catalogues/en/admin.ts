@@ -1,5 +1,75 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+  'Loading logo preview…': 'Loading logo preview…',
+  'Logo preview is unavailable.': 'Logo preview is unavailable.',
+  'Saved brand logo': 'Saved brand logo',
+
+  'Booking page branding': 'Booking page branding',
+  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
+    'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.',
+  'Branding access has not been confirmed.': 'Branding access has not been confirmed.',
+  'Only the personal owner or team owners and admins can manage branding.':
+    'Only the personal owner or team owners and admins can manage branding.',
+  'Manage branding': 'Manage branding',
+  'Loading branding…': 'Loading branding…',
+  'Could not load branding.': 'Could not load branding.',
+  'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
+    'Enter a colour in #RRGGBB format, or leave it empty to clear it.',
+  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
+    'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+  'Edit branding': 'Edit branding',
+  'Primary colour': 'Primary colour',
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
+  'Brand logo': 'Brand logo',
+  'A logo is saved for this space.': 'A logo is saved for this space.',
+  'Remove logo': 'Remove logo',
+  'Save branding': 'Save branding',
+  'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
+    'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.',
+  Black: 'Black',
+  White: 'White',
+  'Branding saved. Booking pages and emails are unchanged.':
+    'Branding saved. Booking pages and emails are unchanged.',
+  'Group-seat bookings do not support reschedule requests.':
+    'Group-seat bookings do not support reschedule requests.',
+  'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
+    'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.',
+
+  'Waiting for the invitee to choose a new time.': 'Waiting for the invitee to choose a new time.',
+  'Ask the invitee to choose a new time': 'Ask the invitee to choose a new time',
+  'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.':
+    'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.',
+  'The request is saved. The invitee will receive an email, subject to delivery limits.':
+    'The request is saved. The invitee will receive an email, subject to delivery limits.',
+  'Request reschedule': 'Request reschedule',
+  'A new request replaces any previous request for this booking.':
+    'A new request replaces any previous request for this booking.',
+  'Note to the invitee': 'Note to the invitee',
+  'Plain text, up to 2000 characters. Included only in the email body.':
+    'Plain text, up to 2000 characters. Included only in the email body.',
+  'Use at most 2000 characters for your note.': 'Use at most 2000 characters for your note.',
+  'Could not request a new time. {0}': 'Could not request a new time. {0}',
+  'Retry the same request': 'Retry the same request',
+  'Send request': 'Send request',
+
+  'Export bookings as CSV': 'Export bookings as CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    'Choose a start-time range of at most 366 days. Current booking filters also apply.',
+  'This file contains personal data. Store and share it carefully.':
+    'This file contains personal data. Store and share it carefully.',
+  'CSV times use {zone} and UTC.': 'CSV times use {zone} and UTC.',
+  'Bookings starting at or after (UTC)': 'Bookings starting at or after (UTC)',
+  'Bookings starting before (UTC)': 'Bookings starting before (UTC)',
+  'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
+  'Could not download CSV. Check the booking range and try again shortly.':
+    'Could not download CSV. Check the booking range and try again shortly.',
+  'Download CSV': 'Download CSV',
+
   'Past date overrides ({0})': 'Past date overrides ({0})',
   'Times are in {0}.': 'Times are in {0}.',
   'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
@@ -1109,6 +1179,18 @@ export const admin = {
   Created: 'Created',
   'Created “{0}”.': 'Created “{0}”.',
   'Creating…': 'Creating…',
+  'Weekly limit': 'Weekly limit',
+  'Monthly limit': 'Monthly limit',
+  'Bookings per week, {0}–{1}. Empty: no limit.': 'Bookings per week, {0}–{1}. Empty: no limit.',
+  'Bookings per month, {0}–{1}. Empty: no limit.': 'Bookings per month, {0}–{1}. Empty: no limit.',
+  'Weekly limit must be at least the daily limit.':
+    'Weekly limit must be at least the daily limit.',
+  'Monthly limit must be at least the weekly limit.':
+    'Monthly limit must be at least the weekly limit.',
+  'Monthly limit must be at least the daily limit.':
+    'Monthly limit must be at least the daily limit.',
+  'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.':
+    'Booking limits changed elsewhere. Reload to see the current limits before saving again. Your changes have not been saved.',
   'Daily limit': 'Daily limit',
   Date: 'Date',
   'Date overrides': 'Date overrides',
