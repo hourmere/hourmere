@@ -455,7 +455,8 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
   it('bounds every lock wait: a held member write lock fails the migration with 55P03, records nothing, and the next start applies it; removing the bound fails', async () => {
     const source = await readFile(join(migrationsDir, migration), 'utf8')
     const bound = "SET LOCAL lock_timeout = '5s';\n"
-    expect(source.includes(bound)).toBe(true)
+    // The real source runs first, so a missing or loosened bound fails on behaviour (the
+    // attempt is still waiting at the deadline), not on this control's own guard.
     for (const mutated of [false, true]) {
       const { directory, database } = await predecessor()
       // An in-flight membership write holds ROW EXCLUSIVE on auth.member for as long as its
@@ -463,7 +464,9 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
       const holder = await database.pool.connect()
       let attempt: Promise<string[]> = Promise.resolve([])
       try {
-        await writeFile(join(directory, migration), mutated ? source.replace(bound, '') : source)
+        const sql = mutated ? source.replace(bound, '') : source
+        if (mutated) expect(sql).not.toBe(source)
+        await writeFile(join(directory, migration), sql)
         await holder.query('BEGIN')
         await holder.query('LOCK TABLE auth.member IN ROW EXCLUSIVE MODE')
         const started = Date.now()
