@@ -263,6 +263,8 @@ export interface BookingAttendees {
   is_booker: Generated<boolean>;
   locale: string | null;
   name: string;
+  no_show_marked_at: Timestamp | null;
+  no_show_marked_by: string | null;
   time_zone: string;
 }
 
@@ -808,6 +810,18 @@ export interface OneTimeBookingLinks {
   used_at: Timestamp | null;
 }
 
+export interface OrganizationBranding {
+  brand_logo: string | null;
+  brand_primary_color: string | null;
+  organization_id: string;
+}
+
+export interface OrganizationBrandLogos {
+  data: Buffer;
+  hash: string;
+  organization_id: string;
+}
+
 export interface OrganizationOperations {
   actor_user_id: string | null;
   api_key_id: string | null;
@@ -860,6 +874,21 @@ export interface Schedules {
   updated_at: Generated<Timestamp>;
   user_id: string;
   weekly_hours: Json;
+}
+
+export interface ScimProvisioningTokens {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  id: Generated<string>;
+  last_used_at: Timestamp | null;
+  name: string;
+  organization_id: string;
+  previous_token_hash: string | null;
+  previous_valid_until: Timestamp | null;
+  revoked_at: Timestamp | null;
+  rotated_at: Timestamp | null;
+  rotated_by_user_id: string | null;
+  token_hash: string | null;
 }
 
 export interface SignInEmails {
@@ -1083,12 +1112,15 @@ export interface DB {
   mcp_oauth_intents: McpOauthIntents;
   notification_email_sends: NotificationEmailSends;
   one_time_booking_links: OneTimeBookingLinks;
+  organization_brand_logos: OrganizationBrandLogos;
+  organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
+  scim_provisioning_tokens: ScimProvisioningTokens;
   sign_in_emails: SignInEmails;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;

@@ -13,6 +13,8 @@ import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
+import { useMe } from '../../session.tsx'
+import { BookingExport } from './BookingExport.tsx'
 import { bookingTitle, hostZone } from './booking-format.ts'
 
 type Tab = 'upcoming' | 'past'
@@ -85,6 +87,7 @@ function BookingList({
   fromProfile: boolean
 }) {
   const { t, ui, formatLocale: displayLocale } = useI18n()
+  const me = useMe()
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
@@ -189,6 +192,13 @@ function BookingList({
           </>
         )}
       </p>
+      {me.organization.personal && (
+        <BookingExport
+          filters={{ ...range, order: tab === 'past' ? 'desc' : 'asc' }}
+          timeZone={timeZone}
+          expectedOrganizationId={me.organization.id}
+        />
+      )}
       {shown.bookings.length === 0 ? (
         <EmptyState
           title={tab === 'upcoming' ? t('No upcoming bookings.') : t('No past bookings yet.')}

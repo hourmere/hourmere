@@ -30,12 +30,19 @@ import {
   meetOrganizer,
   requireMeetDestination,
   requireZoomConnection,
+  withLocationAvailability,
 } from './conferences.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertCanExplainEventType } from './event-types.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
+import {
+  type LocationOption,
+  type PublicLocationOption,
+  publicLocationOptions,
+  selectLocationOption,
+} from './location-options.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
@@ -123,6 +130,8 @@ export interface PublicEventTypeRecord {
   minimumNoticeMinutes: number
   bookingWindowDays: number | null
   location: Location | null
+  locations: LocationOption[] | null
+  bookingMode?: 'individual' | 'group'
   questions: Question[]
   allowGuests: boolean
   hostName: string
@@ -182,6 +191,8 @@ async function findPersonalEventType(
       'et.minimum_notice_minutes',
       'et.booking_window_days',
       'et.location',
+      'et.locations',
+      'et.booking_mode',
       'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
@@ -232,6 +243,8 @@ async function findPersonalEventType(
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
+    locations: row.locations as LocationOption[] | null,
+    bookingMode: row.booking_mode === 'group' ? 'group' : 'individual',
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -368,6 +381,8 @@ async function findTeamEventType(
     minimumNoticeMinutes: row.minimum_notice_minutes,
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
+    locations: row.locations as LocationOption[] | null,
+    bookingMode: row.booking_mode === 'group' ? 'group' : 'individual',
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -426,6 +441,7 @@ export async function getOneTimeBookingPage(
         allowedDurationsMinutes: page.allowedDurationsMinutes,
       }),
       location: page.location,
+      locations: page.locations,
       questions: page.questions,
       allowGuests: page.allowGuests,
       host: page.host,
@@ -451,6 +467,7 @@ export interface PublicEventType {
   /** Omitted for a single offered length to retain the original public response. */
   allowedDurationsMinutes?: number[]
   location: { kind: LocationKind } | null
+  locations: PublicLocationOption[] | null
   questions: Question[]
   allowGuests: boolean
   waitlist?: { enabled: true }
@@ -492,6 +509,7 @@ function publicEventType(
       allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b),
     }),
     location: et.location && { kind: et.location.kind },
+    locations: publicLocationOptions(et.locations),
     questions: et.questions,
     allowGuests: et.allowGuests,
     ...(smtpConfigured &&
@@ -655,6 +673,7 @@ export async function listPublicSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
 ): Promise<SlotView[]> {
   return publicSlots(ctx, input, findPublicEventType)
@@ -668,6 +687,7 @@ export async function listPublicTeamSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
 ): Promise<SlotView[]> {
   return publicSlots(ctx, input, findPublicTeamEventType)
@@ -681,6 +701,7 @@ async function publicSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
   resolve: typeof findPublicEventType,
 ): Promise<SlotView[]> {
@@ -697,6 +718,7 @@ export async function listOneTimeBookingSlots(
     start: Temporal.Instant
     end: Temporal.Instant
     durationMinutes?: number
+    locationOptionId?: string
   },
 ): Promise<SlotView[]> {
   const link = await resolveOneTimeBookingLink(ctx, input.token)
@@ -706,34 +728,74 @@ export async function listOneTimeBookingSlots(
   return eventSlots(ctx, input, et)
 }
 
-async function eventSlots(
+/** Shared seats use the slot's configured default, never a per-invitee location or phone. */
+export function selectBookableLocationOption(
+  event: Pick<PublicEventTypeRecord, 'locations' | 'bookingMode'>,
+  optionId?: string,
+): LocationOption | null {
+  const chosen = selectLocationOption(event.locations, optionId)
+  if (
+    event.bookingMode === 'group' &&
+    (chosen?.id !== selectLocationOption(event.locations)?.id ||
+      (chosen?.kind === 'phone' && 'askInvitee' in chosen))
+  )
+    throw new DomainError(
+      'conflict',
+      'location_unavailable',
+      'Group seats share the configured location.',
+    )
+  return chosen
+}
+
+/**
+ * Checks that the option a query would book is usable and returns the round-robin pool that
+ * can host it; Meet narrows that pool to hosts with a Meet-capable destination.
+ */
+async function requireLocationAvailability(
   ctx: PublicContext,
-  input: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
   et: PublicEventTypeRecord,
-): Promise<SlotView[]> {
-  const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
-  const now = ctx.now()
-  if (automaticZoom(et.location)) {
-    if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
-      throw new DomainError('conflict', 'automatic_zoom_host_policy')
-    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
-  }
-  if (automaticMeet(et.location)) {
-    if (et.schedulingType === 'round_robin')
-      et.eligibleHostUserIds = await eligibleMeetHosts(
+  optionId?: string,
+): Promise<string[]> {
+  const chosenOption = selectBookableLocationOption(et, optionId)
+  return withLocationAvailability(et.locations, optionId, async () => {
+    if (automaticZoom(chosenOption)) {
+      if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
+        throw new DomainError('conflict', 'automatic_zoom_host_policy')
+      await requireZoomConnection(
         ctx.db,
-        et.eligibleHostUserIds,
-        et.id,
-        ctx.automaticMeet,
+        et.hostUserId,
+        et.zoomConnectionId,
+        ctx.automaticZoom,
+        true,
       )
-    else
+    }
+    if (automaticMeet(chosenOption)) {
+      if (et.schedulingType === 'round_robin')
+        return eligibleMeetHosts(ctx.db, et.eligibleHostUserIds, et.id, ctx.automaticMeet)
       await requireMeetDestination(
         ctx.db,
         meetOrganizer(et.schedulingType, et.hostUserIds, et.conferenceOrganizerUserId) as string,
         et.id,
         ctx.automaticMeet,
       )
-  }
+    }
+    return et.eligibleHostUserIds
+  })
+}
+
+async function eventSlots(
+  ctx: PublicContext,
+  input: {
+    start: Temporal.Instant
+    end: Temporal.Instant
+    durationMinutes?: number
+    locationOptionId?: string
+  },
+  et: PublicEventTypeRecord,
+): Promise<SlotView[]> {
+  const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
+  const now = ctx.now()
+  const eligibleHostUserIds = await requireLocationAvailability(ctx, et, input.locationOptionId)
   // Without an explicit step, each selected duration supplies its own start grid.
   const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
   if (!hasBookablePart(rules, input.start, input.end, now, et.hostUserIds.length)) return []
@@ -741,7 +803,7 @@ async function eventSlots(
     return unionRoundRobinSlots(
       ctx.db,
       et.id,
-      et.eligibleHostUserIds,
+      eligibleHostUserIds,
       input.start,
       input.end,
       now,
@@ -1396,29 +1458,10 @@ export async function explainEventAvailability(
   )
     throw new DomainError('invalid', 'range_too_long', 'Ask for a shorter explanation range')
   const now = ctx.now()
-  if (automaticZoom(et.location)) {
-    if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
-      throw new DomainError('conflict', 'automatic_zoom_host_policy')
-    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
-  }
-  if (automaticMeet(et.location)) {
-    if (et.schedulingType === 'round_robin')
-      et.eligibleHostUserIds = await eligibleMeetHosts(
-        ctx.db,
-        et.eligibleHostUserIds,
-        et.id,
-        ctx.automaticMeet,
-      )
-    else
-      await requireMeetDestination(
-        ctx.db,
-        meetOrganizer(et.schedulingType, et.hostUserIds, et.conferenceOrganizerUserId) as string,
-        et.id,
-        ctx.automaticMeet,
-      )
-  }
+  // Diagnostics describe the same default option and host pool as an omitted-choice query.
+  const eligibleHostUserIds = await requireLocationAvailability(ctx, et)
   const discloseHosts = et.team !== undefined
-  const hosts = et.schedulingType === 'round_robin' ? et.eligibleHostUserIds : et.hostUserIds
+  const hosts = et.schedulingType === 'round_robin' ? eligibleHostUserIds : et.hostUserIds
   const maximumCandidates = Math.floor(MAX_SLOT_CANDIDATES / Math.max(1, hosts.length))
   const inputs: { hostUserId: string; input: ExplainAvailabilityInput; slots: ExplainedSlot[] }[] =
     []

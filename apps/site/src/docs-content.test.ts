@@ -539,6 +539,14 @@ describe('complete public documentation', () => {
         .match(/^### Booking source compatibility\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
         ?.trimEnd()
       expect(bookingSourcePolicy).toBeDefined()
+      const webhookEventPolicy = source
+        .match(/^### Webhook event compatibility\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
+        ?.trimEnd()
+      const attendancePolicy = source
+        .match(/^### Attendance access and team booking fields\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
+        ?.trimEnd()
+      expect(webhookEventPolicy).toBeDefined()
+      expect(attendancePolicy).toBeDefined()
       const fieldPolicy = source.match(/An optional `field` string[\s\S]*?older servers\./)?.[0]
       const scopePolicy = source
         .match(/^### API key scopes\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
@@ -569,6 +577,10 @@ describe('complete public documentation', () => {
           '[API conventions](https://hourmere.com/docs/api-conventions).',
           '',
           bookingSourcePolicy,
+          '',
+          webhookEventPolicy,
+          '',
+          attendancePolicy,
           '',
           '### Validation error fields',
           '',
@@ -725,5 +737,18 @@ describe('consolidated guide facts', () => {
     'The browser checks every ancestor',
   ])('explains the embedding constraint %s once', (fact) => {
     expect(read(`${siteDocs}/embedding.md`).split(fact)).toHaveLength(2)
+  })
+})
+
+describe('location phone input documentation', () => {
+  it('describes accepted separators and the stored E.164 form', () => {
+    const contract = prose(read(`${siteDocs}/api-conventions.md`))
+    expect(contract).toContain(
+      'The number must start with + and contain 7–15 digits including the country code',
+    )
+    expect(contract).toContain(
+      'spaces, parentheses, dots and hyphens are accepted and removed before storage in E.164 form',
+    )
+    expect(contract).not.toContain('The number must be E.164.')
   })
 })
