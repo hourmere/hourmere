@@ -174,7 +174,7 @@ export class HourmereTrigger implements INodeType {
         } catch {
           // Keep the endpoint, secret and replay receipts together until remote removal succeeds.
           this.logger.warn(
-            'Hourmere webhook deletion failed. Remove the endpoint in Hourmere webhook settings.',
+            'Hourmere webhook deletion failed. List endpoints with GET /api/v1/webhooks, then remove the matching endpoint with DELETE /api/v1/webhooks/{id}, using a Full API key for an organization owner/admin.',
           )
           return false
         }

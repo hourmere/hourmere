@@ -8,7 +8,7 @@
       "description": "触发工作流的事件。",
       "options": {
         "booking.attendee_no_show_changed": {
-          "displayName": "参会者缺席标记已更改"
+          "displayName": "参会者未出席标记已更改"
         },
         "booking.cancelled": {
           "displayName": "预约已取消"

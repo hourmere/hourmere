@@ -8,13 +8,13 @@ Hourmere Trigger supports six events: `booking.created`, `booking.cancelled`,
 `booking.reschedule_request_expired` and `booking.attendee_no_show_changed`.
 The last appears as **Attendee No-Show Changed**, matching the Zapier trigger.
 
-Select the new event explicitly in existing workflows. Its signed payload includes
+Select this event to receive attendance changes. Its signed payload includes
 `data.bookingId`, `data.attendeeId`, `data.noShowMarkedAt` and `data.noShowMarkedBy`
 alongside the usual booking fields. Both marker fields are null when unmarked;
 `data.requestId` is absent. Use the event `id` for downstream deduplication and
 booking/attendee IDs to match attendance records. Payloads contain no attendee
 contact details or management links.
 
-Signature verification, the five-minute timestamp tolerance and ten-minute receipt
-window are unchanged. Receipts remain best-effort across workers and restarts;
+Every delivery uses signature verification, a five-minute timestamp tolerance and a
+ten-minute receipt window. Receipts are best-effort across workers and restarts;
 use a persistent unique constraint for durable downstream idempotency.

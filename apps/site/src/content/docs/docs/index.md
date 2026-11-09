@@ -132,6 +132,7 @@ Explore these detailed guides:
   from a terminal with an API key.
 - [Booking webhooks](/docs/webhooks):
   configure signed delivery and retries.
+- [n8n](/docs/n8n): automate bookings with actions and signed triggers in self-hosted n8n.
 - [Zapier](/docs/zapier): connect booking triggers, actions and searches through a
   private integration.
 - Team scheduling: [collective meetings](/docs/collective-scheduling)

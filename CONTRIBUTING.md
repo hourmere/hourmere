@@ -217,7 +217,7 @@ printing the actual token strings.
 
 The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing required `check`,
 `cli-compatibility`, `docker` and `e2e` check names, alongside the standalone
-`n8n-compatibility` job. Four `e2e-shard` jobs run the
+`n8n-compatibility` and `zapier-compatibility` jobs. Four `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
 web and disposable site fixture and retains the browser-artifact privacy check. The separate

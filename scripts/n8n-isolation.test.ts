@@ -1,12 +1,47 @@
+import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { parse } from 'yaml'
+import rootConfig from '../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
+const contractFile = 'tools/n8n-nodes-hourmere/contract.test.ts'
 const forbidden =
   /(?:^|\/)(?:n8n(?:-[^/]*)?|@n8n|@langchain|langchain|openai|isolated-vm|ssh2|eslint-plugin-n8n-nodes-base)(?:\/|$)/
+
+it('includes the standalone n8n contract in the root node project', () => {
+  expect(rootConfig.test?.projects).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        test: expect.objectContaining({
+          name: 'node',
+          include: expect.arrayContaining([contractFile]),
+        }),
+      }),
+    ]),
+  )
+})
+
+it('collects the n8n contract through the root suite', async () => {
+  // filesOnly checks discovery without loading tests or opening database pools.
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [
+      resolve(root, 'node_modules/vitest/vitest.mjs'),
+      'list',
+      contractFile,
+      '--project',
+      'node',
+      '--filesOnly',
+      '--json',
+    ],
+    { cwd: root, timeout: 15_000 },
+  )
+  expect(JSON.parse(stdout)).toEqual([{ file: resolve(root, contractFile), projectName: 'node' }])
+}, 20_000)
 
 it('keeps the n8n dependency graph outside root installs', () => {
   const manifest = JSON.parse(read('package.json'))

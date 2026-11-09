@@ -39,6 +39,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
+| `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
 | `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
 CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
@@ -426,6 +427,8 @@ the stored theme yet.
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- The [n8n community node](https://hourmere.com/docs/n8n) is not yet published to npm or available on n8n Cloud.
+  Self-hosters can build and install the package from source.
 - [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
   Self-hosters can deploy the source as a private integration using their own Zapier account.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across

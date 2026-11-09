@@ -306,7 +306,7 @@ describe('Hourmere trigger lifecycle', () => {
     expect(await node.webhookMethods.default.delete.call(h.context)).toBe(false)
     expect(h.data.webhookId).toBe(webhookId)
     expect(h.context.logger.warn).toHaveBeenCalledWith(
-      'Hourmere webhook deletion failed. Remove the endpoint in Hourmere webhook settings.',
+      'Hourmere webhook deletion failed. List endpoints with GET /api/v1/webhooks, then remove the matching endpoint with DELETE /api/v1/webhooks/{id}, using a Full API key for an organization owner/admin.',
     )
   })
   it('replaces mismatched registration without leaving the old endpoint', async () => {

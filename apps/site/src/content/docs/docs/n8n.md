@@ -123,9 +123,11 @@ Add **Hourmere Trigger**, select its credential and one or more events, then act
 workflow. The node registers its callback and stores the returned webhook ID and signing
 secret in workflow static data. Deactivation attempts to delete that endpoint. If Hourmere
 is unreachable, it returns false and keeps the registration details for recovery. Remove
-a leftover endpoint in Hourmere’s webhook settings or through `DELETE /api/v1/webhooks/{id}`;
-it still occupies a webhook slot until removed. Reactivation can reuse or replace the
-retained registration once Hourmere is reachable. Each active trigger
+a leftover endpoint through REST: find its ID with `GET /api/v1/webhooks`, then call
+`DELETE /api/v1/webhooks/{id}` using a `full` API key for an organization owner/admin.
+Webhook management is REST-only; there is no settings page or MCP/CLI operation.
+The endpoint still occupies a webhook slot until removed. Reactivation can reuse or replace
+the retained registration once Hourmere is reachable. Each active trigger
 uses one of Hourmere's ten webhook endpoints per organization. Supported events are:
 
 - `booking.created`
@@ -169,12 +171,12 @@ data. Events can arrive out of order. A reschedule carries the new booking ID an
 Its `data` includes `bookingId`, `attendeeId`, `noShowMarkedAt` and `noShowMarkedBy`
 alongside the usual booking fields. Both marker fields are null when the mark is cleared;
 `data.requestId` is absent. Match attendance records by booking ID and attendee ID,
-not by an email address. Existing workflows must explicitly select this event to receive it.
+not by an email address. Select this event to receive attendance changes.
 
 ## Examples
 
-Select **Attendee No-Show Changed** to update attendance in another system. Use the event
-`id` for deduplication and `data.attendeeId` to identify the changed attendee. A null
+**Sync attendance:** select **Attendee No-Show Changed** to update attendance in another
+system. Use the event `id` for deduplication and `data.attendeeId` to identify the changed attendee. A null
 `data.noShowMarkedAt` clears the no-show state; it does not cancel or reschedule the booking.
 
 **Keep another system in sync:** activate a trigger for all six events. Use the event

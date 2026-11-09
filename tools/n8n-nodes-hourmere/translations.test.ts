@@ -30,6 +30,20 @@ function checkProperties(properties: INodeProperties[], translations: Translatio
 }
 
 describe('community node Simplified Chinese parameter translations', () => {
+  it.each(['zh', 'zh-CN'])('uses the product no-show term in %s', (locale) => {
+    const translation = JSON.parse(
+      readFileSync(
+        new URL(
+          `./nodes/HourmereTrigger/translations/${locale}/n8n-nodes-hourmere.hourmereTrigger.json`,
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    )
+    expect(
+      translation.nodeView.events.options['booking.attendee_no_show_changed'].displayName,
+    ).toBe('参会者未出席标记已更改')
+  })
   for (const Node of [Hourmere, HourmereTrigger]) {
     it(`${Node.name} covers every parameter in both supported locale spellings`, () => {
       const node = new Node()
