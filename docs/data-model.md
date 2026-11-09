@@ -771,6 +771,12 @@ Canceling from the confirmation removes the continuation link.
 Group seats retain `manage_token_hash` and `responses` on each independent `bookings`
 row; they do not move private seat data onto shared slots or attendee rosters.
 
+## Routing forms design
+
+[Routing forms — proposed design](routing-forms.md) sketches versioned questions, rules,
+fallback targets, private answer retention and booking provenance. It is design only; no
+routing tables or public feature are installed yet.
+
 ## Planned additions (each a new migration)
 
 | When | Change |
