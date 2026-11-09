@@ -36,6 +36,7 @@ import {
   redactOneTimeLogDetails,
 } from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
+import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
 import { mountScim, type ScimOptions } from './scim.ts'
@@ -594,6 +595,7 @@ export function createApp({
   if (webDist) {
     // serveStatic resolves paths against the working directory.
     const root = relative(process.cwd(), webDist) || '.'
+    app.on('GET', ['/app/sw.js', '/app/manifest.webmanifest'], pwaStatic(root))
     // Vite's hashed bundles never change, so cache them for a year. A missing bundle (an old
     // tab asking for a file from the previous deploy) is a real 404, not the app's HTML.
     app.use('/assets/*', async (c, next) => {

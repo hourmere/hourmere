@@ -11,7 +11,10 @@ name: hourmere
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_PWA_ENABLED: ${VITE_PWA_ENABLED:-}
     # Built here, never pulled; the optional worker overlay runs the same image.
     image: ${APP_IMAGE:-hourmere:local}
     pull_policy: never
