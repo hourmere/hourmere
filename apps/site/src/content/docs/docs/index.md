@@ -10,6 +10,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,
   split workers, back up and upgrade.
+- [Install the app](/docs/install-app): add Hourmere to your home screen and understand
+  its offline notice and privacy boundaries.
 - [Configuration reference](/docs/configuration): environment variables and Compose behavior.
 - [Troubleshooting](/docs/troubleshooting): email delivery, workers, HTTPS, DNS and database
   startup failures.
@@ -47,6 +49,10 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
   Users, Groups, discovery and IdP synchronization are not available yet.
+- Organization OIDC/SAML SSO is in design and is not available yet. The
+  [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
+  self-hosting, linking, enforcement and the planned implementation sequence.
+  Planned SSO is available to every instance without a paid-plan requirement.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
