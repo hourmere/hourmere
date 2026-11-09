@@ -6,6 +6,8 @@ const document = readFileSync(new URL('../docs/routing-forms.md', import.meta.ur
 // Prose checks ignore line wrapping.
 const prose = document.replaceAll(/\s+/g, ' ')
 const limits = {
+  forms_per_organization: 100,
+  versions_per_form: 1000,
   questions_per_form: 20,
   options_per_question: 50,
   rules_per_form: 50,

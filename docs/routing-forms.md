@@ -1,11 +1,12 @@
 # Routing forms — proposed design
 
-Status: design only; no routing form is available yet. This proposal adds no tables,
-routes, UI or plan checks. The eventual feature is free on self-hosted and Cloud alike,
+Status: storage foundation only; no routing form is available yet. Migration 0072 adds
+the five storage tables; no routes, UI, execution path or plan checks exist. The eventual
+feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
 [MCP](mcp.md) and [team administrator booking fields](team-admin-bookings.md) remain
-canonical for existing behavior. All contracts below describe future implementation.
+canonical for existing behavior. Contracts beyond storage below describe future implementation.
 
 ## Official reference check
 
@@ -81,6 +82,8 @@ evaluation work finite.
 
 | Limit | Value | Meaning |
 |---|---:|---|
+| forms_per_organization | 100 | Maximum retained forms, including disabled and archived forms |
+| versions_per_form | 1000 | Maximum retained published versions of one form |
 | questions_per_form | 20 | Maximum questions in a version |
 | options_per_question | 50 | Maximum options for a select question |
 | rules_per_form | 50 | Maximum ordered rules, excluding fallback |
@@ -101,8 +104,12 @@ its largest legal request with every string at its maximum length and every char
 escaped as `\uXXXX`. The largest legal submission is 20 short-text answers of 500 CJK code
 units keyed by question UUIDs: 30,904 bytes as ordinary UTF-8 JSON and 64,764 bytes with
 every character of every string, keys and `versionId` included, escaped as `\uXXXX`. Both
-fit the cap, so clients may send either encoding. Versions and organization form quotas
-are chosen and pinned in step a1a; their numeric values are not fixed here. Public
+fit the cap, so clients may send either encoding. The storage quotas above count retained
+rows, not enabled forms or the current version alone. Archiving does not free a form slot. Unreferenced old-version cleanup frees a
+version slot, but never permits reusing a version number; each form retains its greatest
+published version number. SQL serializes quota admission on the organization/form row,
+so concurrent writers cannot exceed either quota. These limits apply equally to
+self-hosted and Cloud installations. Public
 submissions and continuations use the named rate-limit buckets and admission ceilings in
 [Ownership, permissions and public security](#ownership-permissions-and-public-security);
 step c1 pins their values before any public routing write exists.
@@ -373,7 +380,7 @@ per-answer breakdown or new analytics IDs. If aggregate counts are added later, 
 an explicit retention/privacy contract, transaction-safe deduplication and small-count
 exposure review; they must not be reconstructed from unbooked answer retention.
 
-## Table sketch (proposal, not a migration)
+## Table sketch (storage installed by migration 0072)
 
 Application tables live in `public`, snake_case; UUIDv7 keys and `timestamptz` instants.
 Every organization reference is an FK to `auth.organization`; organization deletion
@@ -381,7 +388,7 @@ cascades. Use composite unique keys/FKs to prevent cross-organization associatio
 
 | Table | Columns and constraints | Indexes |
 |---|---|---|
-| `routing_forms` | `id`, `organization_id`, `slug`, `created_by_user_id` (historical UUID, no user FK), `draft` JSONB, `draft_revision`, nullable `published_version_id`, `enabled`, `archived_at`, timestamps; unique organization/slug and organization/id; positive revision | organization + creation time + id for keyset lists; scoped slug unique |
+| `routing_forms` | `id`, `organization_id`, `slug`, `created_by_user_id` (historical UUID, no user FK), `draft` JSONB, `draft_revision`, nonnegative `last_version_number` high-water mark, nullable `published_version_id`, `enabled`, `archived_at`, timestamps; unique organization/slug and organization/id; positive revision | organization + creation time + id for keyset lists; scoped slug unique |
 | `routing_form_versions` | `id`, `organization_id`, `form_id`, positive `version_number`, immutable `questions`/`rules`/`fallback` JSONB, `published_at`, historical publisher UUID; composite form FK and unique form/version number; unique organization/form/id for pointer FK | form + version number |
 | `routing_target_dependencies` | `organization_id`, `version_id`, rule identity (UUID text or `fallback`), historical `event_type_id`, derived health code/time; composite version FK; no cascading event/user FK; JSON target is authoritative | organization + event_type_id; unique version/rule |
 | `routing_receipts` | `id`, `organization_id`, `form_id`, `version_id`, unique `token_hash`, nullable `answers_ciphertext`, matched/resolved rule identities, resolved target snapshot, `created_at`, `expires_at`, nullable `consumed_booking_id`; composite version/booking FKs; expiry after creation; consumed implies booking and no answer ciphertext | digest unique; partial expiry + id for unconsumed cleanup; partial organization + form + expiry for unconsumed admission counts; consuming booking |
@@ -398,7 +405,10 @@ evidence survives form archive and version cleanup: detach its version FK only a
 consumption and retain historical IDs, or retain the referenced version until booking deletion;
 choose the latter initially. Unconsumed receipts cascade on physical organization deletion.
 Cleanup locks receipt rows in bounded batches, skips locked rows and does not take host locks.
-No migration number is reserved by this document.
+Migration 0072 installs this storage foundation. Version rows reject every update;
+foreign keys reject deletion of the current published version or any receipted version.
+Only unreferenced historical versions can be cleaned up. Booking routing snapshots
+reject updates and follow booking/organization deletion.
 
 ## REST, MCP and CLI contract sketch (proposal)
 
@@ -663,8 +673,9 @@ and owns its focused tests and generated artifacts. The final e5 step runs the f
 matrix rather than deferring missing implementation to acceptance. This design's doc-fact
 test checks only the numeric register, the unescaped and fully escaped maximum submission
 against the cap and the server's default body limit, and mutation controls; it does not
-claim to test routing behavior that does not exist yet. No schema change, migration,
-product strings or UI is part of this design PR.
+claim to test routing behavior that does not exist yet. The design PR introduced no schema
+changes or product surfaces; the storage step now installs migration 0072 without adding
+product strings or UI.
 
 ## Out of scope and known limitations
 
