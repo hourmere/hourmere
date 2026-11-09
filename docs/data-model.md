@@ -31,6 +31,10 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
+The [SCIM design and provisioning-token foundation](scim.md) describes organization-scoped
+credential storage and the planned user lifecycle and Groups-to-teams mapping. Only token
+administration is implemented; SCIM resources remain unavailable.
+
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
 available in this foundation release.

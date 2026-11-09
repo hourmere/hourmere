@@ -122,6 +122,7 @@ export default defineConfig({
           items: [
             { label: 'REST quickstart', link: '/docs/rest' },
             { label: 'API keys', link: '/docs/api-keys' },
+            { label: 'SCIM provisioning tokens', link: '/docs/scim' },
             { label: 'API conventions', link: '/docs/api-conventions' },
             { label: 'MCP quickstart', link: '/docs/mcp' },
             { label: 'CLI', link: '/docs/cli' },

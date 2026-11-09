@@ -876,6 +876,21 @@ export interface Schedules {
   weekly_hours: Json;
 }
 
+export interface ScimProvisioningTokens {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  id: Generated<string>;
+  last_used_at: Timestamp | null;
+  name: string;
+  organization_id: string;
+  previous_token_hash: string | null;
+  previous_valid_until: Timestamp | null;
+  revoked_at: Timestamp | null;
+  rotated_at: Timestamp | null;
+  rotated_by_user_id: string | null;
+  token_hash: string | null;
+}
+
 export interface SignInEmails {
   created_at: Generated<Timestamp>;
   encrypted_payload: Buffer;
@@ -1105,6 +1120,7 @@ export interface DB {
   round_robin_state: RoundRobinState;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
+  scim_provisioning_tokens: ScimProvisioningTokens;
   sign_in_emails: SignInEmails;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
