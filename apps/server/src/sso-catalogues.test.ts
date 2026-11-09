@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import type { Principal } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -261,10 +261,13 @@ describe('SSO hard-off preserves the published catalogues', () => {
   it('keeps the existing web router and path definitions unchanged', async () => {
     // The existing app-routes.test.tsx exercises these routes in jsdom. Freeze the
     // definitions here as well, without importing browser modules into a server test.
+    const webFiles = await readdir(new URL('../../web/src/', import.meta.url))
     for (const [file, digest] of [
-      ['app.tsx', '3b357198f2876e1f5c18ea0f00fc90a0f7b4283cc34991326dfee4fcd02b1566'],
+      ['App.tsx', '3b357198f2876e1f5c18ea0f00fc90a0f7b4283cc34991326dfee4fcd02b1566'],
       ['paths.ts', '6607d87ebd83ad71d86a45471d56d4ba230ae7fa1385f6aa06e719d94b877530'],
     ]) {
+      // Catch casing mistakes even on case-insensitive developer filesystems.
+      expect(webFiles).toContain(file)
       const source = await readFile(new URL(`../../web/src/${file}`, import.meta.url))
       expect(createHash('sha256').update(source).digest('hex')).toBe(digest)
     }
