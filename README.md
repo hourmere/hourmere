@@ -19,6 +19,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
   [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
 - A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
   available as a private integration until published.
+- A source-built [n8n community node](https://hourmere.com/docs/n8n) with booking actions
+  and signed triggers for self-hosted n8n, installed from source until published to npm.
 
 ## Repository layout
 

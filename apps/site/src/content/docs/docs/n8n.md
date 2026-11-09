@@ -176,8 +176,9 @@ not by an email address. Select this event to receive attendance changes.
 ## Examples
 
 **Sync attendance:** select **Attendee No-Show Changed** to update attendance in another
-system. Use the event `id` for deduplication and `data.attendeeId` to identify the changed attendee. A null
-`data.noShowMarkedAt` clears the no-show state; it does not cancel or reschedule the booking.
+system. Use the event `id` for deduplication and `data.attendeeId` to identify the
+changed attendee. A null `data.noShowMarkedAt` clears the no-show state; it does not
+cancel or reschedule the booking.
 
 **Keep another system in sync:** activate a trigger for all six events. Use the event
 `id` as your downstream deduplication key. Match records using `data.bookingId`; for a

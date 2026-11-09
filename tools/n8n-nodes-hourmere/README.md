@@ -106,8 +106,9 @@ through REST: find its ID with `GET /api/v1/webhooks`, then call
 `DELETE /api/v1/webhooks/{id}` using a `full` API key for an organization owner/admin.
 Webhook management is REST-only; there is no settings page or MCP/CLI operation.
 The endpoint consumes one of the organization’s ten webhook slots until removed.
-Hourmere webhooks must be enabled and its worker must reach n8n's configured callback URL. Private destinations need Hourmere's explicit
-operator allowlist; ordinary public receivers use HTTPS.
+Hourmere webhooks must be enabled and its worker must reach n8n's configured callback URL.
+Private destinations need Hourmere's explicit operator allowlist; ordinary public
+receivers use HTTPS.
 
 Every delivery verifies HMAC-SHA256 over raw bytes and a signed timestamp within five
 minutes. Missing/invalid signatures and stale requests are rejected. The signed event ID
