@@ -63,12 +63,36 @@ available in this foundation release.
   host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
   Temporal handles DST when these dates and rules become instants.
 
-## Meeting polls (proposal)
+## Meeting poll storage
 
-[Meeting polls: data model and flow design](meeting-polls.md) proposes scoped polls,
-candidate slots, voters and votes, with atomic finalization through the booking service.
-These tables and interfaces are not implemented; the document defines the later tasks
-and their acceptance checks.
+Migration `0071_meeting_polls.sql` adds organization-scoped polls, candidate slots,
+voters, votes, purpose-bound capabilities, mailbox counters, operation receipts and
+recipient deliveries. Generated database interfaces and selectable row types describe
+storage only; no poll service admission, transport, worker, flag or UI is enabled.
+See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
+capacity bounds and the remaining implementation steps. Numeric admission and cleanup
+constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
+
+The chosen cleanup schedule is hourly, at most 500 rows per transaction. It persists
+closure for abandoned open polls at their deadline, deletes expired public pending
+voters and their dependent personal data, and clears expired capability ciphertext.
+Capacity and voting expiry are synchronous database-clock decisions, never dependent on
+worker punctuality. Normal terminal poll history follows the installation's booking-data
+retention policy from its terminal transition (deadline for automatic closure); with no
+such policy, the current repository retains booking and terminal poll history until
+explicit deletion. This storage step does not install the later cleanup worker.
+
+Mailbox digest counters and terminal delivery receipts remain for the entire retained
+poll lifetime so removing/recreating voters cannot reset mail budgets, reminder receipts
+or opt-outs. Counters' `purge_at` is unset until the parent is due for retention deletion;
+poll deletion cascades them. Delivery ciphertext is cleared immediately at terminal
+sent/suppressed/skipped state; retries have at most 5 attempts and 5-minute leases.
+Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion,
+then retain only non-personal replay digests for 90 days before the hourly purge.
+Organization deletion removes them immediately. Poll deletion preserves the booking;
+linked-booking deletion first deletes poll history and clears receipt references.
+See [the full cleanup contract](meeting-polls.md#storage-policy-and-cleanup-schedule)
+for the later workers and installation retention integration.
 
 ## Tables
 

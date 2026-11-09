@@ -7,7 +7,7 @@ import pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as databaseModule from './index.ts'
 import * as migrationModule from './migrate.ts'
-import { cleanupTestDatabases, createTestDatabase } from './testing.ts'
+import { cleanupTestDatabases, createTestDatabase, reuseConnectionsAfterErrors } from './testing.ts'
 
 function fakePool() {
   return {
@@ -272,6 +272,32 @@ describe('test database ownership', () => {
     expect(pg.Pool).not.toHaveBeenCalled()
   })
 
+  it('copies a test template database and still migrates by default', async () => {
+    const template = 'hourmere_test_coverage_42_0123456789abcdef'
+    const owned = await createTestDatabase('postgres://localhost/hourmere', '/migrations', {
+      template,
+    })
+    expect(admin.query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(
+          `^CREATE DATABASE hourmere_test_${process.pid}_[a-f0-9]{16} TEMPLATE ${template}$`,
+        ),
+      ),
+    )
+    expect(migrationModule.runMigrations).toHaveBeenCalledWith(pool, '/migrations')
+    await owned.drop()
+  })
+
+  it.each(['hourmere', 'template1', 'hourmere_test_x; DROP DATABASE hourmere'])(
+    'rejects the non-test template %s before creating a pool',
+    async (template) => {
+      await expect(
+        createTestDatabase('postgres://localhost/hourmere', undefined, { template }),
+      ).rejects.toThrow('Test database templates must be test databases')
+      expect(pg.Pool).not.toHaveBeenCalled()
+    },
+  )
+
   it('drops a created database when ALTER fails before a pool is returned', async () => {
     admin.query.mockImplementation(async (sql) => {
       events.push(sql)
@@ -417,6 +443,25 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     const result = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name])
     return result.rowCount !== 0
   }
+
+  it('can keep a connection after failed statements instead of reopening one', async () => {
+    const owned = await createTestDatabase(serverUrl as string, undefined, {
+      migrate: false,
+      tag: 'reuse',
+    })
+    try {
+      const pool = reuseConnectionsAfterErrors(owned.pool)
+      const backends = new Set<number>()
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await expect(pool.query('SELECT 1/0')).rejects.toMatchObject({ code: '22012' })
+        backends.add((await pool.query('SELECT pg_backend_pid() AS pid')).rows[0].pid)
+      }
+      expect(backends.size).toBe(1)
+      expect(pool.totalCount).toBe(1)
+    } finally {
+      await owned.drop()
+    }
+  })
 
   it('creates migrated fixtures with synchronous_commit disabled', async () => {
     const owned = await createTestDatabase(serverUrl as string)

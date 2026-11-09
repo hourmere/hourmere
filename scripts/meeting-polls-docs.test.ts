@@ -2,8 +2,13 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PUBLIC_RATE_LIMITS, type RateLimit } from '../apps/server/src/rate-limit.ts'
 import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
+import {
+  MEETING_POLL_LIMITS,
+  MEETING_POLL_RETENTION,
+} from '../packages/scheduling/src/meeting-poll-policy.ts'
 
 const document = readFileSync(new URL('../docs/meeting-polls.md', import.meta.url), 'utf8')
+const dataModel = readFileSync(new URL('../docs/data-model.md', import.meta.url), 'utf8')
 
 const limits = [
   ['Candidates per poll', '2–20'],
@@ -519,6 +524,12 @@ function verifyPlan(source: string) {
   expect(acceptance('A2')).toMatch(
     /Voter-dependent results, removal and privacy cascades belong to A4a and A4b/,
   )
+  expect(acceptance('A2')).toContain(
+    'service-only invariants: immutable event, duration, deadline, admission mode, visibility and settings snapshot/fingerprint; no reopening of closed or canceled polls; public-link polls retain a public token except during deletion',
+  )
+  expect(acceptance('A2')).toContain(
+    'A1 validates candidate duration and start-after-deadline only on slot writes, not parent updates',
+  )
   expect(acceptance('A3a')).toContain('Enroll/invite/verify/recover/resend')
   expect(acceptance('A3b')).toContain(
     'Submit/replace full ballots, withdraw/reactivate and opt-out',
@@ -561,6 +572,16 @@ describe('meeting poll day-sized implementation plan', () => {
   })
 
   it.each([
+    [
+      'service-owned invariants',
+      'service-only invariants: immutable event',
+      'database invariants: immutable event',
+    ],
+    [
+      'slot-only enforcement',
+      'only on slot writes, not parent updates',
+      'on slot writes and parent updates',
+    ],
     ['enrollment split', '| A3a Storage', '| A3 Storage'],
     ['ballot split', '| A3b Storage', '| A3 Storage'],
     ['host creation split', '| D4a Agent', '| D4 Agent'],
@@ -629,5 +650,350 @@ describe('meeting poll day-sized implementation plan', () => {
     expect(mutated).not.toBe(document)
     expect(() => verifyPlan(mutated)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
     verifyPlan(document)
+  })
+})
+
+const contractRevisions = [
+  ['POST `/meeting-polls`', []],
+  ['GET `/meeting-polls`, GET `/meeting-polls/{id}`', []],
+  ['GET `/meeting-polls/{id}/results`', []],
+  ['POST `/meeting-polls/{id}/invitations`', []],
+  ['POST `/meeting-polls/{id}/invitations/{voterId}/resend`', ['expectedHostRevision']],
+  ['DELETE `/meeting-polls/{id}/voters/{voterId}`', ['expectedHostRevision']],
+  ['POST `/meeting-polls/{id}/remove-unverified`', ['expectedHostRevision']],
+  ['DELETE `/meeting-polls/{id}`', ['expectedHostRevision']],
+  ['POST `/meeting-polls/{id}/close`, `/cancel`', ['expectedHostRevision']],
+  ['POST `/meeting-polls/{id}/finalize`', ['expectedResultsRevision']],
+  ['POST `/meeting-polls/{id}/rotate-link`', ['expectedHostRevision']],
+  ['POST `/public/meeting-polls/read`', []],
+  ['POST `/public/meeting-polls/enroll`, `/recover`', []],
+  ['POST `/public/meeting-polls/verify`', []],
+  ['POST `/public/meeting-polls/vote`', ['expectedBallotRevision']],
+  ['POST `/public/meeting-polls/reminder-opt-out`', []],
+  ['POST `/public/meeting-polls/withdraw`', ['expectedBallotRevision']],
+] as const
+
+function verifyRevisionContract(source: string) {
+  const text = source.replace(/\s+/g, ' ')
+  expect(text).toContain(
+    '`host_revision` changes only on accepted host writes (invitation, resend, removal, bulk removal, link rotation) and host lifecycle transitions (close, cancel, finalize); voter actions, recovery, reminder opt-out, public pending expiry and the derived deadline transition never change it.',
+  )
+  expect(text).toContain(
+    '`results_revision` changes whenever the results/attendee snapshot changes: admission, verification, ballot and profile edits, withdrawal, reactivation, invitation, removal and bulk removal. Only finalize checks it, through `expectedResultsRevision`',
+  )
+  expect(text).toContain(
+    'Bulk removal retains mailbox tombstones/counters and uses the same poll lock and `expectedHostRevision`, so voter activity cannot make any of these remedies fail.',
+  )
+  expect(text).toContain(
+    'These operations use current authority, `expectedHostRevision` and the common poll lock',
+  )
+  expect(source).not.toMatch(/\bexpectedRevision\b/)
+  for (const [resource, revisions] of contractRevisions) {
+    expect(
+      tableRow(source, resource)[3]?.match(/\bexpected\w*Revision\b/g) ?? [],
+      resource,
+    ).toEqual(revisions)
+  }
+}
+
+describe('meeting poll exact revision contract', () => {
+  it('pins both bump lists, bulk removal and every contract row revision field', () => {
+    verifyRevisionContract(document)
+  })
+
+  it.each([
+    [
+      'host bump list',
+      'removal, link rotation) and host lifecycle',
+      'removal, link rotation, ballot edits) and host lifecycle',
+    ],
+    [
+      'host lifecycle bump list',
+      '(close, cancel, finalize); voter',
+      '(close, cancel, finalize, verification); voter',
+    ],
+    [
+      'results bump list',
+      'bulk removal. Only finalize checks it',
+      'bulk removal, recovery. Only finalize checks it',
+    ],
+    [
+      'bulk-removal prose',
+      '`expectedHostRevision`, so voter activity',
+      '`expectedResultsRevision`, so voter activity',
+    ],
+    [
+      'lifecycle authority sentence',
+      'These operations use current authority, `expectedHostRevision`',
+      'These operations use current authority, `expectedResultsRevision`',
+    ],
+    ['legacy revision field', 'Require `expectedBallotRevision`', 'Require `expectedRevision`'],
+  ])('rejects a source-copy regression of %s', (_name, before, after) => {
+    verifyRevisionContract(document)
+    const mutated = document.replace(before, after)
+    expect(mutated).not.toBe(document)
+    expect(() => verifyRevisionContract(mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyRevisionContract(document)
+  })
+
+  it.each(contractRevisions)(
+    'rejects a source-copy revision change in %s',
+    (resource, revisions) => {
+      verifyRevisionContract(document)
+      const original = document.split('\n').find((line) => line.startsWith(`| ${resource} |`))
+      expect(original).toBeDefined()
+      const replacement = revisions.length
+        ? original?.replace(
+            revisions[0],
+            revisions[0] === 'expectedHostRevision'
+              ? 'expectedResultsRevision'
+              : 'expectedHostRevision',
+          )
+        : original?.replace(/ \|$/, '; expectedHostRevision |')
+      const mutated = document.replace(original ?? '', replacement ?? '')
+      expect(mutated).not.toBe(document)
+      expect(() => verifyRevisionContract(mutated)).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+      verifyRevisionContract(document)
+    },
+  )
+})
+
+const invitationOutcomes = [
+  [
+    'Active host invitee, verified or not',
+    'Unchanged: no new place, credential or mail; lost mail uses resend',
+  ],
+  ['Verified public-link voter', 'Unchanged: keeps its place, credential and ballot; no mail'],
+  [
+    'Unexpired public pending enrollee',
+    'Upgraded to an invitation: pending expiry and IP digest cleared, verification credential revoked, invitation mail with a voting credential; still one place',
+  ],
+  [
+    'Withdrawn voter',
+    "Unchanged: withdrawal opted out of poll mail; only the voter's own capability can reactivate. A host who removes and then re-invites the address overrides this deliberately and sends one invitation; a reminder opt-out still applies",
+  ],
+  [
+    'Expired public pending enrollee',
+    'Invited as new: the expired row is replaced and a new place is reserved',
+  ],
+  [
+    'Removed mailbox',
+    "Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist",
+  ],
+] as const
+
+function verifyInvitationOutcomes(source: string) {
+  for (const [state, outcome] of invitationOutcomes) {
+    expect(tableRow(source, `${state} |`)[1], state).toBe(outcome)
+  }
+}
+
+describe('meeting poll invitation outcome contract', () => {
+  it('pins the complete outcome of each of the six mailbox states', () => {
+    verifyInvitationOutcomes(document)
+  })
+
+  it.each(invitationOutcomes)('rejects a source-copy outcome change for %s', (state, outcome) => {
+    verifyInvitationOutcomes(document)
+    const mutated = document.replace(`| ${state} | ${outcome} |`, `| ${state} | Re-invited |`)
+    expect(mutated).not.toBe(document)
+    expect(() => verifyInvitationOutcomes(mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyInvitationOutcomes(document)
+  })
+})
+
+const migration = readFileSync(
+  new URL('../packages/db/migrations/0071_meeting_polls.sql', import.meta.url),
+  'utf8',
+)
+
+/** Exactly one whole-token occurrence: `AND 3)` must not match a widened `AND 30)`. */
+function expectExactFragment(sql: string, fragment: string) {
+  const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  expect(
+    sql.match(new RegExp(`(?<![\\w'])${escaped}(?![\\w'])`, 'g')) ?? [],
+    fragment,
+  ).toHaveLength(1)
+}
+
+function verifyStoragePolicy(sql: string, docs: string) {
+  const limits = MEETING_POLL_LIMITS
+  const retention = MEETING_POLL_RETENTION
+  const rows = [
+    ['Candidates per poll', `${limits.minCandidates}–${limits.maxCandidates}`],
+    ['Enrollments per poll', `0–${limits.maxEnrollments}`],
+    ['Attendees per booking', `${limits.minAttendees}–${limits.maxAttendees}`],
+    ['Pending enrollment expiry', `${limits.pendingExpirySeconds / 3600} hour`],
+    ['Public pending reservations per IP/poll', `${limits.maxPendingPerIp}`],
+    [
+      'Deadline after creation',
+      `${limits.minDeadlineSeconds / 3600} hour–${limits.maxDeadlineSeconds / 86400} days`,
+    ],
+    ['Reminder lead time', `${limits.reminderLeadSeconds / 3600} hours`],
+    ['Invitation resend cooldown', `${limits.resendCooldownSeconds / 60} minutes`],
+    ['Invitation resend cap', `${limits.maxResendsPerMailbox} per poll/mailbox`],
+    ['Recovery delivery cooldown', `${limits.recoveryCooldownSeconds / 60} minutes`],
+    ['Recovery delivery cap', `${limits.maxRecoveriesPerCredential} per mailbox credential`],
+  ] as const
+  for (const [label, value] of rows) verifyLimit(docs, label, value)
+  for (const fragment of [
+    `position BETWEEN 0 AND ${limits.maxCandidates - 1}`,
+    `total NOT BETWEEN ${limits.minCandidates} AND ${limits.maxCandidates}`,
+    `IF total>=${limits.maxEnrollments} THEN`,
+    `IF total>=${limits.maxPendingPerIp} THEN`,
+    `deadline_at BETWEEN created_at+interval '${limits.minDeadlineSeconds / 3600} hour' AND created_at+interval '${limits.maxDeadlineSeconds / 3600} hours'`,
+    `pending_expires_at<=created_at+interval '${limits.pendingExpirySeconds / 3600} hour'`,
+    `resend_count BETWEEN 0 AND ${limits.maxResendsPerMailbox}`,
+    `recovery_count BETWEEN 0 AND ${limits.maxRecoveriesPerCredential}`,
+    `attempts BETWEEN 0 AND ${retention.deliveryMaxAttempts}`,
+    `purge_at=clock_timestamp()+interval '${retention.deletedReceiptDays} days'`,
+  ])
+    expectExactFragment(sql, fragment)
+  const text = docs.replace(/\s+/g, ' ')
+  expect(retention.sweepSeconds).toBe(3600)
+  expect(text).toContain(`run hourly, in batches of at most ${retention.batchSize} rows`)
+  expect(text).toContain(`replay digests for ${retention.deletedReceiptDays} days from deletion`)
+  expect(text).toContain(
+    `at most ${retention.deliveryMaxAttempts} attempts with a ${retention.deliveryLeaseSeconds / 60}-minute lease`,
+  )
+  expect(limits.admissionRequestsPerWindow).toBe(PUBLIC_RATE_LIMITS.book.limit)
+  expect(limits.readRequestsPerWindow).toBe(PUBLIC_RATE_LIMITS.page.limit)
+  expect(limits.ballotRequestsPerWindow).toBe(PUBLIC_RATE_LIMITS.manage.limit)
+  for (const bucket of ['book', 'page', 'manage'] as const) {
+    expect(limits.requestWindowSeconds).toBe(PUBLIC_RATE_LIMITS[bucket].windowSeconds)
+  }
+  verifyRateLimits(docs, PUBLIC_RATE_LIMITS)
+}
+
+describe('meeting poll shared SQL, TypeScript and documentation policy', () => {
+  it('binds storage limits, cleanup bounds and public request buckets to the shared constants', () => {
+    verifyStoragePolicy(migration, document)
+  })
+
+  it.each([
+    ['candidate position', 'position BETWEEN 0 AND 19', 'position BETWEEN 0 AND 24'],
+    ['candidate count', 'total NOT BETWEEN 2 AND 20', 'total NOT BETWEEN 2 AND 25'],
+    ['enrollments', 'IF total>=40 THEN', 'IF total>=41 THEN'],
+    ['pending IP cap', 'IF total>=3 THEN', 'IF total>=4 THEN'],
+    ['deadline minimum', "created_at+interval '1 hour' AND", "created_at+interval '1 minute' AND"],
+    ['deadline maximum', "interval '720 hours'", "interval '744 hours'"],
+    [
+      'pending expiry',
+      "pending_expires_at<=created_at+interval '1 hour'",
+      "pending_expires_at<=created_at+interval '2 hours'",
+    ],
+    ['resends', 'resend_count BETWEEN 0 AND 3', 'resend_count BETWEEN 0 AND 4'],
+    ['recovery', 'recovery_count BETWEEN 0 AND 3', 'recovery_count BETWEEN 0 AND 4'],
+    ['attempts', 'attempts BETWEEN 0 AND 5', 'attempts BETWEEN 0 AND 6'],
+    ['receipt retention', "interval '90 days'", "interval '91 days'"],
+    [
+      'appended candidate position digit',
+      'position BETWEEN 0 AND 19)',
+      'position BETWEEN 0 AND 199)',
+    ],
+    [
+      'appended candidate count digit',
+      'total NOT BETWEEN 2 AND 20 THEN',
+      'total NOT BETWEEN 2 AND 200 THEN',
+    ],
+    ['appended enrollment digit', 'IF total>=40 THEN', 'IF total>=400 THEN'],
+    ['appended pending IP digit', 'IF total>=3 THEN', 'IF total>=30 THEN'],
+    ['appended resend digit', 'resend_count BETWEEN 0 AND 3)', 'resend_count BETWEEN 0 AND 30)'],
+    [
+      'appended recovery digit',
+      'recovery_count BETWEEN 0 AND 3)',
+      'recovery_count BETWEEN 0 AND 30)',
+    ],
+    ['appended attempts digit', 'attempts BETWEEN 0 AND 5)', 'attempts BETWEEN 0 AND 50)'],
+    [
+      'duplicated pending IP cap',
+      'IF total>=3 THEN',
+      'IF total>=3 THEN NULL; END IF; IF total>=3 THEN',
+    ],
+  ])('rejects a SQL source-copy change to %s', (_name, before, after) => {
+    const mutated = migration.replace(before, after)
+    expect(mutated).not.toBe(migration)
+    expect(() => verifyStoragePolicy(mutated, document)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it.each([
+    ['sweep cadence', 'run hourly, in batches', 'run daily, in batches'],
+    ['batch size', 'at most 500 rows', 'at most 501 rows'],
+    ['receipt retention', 'digests for 90 days from deletion', 'digests for 91 days from deletion'],
+    ['attempt cap', 'at most 5 attempts', 'at most 6 attempts'],
+    ['lease duration', 'with a 5-minute lease', 'with a 6-minute lease'],
+  ])('rejects a cleanup documentation source-copy change to %s', (_name, before, after) => {
+    const mutated = document.replace(before, after)
+    expect(mutated).not.toBe(document)
+    expect(() => verifyStoragePolicy(migration, mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+})
+
+const receiptColumns =
+  'nullable `booking_id` (set by finalize; a receipt stores no result beyond its `poll_id` and `booking_id` references). Replays return only those stored references: a create replay returns `poll_id` as `poll_already_created`, a finalize replay returns the booking reference, and invite, resend and rotate-link replays return their safe outcome or conflict without a stored result'
+const receiptCleanup =
+  'On poll deletion erase poll/booking references (`poll_id` and `booking_id`);'
+
+function verifyReceiptWording(design: string, model: string) {
+  expect(tableRow(design, '`meeting_poll_operations`')[1]).toContain(receiptColumns)
+  expect(tableRow(design, 'Operation receipts')[1]).toContain(receiptCleanup)
+  expect(model.replace(/\s+/g, ' ')).toContain(
+    'Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion',
+  )
+  // 0071 stores no result metadata column; a create replay returns poll_id, finalize booking_id.
+  for (const source of [design, model]) expect(source).not.toMatch(/result metadata/i)
+}
+
+describe('meeting poll operation receipt columns', () => {
+  it('names the stored result reference and the references erased on deletion', () => {
+    verifyReceiptWording(document, dataModel)
+  })
+
+  it.each([
+    ['design columns', receiptColumns, 'nullable `booking_id`, minimal result metadata', 'design'],
+    [
+      'design replay wording',
+      receiptColumns,
+      'nullable `booking_id` (the only stored replay result reference)',
+      'design',
+    ],
+    [
+      'design stored-result wording',
+      receiptColumns,
+      receiptColumns.replace(
+        'stores no result beyond its `poll_id` and `booking_id` references',
+        'stores no other result',
+      ),
+      'design',
+    ],
+    [
+      'design cleanup',
+      receiptCleanup,
+      'On poll deletion erase poll/booking references and result metadata;',
+      'design',
+    ],
+    [
+      'data model cleanup',
+      'lose poll/booking references (`poll_id` and `booking_id`)',
+      'lose poll/booking references and result metadata',
+      'model',
+    ],
+  ])('rejects a source-copy revert of the %s', (_name, before, after, file) => {
+    const design = file === 'design' ? document.replace(before, after) : document
+    const model = file === 'model' ? dataModel.replace(before, after) : dataModel
+    expect([design, model]).not.toEqual([document, dataModel])
+    expect(() => verifyReceiptWording(design, model)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 })
