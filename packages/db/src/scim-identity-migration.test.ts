@@ -51,12 +51,14 @@ async function predecessor() {
     await runMigrations(database.pool, directory)
     await seedLater(database.pool)
     await database.pool.query(`
+      INSERT INTO auth.organization (name,slug,"createdAt")
+        VALUES ('Second upgrade team','upgrade-scim-team',now());
       INSERT INTO scim_provisioning_tokens
         (organization_id,name,token_hash,previous_token_hash,previous_valid_until,
          created_by_user_id,rotated_by_user_id,rotated_at,last_used_at,revoked_at,created_at)
       SELECT o.id, 'Synthetic ' || states.n,
-        CASE WHEN states.n <> 3 THEN repeat(states.n::text,43) END,
-        CASE WHEN states.n = 2 THEN repeat('p',43) END,
+        CASE WHEN states.n <> 3 THEN substr(encode(sha256(convert_to(o.id::text || states.n::text,'UTF8')),'hex'),1,43) END,
+        CASE WHEN states.n = 2 THEN substr(encode(sha256(convert_to(o.id::text || 'previous','UTF8')),'hex'),1,43) END,
         CASE WHEN states.n = 2 THEN '2030-01-02T03:04:05.123456Z'::timestamptz END,
         u.id, CASE WHEN states.n = 2 THEN u.id END,
         CASE WHEN states.n = 2 THEN '2026-01-02T03:04:05.123456Z'::timestamptz END,
@@ -65,7 +67,7 @@ async function predecessor() {
         '2026-01-01T01:02:03.123456Z'
       FROM auth.organization o CROSS JOIN generate_series(1,3) states(n)
       CROSS JOIN LATERAL (SELECT id FROM auth."user" ORDER BY id LIMIT 1) u
-      WHERE o.slug='upgrade-team';
+      WHERE o.slug IN ('upgrade-team','upgrade-scim-team');
     `)
     return { directory, database }
   } catch (error) {
@@ -83,7 +85,7 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
     let fresh: TestDatabase | undefined
     try {
       const before = await records(database.pool)
-      expect((before.data['public.scim_provisioning_tokens'] as unknown[]).length).toBe(3)
+      expect((before.data['public.scim_provisioning_tokens'] as unknown[]).length).toBe(6)
       expect((before.data['public.bookings'] as unknown[]).length).toBeGreaterThan(0)
       expect((before.data['auth.member'] as unknown[]).length).toBeGreaterThan(0)
       await copyFile(join(migrationsDir, migration), join(directory, migration))
@@ -95,14 +97,28 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
             `SELECT count(*)::integer AS count,count(DISTINCT connection_id)::integer AS connections FROM scim_token_connections`,
           )
         ).rows,
-      ).toEqual([{ count: 3, connections: 1 }])
+      ).toEqual([{ count: 6, connections: 2 }])
       expect(
         (
           await database.pool.query(
             `SELECT count(*)::integer AS count FROM scim_token_connections b JOIN scim_provisioning_tokens t ON t.id=b.token_id JOIN scim_connections c ON c.id=b.connection_id WHERE b.organization_id=t.organization_id AND c.organization_id=t.organization_id`,
           )
         ).rows,
-      ).toEqual([{ count: 3 }])
+      ).toEqual([{ count: 6 }])
+      expect(
+        (
+          await database.pool.query(
+            `SELECT o.slug,count(DISTINCT c.id)::integer AS connections,
+              count(b.token_id)::integer AS bindings
+             FROM auth.organization o JOIN scim_connections c ON c.organization_id=o.id
+             JOIN scim_token_connections b ON b.connection_id=c.id
+             GROUP BY o.slug ORDER BY o.slug`,
+          )
+        ).rows,
+      ).toEqual([
+        { slug: 'upgrade-scim-team', connections: 1, bindings: 3 },
+        { slug: 'upgrade-team', connections: 1, bindings: 3 },
+      ])
       const upgraded = await records(database.pool)
       expect(await runMigrations(database.pool, directory)).toEqual([])
       expect(await records(database.pool)).toEqual(upgraded)
@@ -112,6 +128,60 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
       await fresh?.drop()
       await database.drop()
       await rm(directory, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('blocks concurrent token creation before the connection snapshot, including a removed-lock control', async () => {
+    const source = await readFile(join(migrationsDir, migration), 'utf8')
+    for (const mutated of [true, false]) {
+      const { directory, database } = await predecessor()
+      const migrator = await database.pool.connect()
+      const writer = await database.pool.connect()
+      try {
+        const organization = (
+          await writer.query(`INSERT INTO auth.organization (name,slug,"createdAt")
+            VALUES ('Concurrent team','concurrent-team',now()) RETURNING id`)
+        ).rows[0].id
+        const sql = mutated
+          ? source.replace('LOCK TABLE scim_provisioning_tokens IN SHARE ROW EXCLUSIVE MODE;', '')
+          : source
+        const boundary = sql.indexOf('INSERT INTO scim_connections (organization_id)')
+        expect(boundary).toBeGreaterThan(0)
+        await migrator.query('BEGIN')
+        await migrator.query(sql.slice(0, boundary))
+        await writer.query("BEGIN; SET LOCAL lock_timeout = '150ms'")
+        const insert = () =>
+          writer.query(
+            `INSERT INTO scim_provisioning_tokens (organization_id,name,token_hash)
+            VALUES ($1,'Concurrent token',repeat('z',43))`,
+            [organization],
+          )
+        const verify = async () => {
+          await expect(insert()).rejects.toMatchObject({ code: '55P03' })
+        }
+        if (mutated) await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
+        else await verify()
+        await writer.query('ROLLBACK')
+        await migrator.query(sql.slice(boundary))
+        await migrator.query('COMMIT')
+        await insert()
+        expect(
+          (
+            await writer.query(
+              `SELECT count(*)::integer AS count FROM scim_token_connections
+            WHERE organization_id=$1`,
+              [organization],
+            )
+          ).rows,
+        ).toEqual([{ count: 1 }])
+      } finally {
+        await writer.query('ROLLBACK')
+        await migrator.query('ROLLBACK')
+        writer.release()
+        migrator.release()
+        await database.drop()
+        await rm(directory, { recursive: true, force: true })
+      }
     }
   }, 30_000)
 
@@ -145,7 +215,7 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
                     'SELECT count(*)::integer AS count FROM scim_token_connections',
                   )
                 ).rows,
-              ).toEqual([{ count: 3 }])
+              ).toEqual([{ count: 6 }])
           }
           if (mutated) await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
           else await verify()

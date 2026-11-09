@@ -188,6 +188,18 @@ async function rejected(client: pg.PoolClient, protection: Protection) {
   expect(code, protection.name).toBe(protection.code)
 }
 
+async function succeeds(client: pg.PoolClient, sql: string) {
+  await client.query('SAVEPOINT positive_assertion')
+  let code: string | undefined
+  try {
+    await client.query(sql)
+  } catch (error) {
+    code = (error as { code: string }).code
+    await client.query('ROLLBACK TO SAVEPOINT positive_assertion')
+  }
+  expect(code).toBeUndefined()
+}
+
 describe.skipIf(!serverUrl)('SCIM identity storage', () => {
   let database: TestDatabase
   let source: string
@@ -388,29 +400,246 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
   })
 
   it.each(['id', 'organization_id', 'connection_id', 'retired_at'] as const)(
-    '%s is immutable and identity-trigger removal fails its assertion',
+    '%s is independently immutable and removing only its comparison fails the assertion',
     async (column) => {
       const protection = check(
         column,
-        `UPDATE scim_users SET ${column}=${column === 'retired_at' ? "now()+interval '1 second'" : `'${id(99)}'`} WHERE id='${user}'`,
+        `UPDATE scim_users SET ${column}=${column === 'retired_at' ? "now()+interval '1 second'" : `'${column === 'organization_id' ? otherOrg : column === 'connection_id' ? otherConnection : id(99)}'`},user_name='moved',external_id=NULL,linked_member_id=NULL,linked_user_id=NULL WHERE id='${user}'`,
         column === 'retired_at'
           ? `UPDATE scim_users SET active=false,retired_at=now() WHERE id='${user}'`
           : undefined,
       )
-      // Other foreign keys must remain valid so this test isolates the identity trigger.
-      if (column === 'organization_id' || column === 'connection_id')
-        protection.sql = `UPDATE scim_users SET organization_id='${otherOrg}',connection_id='${otherConnection}',user_name='moved',external_id=NULL,linked_member_id=NULL,linked_user_id=NULL WHERE id='${user}'`
-      await transaction(source, (client) => rejected(client, protection))
-      await transaction(
-        source.replace(/CREATE TRIGGER scim_users_preserve_identity\b[^;]+;/, ''),
-        async (client) => {
-          await expect(rejected(client, protection)).rejects.toMatchObject({
-            name: 'AssertionError',
-          })
-        },
-      )
+      // The scoped FK makes either move impossible in production. Remove it only in
+      // this private fixture to isolate each defensive trigger branch independently.
+      const fixture = `${column === 'retired_at' ? source.replace(/IF OLD.retired_at IS NOT NULL AND \([\s\S]*?END IF;/, '') : source}\nALTER TABLE scim_users DROP CONSTRAINT scim_users_connection_scope;`
+      const mutant =
+        column === 'retired_at'
+          ? fixture.replace(
+              'OLD.retired_at IS NOT NULL AND NEW.retired_at IS DISTINCT FROM OLD.retired_at',
+              'false',
+            )
+          : fixture.replace(
+              /\((NEW|OLD)\.id(?:, \1\.(?:organization_id|connection_id))*\)/g,
+              (tuple) => tuple.replace(new RegExp(`(NEW|OLD)\\.${column}\\b`), 'NULL'),
+            )
+      await transaction(fixture, (client) => rejected(client, protection))
+      expect(mutant).not.toBe(fixture)
+      await transaction(mutant, async (client) => {
+        await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
     },
   )
+
+  it.each([
+    {
+      name: 'invalidated claims permit a fresh pending claim',
+      setup: claimInsert(',invalidated_at', ',now()'),
+      sql: claimInsert(),
+      from: 'completed_at IS NULL AND invalidated_at IS NULL',
+      to: 'completed_at IS NULL',
+    },
+    {
+      name: 'cleared removal permits a fresh removal',
+      setup: blockInsert(',cleared_at', ',now()', 'local', 'removal'),
+      sql: blockInsert('', '', 'local', 'removal'),
+      from: 'WHERE cleared_at IS NULL;',
+      to: ';',
+    },
+    {
+      name: 'cleared removal is excluded even when suspension predicate remains',
+      setup: blockInsert(',cleared_at', ',now()', 'local', 'removal'),
+      sql: blockInsert('', '', 'local', 'removal'),
+      from: 'WHERE cleared_at IS NULL;',
+      to: "WHERE cleared_at IS NULL OR kind = 'removal';",
+    },
+    {
+      name: 'one authority may independently suspend and remove an account',
+      setup: blockInsert(),
+      sql: blockInsert('', '', 'local', 'removal'),
+      from: '(organization_id, user_id, source, kind)',
+      to: '(organization_id, user_id, source)',
+    },
+  ])('$name and source-copy predicate mutation fails the success assertion', async (entry) => {
+    const verify = async (client: pg.PoolClient) => {
+      await client.query(entry.setup)
+      await succeeds(client, entry.sql)
+    }
+    await transaction(source, verify)
+    const mutant = source.replace(entry.from, entry.to)
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it('connection deletion cannot silently discard bound credentials', async () => {
+    const protection = fk(
+      'connection deletion restriction',
+      `DELETE FROM scim_connections WHERE id='${connection}'`,
+      `DELETE FROM scim_token_connections WHERE token_id='${otherToken}'; DELETE FROM scim_provisioning_tokens WHERE id='${otherToken}';
+       DELETE FROM auth.organization WHERE id='${otherOrg}';
+       UPDATE scim_users SET linked_member_id=NULL,linked_user_id=NULL WHERE id='${user}';
+       ALTER TABLE scim_users DISABLE TRIGGER scim_users_preserve_identity;
+       DELETE FROM scim_users WHERE id='${user}'`,
+    )
+    await transaction(source, (client) => rejected(client, protection))
+    const mutant = source.replace(
+      'REFERENCES scim_connections (organization_id, id)\n);',
+      'REFERENCES scim_connections (organization_id, id) ON DELETE CASCADE\n);',
+    )
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it.each([
+    ['user_name', 256, userInsert('', '', `${' '.repeat(100000)}pad`)],
+    [
+      'work_email',
+      320,
+      `INSERT INTO scim_user_claims(organization_id,connection_id,scim_user_id,work_email,expires_at) VALUES ('${org}','${connection}','${user}',repeat(' ',100000)||'pad',now()+interval '1 hour')`,
+    ],
+  ] as const)('%s raw length remains bounded before trimming', async (column, limit, sql) => {
+    const protection = check(`${column} raw length`, sql)
+    await transaction(source, (client) => rejected(client, protection))
+    const mutant = source.replace(`char_length(${column}) <= ${limit}`, 'true')
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it.each([
+    ['display_name', "'changed'"],
+    ['user_name', "'changed'"],
+    ['external_id', "'changed'"],
+    ['manager_id', `'${id(80)}'`],
+    ['created_at', "now()+interval '1 second'"],
+    ['updated_at', "now()+interval '1 second'"],
+    ['linked_user_id', `'${otherAccount}',linked_member_id=NULL`],
+    ['linked_member_id', `'${id(81)}'`],
+  ])(
+    'retired %s cannot be rewritten while native link clearing remains allowed',
+    async (column, value) => {
+      const protection = check(
+        `retired ${column}`,
+        `UPDATE scim_users SET ${column}=${value} WHERE id='${user}'`,
+        `${userInsert(',id', `,'${id(80)}'`, 'manager')};
+       INSERT INTO auth.member (id,"organizationId","userId",role,"createdAt") VALUES ('${id(81)}','${org}','${account}','member',now());
+       UPDATE scim_users SET active=false,retired_at=now() WHERE id='${user}'`,
+      )
+      await transaction(source, async (client) => {
+        await rejected(client, protection)
+        await succeeds(client, `DELETE FROM auth.member WHERE id='${member}'`)
+        await succeeds(client, `DELETE FROM auth."user" WHERE id='${account}'`)
+        expect(
+          (
+            await client.query(
+              `SELECT linked_user_id,linked_member_id FROM scim_users WHERE id='${user}'`,
+            )
+          ).rows,
+        ).toEqual([{ linked_user_id: null, linked_member_id: null }])
+      })
+      const mutant = source.replace(/IF OLD.retired_at IS NOT NULL AND \([\s\S]*?END IF;/, '')
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    },
+  )
+
+  it.each([
+    check(
+      'scim_blocks_identity',
+      `INSERT INTO scim_membership_blocks(organization_id,source,kind) VALUES ('${org}','local','removal')`,
+    ),
+    check(
+      'scim_blocks_identity_email',
+      blockInsert(',identity_email', ",' UNNORMALIZED@example.test '"),
+    ),
+  ])('$name rejects invalid tombstone storage and its source removal fails', async (protection) => {
+    await transaction(source, (client) => rejected(client, protection))
+    const mutant = removeProtection(source, protection)
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it.each([
+    ['identity_email', "'changed@example.test'"],
+    ['identity_email', 'NULL'],
+    ['organization_id', `'${otherOrg}'`],
+    ['user_id', `'${otherAccount}'`],
+  ])('captured tombstone %s cannot be redirected to %s', async (column, value) => {
+    const protection = check(
+      'scim_blocks_preserve_identity',
+      `UPDATE scim_membership_blocks SET ${column}=${value} WHERE id='${block}'`,
+      blockInsert(',id,identity_email', `,'${block}','one@example.test'`, 'local', 'removal'),
+    )
+    await transaction(source, (client) => rejected(client, protection))
+    const mutant = source.replace(/CREATE TRIGGER scim_blocks_preserve_identity\b[^;]+;/, '')
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it('captured identity survives account email changes and blocks a newly registered identity', async () => {
+    const verify = async (client: pg.PoolClient) => {
+      await client.query(blockInsert(',identity_email', ",'one@example.test'", 'local', 'removal'))
+      await client.query(
+        `UPDATE auth."user" SET email='renamed@example.test' WHERE id='${account}'`,
+      )
+      await succeeds(client, `DELETE FROM auth."user" WHERE id='${account}'`)
+      await client.query(`INSERT INTO auth."user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES
+        ('${id(95)}','Recreated','one@example.test',true,now(),now())`)
+      expect(
+        (
+          await client.query(`SELECT b.user_id,b.kind FROM scim_membership_blocks b
+        JOIN auth."user" u ON b.identity_email=lower(btrim(u.email))
+        WHERE u.id='${id(95)}' AND b.organization_id='${org}' AND b.cleared_at IS NULL`)
+        ).rows,
+      ).toEqual([{ user_id: null, kind: 'removal' }])
+    }
+    await transaction(source, verify)
+    const mutant = source.replace(
+      'coalesce(identity_email, lower(btrim(OLD.email)))',
+      'lower(btrim(OLD.email))',
+    )
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it.each([
+    ['scim_token_connections_connection_idx', 'organization_id, connection_id'],
+    ['scim_users_member_idx', 'organization_id, linked_member_id, linked_user_id'],
+    ['scim_users_account_idx', 'linked_user_id'],
+    ['scim_users_manager_idx', 'organization_id, connection_id, manager_id'],
+    ['scim_claims_user_idx', 'organization_id, connection_id, scim_user_id'],
+    ['scim_claims_invitation_idx', 'organization_id, invitation_id'],
+    ['scim_blocks_user_idx', 'user_id'],
+    ['scim_blocks_resource_idx', 'organization_id, connection_id, scim_user_id'],
+    ['scim_blocks_identity_idx', 'organization_id, identity_email'],
+  ])('%s supports FK or tombstone lookup with its intended columns', async (name, columns) => {
+    const verify = async (client: pg.PoolClient) => {
+      const result = await client.query(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND indexname=$1",
+        [name],
+      )
+      expect(result.rows).toHaveLength(1)
+      expect(result.rows[0].indexdef).toContain(`(${columns})`)
+    }
+    await transaction(source, verify)
+    const mutant = source.replace(new RegExp(`CREATE INDEX ${name}\\b[^;]+;`), '')
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
 
   it('token creation automatically binds the organization connection; source-copy trigger removal fails', async () => {
     const verify = async (client: pg.PoolClient) => {
@@ -436,6 +665,13 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
 
   it('native account deletion preserves the resource and clears both links; removing cleanup trigger fails the assertion', async () => {
     const verify = async (client: pg.PoolClient) => {
+      await client.query(blockInsert('', '', 'local', 'removal'))
+      await client.query(
+        blockInsert(',connection_id,scim_user_id', `,'${connection}','${user}'`, 'scim'),
+      )
+      await client.query(blockInsert(',cleared_at', ',now()'))
+      await client.query(`INSERT INTO scim_membership_blocks (organization_id,user_id,source,kind)
+        VALUES ('${otherOrg}','${otherAccount}','local','removal')`)
       await client.query('SAVEPOINT account_delete')
       let code: string | undefined
       try {
@@ -452,18 +688,85 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
           )
         ).rows,
       ).toEqual([{ linked_user_id: null, linked_member_id: null }])
+      expect(
+        (
+          await client.query(
+            `SELECT linked_user_id,linked_member_id FROM scim_users WHERE id='${otherUser}'`,
+          )
+        ).rows,
+      ).toEqual([{ linked_user_id: otherAccount, linked_member_id: otherMember }])
+      expect(
+        (
+          await client.query(
+            `SELECT user_id,identity_email,source,kind,cleared_at IS NOT NULL AS cleared FROM scim_membership_blocks WHERE organization_id='${org}' ORDER BY source,kind`,
+          )
+        ).rows,
+      ).toEqual([
+        {
+          user_id: null,
+          identity_email: 'one@example.test',
+          source: 'local',
+          kind: 'removal',
+          cleared: false,
+        },
+        {
+          user_id: null,
+          identity_email: 'one@example.test',
+          source: 'local',
+          kind: 'suspension',
+          cleared: true,
+        },
+        {
+          user_id: null,
+          identity_email: 'one@example.test',
+          source: 'scim',
+          kind: 'suspension',
+          cleared: false,
+        },
+      ])
+      expect(
+        (
+          await client.query(
+            `SELECT user_id,identity_email FROM scim_membership_blocks WHERE organization_id='${otherOrg}'`,
+          )
+        ).rows,
+      ).toEqual([{ user_id: otherAccount, identity_email: null }])
+      expect(
+        (await client.query(`SELECT id FROM auth.member WHERE id='${otherMember}'`)).rows,
+      ).toEqual([{ id: otherMember }])
     }
     await transaction(source, verify)
-    const mutant = source.replace(/CREATE TRIGGER scim_account_delete_links\b[^;]+;/, '')
-    expect(mutant).not.toBe(source)
-    await transaction(mutant, async (client) => {
-      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
-    })
+    for (const mutant of [
+      source.replace(/CREATE TRIGGER scim_account_delete_links\b[^;]+;/, ''),
+      source.replace('WHERE linked_user_id = OLD.id;', ';'),
+      source.replace('WHERE user_id = OLD.id;', ';'),
+      source.replace(
+        /UPDATE scim_membership_blocks SET identity_email[\s\S]*?WHERE user_id = OLD.id;/,
+        '',
+      ),
+      source.replace(
+        '\n  user_id uuid REFERENCES auth.user(id) ON DELETE SET NULL',
+        '\n  user_id uuid REFERENCES auth.user(id) ON DELETE NO ACTION',
+      ),
+      source.replace(
+        '\n  user_id uuid REFERENCES auth.user(id) ON DELETE SET NULL',
+        '\n  user_id uuid REFERENCES auth.user(id) ON DELETE CASCADE',
+      ),
+    ]) {
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    }
   })
 
   it('whole-organization deletion cascades its graph and removing the claim cleanup guard fails the success assertion', async () => {
     const verify = async (client: pg.PoolClient) => {
       await client.query(claimInsert(',invitation_id', `,'${invitation}'`))
+      await client.query(`INSERT INTO scim_user_claims (organization_id,connection_id,scim_user_id,invitation_id,work_email,expires_at)
+        VALUES ('${otherOrg}','${otherConnection}','${otherUser}','${otherInvitation}','other@example.test',now()+interval '1 hour')`)
+      await client.query(`INSERT INTO scim_membership_blocks (organization_id,user_id,source,kind)
+        VALUES ('${otherOrg}','${otherAccount}','local','removal')`)
       await client.query(blockInsert())
       await client.query(
         blockInsert(',connection_id,scim_user_id', `,'${connection}','${user}'`, 'scim'),
@@ -491,6 +794,18 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
             )
           ).rows,
         ).toEqual([])
+      expect(
+        (
+          await client.query(
+            `SELECT organization_id,scim_user_id,invitation_id FROM scim_user_claims`,
+          )
+        ).rows,
+      ).toEqual([
+        { organization_id: otherOrg, scim_user_id: otherUser, invitation_id: otherInvitation },
+      ])
+      expect(
+        (await client.query(`SELECT organization_id,user_id FROM scim_membership_blocks`)).rows,
+      ).toEqual([{ organization_id: otherOrg, user_id: otherAccount }])
       expect((await client.query(`SELECT id FROM scim_users`)).rows).toEqual([{ id: otherUser }])
       expect((await client.query(`SELECT id FROM auth."user" ORDER BY id`)).rows).toEqual([
         { id: account },
@@ -498,11 +813,18 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       ])
     }
     await transaction(source, verify)
-    const mutant = source.replace(/CREATE TRIGGER scim_organization_delete_claims\b[^;]+;/, '')
-    expect(mutant).not.toBe(source)
-    await transaction(mutant, async (client) => {
-      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
-    })
+    for (const mutant of [
+      source.replace(/CREATE TRIGGER scim_organization_delete_claims\b[^;]+;/, ''),
+      source.replace(
+        'DELETE FROM scim_user_claims WHERE organization_id = OLD.id;',
+        'DELETE FROM scim_user_claims;',
+      ),
+    ]) {
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    }
   })
   const primaryKeys = [
     {

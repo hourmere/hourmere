@@ -7,6 +7,10 @@ CREATE TABLE scim_connections (
   CONSTRAINT scim_connections_scope UNIQUE (organization_id, id)
 );
 
+-- Hold token writers until both backfills and the INSERT trigger are installed.
+-- This transaction-scoped lock closes the new-organization token creation window.
+LOCK TABLE scim_provisioning_tokens IN SHARE ROW EXCLUSIVE MODE;
+
 -- Preserve every credential field, including revoked history and actor attribution.
 INSERT INTO scim_connections (organization_id)
 SELECT DISTINCT organization_id FROM scim_provisioning_tokens;
@@ -81,7 +85,7 @@ CREATE TABLE scim_users (
     ON DELETE SET NULL (linked_member_id),
   CONSTRAINT scim_users_manager_scope FOREIGN KEY (organization_id, connection_id, manager_id)
     REFERENCES scim_users (organization_id, connection_id, id),
-  CONSTRAINT scim_users_username_length CHECK (char_length(btrim(user_name)) BETWEEN 1 AND 256),
+  CONSTRAINT scim_users_username_length CHECK (char_length(btrim(user_name)) BETWEEN 1 AND 256 AND char_length(user_name) <= 256),
   CONSTRAINT scim_users_external_id_length CHECK (char_length(external_id) BETWEEN 1 AND 1024),
   CONSTRAINT scim_users_member_account CHECK (linked_member_id IS NULL OR linked_user_id IS NOT NULL),
   CONSTRAINT scim_users_retired_inactive CHECK (retired_at IS NULL OR NOT active),
@@ -124,7 +128,7 @@ CREATE TABLE scim_user_claims (
     REFERENCES scim_users (organization_id, connection_id, id) ON DELETE CASCADE,
   CONSTRAINT scim_claims_invitation_scope FOREIGN KEY (organization_id, invitation_id)
     REFERENCES auth.invitation ("organizationId", id) ON DELETE SET NULL (invitation_id),
-  CONSTRAINT scim_claims_email_length CHECK (char_length(btrim(work_email)) BETWEEN 1 AND 320),
+  CONSTRAINT scim_claims_email_length CHECK (char_length(btrim(work_email)) BETWEEN 1 AND 320 AND char_length(work_email) <= 320),
   CONSTRAINT scim_claims_expiry CHECK (expires_at > created_at),
   CONSTRAINT scim_claims_terminal CHECK (completed_at IS NULL OR invalidated_at IS NULL)
 );
@@ -133,18 +137,23 @@ CREATE UNIQUE INDEX scim_claims_pending_user ON scim_user_claims (scim_user_id)
 CREATE UNIQUE INDEX scim_claims_invitation ON scim_user_claims (invitation_id)
   WHERE invitation_id IS NOT NULL;
 
--- Account-scoped blockers survive membership deletion and a fresh resource's admission.
+-- Admission blockers survive membership and account deletion. On account deletion,
+-- the cleanup trigger retains the normalized mailbox as a team-local identity tombstone.
 -- Each authority clears only its own blocker in the later lifecycle service.
 CREATE TABLE scim_membership_blocks (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   organization_id uuid NOT NULL REFERENCES auth.organization(id) ON DELETE CASCADE,
-  user_id uuid NOT NULL REFERENCES auth.user(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES auth.user(id) ON DELETE SET NULL,
+  identity_email text,
   source text NOT NULL,
   kind text NOT NULL,
   connection_id uuid,
   scim_user_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   cleared_at timestamptz,
+  CONSTRAINT scim_blocks_identity CHECK (user_id IS NOT NULL OR identity_email IS NOT NULL),
+  CONSTRAINT scim_blocks_identity_email CHECK (identity_email IS NULL OR
+    (identity_email = lower(btrim(identity_email)) AND char_length(identity_email) BETWEEN 1 AND 320)),
   CONSTRAINT scim_blocks_source CHECK (source IN ('local', 'scim')),
   CONSTRAINT scim_blocks_kind CHECK (kind IN ('suspension', 'removal')),
   CONSTRAINT scim_blocks_resource CHECK (
@@ -155,6 +164,34 @@ CREATE TABLE scim_membership_blocks (
 );
 CREATE UNIQUE INDEX scim_blocks_live_authority ON scim_membership_blocks (organization_id, user_id, source, kind)
   WHERE cleared_at IS NULL;
+
+-- Index referencing columns for FK checks and deletion cleanup, including history.
+CREATE INDEX scim_token_connections_connection_idx ON scim_token_connections (organization_id, connection_id);
+CREATE INDEX scim_users_member_idx ON scim_users (organization_id, linked_member_id, linked_user_id);
+CREATE INDEX scim_users_account_idx ON scim_users (linked_user_id);
+CREATE INDEX scim_users_manager_idx ON scim_users (organization_id, connection_id, manager_id);
+CREATE INDEX scim_claims_user_idx ON scim_user_claims (organization_id, connection_id, scim_user_id);
+CREATE INDEX scim_claims_invitation_idx ON scim_user_claims (organization_id, invitation_id);
+CREATE INDEX scim_blocks_user_idx ON scim_membership_blocks (user_id);
+CREATE INDEX scim_blocks_resource_idx ON scim_membership_blocks (organization_id, connection_id, scim_user_id);
+CREATE INDEX scim_blocks_identity_idx ON scim_membership_blocks (organization_id, identity_email);
+
+-- A captured identity cannot be redirected to a different mailbox or account.
+CREATE FUNCTION scim_preserve_block_identity() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
+BEGIN
+  IF OLD.identity_email IS NOT NULL AND (
+    NEW.identity_email IS DISTINCT FROM OLD.identity_email OR
+    NEW.organization_id IS DISTINCT FROM OLD.organization_id OR
+    (NEW.user_id IS DISTINCT FROM OLD.user_id AND NEW.user_id IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'Admission tombstone identity is immutable' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER scim_blocks_preserve_identity BEFORE UPDATE ON scim_membership_blocks
+  FOR EACH ROW EXECUTE FUNCTION scim_preserve_block_identity();
 
 -- Keep resource identity and retirement durable. Whole-organization deletion may cascade;
 -- an IdP deletion instead sets retired_at and keeps the opaque ID reserved forever.
@@ -171,6 +208,16 @@ BEGIN
      (OLD.retired_at IS NOT NULL AND NEW.retired_at IS DISTINCT FROM OLD.retired_at) THEN
     RAISE EXCEPTION 'SCIM resource identity and retirement are immutable' USING ERRCODE = '23514';
   END IF;
+  -- Generated values are unavailable in BEFORE triggers. Compare every stored field
+  -- except nullable links; those may only clear to support native deletion cleanup.
+  IF OLD.retired_at IS NOT NULL AND (
+    (to_jsonb(NEW) - ARRAY['normalized_user_name', 'linked_user_id', 'linked_member_id']) IS DISTINCT FROM
+    (to_jsonb(OLD) - ARRAY['normalized_user_name', 'linked_user_id', 'linked_member_id']) OR
+    (NEW.linked_user_id IS DISTINCT FROM OLD.linked_user_id AND NEW.linked_user_id IS NOT NULL) OR
+    (NEW.linked_member_id IS DISTINCT FROM OLD.linked_member_id AND NEW.linked_member_id IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'Retired SCIM resources are immutable' USING ERRCODE = '23514';
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -182,6 +229,9 @@ CREATE TRIGGER scim_users_preserve_identity BEFORE UPDATE OR DELETE ON scim_user
 CREATE FUNCTION scim_clear_deleted_account_links() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
 BEGIN
+  -- Preserve admission decisions without retaining a foreign key to the deleted account.
+  UPDATE scim_membership_blocks SET identity_email = coalesce(identity_email, lower(btrim(OLD.email)))
+    WHERE user_id = OLD.id;
   UPDATE scim_users SET linked_user_id = NULL, linked_member_id = NULL
     WHERE linked_user_id = OLD.id;
   RETURN OLD;

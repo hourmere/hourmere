@@ -887,11 +887,12 @@ export interface ScimMembershipBlocks {
   connection_id: string | null;
   created_at: Generated<Timestamp>;
   id: Generated<string>;
+  identity_email: string | null;
   kind: string;
   organization_id: string;
   scim_user_id: string | null;
   source: string;
-  user_id: string;
+  user_id: string | null;
 }
 
 export interface ScimProvisioningTokens {

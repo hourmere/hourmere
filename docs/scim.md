@@ -29,8 +29,8 @@ through a separately chosen plugin are future test targets, not verified integra
 The RFC Editor pages list later updates to these RFCs; this first implementation
 explicitly targets the bounded RFC 7643/7644 subset below, not every newer extension.
 
-The SSO proposal in [PR #247](https://github.com/hourmere/hourmere/pull/247)
-(`docs/sso.md` on that branch, inspected 2026-11-06) is still subject to acceptance.
+The accepted [SSO design](sso.md) defines shared admission tombstones and identity
+linking; its authentication and admission implementation remains a prerequisite.
 SCIM controls membership lifecycle; SSO controls authentication proof. Before enabling
 Users, reconcile its exact linking, admission tombstones and revocation transactions
 with the accepted SSO implementation. Token administration does not depend on SSO.
@@ -200,6 +200,40 @@ manual reactivation. Both controls must explicitly clear their own blocker befor
 returns. Existing management interfaces must display the managed state and refuse bypasses
 on the server, including native Better Auth routes. SSO JIT cannot recreate a suspended
 SCIM membership; SSO enforcement still requires a valid team proof after provisioning.
+
+The storage foundation retains local and SCIM blockers, including cleared history,
+after account deletion. `scim_membership_blocks.user_id` becomes null through its FK;
+the account-deletion trigger first captures the account's normalized mailbox in
+`identity_email`, on that account's rows only. This is the team-local admission tombstone
+shared with the SSO design, not an additional SSO-only tombstone store. It identifies a
+removal decision, never an account link or authentication proof. Captured mailbox identity
+is immutable and cannot be redirected or attached to another account; explicit reinstatement
+clears the appropriate blocker rather than deleting or rewriting its identity.
+
+The later shared SSO/SCIM admission service must check live blockers by both current
+account ID and proven normalized mailbox under the organization lock. A newly registered
+account with the same proven mailbox must therefore still encounter the retained local
+removal decision. It cannot gain access merely by claiming a fresh SCIM resource or
+receiving `active:true`. A new current invitation can explicitly clear local removal as
+specified by SSO; SCIM suspension still needs its own authority's reactivation. Mailbox
+matching happens only after independent proof and cannot auto-link accounts. The retained
+mailbox is organization-local personal data, limited to 320 characters, not exposed through
+SCIM resources or logged; whole-organization deletion removes it, and any later purge
+requires the audited retention policy. This foundation adds storage only, not admission
+handlers or enforcement.
+
+Retired resource rows are immutable, including their profile and timestamps. Native
+account/member deletion may only clear their nullable links; it cannot relink a retired
+resource. Stored userName and claim mailbox values are bounded before trimming as well
+as checked for nonblank normalized values. Referencing-column indexes cover cleanup and
+FK checks over live rows and history.
+
+Migration 0073 takes a transaction-scoped `SHARE ROW EXCLUSIVE` lock on provisioning
+tokens before reading either backfill. Token writers wait until the connection backfill,
+credential binding backfill and INSERT trigger have committed together. A concurrent token
+therefore belongs either to the backfill snapshot or to the installed trigger, closing the
+new-organization token creation window without locking organization rows.
+
 
 ## Groups to teams: required schema decision
 

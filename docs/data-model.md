@@ -50,7 +50,9 @@ managers, membership links and invitation claims to their organization and conne
 
 `scim_user_claims` stores expiring, deduplicated invitation intents, without creating
 accounts or verifying mailboxes. `scim_membership_blocks` stores separate local and SCIM
-suspension/removal records that survive membership deletion. These tables provide storage
+suspension/removal records that survive membership and account deletion. Account deletion
+nulls the account reference and retains an immutable normalized mailbox tombstone for the
+shared SSO/SCIM admission checks described in [the SCIM design](scim.md). These tables provide storage
 for later claim and authorization work; this migration does not enforce new admission,
 suspension or revocation behavior in application services. Users, Groups and discovery
 handlers remain unregistered in production.
