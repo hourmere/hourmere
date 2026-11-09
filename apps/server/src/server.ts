@@ -4,7 +4,9 @@ import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import {
+  type Auth,
   assertSignupEnforced,
+  type CallerResolver,
   createAuth,
   createAuthPool,
   createCallerResolver,
@@ -66,13 +68,14 @@ import {
   verifyWaitlist,
 } from '@hourmere/scheduling'
 import {
+  type WebhookSettings,
   webhookAttendeeNoShowNotifier,
   webhookBookingNotifier,
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
 import { sql } from 'kysely'
-import { createApp } from './app.ts'
+import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
@@ -337,6 +340,129 @@ export function productTools({
   ]
 }
 
+/** What the running server's app options need beyond the configuration. */
+export interface ProductionAppDeps {
+  config: Config
+  db: Db
+  /** Better Auth: its request handler, and the MCP authorization provider when enabled. */
+  auth: Pick<Auth, 'handler'>
+  /** createCallerResolver for that auth. */
+  resolveCaller: CallerResolver
+  /** createMcpOAuthResolver for that auth; used when MCP_OAUTH_ENABLED. */
+  resolveMcpOAuth: ReturnType<typeof createMcpOAuthResolver>
+  checkDb: AppDeps['checkDb']
+  waitlist: NonNullable<AppDeps['waitlist']>
+  invitationMailLimits: InvitationSummaryMailLimits
+  webhookSettings: WebhookSettings
+  notify: BookingNotifier
+  notifyAttendeeNoShow: AttendeeNoShowNotifier
+  googleCalendar: CalendarDeps['google']
+  microsoftCalendar: CalendarDeps['microsoft']
+  zoomConference: ConferenceDeps['zoom']
+  enqueueCalendarSync: CalendarDeps['enqueueSync']
+  enqueueCalendarWritebackRecovery: CalendarDeps['enqueueWritebackRecovery']
+}
+
+/**
+ * The createApp options as the running server assembles them: every route group, page,
+ * static asset, MCP and SCIM mount that the configuration enables. startServer serves
+ * createApp(productionAppOptions(...)); tests that must see the production routes (not a
+ * reduced test assembly) build the app the same way.
+ */
+export function productionAppOptions({
+  config,
+  db,
+  auth,
+  resolveCaller,
+  resolveMcpOAuth,
+  checkDb,
+  waitlist,
+  invitationMailLimits,
+  webhookSettings,
+  notify,
+  notifyAttendeeNoShow,
+  googleCalendar,
+  microsoftCalendar,
+  zoomConference,
+  enqueueCalendarSync,
+  enqueueCalendarWritebackRecovery,
+}: ProductionAppDeps): AppDeps {
+  // All configuration transports and public booking routes share the instance policy.
+  const successRedirectPolicy = {
+    publicUrl: config.PUBLIC_URL,
+    allowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
+  }
+  return {
+    checkDb,
+    scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
+    authHandler: auth.handler,
+    resolveCaller,
+    publicUrl: config.PUBLIC_URL,
+    embedOrigins: config.EMBED_ALLOWED_ORIGINS,
+    hstsMaxAge: config.HSTS_MAX_AGE,
+    trustedProxies: config.trustedProxies,
+    webDist: config.WEB_DIST,
+    waitlist,
+    // db is closed by the caller.
+    routes: productRoutes({
+      scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
+      mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
+      publicUrl: config.PUBLIC_URL,
+      db,
+      invitationMailLimits,
+      waitlistSecret: config.BETTER_AUTH_SECRET,
+      smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+      socialProviders: config.socialProviders,
+      automaticMeet: config.GOOGLE_MEET_ENABLED,
+      automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+      followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+      embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
+      slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
+      successRedirectPolicy,
+      bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
+      hostedSignupUrl: config.HOSTED_SIGNUP_URL,
+      privacyPolicyUrl: config.PRIVACY_POLICY_URL,
+      termsUrl: config.TERMS_URL,
+      webhooks: webhookSettings,
+      notify,
+      notifyAttendeeNoShow,
+      googleCalendar,
+      microsoftCalendar,
+      zoomConference,
+      zoomWebhookSecretToken: config.ZOOM_WEBHOOK_SECRET_TOKEN,
+      zoomWebhookClientId: config.ZOOM_CLIENT_ID,
+      enqueueCalendarSync,
+      enqueueCalendarWritebackRecovery,
+    }),
+    mcp: mcpEndpoint({
+      ...(config.MCP_OAUTH_ENABLED
+        ? {
+            oauth: {
+              resolve: resolveMcpOAuth,
+              handler: auth.handler,
+            },
+          }
+        : {}),
+      tools: productTools({
+        db,
+        slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
+        waitlistSecret: config.BETTER_AUTH_SECRET,
+        publicUrl: config.PUBLIC_URL,
+        followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+        successRedirectPolicy,
+        smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+        notify,
+        notifyAttendeeNoShow,
+        automaticMeet: config.GOOGLE_MEET_ENABLED,
+        automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+        bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
+        googleCalendar,
+        zoomConference,
+      }),
+    }),
+  }
+}
+
 export interface RunningServer {
   port: number
   /**
@@ -360,11 +486,6 @@ export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise
 
 async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promise<RunningServer> {
   const config = loadConfig(env)
-  // All configuration transports and public booking routes share the instance policy.
-  const successRedirectPolicy = {
-    publicUrl: config.PUBLIC_URL,
-    allowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
-  }
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
@@ -692,48 +813,26 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       socialProviders: config.socialProviders,
       mcpOAuth: config.MCP_OAUTH_ENABLED,
     })
-    fetch = createApp({
-      checkDb,
-      scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
-      authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
-      publicUrl: config.PUBLIC_URL,
-      embedOrigins: config.EMBED_ALLOWED_ORIGINS,
-      hstsMaxAge: config.HSTS_MAX_AGE,
-      trustedProxies: config.trustedProxies,
-      webDist: config.WEB_DIST,
-      waitlist: {
-        verify: (token) => verifyWaitlist(waitlistDeps, { token }),
-        remove: (token) => removeWaitlist(waitlistDeps, { token }),
-      },
-      // db is closed below.
-      routes: productRoutes({
-        scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
-        mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
-        publicUrl: config.PUBLIC_URL,
+    // db is closed below.
+    fetch = createApp(
+      productionAppOptions({
+        config,
         db,
+        auth,
+        resolveCaller: createCallerResolver({ auth, db }),
+        resolveMcpOAuth: createMcpOAuthResolver({ auth, db, publicUrl: config.PUBLIC_URL }),
+        checkDb,
+        waitlist: {
+          verify: (token) => verifyWaitlist(waitlistDeps, { token }),
+          remove: (token) => removeWaitlist(waitlistDeps, { token }),
+        },
         invitationMailLimits,
-        waitlistSecret: config.BETTER_AUTH_SECRET,
-        smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
-        socialProviders: config.socialProviders,
-        automaticMeet: config.GOOGLE_MEET_ENABLED,
-        automaticZoom: config.ZOOM_MEETINGS_ENABLED,
-        followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
-        embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
-        slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
-        successRedirectPolicy,
-        bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
-        hostedSignupUrl: config.HOSTED_SIGNUP_URL,
-        privacyPolicyUrl: config.PRIVACY_POLICY_URL,
-        termsUrl: config.TERMS_URL,
-        webhooks: webhookSettings,
+        webhookSettings,
         notify,
         notifyAttendeeNoShow,
         googleCalendar,
         microsoftCalendar,
         zoomConference,
-        zoomWebhookSecretToken: config.ZOOM_WEBHOOK_SECRET_TOKEN,
-        zoomWebhookClientId: config.ZOOM_CLIENT_ID,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
         enqueueCalendarWritebackRecovery: (connectionId, trx) =>
@@ -743,33 +842,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
             { singletonKey: connectionId, transaction: trx },
           ),
       }),
-      mcp: mcpEndpoint({
-        ...(config.MCP_OAUTH_ENABLED
-          ? {
-              oauth: {
-                resolve: createMcpOAuthResolver({ auth, db, publicUrl: config.PUBLIC_URL }),
-                handler: auth.handler,
-              },
-            }
-          : {}),
-        tools: productTools({
-          db,
-          slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
-          waitlistSecret: config.BETTER_AUTH_SECRET,
-          publicUrl: config.PUBLIC_URL,
-          followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
-          successRedirectPolicy,
-          smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
-          notify,
-          notifyAttendeeNoShow,
-          automaticMeet: config.GOOGLE_MEET_ENABLED,
-          automaticZoom: config.ZOOM_MEETINGS_ENABLED,
-          bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
-          googleCalendar,
-          zoomConference,
-        }),
-      }),
-    }).fetch
+    ).fetch
   }
 
   let closing = false
