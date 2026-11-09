@@ -15,22 +15,26 @@
 //   code; the scan then narrows to the packages that may own routing data access.
 // The web route table is asserted by apps/web/src/routing-forms-off.test.tsx (jsdom
 // project), which c3, c6 and d1 narrow when they mount routing pages.
+// The Hono routes are read from the app as startServer assembles it (productionAppOptions),
+// with every optional route group turned on, so a route only production registers is seen too.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
+import { createApp } from '../apps/server/src/app.ts'
+import { loadConfig } from '../apps/server/src/config.ts'
 import { prepareTools } from '../apps/server/src/mcp/tools.ts'
-import { openApiDocument, openApiRouteInventory } from '../apps/server/src/openapi-document.ts'
-import { productTools } from '../apps/server/src/server.ts'
+import { openApiDocument } from '../apps/server/src/openapi-document.ts'
+import { productionAppOptions, productTools } from '../apps/server/src/server.ts'
 import { COMMANDS, REST_COMMANDS } from '../tools/cli/src/cli.ts'
 import { isRoutingName } from './routing-forms-names.ts'
 
 const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 
-// Routing-form names are matched token by token (`isRoutingName`): `route`, `routing` or
-// `routed` as a whole word of a path, identifier or camelCase name.
+// Routing-form names are matched token by token (`isRoutingName`): `route`, `routing`,
+// `routed` or `routings` as a whole word of a path, identifier or camelCase name.
 
 const REST_PATHS = [
   '/api/v1/routing-forms',
@@ -139,9 +143,20 @@ describe('routing forms are storage only', () => {
       'listRoutingForms',
       'RoutingForm',
       'Routing forms',
+      'ROUTE_LEAD',
       '/api/v1/routing_forms',
       '/api/v1/forms/{id}/route',
       '/route/:handle/:slug',
+      // An acronym run before the word, and a digit before or after it.
+      'getMCPRoute',
+      'MCPRoutingForm',
+      'getV2Route',
+      'v2Route',
+      'route2',
+      'Route2',
+      'routing2',
+      'v2route',
+      'routings',
     ])
       expect(isRoutingName(name), name).toBe(true)
     // Words that merely contain the letters are not routing names.
@@ -155,9 +170,12 @@ describe('routing forms are storage only', () => {
       'router-status',
       'getRouterStatus',
       'RouterStatus',
+      'routes',
       '/routes/:id',
       '/app/router',
       '/api/v1/bookings/{id}',
+      '/api/auth/oauth2/authorize',
+      'oauth2',
     ])
       expect(isRoutingName(name), name).toBe(false)
   })
@@ -175,19 +193,94 @@ describe('routing forms are storage only', () => {
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
 
-  it('exposes no routing path, operation, tag or schema in the OpenAPI document or a Hono route', async () => {
+  it('exposes no routing path, operation, tag or schema in the OpenAPI document', async () => {
     const document = await openApiDocument()
     const names = openApiNames(document)
     expect(names.length).toBeGreaterThan(100)
     expect(names).toContain('/api/v1/bookings/{id}')
     for (const path of REST_PATHS) expect(names).not.toContain(path)
     expect(names.filter(isRoutingName)).toEqual([])
-    // Every route registered on the Hono app, including plain GET routes and pages that the
-    // OpenAPI document need not list.
-    const { routes } = await openApiRouteInventory()
-    expect(routes.length).toBeGreaterThan(100)
-    expect(routes.map(({ path }) => path)).toContain('/api/v1/bookings/:id')
-    expect(routes.filter(({ path }) => isRoutingName(path))).toEqual([])
+  })
+
+  it('registers no routing route on the app startServer serves, with every optional group on', async () => {
+    // The production assembly (createApp of productionAppOptions, as startServer calls it),
+    // from a configuration that enables each optional route group: SCIM, MCP OAuth, slot snippets,
+    // webhooks, the Zoom event webhook, the waitlist pages and the built web app. Creating
+    // the app touches no database (Better Auth is stood in for, since creating it would
+    // check its schema); the pool is still closed explicitly.
+    const databaseUrl = 'postgres://routing-off@127.0.0.1:9/routing-off'
+    const config = loadConfig({
+      DATABASE_URL: databaseUrl,
+      BETTER_AUTH_SECRET: 'routing-off-secret-with-at-least-32-characters',
+      PUBLIC_URL: 'http://localhost',
+      SCIM_PROVISIONING_ENABLED: 'true',
+      MCP_OAUTH_ENABLED: 'true',
+      SLOT_SNIPPETS_ENABLED: 'true',
+      WEBHOOKS_ENABLED: 'true',
+      WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      ZOOM_WEBHOOK_SECRET_TOKEN: 'routing-off-zoom-webhook-token',
+      WEB_DIST: rootPath,
+    })
+    const db = createDb(createPool(databaseUrl))
+    try {
+      const app = createApp(
+        productionAppOptions({
+          config,
+          db,
+          auth: { handler: async () => new Response(null, { status: 404 }) },
+          resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+          resolveMcpOAuth: async () => ({ ok: false, error: 'invalid_token' }),
+          checkDb: async () => {},
+          waitlist: { verify: async () => null, remove: async () => null },
+          invitationMailLimits: { secret: 'routing-off' },
+          webhookSettings: {
+            enabled: config.WEBHOOKS_ENABLED,
+            encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
+          },
+          notify: async () => {},
+          notifyAttendeeNoShow: async () => {},
+          googleCalendar: undefined,
+          microsoftCalendar: undefined,
+          zoomConference: undefined,
+          enqueueCalendarSync: async () => null,
+          enqueueCalendarWritebackRecovery: async () => null,
+        }),
+      )
+      const paths = app.routes.map(({ path }) => path)
+      expect(paths.length).toBeGreaterThan(100)
+      // A versioned API route, a page outside /api, and one route from each group that the
+      // configuration above turns on: MCP, its OAuth authorize guard, the waitlist pages,
+      // the Zoom event webhook, SCIM and the web app's assets.
+      for (const control of [
+        '/api/v1/bookings/:id',
+        '/sign-in/confirm',
+        '/mcp',
+        '/api/auth/oauth2/authorize',
+        '/booking/waitlist/verify',
+        '/api/conference/zoom/events',
+        '/scim/*',
+        '/assets/*',
+      ])
+        expect(paths, control).toContain(control)
+      expect(paths.filter(isRoutingName)).toEqual([])
+    } finally {
+      await db.destroy()
+    }
+  })
+
+  it('names no routing path in a server source string literal', () => {
+    // Backstop for a route registered outside the shared assembly (a `.get` on the app in
+    // startServer, say): every string literal that begins with `/` in the server's sources.
+    const literals = productionSources()
+      .filter((file) => file.startsWith('apps/server/src/'))
+      .flatMap((file) => [
+        ...readFileSync(new URL(file, root), 'utf8').matchAll(/(['"`])(\/[^'"`\s]*)\1/g),
+      ])
+      .map(([, , literal]) => literal ?? '')
+    expect(literals.length).toBeGreaterThan(100)
+    expect(literals).toContain('/api/v1/bookings/{id}')
+    expect(literals).toContain('/mcp')
+    expect(literals.filter(isRoutingName)).toEqual([])
   })
 
   it('lists no routing MCP tool, with every optional catalogue enabled', async () => {
