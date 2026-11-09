@@ -1,11 +1,29 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type pg from 'pg'
+import pg from 'pg'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { checkConstraintCoverage } from './constraint-coverage.ts'
 
 const serverUrl = process.env.DATABASE_URL
+
+/** A driver error with the given SQLSTATE, as pg raises it (its name is 'error'). */
+const databaseError = (code: string, message: string) =>
+  Object.assign(new pg.DatabaseError(message, 0, 'error'), { code })
+
+// One case per SQLSTATE class that must abort the run: connection, transaction state,
+// deadlock/serialization, syntax/privilege, resources, locks, timeouts/shutdown, system, internal.
+const abortingErrors: [code: string, message: string][] = [
+  ['08006', 'Connection terminated unexpectedly'],
+  ['25P02', 'current transaction is aborted, commands ignored until end of transaction block'],
+  ['40P01', 'deadlock detected'],
+  ['42P01', 'relation "missing_relation" does not exist'],
+  ['53300', 'sorry, too many clients already'],
+  ['55P03', 'could not obtain lock on relation'],
+  ['57014', 'canceling statement due to statement timeout'],
+  ['58030', 'could not write to file: No space left on device'],
+  ['XX000', 'internal error'],
+]
 
 // A toy migration set: 0002 is the migration under test, 0003 adds and removes objects later.
 const migrations = {
@@ -47,6 +65,11 @@ const created = [
 
 async function rejects(pool: pg.Pool, sql: string, code: string) {
   await expect(pool.query(sql)).rejects.toMatchObject({ code })
+}
+
+/** An expected success, written the way suites write it (CONTRIBUTING.md). */
+async function accept(pool: pg.Pool, sql: string) {
+  await expect(pool.query(sql)).resolves.toBeDefined()
 }
 
 /** Guards the CHECKs, both child NOT NULL columns and the FK; not the key, index, label or trigger. */
@@ -221,5 +244,206 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
       await expect(coverage({ concurrency: 1, assertions: suite }), name).rejects.toThrow(
         'Constraint coverage could not evaluate',
       )
+  }, 240_000)
+
+  it('aborts when expect(...).resolves hides an error that is not an integrity rejection', async () => {
+    await writeExpectation()
+    // A real 42P10 on the copy without child_pkey: the "expected success" is the suite's bug.
+    await expect(
+      coverage({
+        concurrency: 1,
+        assertions: async (pool) => {
+          await pool.query('INSERT INTO parent (id) VALUES (1) ON CONFLICT DO NOTHING')
+          await expect(
+            pool.query(
+              'INSERT INTO child (id,parent_id,amount) VALUES (30,1,1) ON CONFLICT (id) DO NOTHING',
+            ),
+          ).resolves.toBeDefined()
+          await fullSuite(pool)
+        },
+      }),
+    ).rejects.toThrow(
+      /could not evaluate constraint public\.child\.child_pkey: .*code 42P10 in the cause chain: there is no unique or exclusion constraint/,
+    )
+
+    // A real 57014 on one copy, as a loaded server produces; the first copy drops amount_check.
+    let timeouts = 0
+    await expect(
+      coverage({
+        concurrency: 1,
+        assertions: async (pool) => {
+          timeouts += 1
+          if (timeouts > 1)
+            await expect(
+              pool.query("SET statement_timeout='10ms'; SELECT pg_sleep(1)"),
+            ).resolves.toBeDefined()
+          await fullSuite(pool)
+        },
+      }),
+    ).rejects.toThrow(
+      /could not evaluate constraint public\.child\.child_amount_check: .*code 57014 in the cause chain: canceling statement/,
+    )
+
+    // Errors without a SQLSTATE: a dropped connection, or a driver/socket error.
+    for (const [name, error] of [
+      ['a code-less error', new Error('Connection terminated unexpectedly')],
+      ['a socket error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })],
+    ] as const) {
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            if (calls > 1) await expect(Promise.reject(error)).resolves.toBeDefined()
+            await fullSuite(pool)
+          },
+        }),
+        name,
+      ).rejects.toThrow(
+        error.name === 'Error' && !('code' in error)
+          ? /child_amount_check: .*an error without SQLSTATE in the cause chain: Connection terminated unexpectedly/
+          : /child_amount_check: .*code ECONNRESET in the cause chain: read ECONNRESET/,
+      )
+    }
+  }, 240_000)
+
+  it.each(abortingErrors)(
+    'aborts on SQLSTATE %s in a cause chain or an assertion',
+    async (code, message) => {
+      await writeExpectation()
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            if (calls > 1)
+              await expect(Promise.reject(databaseError(code, message))).resolves.toBeDefined()
+            await fullSuite(pool)
+          },
+        }),
+        'cause chain',
+      ).rejects.toThrow(
+        new RegExp(
+          `child_amount_check: .*code ${code} in the cause chain: ${message.slice(0, 20)}`,
+        ),
+      )
+      let attempts = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            attempts += 1
+            if (attempts > 1)
+              await expect(Promise.reject(databaseError(code, message))).rejects.toMatchObject({
+                code: '23514',
+              })
+            await fullSuite(pool)
+          },
+        }),
+        'assertion actual',
+      ).rejects.toThrow(
+        // toMatchObject keeps only the compared subset of the error, so no message follows.
+        new RegExp(`child_amount_check: .*an assertion about an error with code ${code}: `),
+      )
+    },
+    120_000,
+  )
+
+  it('counts integrity rejections inside expect(...).resolves and value mismatches as coverage', async () => {
+    await writeExpectation()
+    const cases: [name: string, suite: (pool: pg.Pool) => Promise<void>][] = [
+      ['23505 inside resolves', (pool) => accept(pool, 'INSERT INTO parent (id) VALUES (1)')],
+      ['22012 inside resolves', (pool) => accept(pool, 'SELECT 1/0')],
+      [
+        'P0001 inside resolves',
+        (pool) => accept(pool, "DO $$ BEGIN RAISE EXCEPTION 'guarded by a function'; END $$"),
+      ],
+      [
+        'a different integrity code than asserted',
+        (pool) => rejects(pool, 'INSERT INTO child (id,parent_id,amount) VALUES (13,2,1)', '23514'),
+      ],
+      [
+        'a value mismatch',
+        async (pool) => {
+          expect((await pool.query('SELECT count(*)::int AS n FROM parent')).rows).toEqual([
+            { n: 0 },
+          ])
+        },
+      ],
+    ]
+    for (const [name, failing] of cases) {
+      let calls = 0
+      const report = await coverage({
+        concurrency: 1,
+        assertions: async (pool) => {
+          calls += 1
+          await pool.query('INSERT INTO parent (id) VALUES (1) ON CONFLICT DO NOTHING')
+          if (calls > 1) await failing(pool)
+          await partialSuite(pool)
+        },
+      })
+      expect(report.problems, name).toEqual([])
+      expect(
+        report.results.map((result) => result.status),
+        name,
+      ).toEqual(created.map(() => 'covered'))
+    }
+  }, 240_000)
+
+  it('pins the trigger function definition: SET clauses, SECURITY DEFINER and the body', async () => {
+    const expectation = await writeExpectation()
+    const pinned = expectation.objects['trigger public.child.child_guard'] as string
+    expect(pinned).toMatch(/ -- function md5 [0-9a-f]{32}$/)
+    const file = join(directory, '0002_child.sql')
+    const original = migrations['0002_child.sql']
+    try {
+      for (const [name, before, after, visible] of [
+        [
+          'search_path pin',
+          'LANGUAGE plpgsql AS $$',
+          'LANGUAGE plpgsql SET search_path=public,pg_temp AS $$',
+          ' -- function SET search_path=public, pg_temp md5 ',
+        ],
+        [
+          'SECURITY DEFINER',
+          'LANGUAGE plpgsql AS $$',
+          'LANGUAGE plpgsql SECURITY DEFINER AS $$',
+          ' -- function SECURITY DEFINER md5 ',
+        ],
+        [
+          'volatility',
+          'LANGUAGE plpgsql AS $$',
+          'LANGUAGE plpgsql STABLE AS $$',
+          ' -- function md5 ',
+        ],
+        [
+          'body',
+          "RAISE EXCEPTION 'forbidden note'",
+          "RAISE EXCEPTION 'banned note'",
+          ' -- function md5 ',
+        ],
+      ] as const) {
+        // A replacer function keeps the `$$` quotes literal.
+        const mutated = original.replace(before, () => after)
+        expect(mutated, name).not.toBe(original)
+        await writeFile(file, mutated)
+        const report = await coverage({
+          assertions: fullSuite,
+          allowList: { 'index public.child.child_parent': 'Lookup index only' },
+        })
+        expect(report.problems, name).toEqual([
+          'definition changed: trigger public.child.child_guard',
+        ])
+        const definition = report.objects.find(
+          (object) => object.key === 'trigger public.child.child_guard',
+        )?.definition
+        expect(definition, name).toContain(visible)
+        expect(definition, name).not.toBe(pinned)
+      }
+    } finally {
+      await writeFile(file, original)
+    }
   }, 240_000)
 })

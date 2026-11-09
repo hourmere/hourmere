@@ -165,31 +165,52 @@ with their definitions, to the committed
 own `CREATE DATABASE … TEMPLATE` copy and requires your assertion suite to fail:
 
 ```ts
-it('fails an assertion when any 0072 object is dropped', async () => {
-  const report = await checkConstraintCoverage({
-    serverUrl: process.env.DATABASE_URL as string,
-    migration: '0072_routing_forms.sql',
-    assertions: assertRoutingFormProtections, // (pool) => Promise<void>; throws on failure
-    allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
-  })
-  expect(report.problems).toEqual([])
-}, 600_000)
+const serverUrl = process.env.DATABASE_URL
+
+describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
+  it('fails an assertion when any 0072 object is dropped', async () => {
+    const report = await checkConstraintCoverage({
+      serverUrl: serverUrl as string,
+      migration: '0072_routing_forms.sql',
+      assertions: assertRoutingFormProtections, // (pool) => Promise<void>; throws on failure
+      allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
+    })
+    expect(report.problems).toEqual([])
+  }, 600_000)
+})
 ```
 
 Write the suite as checks that create their own rows, because one copy serves the whole
 suite: rejected and accepted writes, cascades, defaults and, for an index that has no other
-behaviour, its definition. Only an assertion failure counts; any other error aborts the run,
-so wrap every expected success in `expect(...).resolves`. Generate the expectation file with
-`HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`, review it and commit it; adding, removing or
-redefining an object later fails until the file is updated. Allow-list only objects that are
-not protections on their own, each with a reason; they are still dropped, and an entry whose
-removal does fail an assertion is reported as stale. `HOURMERE_CONSTRAINT_COVERAGE_REPORT=<file>`
-writes which assertion failed for each object. Dropping one object cannot reach a loosened
-predicate, a changed FK action or deferrability, a widened unique key, a changed default or a
-weaker trigger-function clause, so keep source-copy mutation tests for those.
+behaviour, its definition. Only an assertion about an integrity rejection counts as coverage:
+a value mismatch, or a database error of SQLSTATE class 23, 22 or P0 on the assertion's
+received value or in its `cause` chain. Wrap every expected success in `expect(...).resolves`;
+if that rejects with any other error (a syntax error, a statement timeout, a deadlock, a lost
+connection), the whole run aborts and names the object instead of counting it as covered.
+Generate the expectation file with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`, review it and
+commit it; adding, removing or redefining an object later fails until the file is updated.
+Allow-list only objects that are not protections on their own, each with a reason; they are
+still dropped, and an entry whose removal does fail an assertion is reported as stale.
+`HOURMERE_CONSTRAINT_COVERAGE_REPORT=<file>` writes which assertion failed for each object.
+
+The helper sees constraints, standalone indexes, triggers (with the complete function
+definition, including `SET search_path` and `SECURITY DEFINER`) and NOT NULL columns with
+their defaults. It does not see:
+
+- defaults on nullable and primary-key columns;
+- column types (CI's `db:types -- --verify` covers the generated types);
+- row-level security policies and whether RLS is enabled;
+- whether a trigger is enabled, disabled or replica-only;
+- objects a migration drops or alters away;
+- a loosened predicate, a changed FK action or deferrability, a widened unique key or a weaker
+  trigger-function clause, which dropping an object cannot reach.
+
+Guard those with behavioural checks and source-copy mutation tests.
 `packages/db/src/meeting-poll-protections.ts` with `meeting-polls-coverage.test.ts` and
 `meeting-polls-migration.test.ts` is the reference. `createTestDatabaseTemplate` (from
 `@hourmere/db/testing`) migrates a schema once for any test that needs many copies of it.
+`packages/db/src/testing/migration-objects.test.ts` fails when a migration from 0071 on has no
+expectation file; migrations whose coverage test lands in a follow-up are listed there explicitly.
 
 ## Browser tests
 

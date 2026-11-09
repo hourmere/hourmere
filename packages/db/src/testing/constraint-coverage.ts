@@ -8,9 +8,10 @@
  *    migrations. The objects created (or redefined) by `migration` are the difference, read
  *    from `pg_constraint` (except NOT NULL and constraint-trigger rows), `pg_index` (indexes
  *    that do not back a primary key, unique or exclusion constraint), `pg_trigger` (user
- *    triggers, including constraint triggers, with a digest of the function body) and
- *    `pg_attribute` (NOT NULL columns outside the primary key, with their default). Nothing
- *    is listed by hand.
+ *    triggers, including constraint triggers, with a digest of the complete function
+ *    definition from `pg_get_functiondef`: body, language, volatility, SECURITY DEFINER and
+ *    `SET` clauses such as `search_path`) and `pg_attribute` (NOT NULL columns outside the
+ *    primary key, with their default). Nothing is listed by hand.
  * 2. The enumerated objects and their definitions must equal the committed expectation file,
  *    so adding, removing or redefining an object needs a reviewed expectation change. Rewrite
  *    it after review with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`.
@@ -18,8 +19,23 @@
  * 4. For every object, a fresh `CREATE DATABASE … TEMPLATE` copy drops exactly that object and
  *    runs the suite again. Each object that is not allow-listed must fail an assertion; an
  *    allow-listed object must not (otherwise the entry is stale). Only an AssertionError
- *    counts: any other error, or an assertion about a connection, lock, deadlock or syntax
- *    error, aborts the run, so write every expected outcome as an `expect`.
+ *    about an integrity rejection counts: a plain value mismatch, or a database error of
+ *    SQLSTATE class 23 (integrity constraint), 22 (data exception) or P0 (raised by a trigger
+ *    or function), found on the assertion's `actual` value or anywhere in its `cause` chain
+ *    (`expect(...).resolves` puts the rejection there). Any other error, any other SQLSTATE
+ *    (connection 08, deadlock or serialization 40, syntax 42, resources 53, lock 55, timeout or
+ *    shutdown 57, …) and any error without a SQLSTATE abort the whole run and name the object,
+ *    so write every expected outcome as an `expect`.
+ *
+ * What the helper does not see, and what must be guarded by behavioural checks, source-copy
+ * mutations or other tests instead:
+ * - defaults on nullable and primary-key columns (only NOT NULL defaults are pinned);
+ * - column types (CI's `db:types -- --verify` covers the generated types);
+ * - row-level security policies and whether RLS is enabled;
+ * - whether a trigger is enabled, disabled or replica-only (`tgenabled`);
+ * - objects a migration drops or alters away;
+ * - a loosened predicate, FK action, unique key or trigger clause, which only the pinned
+ *   definitions make visible in review.
  *
  * Usage, from a `*.test.ts` file (the suite throws on the first failing assertion and must
  * only touch rows it creates, because one database serves the whole suite):
@@ -39,11 +55,9 @@
  * The expectation file defaults to `testing/migration-objects/<migration>.json` (not a
  * `coverage` directory, which .gitignore excludes). Keep the allow-list to objects that are
  * not protections on their own (for example an FK target key that only restates the primary
- * key), each with a reason. Dropping one object cannot detect a loosened predicate, a changed
- * FK action, a widened unique key or a weaker trigger-function clause; the definitions in the
- * expectation file only make such changes visible in review. Pair this with source-copy
- * mutation tests that relax them, and with checks of column defaults, which are not objects.
- * Set `HOURMERE_CONSTRAINT_COVERAGE_REPORT=<file>` to write the per-object results as JSON.
+ * key), each with a reason. Pair the coverage run with source-copy mutation tests that relax
+ * the predicates and clauses listed above, and with checks of column defaults, which are not
+ * objects. Set `HOURMERE_CONSTRAINT_COVERAGE_REPORT=<file>` to write the per-object results.
  */
 import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -132,7 +146,10 @@ WHERE NOT EXISTS (SELECT FROM pg_constraint con WHERE con.conindid=x.indexrelid
   AND con.conrelid=x.indrelid AND con.contype IN ('p','u','x'))
 UNION ALL
 SELECT 'trigger',r.nspname,r.relname,tg.tgname,
-  pg_get_triggerdef(tg.oid)||' -- function md5 '||md5(p.prosrc),
+  pg_get_triggerdef(tg.oid)||' -- function '
+    ||CASE WHEN p.prosecdef THEN 'SECURITY DEFINER ' ELSE '' END
+    ||coalesce('SET '||array_to_string(p.proconfig,' SET ')||' ','')
+    ||'md5 '||md5(pg_get_functiondef(p.oid)),
   format('DROP TRIGGER %I ON %I.%I',tg.tgname,r.nspname,r.relname)
 FROM pg_trigger tg JOIN user_relations r ON r.oid=tg.tgrelid JOIN pg_proc p ON p.oid=tg.tgfoid
 WHERE NOT tg.tgisinternal
@@ -203,15 +220,61 @@ async function prepareTemplate(
 const byKey = (a: { key: string }, b: { key: string }) =>
   a.key < b.key ? -1 : a.key > b.key ? 1 : 0
 
-// Connection, transaction-state, rollback (deadlock), syntax/privilege, resource, lock,
-// operator-intervention, system and internal errors say nothing about a dropped object.
-const unrelatedState = /^(08|25|40|42|53|55|57|58|XX)/
+// Only these SQLSTATE classes describe a rejected write: integrity constraint violations (23),
+// data exceptions (22) and errors raised by a trigger or function (P0). Every other class
+// (connection 08, transaction state 25, deadlock 40, syntax 42, resources 53, locks 55,
+// timeouts and shutdown 57, …) says nothing about the dropped object.
+const integrityState = /^(23|22|P0)/
 
-/** Only a real assertion about the schema counts as a failure caused by the dropped object. */
-function assertionFailure(error: unknown): boolean {
-  if (!(error instanceof Error) || error.name !== 'AssertionError') return false
-  const code = ((error as { actual?: unknown }).actual as { code?: unknown } | null)?.code
-  return !(typeof code === 'string' && unrelatedState.test(code))
+function firstLine(error: unknown): string {
+  // An assertion's `actual` can be a plain subset of the error (for example `{ code }`).
+  const message = (error as { message?: unknown } | null)?.message
+  let text: string
+  if (typeof message === 'string') text = message
+  else if (typeof error === 'object' && error !== null) {
+    try {
+      text = JSON.stringify(error)
+    } catch {
+      text = String(error)
+    }
+  } else text = String(error)
+  return (text.split('\n')[0] ?? '').slice(0, 240)
+}
+
+const sqlState = (value: unknown): string | undefined => {
+  const code = (value as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : undefined
+}
+
+/**
+ * Why a suite failure is not an assertion about an integrity rejection, or undefined when it
+ * is one and therefore counts as coverage. An AssertionError's `actual` value (from
+ * `expect(...).rejects.toMatchObject`) and every error in its `cause` chain (from
+ * `expect(...).resolves`) must either carry an integrity SQLSTATE or be a plain value.
+ */
+function notIntegrityAssertion(error: unknown): string | undefined {
+  if (!(error instanceof Error) || error.name !== 'AssertionError')
+    return `${error instanceof Error ? error.name : typeof error}${sqlState(error) ? ` ${sqlState(error)}` : ''}: ${firstLine(error)}`
+  const seen = new Set<unknown>()
+  for (let current: unknown = error; current !== undefined && current !== null; ) {
+    if (seen.has(current)) break
+    seen.add(current)
+    if (current instanceof Error && current.name === 'AssertionError') {
+      const actual = (current as { actual?: unknown }).actual
+      const code = sqlState(actual)
+      if (code !== undefined && !integrityState.test(code))
+        return `an assertion about an error with code ${code}: ${firstLine(actual)}`
+      current = current.cause
+      continue
+    }
+    const code = sqlState(current)
+    if (code === undefined)
+      return `an error without SQLSTATE in the cause chain: ${firstLine(current)}`
+    if (!integrityState.test(code))
+      return `an error with code ${code} in the cause chain: ${firstLine(current)}`
+    current = (current as { cause?: unknown }).cause
+  }
+  return undefined
 }
 
 async function withTimeout<T>(operation: Promise<T>, milliseconds: number, label: string) {
@@ -226,11 +289,6 @@ async function withTimeout<T>(operation: Promise<T>, milliseconds: number, label
   } finally {
     clearTimeout(timer)
   }
-}
-
-function firstLine(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return (message.split('\n')[0] ?? '').slice(0, 240)
 }
 
 /**
@@ -269,9 +327,10 @@ async function runOnCopy(
       await withTimeout(assertions(reuseConnectionsAfterErrors(copy.pool)), timeoutMs, label)
       return {}
     } catch (failure) {
-      if (!assertionFailure(failure))
+      const reason = notIntegrityAssertion(failure)
+      if (reason !== undefined)
         throw new Error(
-          `Constraint coverage could not evaluate ${label}: expected an assertion failure, got ${firstLine(failure)}`,
+          `Constraint coverage could not evaluate ${label}: expected an assertion about an integrity rejection, got ${reason}`,
           { cause: failure },
         )
       return { failure }

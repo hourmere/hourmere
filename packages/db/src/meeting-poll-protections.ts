@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
 import type pg from 'pg'
 import { expect } from 'vitest'
+import { createPool } from './index.ts'
 import { reuseConnectionsAfterErrors } from './testing.ts'
 
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
@@ -839,6 +840,93 @@ export const meetingPollProtections: Record<string, (f: Fixture) => Promise<void
     expect(
       (await f.pool.query('SELECT id FROM meeting_poll_deliveries WHERE id=$1', [notice])).rows,
     ).toEqual([])
+  },
+  'auth-only user deletion': async (f) => {
+    // Better Auth deletes users over a pool whose search_path is only `auth`
+    // (docs/data-model.md). The deferred constraint triggers that its commit runs must still
+    // find the public tables, which is what the functions' own `SET search_path` provides.
+    const personalUser = (
+      await f.pool.query(
+        `INSERT INTO auth."user" (name,email,"emailVerified") VALUES ('Personal host',$1,true) RETURNING id`,
+        [`${randomUUID()}@example.test`],
+      )
+    ).rows[0].id as string
+    const personalOrganization = (
+      await f.pool.query(
+        `INSERT INTO auth.organization (name,slug,"createdAt") VALUES ('Personal space',$1,now()) RETURNING id`,
+        [randomUUID()],
+      )
+    ).rows[0].id as string
+    await f.pool.query(
+      `INSERT INTO auth.member ("organizationId","userId",role,"createdAt") VALUES ($1,$2,'owner',now())`,
+      [personalOrganization, personalUser],
+    )
+    await f.pool.query(
+      'INSERT INTO personal_organizations (user_id,organization_id) VALUES ($1,$2)',
+      [personalUser, personalOrganization],
+    )
+    const personalEvent = await insert(f.pool, 'event_types', {
+      organization_id: personalOrganization,
+      slug: 'personal-poll',
+      title: 'Personal poll',
+      duration_minutes: 30,
+    })
+    const personal = await f.makePoll({
+      organization_id: personalOrganization,
+      event_type_id: personalEvent,
+      created_by_user_id: personalUser,
+    })
+    const personalReceipt = await insert(
+      f.pool,
+      'meeting_poll_operations',
+      receipt(f, { organization_id: personalOrganization, poll_id: personal.poll }),
+    )
+    await bookingAt(f, personalOrganization, personalEvent)
+    const teamReceipt = await insert(f.pool, 'meeting_poll_operations', receipt(f))
+    const notice = await insert(f.pool, 'meeting_poll_deliveries', hostDelivery(f))
+
+    const authUrl = new URL(f.pool.options.connectionString as string)
+    authUrl.searchParams.set('options', '-c search_path=auth')
+    const authOnly = createPool(authUrl.toString())
+    try {
+      // (a) The creator of a team poll: the poll stays, attributed to nobody.
+      await accept(authOnly.query('DELETE FROM "user" WHERE id=$1', [f.user]), 'team poll creator')
+      // (b) The owner of a personal space: the space and its poll go with the user.
+      await accept(
+        authOnly.query('DELETE FROM "user" WHERE id=$1', [personalUser]),
+        'personal-space poll owner',
+      )
+    } finally {
+      await authOnly.end()
+    }
+    expect(
+      (
+        await f.pool.query(
+          `SELECT (SELECT count(*)::int FROM auth."user" WHERE id=ANY($1)) AS users,
+                  (SELECT count(*)::int FROM auth.organization WHERE id=$2) AS spaces,
+                  (SELECT count(*)::int FROM meeting_polls WHERE id=$3) AS personal_polls,
+                  (SELECT count(*)::int FROM meeting_poll_slots WHERE poll_id=$3) AS personal_slots,
+                  (SELECT count(*)::int FROM meeting_poll_slots WHERE poll_id=$4) AS team_slots,
+                  (SELECT count(*)::int FROM meeting_poll_deliveries WHERE id=$5) AS notices`,
+          [[f.user, personalUser], personalOrganization, personal.poll, f.poll, notice],
+        )
+      ).rows,
+    ).toEqual([
+      { users: 0, spaces: 0, personal_polls: 0, personal_slots: 0, team_slots: 2, notices: 0 },
+    ])
+    expect(
+      (await f.pool.query('SELECT created_by_user_id FROM meeting_polls WHERE id=$1', [f.poll]))
+        .rows,
+    ).toEqual([{ created_by_user_id: null }])
+    // The team receipt keeps its poll; the personal space's receipt went with the organization.
+    expect(
+      (
+        await f.pool.query(
+          'SELECT id,poll_id,booking_id FROM meeting_poll_operations WHERE id=ANY($1)',
+          [[teamReceipt, personalReceipt]],
+        )
+      ).rows,
+    ).toEqual([{ id: teamReceipt, poll_id: f.poll, booking_id: null }])
   },
   'unique public link': async (f) => {
     const token = digest()

@@ -693,6 +693,22 @@ const mutations: Record<string, { check: string; mutation: Mutation }> = {
       'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE CASCADE',
     ),
   },
+  // Without their search_path pin, the deferred triggers run at Better Auth's commit cannot
+  // find the public tables, and user deletion fails.
+  'booking match trigger without search_path pin': {
+    check: 'auth-only user deletion',
+    mutation: replace(
+      'CREATE FUNCTION check_meeting_poll_booking() RETURNS trigger\nLANGUAGE plpgsql SET search_path=public,pg_temp AS $$',
+      'CREATE FUNCTION check_meeting_poll_booking() RETURNS trigger\nLANGUAGE plpgsql AS $$',
+    ),
+  },
+  'candidate count trigger without search_path pin': {
+    check: 'auth-only user deletion',
+    mutation: replace(
+      'CREATE FUNCTION check_meeting_poll_slot_count() RETURNS trigger\nLANGUAGE plpgsql SET search_path=public,pg_temp AS $$',
+      'CREATE FUNCTION check_meeting_poll_slot_count() RETURNS trigger\nLANGUAGE plpgsql AS $$',
+    ),
+  },
   'unscoped candidate poll': {
     check: 'scoped candidate foreign key',
     mutation: replace(

@@ -939,7 +939,8 @@ describe('meeting poll shared SQL, TypeScript and documentation policy', () => {
   })
 })
 
-const receiptColumns = 'nullable `booking_id` (the only stored replay result reference)'
+const receiptColumns =
+  'nullable `booking_id` (set by finalize; a receipt stores no other result). Replays return only stored references: a create replay returns `poll_id` as `poll_already_created`, a finalize replay returns the booking reference, and invite, resend and rotate-link replays return their safe outcome or conflict without a stored result'
 const receiptCleanup =
   'On poll deletion erase poll/booking references (`poll_id` and `booking_id`);'
 
@@ -949,7 +950,7 @@ function verifyReceiptWording(design: string, model: string) {
   expect(model.replace(/\s+/g, ' ')).toContain(
     'Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion',
   )
-  // 0071 stores no result metadata column; only booking_id references a replay result.
+  // 0071 stores no result metadata column; a create replay returns poll_id, finalize booking_id.
   for (const source of [design, model]) expect(source).not.toMatch(/result metadata/i)
 }
 
@@ -960,6 +961,12 @@ describe('meeting poll operation receipt columns', () => {
 
   it.each([
     ['design columns', receiptColumns, 'nullable `booking_id`, minimal result metadata', 'design'],
+    [
+      'design replay wording',
+      receiptColumns,
+      'nullable `booking_id` (the only stored replay result reference)',
+      'design',
+    ],
     [
       'design cleanup',
       receiptCleanup,
