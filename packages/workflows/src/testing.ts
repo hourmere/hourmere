@@ -25,6 +25,8 @@ export const ids = {
   otherTeamEvent: '40000000-0000-4000-8000-000000000008',
   hostedTeamPersonalLookalike: '40000000-0000-4000-8000-000000000009',
   missingEvent: '40000000-0000-4000-8000-00000000000a',
+  personalOrganizationTeamRow: '40000000-0000-4000-8000-00000000000b',
+  personalOrganizationOtherOwner: '40000000-0000-4000-8000-00000000000c',
   webhook: '50000000-0000-4000-8000-000000000001',
   teamWebhook: '50000000-0000-4000-8000-000000000002',
   foreignWebhook: '50000000-0000-4000-8000-000000000003',
@@ -91,6 +93,12 @@ export const eventTypes: ReadonlyMap<string, WorkflowEventTypeFacts> = new Map(
     eventType(ids.otherTeamEvent, { organizationId: ids.otherTeam }),
     // A team-organization row carrying the user as owner fails closed for both owners.
     eventType(ids.hostedTeamPersonalLookalike, { organizationId: ids.team, ownerUserId: ids.user }),
+    // Rows in the personal organization that are not the user's own fail closed too.
+    eventType(ids.personalOrganizationTeamRow, { organizationId: ids.personalOrganization }),
+    eventType(ids.personalOrganizationOtherOwner, {
+      organizationId: ids.personalOrganization,
+      ownerUserId: ids.otherUser,
+    }),
   ].map((facts) => [facts.id, facts]),
 )
 

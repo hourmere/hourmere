@@ -31,6 +31,18 @@ describe('workflow condition evaluation', () => {
     expect(evaluateCondition(answer('plan', 'enterprise'), booking({ responses }))).toBe(false)
     expect(evaluateCondition(answer('company', ''), booking({ responses: {} }))).toBe(false)
     expect(evaluateCondition(answer('consent', false), booking({ responses: {} }))).toBe(false)
+    // A saved null or undefined is no answer either, never a match.
+    for (const value of [null, undefined])
+      for (const [questionId, compared] of [
+        ['plan', 'enterprise'],
+        ['consent', false],
+      ] as const)
+        expect(
+          evaluateCondition(
+            answer(questionId, compared),
+            booking({ responses: { [questionId]: value } }),
+          ),
+        ).toBe(false)
     // Inherited properties are not answers.
     for (const questionId of ['constructor', 'toString', '__proto__', 'hasOwnProperty'])
       expect(evaluateCondition(answer(questionId, 'x'), booking({ responses: {} }))).toBe(false)

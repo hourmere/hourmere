@@ -1,3 +1,4 @@
+import { MAX_GUESTS } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { describe, expect, it } from 'vitest'
 import {
@@ -425,6 +426,18 @@ describe('workflow definition limits', () => {
     expect(refused({ ...candidate(), actions: undefined })).toBe('actions: is required')
   })
 
+  it(`bounds guest count conditions to whole numbers from 0 to ${MAX_GUESTS}`, () => {
+    const guests = (value: unknown) =>
+      candidate({ conditions: [{ field: 'guest_count', operator: 'at_least', value }] })
+    for (const value of [0, MAX_GUESTS]) expect(validate(guests(value)).conditions).toHaveLength(1)
+    expect(refused(guests(MAX_GUESTS + 1))).toBe(
+      `conditions[0].value: must be at most ${MAX_GUESTS}`,
+    )
+    expect(refused(guests(-1))).toBe('conditions[0].value: must not be negative')
+    expect(refused(guests(1.5))).toBe('conditions[0].value: must be a whole number')
+    expect(refused(guests('2'))).toBe('conditions[0].value: has the wrong type')
+  })
+
   it('bounds timer offsets and lifecycle delays to whole documented minutes', () => {
     for (const type of ['before_start', 'after_end']) {
       for (const offsetMinutes of [WORKFLOW_MIN_TIMER_OFFSET_MINUTES, WORKFLOW_MAX_OFFSET_MINUTES])
@@ -484,6 +497,8 @@ describe('workflow definition ownership', () => {
     // A row whose organization and owner disagree belongs to neither owner.
     expect(refused(scoped(ids.hostedTeamPersonalLookalike))).toBe(notFound)
     expect(refused(scoped(ids.hostedTeamPersonalLookalike), teamContext)).toBe(notFound)
+    for (const id of [ids.personalOrganizationTeamRow, ids.personalOrganizationOtherOwner])
+      expect(refused(scoped(id))).toBe(notFound)
   })
 
   it('rejects a fact loaded under another ID', () => {

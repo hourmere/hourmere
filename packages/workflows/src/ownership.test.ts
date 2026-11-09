@@ -41,6 +41,8 @@ describe('workflow ownership selectors', () => {
     expect(ownsEventType(personalOwner, facts(ids.teamEvent))).toBe(false)
     expect(ownsEventType(personalOwner, facts(ids.foreignEvent))).toBe(false)
     expect(ownsEventType(personalOwner, facts(ids.hostedTeamPersonalLookalike))).toBe(false)
+    expect(ownsEventType(personalOwner, facts(ids.personalOrganizationTeamRow))).toBe(false)
+    expect(ownsEventType(personalOwner, facts(ids.personalOrganizationOtherOwner))).toBe(false)
   })
 
   it('gives a team only its own team event types', () => {
